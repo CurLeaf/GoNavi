@@ -122,8 +122,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: |
-            ${{ matrix.artifact_name }}.dmg
-            ${{ matrix.artifact_name }}.exe
+          files: ${{ matrix.artifact_name }}*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
