@@ -62,10 +62,13 @@ jobs:
           # Find .app bundle
           APP_PATH=$(find . -maxdepth 1 -name "*.app" | head -n 1)
           
-          if [ -z "$APP_NAME" ]; then
+          if [ -z "$APP_PATH" ]; then
             echo "❌ 未找到 .app 应用包!"
             exit 1
           fi
+          
+          # Get pure name (e.g. GoNavi.app)
+          APP_NAME=$(basename "$APP_PATH")
           
           # Ad-hoc codesign to prevent "Damaged" error (requires user to allow anyway, but valid structure)
           echo "🔏 正在进行 Ad-hoc 签名..."
