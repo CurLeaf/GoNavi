@@ -166,7 +166,7 @@ func (d *DamengDB) GetDatabases() ([]string, error) {
 }
 
 func (d *DamengDB) GetTables(dbName string) ([]string, error) {
-	query := fmt.Sprintf("SELECT table_name FROM all_tables WHERE owner = '%s'", strings.ToUpper(dbName))
+	query := fmt.Sprintf("SELECT owner, table_name FROM all_tables WHERE owner = '%s' ORDER BY table_name", strings.ToUpper(dbName))
 	if dbName == "" {
 		query = "SELECT table_name FROM user_tables"
 	}
@@ -178,6 +178,14 @@ func (d *DamengDB) GetTables(dbName string) ([]string, error) {
 
 	var tables []string
 	for _, row := range data {
+		if dbName != "" {
+			if owner, okOwner := row["OWNER"]; okOwner {
+				if name, okName := row["TABLE_NAME"]; okName {
+					tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
+					continue
+				}
+			}
+		}
 		if val, ok := row["TABLE_NAME"]; ok {
 			tables = append(tables, fmt.Sprintf("%v", val))
 		}
