@@ -141,8 +141,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   return <td {...restProps} onDoubleClick={editable ? toggleEdit : undefined}>{childNode}</td>;
 });
 
-const ContextMenuRow = React.memo(({ children, ...props }: any) => {
-    const record = props.record; 
+const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
     const context = useContext(DataContext);
     
     if (!record || !context) return <tr {...props}>{children}</tr>;

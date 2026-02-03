@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { message } from 'antd';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
@@ -11,6 +11,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [pkColumns, setPkColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const { connections, addSqlLog } = useStore();
+  const fetchSeqRef = useRef(0);
 
   const [pagination, setPagination] = useState({
       current: 1,
@@ -24,11 +25,12 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [filterConditions, setFilterConditions] = useState<any[]>([]);
 
   const fetchData = useCallback(async (page = pagination.current, size = pagination.pageSize) => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     const conn = connections.find(c => c.id === tab.connectionId);
     if (!conn) {
         message.error("Connection not found");
-        setLoading(false);
+        if (fetchSeqRef.current === seq) setLoading(false);
         return;
     }
 
@@ -135,15 +137,15 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             if (fieldNames.length === 0 && resultData.length > 0) {
                 fieldNames = Object.keys(resultData[0]);
             }
+            if (fetchSeqRef.current !== seq) return;
             setColumnNames(fieldNames);
-            
-            setData(resultData.map((row: any, i: number) => ({ ...row, key: `row-${i}` }))); 
-            
+            setData(resultData.map((row: any, i: number) => ({ ...row, key: `row-${i}` })));
             setPagination(prev => ({ ...prev, current: page, pageSize: size, total: totalRecords }));
         } else {
             message.error(resData.message);
         }
     } catch (e: any) {
+        if (fetchSeqRef.current !== seq) return;
         message.error("Error fetching data: " + e.message);
         addSqlLog({
             id: `log-${Date.now()}-error`,
@@ -155,7 +157,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             dbName
         });
     }
-    setLoading(false);
+    if (fetchSeqRef.current === seq) setLoading(false);
   }, [connections, tab, sortInfo, filterConditions, pkColumns.length]); 
   // Depend on pkColumns.length to avoid loop? No, pkColumns is updated inside.
   // Actually, 'pkColumns' state shouldn't trigger re-fetch.
