@@ -92,7 +92,11 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 			val := values[i]
 			b, ok := val.([]byte)
 			if ok {
-				v = string(b)
+				if b == nil {
+					v = nil
+				} else {
+					v = string(b)
+				}
 			} else {
 				v = val
 			}

@@ -116,7 +116,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   const save = async () => {
     try {
       if (!form) return;
-      const values = await form.validateFields();
+      const values = await form.validateFields([dataIndex]);
       toggleEdit();
       handleSave({ ...record, ...values });
     } catch (errInfo) {
@@ -285,6 +285,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
+      form.resetFields();
   }, [tableName, dbName, connectionId]); // Reset on context change
 
   const displayData = useMemo(() => {
