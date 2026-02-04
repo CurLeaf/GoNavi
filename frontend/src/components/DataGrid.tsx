@@ -3,10 +3,11 @@ import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, S
 import type { SortOrder } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
-import { ImportData, ExportTable, ExportData, ApplyChanges } from '../../wailsjs/go/app/App';
+import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges } from '../../wailsjs/go/app/App';
 import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 import 'react-resizable/css/styles.css';
+import { buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 
 // 内部行标识字段：避免与真实业务字段（如 `key` 列）冲突。
 export const GONAVI_ROW_KEY = '__gonavi_row_key__';
@@ -56,12 +57,19 @@ const looksLikeJsonText = (text: string): boolean => {
 const ResizableTitle = (props: any) => {
   const { onResizeStart, width, ...restProps } = props;
 
+  const nextStyle = { ...(restProps.style || {}) } as React.CSSProperties;
+  if (width) {
+    nextStyle.width = width;
+  }
+
+  // 注意：virtual table 模式下，rc-table 会依赖 header cell 的 width 样式来渲染选择列。
+  // 若这里丢失 width，可能导致左上角“全选”checkbox 不显示。
   if (!width || typeof onResizeStart !== 'function') {
-    return <th {...restProps} />;
+    return <th {...restProps} style={nextStyle} />;
   }
 
   return (
-    <th {...restProps} style={{ ...restProps.style, position: 'relative' }}>
+    <th {...restProps} style={{ ...nextStyle, position: 'relative' }}>
       {restProps.children}
       <span
         className="react-resizable-handle"
@@ -366,7 +374,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
 
   // Filter State
-  const [filterConditions, setFilterConditions] = useState<{ id: number, column: string, op: string, value: string }[]>([]);
+  const [filterConditions, setFilterConditions] = useState<{ id: number, column: string, op: string, value: string, value2?: string }[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
@@ -866,11 +874,98 @@ const DataGrid: React.FC<DataGridProps> = ({
       copyToClipboard(lines.join('\n'));
   }, [getTargets, copyToClipboard]);
 
+  const buildConnConfig = useCallback(() => {
+      if (!connectionId) return null;
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) return null;
+      return {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+  }, [connections, connectionId]);
+
+  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {
+      const config = buildConnConfig();
+      if (!config) return;
+      const hide = message.loading(`正在导出...`, 0);
+      const res = await ExportQuery(config as any, dbName || '', sql, defaultName || 'export', format);
+      hide();
+      if (res.success) {
+          message.success("导出成功");
+      } else if (res.message !== "Cancelled") {
+          message.error("导出失败: " + res.message);
+      }
+  }, [buildConnConfig, dbName]);
+
+  const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
+      if (!tableName || pkColumns.length === 0) return '';
+      const targets = (rows || []).filter(Boolean);
+      if (targets.length === 0) return '';
+
+      const clauses: string[] = [];
+      for (const r of targets) {
+          const andParts: string[] = [];
+          for (const pk of pkColumns) {
+              const col = quoteIdentPart(dbType, pk);
+              const v = r?.[pk];
+              if (v === null || v === undefined) return '';
+              andParts.push(`${col} = '${escapeLiteral(String(v))}'`);
+          }
+          if (andParts.length === pkColumns.length) {
+              clauses.push(`(${andParts.join(' AND ')})`);
+          }
+      }
+      if (clauses.length === 0) return '';
+      return clauses.join(' OR ');
+  }, [pkColumns, tableName]);
+
+  const buildCurrentPageSql = useCallback((dbType: string) => {
+      if (!tableName || !pagination) return '';
+      const whereSQL = buildWhereSQL(dbType, filterConditions);
+      let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+      if (sortInfo && sortInfo.order) {
+          sql += ` ORDER BY ${quoteIdentPart(dbType, sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
+      }
+      const offset = (pagination.current - 1) * pagination.pageSize;
+      sql += ` LIMIT ${pagination.pageSize} OFFSET ${offset}`;
+      return sql;
+  }, [tableName, pagination, filterConditions, sortInfo]);
+
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
       const records = getTargets(record);
-      await exportData(records, format);
-  }, [getTargets]);
+      if (!connectionId || !tableName) {
+          await exportData(records, format);
+          return;
+      }
+
+      // 有未提交修改时，优先按界面数据导出，避免与数据库不一致。
+      if (hasChanges) {
+          message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+          await exportData(records, format);
+          return;
+      }
+
+      const config = buildConnConfig();
+      if (!config) {
+          await exportData(records, format);
+          return;
+      }
+
+      const dbType = config.type || '';
+      const pkWhere = buildPkWhereSql(records, dbType);
+      if (!pkWhere) {
+          await exportData(records, format);
+          return;
+      }
+
+      const sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} WHERE ${pkWhere}`;
+      await exportByQuery(sql, format, tableName || 'export');
+  }, [getTargets, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery]);
 
   // Export
   const handleExport = async (format: string) => {
@@ -879,7 +974,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 1. Export Selected
       if (selectedRowKeys.length > 0) {
           const selectedRows = displayData.filter(d => selectedRowKeys.includes(d?.[GONAVI_ROW_KEY]));
-          await exportData(selectedRows, format);
+          await handleExportSelected(format, selectedRows[0]);
           return;
       }
 
@@ -888,9 +983,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       let instance: any;
       const handleAll = async () => {
           instance.destroy();
-          const conn = connections.find(c => c.id === connectionId);
-          if (!conn) return;
-          const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
+          const config = buildConnConfig();
+          if (!config) return;
           const hide = message.loading(`正在导出全部数据...`, 0);
           const res = await ExportTable(config as any, dbName || '', tableName, format);
           hide();
@@ -898,7 +992,25 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
       const handlePage = async () => {
           instance.destroy();
-          await exportData(displayData, format);
+          if (hasChanges) {
+              message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+              await exportData(displayData, format);
+              return;
+          }
+
+          const config = buildConnConfig();
+          if (!config) {
+              await exportData(displayData, format);
+              return;
+          }
+
+          const sql = buildCurrentPageSql(config.type || '');
+          if (!sql) {
+              await exportData(displayData, format);
+              return;
+          }
+
+          await exportByQuery(sql, format, tableName || 'export');
       };
 
       instance = modal.info({
@@ -921,21 +1033,64 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleImport = async () => {
       if (!connectionId || !tableName) return;
-      const conn = connections.find(c => c.id === connectionId);
-      if (!conn) return;
-      const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
+      const config = buildConnConfig();
+      if (!config) return;
       
       const res = await ImportData(config as any, dbName || '', tableName);
       if (res.success) { message.success(res.message); if (onReload) onReload(); } else if (res.message !== "Cancelled") { message.error("Import Failed: " + res.message); }
   };
 
   // Filters
+  const filterOpOptions = useMemo(() => ([
+      { value: '=', label: '=' },
+      { value: '!=', label: '!=' },
+      { value: '<', label: '<' },
+      { value: '<=', label: '<=' },
+      { value: '>', label: '>' },
+      { value: '>=', label: '>=' },
+      { value: 'CONTAINS', label: '包含' },
+      { value: 'NOT_CONTAINS', label: '不包含' },
+      { value: 'STARTS_WITH', label: '开始以' },
+      { value: 'NOT_STARTS_WITH', label: '不是开始于' },
+      { value: 'ENDS_WITH', label: '结束以' },
+      { value: 'NOT_ENDS_WITH', label: '不是结束于' },
+      { value: 'IS_NULL', label: '是 null' },
+      { value: 'IS_NOT_NULL', label: '不是 null' },
+      { value: 'IS_EMPTY', label: '是空的' },
+      { value: 'IS_NOT_EMPTY', label: '不是空的' },
+      { value: 'BETWEEN', label: '介于' },
+      { value: 'NOT_BETWEEN', label: '不介于' },
+      { value: 'IN', label: '在列表' },
+      { value: 'NOT_IN', label: '不在列表' },
+      { value: 'CUSTOM', label: '[自定义]' },
+  ]), []);
+
+  const isNoValueOp = useCallback((op: string) => (
+      op === 'IS_NULL' || op === 'IS_NOT_NULL' || op === 'IS_EMPTY' || op === 'IS_NOT_EMPTY'
+  ), []);
+  const isBetweenOp = useCallback((op: string) => op === 'BETWEEN' || op === 'NOT_BETWEEN', []);
+  const isListOp = useCallback((op: string) => op === 'IN' || op === 'NOT_IN', []);
+
   const addFilter = () => {
-      setFilterConditions([...filterConditions, { id: nextFilterId, column: columnNames[0] || '', op: '=', value: '' }]);
+      setFilterConditions([...filterConditions, { id: nextFilterId, column: columnNames[0] || '', op: '=', value: '', value2: '' }]);
       setNextFilterId(nextFilterId + 1);
   };
   const updateFilter = (id: number, field: string, val: string) => {
-      setFilterConditions(prev => prev.map(c => c.id === id ? { ...c, [field]: val } : c));
+      setFilterConditions(prev => prev.map(c => {
+          if (c.id !== id) return c;
+          const next: any = { ...c, [field]: val };
+          if (field === 'op') {
+              if (isNoValueOp(val)) {
+                  next.value = '';
+                  next.value2 = '';
+              } else if (isBetweenOp(val)) {
+                  if (typeof next.value2 !== 'string') next.value2 = '';
+              } else {
+                  next.value2 = '';
+              }
+          }
+          return next;
+      }));
   };
   const removeFilter = (id: number) => {
       setFilterConditions(prev => prev.filter(c => c.id !== id));
@@ -1012,10 +1167,62 @@ const DataGrid: React.FC<DataGridProps> = ({
        {showFilter && (
            <div style={{ padding: '8px', background: '#f5f5f5', borderBottom: '1px solid #eee' }}>
                {filterConditions.map(cond => (
-                   <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                       <Select style={{ width: 150 }} value={cond.column} onChange={v => updateFilter(cond.id, 'column', v)} options={columnNames.map(c => ({ value: c, label: c }))} />
-                       <Select style={{ width: 100 }} value={cond.op} onChange={v => updateFilter(cond.id, 'op', v)} options={[{ value: '=', label: '=' }, { value: 'LIKE', label: '包含' }]} />
-                       <Input style={{ width: 200 }} value={cond.value} onChange={e => updateFilter(cond.id, 'value', e.target.value)} />
+                   <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                       <Select
+                           style={{ width: 180 }}
+                           value={cond.column}
+                           onChange={v => updateFilter(cond.id, 'column', v)}
+                           options={columnNames.map(c => ({ value: c, label: c }))}
+                           disabled={cond.op === 'CUSTOM'}
+                       />
+                       <Select
+                           style={{ width: 140 }}
+                           value={cond.op}
+                           onChange={v => updateFilter(cond.id, 'op', v)}
+                           options={filterOpOptions as any}
+                       />
+
+                       {cond.op === 'CUSTOM' ? (
+                           <Input.TextArea
+                               style={{ flex: 1 }}
+                               autoSize={{ minRows: 1, maxRows: 4 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                               placeholder="输入自定义 WHERE 表达式（不需要再写 WHERE），例如：status IN ('A','B')"
+                           />
+                       ) : isListOp(cond.op) ? (
+                           <Input.TextArea
+                               style={{ flex: 1 }}
+                               autoSize={{ minRows: 1, maxRows: 4 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                               placeholder="多个值用逗号或换行分隔"
+                           />
+                       ) : isBetweenOp(cond.op) ? (
+                           <>
+                               <Input
+                                   style={{ width: 220 }}
+                                   value={cond.value}
+                                   onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                                   placeholder="开始值"
+                               />
+                               <Input
+                                   style={{ width: 220 }}
+                                   value={cond.value2 || ''}
+                                   onChange={e => updateFilter(cond.id, 'value2', e.target.value)}
+                                   placeholder="结束值"
+                               />
+                           </>
+                       ) : isNoValueOp(cond.op) ? (
+                           <Input style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
+                       ) : (
+                           <Input
+                               style={{ width: 280 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                           />
+                       )}
+
                        <Button icon={<CloseOutlined />} onClick={() => removeFilter(cond.id)} type="text" danger />
                    </div>
                ))}
