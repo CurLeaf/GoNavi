@@ -46,6 +46,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const allColumnsRef = useRef<{tableName: string, name: string, type: string}[]>([]); // Store all columns
 
   const { connections, addSqlLog } = useStore();
+  const currentConnectionIdRef = useRef(currentConnectionId);
+  const currentDbRef = useRef(currentDb);
+  const connectionsRef = useRef(connections);
+  const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
   const darkMode = useStore(state => state.darkMode);
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);
@@ -53,10 +57,17 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
 
-  const currentDbRef = useRef(currentDb);
+  useEffect(() => {
+      currentConnectionIdRef.current = currentConnectionId;
+  }, [currentConnectionId]);
+
   useEffect(() => {
       currentDbRef.current = currentDb;
   }, [currentDb]);
+
+  useEffect(() => {
+      connectionsRef.current = connections;
+  }, [connections]);
 
   // If opening a saved query, load its SQL
   useEffect(() => {
@@ -155,7 +166,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       monacoRef.current = monaco;
 
       monaco.languages.registerCompletionItemProvider('sql', {
-          provideCompletionItems: (model: any, position: any) => {
+          triggerCharacters: ['.'],
+          provideCompletionItems: async (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
               const range = {
                   startLineNumber: position.lineNumber,
@@ -164,16 +176,144 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   endColumn: word.endColumn,
               };
 
-              const tableRegex = /(?:FROM|JOIN|UPDATE|INTO)\s+[`"]?(\w+)[`"]?/gi;
+              const stripQuotes = (ident: string) => {
+                  let raw = (ident || '').trim();
+                  if (!raw) return raw;
+                  const first = raw[0];
+                  const last = raw[raw.length - 1];
+                  if ((first === '`' && last === '`') || (first === '"' && last === '"')) {
+                      raw = raw.slice(1, -1);
+                  }
+                  return raw.trim();
+              };
+
+              const normalizeQualifiedName = (ident: string) => {
+                  const raw = (ident || '').trim();
+                  if (!raw) return raw;
+                  return raw
+                      .split('.')
+                      .map(p => stripQuotes(p.trim()))
+                      .filter(Boolean)
+                      .join('.');
+              };
+
+              const getLastPart = (qualified: string) => {
+                  const raw = normalizeQualifiedName(qualified);
+                  if (!raw) return raw;
+                  const parts = raw.split('.').filter(Boolean);
+                  return parts[parts.length - 1] || raw;
+              };
+
+              const buildConnConfig = () => {
+                  const connId = currentConnectionIdRef.current;
+                  const conn = connectionsRef.current.find(c => c.id === connId);
+                  if (!conn) return null;
+                  return {
+                      ...conn.config,
+                      port: Number(conn.config.port),
+                      password: conn.config.password || "",
+                      database: conn.config.database || "",
+                      useSSH: conn.config.useSSH || false,
+                      ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+                  };
+              };
+
+              const getColumnsByDB = async (tableIdent: string) => {
+                  const connId = currentConnectionIdRef.current;
+                  const dbName = currentDbRef.current;
+                  if (!connId || !dbName) return [] as ColumnDefinition[];
+                  const key = `${connId}|${dbName}|${tableIdent}`;
+                  const cached = columnsCacheRef.current[key];
+                  if (cached) return cached;
+
+                  const config = buildConnConfig();
+                  if (!config) return [] as ColumnDefinition[];
+
+                  const res = await DBGetColumns(config as any, dbName, tableIdent);
+                  if (res?.success && Array.isArray(res.data)) {
+                      const cols = res.data as ColumnDefinition[];
+                      columnsCacheRef.current[key] = cols;
+                      return cols;
+                  }
+                  return [] as ColumnDefinition[];
+              };
+
+              const fullText = model.getValue();
+
+              // 1) alias.field completion: when cursor is after "<alias>.<prefix>"
+              const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_][\w]*[`"]?)\.(\w*)$/);
+              if (qualifierMatch) {
+                  const alias = stripQuotes(qualifierMatch[1]);
+                  const colPrefix = (qualifierMatch[2] || '').toLowerCase();
+
+                  const reserved = new Set([
+                      'where', 'on', 'group', 'order', 'limit', 'having',
+                      'left', 'right', 'inner', 'outer', 'full', 'cross', 'join',
+                      'union', 'except', 'intersect', 'as', 'set', 'values', 'returning',
+                  ]);
+
+                  const aliasMap: Record<string, string> = {};
+                  // Capture table and optional alias, support schema.table
+                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?[\w]+[`"]?))?/gi;
+                  let m;
+                  while ((m = aliasRegex.exec(fullText)) !== null) {
+                      const tableIdent = normalizeQualifiedName(m[1] || '');
+                      if (!tableIdent) continue;
+                      const shortTable = getLastPart(tableIdent);
+                      // allow "table." as qualifier too
+                      if (shortTable) aliasMap[shortTable.toLowerCase()] = tableIdent;
+
+                      const a = stripQuotes(m[2] || '').trim();
+                      if (!a) continue;
+                      const al = a.toLowerCase();
+                      if (reserved.has(al)) continue;
+                      aliasMap[al] = tableIdent;
+                  }
+
+                  const tableIdent = aliasMap[alias.toLowerCase()];
+                  if (tableIdent) {
+                      const shortTable = getLastPart(tableIdent);
+
+                      // Prefer preloaded MySQL all-columns cache
+                      let cols: { name: string, type?: string, tableName?: string }[] = [];
+                      if (allColumnsRef.current.length > 0) {
+                          cols = allColumnsRef.current
+                              .filter(c => (c.tableName || '').toLowerCase() === (shortTable || '').toLowerCase())
+                              .map(c => ({ name: c.name, type: c.type, tableName: c.tableName }));
+                      } else {
+                          const dbCols = await getColumnsByDB(tableIdent);
+                          cols = dbCols.map(c => ({ name: c.name, type: c.type, tableName: shortTable }));
+                      }
+
+                      const filtered = colPrefix
+                          ? cols.filter(c => (c.name || '').toLowerCase().startsWith(colPrefix))
+                          : cols;
+
+                      const suggestions = filtered.map(c => ({
+                          label: c.name,
+                          kind: monaco.languages.CompletionItemKind.Field,
+                          insertText: c.name,
+                          detail: c.type ? `${c.type}${c.tableName ? ` (${c.tableName})` : ''}` : (c.tableName ? `(${c.tableName})` : ''),
+                          range,
+                          sortText: '0' + c.name
+                      }));
+                      return { suggestions };
+                  }
+              }
+
+              // 2) global/table/column completion
+              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)/gi;
               const foundTables = new Set<string>();
               let match;
-              const fullText = model.getValue(); 
               while ((match = tableRegex.exec(fullText)) !== null) {
-                  foundTables.add(match[1]);
+                  const t = normalizeQualifiedName(match[1] || '');
+                  if (!t) continue;
+                  foundTables.add(getLastPart(t).toLowerCase());
               }
 
               const relevantColumns = allColumnsRef.current
-                  .filter(c => foundTables.has(c.tableName))
+                  .filter(c => foundTables.has((c.tableName || '').toLowerCase()))
                   .map(c => ({
                       label: c.name,
                       kind: monaco.languages.CompletionItemKind.Field,
