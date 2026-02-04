@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -76,6 +77,20 @@ func (m *MySQLDB) Ping() error {
 	return m.conn.PingContext(ctx)
 }
 
+func (m *MySQLDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if m.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := m.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if m.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -113,6 +128,17 @@ func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error
 	}
 
 	return resultData, columns, nil
+}
+
+func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if m.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := m.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (m *MySQLDB) Exec(query string) (int64, error) {

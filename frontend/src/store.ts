@@ -21,6 +21,7 @@ interface AppState {
   savedQueries: SavedQuery[];
   darkMode: boolean;
   sqlFormatOptions: { keywordCase: 'upper' | 'lower' };
+  queryOptions: { maxRows: number };
   sqlLogs: SqlLog[];
   
   addConnection: (conn: SavedConnection) => void;
@@ -41,6 +42,7 @@ interface AppState {
 
   toggleDarkMode: () => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
+  setQueryOptions: (options: Partial<{ maxRows: number }>) => void;
   
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
@@ -56,6 +58,7 @@ export const useStore = create<AppState>()(
       savedQueries: [],
       darkMode: false,
       sqlFormatOptions: { keywordCase: 'upper' },
+      queryOptions: { maxRows: 5000 },
       sqlLogs: [],
 
       addConnection: (conn) => set((state) => ({ connections: [...state.connections, conn] })),
@@ -124,13 +127,14 @@ export const useStore = create<AppState>()(
 
       toggleDarkMode: () => set((state) => ({ darkMode: !state.darkMode })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
+      setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
       
       addSqlLog: (log) => set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
       clearSqlLogs: () => set({ sqlLogs: [] }),
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
-      partialize: (state) => ({ connections: state.connections, savedQueries: state.savedQueries, darkMode: state.darkMode, sqlFormatOptions: state.sqlFormatOptions }), // Don't persist logs
+      partialize: (state) => ({ connections: state.connections, savedQueries: state.savedQueries, darkMode: state.darkMode, sqlFormatOptions: state.sqlFormatOptions, queryOptions: state.queryOptions }), // Don't persist logs
     }
   )
 );

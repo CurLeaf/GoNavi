@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -119,6 +120,20 @@ func (k *KingbaseDB) Ping() error {
 	return k.conn.PingContext(ctx)
 }
 
+func (k *KingbaseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if k.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := k.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if k.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -156,6 +171,17 @@ func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, er
 	}
 
 	return resultData, columns, nil
+}
+
+func (k *KingbaseDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if k.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := k.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (k *KingbaseDB) Exec(query string) (int64, error) {

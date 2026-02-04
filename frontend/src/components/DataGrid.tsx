@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal } from 'antd';
 import type { SortOrder } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined } from '@ant-design/icons';
-import { ImportData, ExportTable, ExportData, ApplyChanges } from '../../wailsjs/go/app/App';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined } from '@ant-design/icons';
+import Editor from '@monaco-editor/react';
+import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges } from '../../wailsjs/go/app/App';
 import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 import 'react-resizable/css/styles.css';
+import { buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 
 // 内部行标识字段：避免与真实业务字段（如 `key` 列）冲突。
 export const GONAVI_ROW_KEY = '__gonavi_row_key__';
@@ -27,16 +29,47 @@ const formatCellValue = (val: any) => {
     return String(val);
 };
 
+const toEditableText = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    try {
+        return JSON.stringify(val, null, 2);
+    } catch {
+        return String(val);
+    }
+};
+
+const toFormText = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return normalizeDateTimeString(val);
+    return toEditableText(val);
+};
+
+const looksLikeJsonText = (text: string): boolean => {
+    const raw = (text || '').trim();
+    if (!raw) return false;
+    const first = raw[0];
+    const last = raw[raw.length - 1];
+    return (first === '{' && last === '}') || (first === '[' && last === ']');
+};
+
 // --- Resizable Header (Native Implementation) ---
 const ResizableTitle = (props: any) => {
   const { onResizeStart, width, ...restProps } = props;
 
-  if (!width) {
-    return <th {...restProps} />;
+  const nextStyle = { ...(restProps.style || {}) } as React.CSSProperties;
+  if (width) {
+    nextStyle.width = width;
+  }
+
+  // 注意：virtual table 模式下，rc-table 会依赖 header cell 的 width 样式来渲染选择列。
+  // 若这里丢失 width，可能导致左上角“全选”checkbox 不显示。
+  if (!width || typeof onResizeStart !== 'function') {
+    return <th {...restProps} style={nextStyle} />;
   }
 
   return (
-    <th {...restProps} style={{ ...restProps.style, position: 'relative' }}>
+    <th {...restProps} style={{ ...nextStyle, position: 'relative' }}>
       {restProps.children}
       <span
         className="react-resizable-handle"
@@ -85,6 +118,7 @@ interface EditableCellProps {
   dataIndex: string;
   record: Item;
   handleSave: (record: Item) => void;
+  focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   [key: string]: any;
 }
 
@@ -95,6 +129,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   dataIndex,
   record,
   handleSave,
+  focusCell,
   ...restProps
 }) => {
   const [editing, setEditing] = useState(false);
@@ -139,7 +174,26 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     );
   }
 
-  return <td {...restProps} onDoubleClick={editable ? toggleEdit : undefined}>{childNode}</td>;
+  const handleDoubleClick = () => {
+      if (!editable) return;
+      toggleEdit();
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+      restProps?.onClick?.(e);
+      if (!editable) return;
+      if (typeof focusCell === 'function') focusCell(record, dataIndex, title);
+  };
+
+  return (
+      <td
+          {...restProps}
+          onClick={editable ? handleClick : restProps?.onClick}
+          onDoubleClick={editable ? handleDoubleClick : restProps?.onDoubleClick}
+      >
+          {childNode}
+      </td>
+  );
 });
 
 const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
@@ -221,9 +275,23 @@ const DataGrid: React.FC<DataGridProps> = ({
 }) => {
   const { connections } = useStore();
   const addSqlLog = useStore(state => state.addSqlLog);
+  const darkMode = useStore(state => state.darkMode);
+  const selectionColumnWidth = 46;
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
   const gridId = useMemo(() => `grid-${uuidv4()}`, []);
+  const [cellEditorOpen, setCellEditorOpen] = useState(false);
+  const [cellEditorValue, setCellEditorValue] = useState('');
+  const [cellEditorIsJson, setCellEditorIsJson] = useState(false);
+  const [cellEditorMeta, setCellEditorMeta] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
+  const cellEditorApplyRef = useRef<((val: string) => void) | null>(null);
+  const [activeCell, setActiveCell] = useState<{ rowKey: string; dataIndex: string; title: string } | null>(null);
+  const [rowEditorOpen, setRowEditorOpen] = useState(false);
+  const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
+  const rowEditorBaseRef = useRef<Record<string, string>>({});
+  const rowEditorDisplayRef = useRef<Record<string, string>>({});
+  const rowEditorNullColsRef = useRef<Set<string>>(new Set());
+  const [rowEditorForm] = Form.useForm();
   
   // Helper to export specific data
   const exportData = async (rows: any[], format: string) => {
@@ -237,6 +305,28 @@ const DataGrid: React.FC<DataGridProps> = ({
   
   const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+
+  const closeCellEditor = useCallback(() => {
+      setCellEditorOpen(false);
+      setCellEditorMeta(null);
+      setCellEditorValue('');
+      setCellEditorIsJson(false);
+      cellEditorApplyRef.current = null;
+  }, []);
+
+  const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode, onApplyValue?: (val: string) => void) => {
+      if (!record || !dataIndex) return;
+      const raw = record?.[dataIndex];
+      const text = toEditableText(raw);
+      const isJson = looksLikeJsonText(text);
+      const titleText = typeof title === 'string' ? title : (typeof title === 'number' ? String(title) : String(dataIndex));
+
+      setCellEditorMeta({ record, dataIndex, title: titleText });
+      setCellEditorValue(text);
+      setCellEditorIsJson(isJson);
+      setCellEditorOpen(true);
+      cellEditorApplyRef.current = typeof onApplyValue === 'function' ? onApplyValue : null;
+  }, []);
   
   // Dynamic Height
   const [tableHeight, setTableHeight] = useState(500);
@@ -284,7 +374,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
 
   // Filter State
-  const [filterConditions, setFilterConditions] = useState<{ id: number, column: string, op: string, value: string }[]>([]);
+  const [filterConditions, setFilterConditions] = useState<{ id: number, column: string, op: string, value: string, value2?: string }[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
@@ -298,6 +388,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
+      setActiveCell(null);
+      setRowEditorOpen(false);
+      setRowEditorRowKey('');
+      rowEditorBaseRef.current = {};
+      rowEditorDisplayRef.current = {};
+      rowEditorNullColsRef.current = new Set();
+      rowEditorForm.resetFields();
+      closeCellEditor();
       form.resetFields();
   }, [tableName, dbName, connectionId]); // Reset on context change
 
@@ -452,6 +550,29 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   }, [addedRows]);
 
+  const handleCellEditorSave = useCallback(() => {
+      if (!cellEditorMeta) return;
+      const apply = cellEditorApplyRef.current;
+      if (apply) {
+          apply(cellEditorValue);
+          closeCellEditor();
+          return;
+      }
+      const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
+      handleCellSave(nextRow);
+      closeCellEditor();
+  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor]);
+
+  const handleFormatJsonInEditor = useCallback(() => {
+      if (!cellEditorIsJson) return;
+      try {
+          const obj = JSON.parse(cellEditorValue);
+          setCellEditorValue(JSON.stringify(obj, null, 2));
+      } catch (e: any) {
+          message.error("JSON 格式无效：" + (e?.message || String(e)));
+      }
+  }, [cellEditorIsJson, cellEditorValue]);
+
   // Merge Data for Display
   // 'displayData' already merges addedRows. 
   // We need to merge modifiedRows into it for rendering.
@@ -464,6 +585,110 @@ const DataGrid: React.FC<DataGridProps> = ({
           return row;
       });
   }, [displayData, modifiedRows]);
+
+  const focusCell = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
+      const k = record?.[GONAVI_ROW_KEY];
+      if (k === undefined) return;
+      const titleText = typeof title === 'string' ? title : (typeof title === 'number' ? String(title) : String(dataIndex));
+      setActiveCell({ rowKey: rowKeyStr(k), dataIndex, title: titleText });
+  }, [rowKeyStr]);
+
+  const closeRowEditor = useCallback(() => {
+      setRowEditorOpen(false);
+      setRowEditorRowKey('');
+      rowEditorBaseRef.current = {};
+      rowEditorDisplayRef.current = {};
+      rowEditorNullColsRef.current = new Set();
+      rowEditorForm.resetFields();
+  }, [rowEditorForm]);
+
+  const openRowEditor = useCallback(() => {
+      if (readOnly || !tableName) return;
+      if (selectedRowKeys.length > 1) {
+          message.info('一次只能编辑一行，请仅选择一行');
+          return;
+      }
+
+      const keyStr =
+          selectedRowKeys.length === 1 ? rowKeyStr(selectedRowKeys[0]) : activeCell?.rowKey;
+      if (!keyStr) {
+          message.info('请先选择一行（勾选一行或点击任意单元格）');
+          return;
+      }
+
+      const displayRow = mergedDisplayData.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+      if (!displayRow) {
+          message.error('未找到目标行，请刷新后重试');
+          return;
+      }
+
+      const baseRow =
+          data.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
+          addedRows.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
+          displayRow;
+
+      const baseMap: Record<string, string> = {};
+      const displayMap: Record<string, string> = {};
+      const nullCols = new Set<string>();
+
+      columnNames.forEach((col) => {
+          const baseVal = (baseRow as any)?.[col];
+          const displayVal = (displayRow as any)?.[col];
+          baseMap[col] = toFormText(baseVal);
+          displayMap[col] = toFormText(displayVal);
+          if (baseVal === null || baseVal === undefined) nullCols.add(col);
+      });
+
+      rowEditorBaseRef.current = baseMap;
+      rowEditorDisplayRef.current = displayMap;
+      rowEditorNullColsRef.current = nullCols;
+
+      rowEditorForm.setFieldsValue(displayMap);
+      setRowEditorRowKey(keyStr);
+      setRowEditorOpen(true);
+  }, [readOnly, tableName, selectedRowKeys, activeCell, mergedDisplayData, data, addedRows, columnNames, rowEditorForm, rowKeyStr]);
+
+  const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
+      if (!dataIndex) return;
+      const val = rowEditorForm.getFieldValue(dataIndex);
+      openCellEditor(
+          { [dataIndex]: val ?? '' },
+          dataIndex,
+          dataIndex,
+          (nextVal) => rowEditorForm.setFieldsValue({ [dataIndex]: nextVal }),
+      );
+  }, [rowEditorForm, openCellEditor]);
+
+  const applyRowEditor = useCallback(() => {
+      const keyStr = rowEditorRowKey;
+      if (!keyStr) return;
+      const values = rowEditorForm.getFieldsValue(true) || {};
+
+      const isAdded = addedRows.some(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+      if (isAdded) {
+          setAddedRows(prev => prev.map(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr ? { ...r, ...values } : r));
+          closeRowEditor();
+          return;
+      }
+
+      const baseMap = rowEditorBaseRef.current || {};
+      const patch: Record<string, any> = {};
+      columnNames.forEach((col) => {
+          const nextVal = values[col];
+          const nextStr = toFormText(nextVal);
+          const baseStr = baseMap[col] ?? '';
+          if (nextStr !== baseStr) patch[col] = nextStr;
+      });
+
+      setModifiedRows(prev => {
+          const next = { ...prev };
+          if (Object.keys(patch).length === 0) delete next[keyStr];
+          else next[keyStr] = patch;
+          return next;
+      });
+
+      closeRowEditor();
+  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
 
   const columns = useMemo(() => {
       return columnNames.map(key => ({
@@ -493,9 +718,13 @@ const DataGrid: React.FC<DataGridProps> = ({
               dataIndex: col.dataIndex,
               title: col.title,
               handleSave: handleCellSave,
+              focusCell,
+              className: (activeCell && rowKeyStr(record?.[GONAVI_ROW_KEY]) === activeCell.rowKey && col.dataIndex === activeCell.dataIndex)
+                ? 'gonavi-active-cell'
+                : undefined,
           }),
       };
-  }), [columns, handleCellSave]);
+  }), [columns, handleCellSave, openCellEditor, focusCell, activeCell, rowKeyStr]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -645,11 +874,98 @@ const DataGrid: React.FC<DataGridProps> = ({
       copyToClipboard(lines.join('\n'));
   }, [getTargets, copyToClipboard]);
 
+  const buildConnConfig = useCallback(() => {
+      if (!connectionId) return null;
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) return null;
+      return {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+  }, [connections, connectionId]);
+
+  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {
+      const config = buildConnConfig();
+      if (!config) return;
+      const hide = message.loading(`正在导出...`, 0);
+      const res = await ExportQuery(config as any, dbName || '', sql, defaultName || 'export', format);
+      hide();
+      if (res.success) {
+          message.success("导出成功");
+      } else if (res.message !== "Cancelled") {
+          message.error("导出失败: " + res.message);
+      }
+  }, [buildConnConfig, dbName]);
+
+  const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
+      if (!tableName || pkColumns.length === 0) return '';
+      const targets = (rows || []).filter(Boolean);
+      if (targets.length === 0) return '';
+
+      const clauses: string[] = [];
+      for (const r of targets) {
+          const andParts: string[] = [];
+          for (const pk of pkColumns) {
+              const col = quoteIdentPart(dbType, pk);
+              const v = r?.[pk];
+              if (v === null || v === undefined) return '';
+              andParts.push(`${col} = '${escapeLiteral(String(v))}'`);
+          }
+          if (andParts.length === pkColumns.length) {
+              clauses.push(`(${andParts.join(' AND ')})`);
+          }
+      }
+      if (clauses.length === 0) return '';
+      return clauses.join(' OR ');
+  }, [pkColumns, tableName]);
+
+  const buildCurrentPageSql = useCallback((dbType: string) => {
+      if (!tableName || !pagination) return '';
+      const whereSQL = buildWhereSQL(dbType, filterConditions);
+      let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+      if (sortInfo && sortInfo.order) {
+          sql += ` ORDER BY ${quoteIdentPart(dbType, sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
+      }
+      const offset = (pagination.current - 1) * pagination.pageSize;
+      sql += ` LIMIT ${pagination.pageSize} OFFSET ${offset}`;
+      return sql;
+  }, [tableName, pagination, filterConditions, sortInfo]);
+
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
       const records = getTargets(record);
-      await exportData(records, format);
-  }, [getTargets]);
+      if (!connectionId || !tableName) {
+          await exportData(records, format);
+          return;
+      }
+
+      // 有未提交修改时，优先按界面数据导出，避免与数据库不一致。
+      if (hasChanges) {
+          message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+          await exportData(records, format);
+          return;
+      }
+
+      const config = buildConnConfig();
+      if (!config) {
+          await exportData(records, format);
+          return;
+      }
+
+      const dbType = config.type || '';
+      const pkWhere = buildPkWhereSql(records, dbType);
+      if (!pkWhere) {
+          await exportData(records, format);
+          return;
+      }
+
+      const sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} WHERE ${pkWhere}`;
+      await exportByQuery(sql, format, tableName || 'export');
+  }, [getTargets, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery]);
 
   // Export
   const handleExport = async (format: string) => {
@@ -658,7 +974,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 1. Export Selected
       if (selectedRowKeys.length > 0) {
           const selectedRows = displayData.filter(d => selectedRowKeys.includes(d?.[GONAVI_ROW_KEY]));
-          await exportData(selectedRows, format);
+          await handleExportSelected(format, selectedRows[0]);
           return;
       }
 
@@ -667,9 +983,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       let instance: any;
       const handleAll = async () => {
           instance.destroy();
-          const conn = connections.find(c => c.id === connectionId);
-          if (!conn) return;
-          const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
+          const config = buildConnConfig();
+          if (!config) return;
           const hide = message.loading(`正在导出全部数据...`, 0);
           const res = await ExportTable(config as any, dbName || '', tableName, format);
           hide();
@@ -677,7 +992,25 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
       const handlePage = async () => {
           instance.destroy();
-          await exportData(displayData, format);
+          if (hasChanges) {
+              message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+              await exportData(displayData, format);
+              return;
+          }
+
+          const config = buildConnConfig();
+          if (!config) {
+              await exportData(displayData, format);
+              return;
+          }
+
+          const sql = buildCurrentPageSql(config.type || '');
+          if (!sql) {
+              await exportData(displayData, format);
+              return;
+          }
+
+          await exportByQuery(sql, format, tableName || 'export');
       };
 
       instance = modal.info({
@@ -700,21 +1033,64 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleImport = async () => {
       if (!connectionId || !tableName) return;
-      const conn = connections.find(c => c.id === connectionId);
-      if (!conn) return;
-      const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
+      const config = buildConnConfig();
+      if (!config) return;
       
       const res = await ImportData(config as any, dbName || '', tableName);
       if (res.success) { message.success(res.message); if (onReload) onReload(); } else if (res.message !== "Cancelled") { message.error("Import Failed: " + res.message); }
   };
 
   // Filters
+  const filterOpOptions = useMemo(() => ([
+      { value: '=', label: '=' },
+      { value: '!=', label: '!=' },
+      { value: '<', label: '<' },
+      { value: '<=', label: '<=' },
+      { value: '>', label: '>' },
+      { value: '>=', label: '>=' },
+      { value: 'CONTAINS', label: '包含' },
+      { value: 'NOT_CONTAINS', label: '不包含' },
+      { value: 'STARTS_WITH', label: '开始以' },
+      { value: 'NOT_STARTS_WITH', label: '不是开始于' },
+      { value: 'ENDS_WITH', label: '结束以' },
+      { value: 'NOT_ENDS_WITH', label: '不是结束于' },
+      { value: 'IS_NULL', label: '是 null' },
+      { value: 'IS_NOT_NULL', label: '不是 null' },
+      { value: 'IS_EMPTY', label: '是空的' },
+      { value: 'IS_NOT_EMPTY', label: '不是空的' },
+      { value: 'BETWEEN', label: '介于' },
+      { value: 'NOT_BETWEEN', label: '不介于' },
+      { value: 'IN', label: '在列表' },
+      { value: 'NOT_IN', label: '不在列表' },
+      { value: 'CUSTOM', label: '[自定义]' },
+  ]), []);
+
+  const isNoValueOp = useCallback((op: string) => (
+      op === 'IS_NULL' || op === 'IS_NOT_NULL' || op === 'IS_EMPTY' || op === 'IS_NOT_EMPTY'
+  ), []);
+  const isBetweenOp = useCallback((op: string) => op === 'BETWEEN' || op === 'NOT_BETWEEN', []);
+  const isListOp = useCallback((op: string) => op === 'IN' || op === 'NOT_IN', []);
+
   const addFilter = () => {
-      setFilterConditions([...filterConditions, { id: nextFilterId, column: columnNames[0] || '', op: '=', value: '' }]);
+      setFilterConditions([...filterConditions, { id: nextFilterId, column: columnNames[0] || '', op: '=', value: '', value2: '' }]);
       setNextFilterId(nextFilterId + 1);
   };
   const updateFilter = (id: number, field: string, val: string) => {
-      setFilterConditions(prev => prev.map(c => c.id === id ? { ...c, [field]: val } : c));
+      setFilterConditions(prev => prev.map(c => {
+          if (c.id !== id) return c;
+          const next: any = { ...c, [field]: val };
+          if (field === 'op') {
+              if (isNoValueOp(val)) {
+                  next.value = '';
+                  next.value2 = '';
+              } else if (isBetweenOp(val)) {
+                  if (typeof next.value2 !== 'string') next.value2 = '';
+              } else {
+                  next.value2 = '';
+              }
+          }
+          return next;
+      }));
   };
   const removeFilter = (id: number) => {
       setFilterConditions(prev => prev.filter(c => c.id !== id));
@@ -735,33 +1111,41 @@ const DataGrid: React.FC<DataGridProps> = ({
       header: { cell: ResizableTitle }
   }), []); 
 
-  const totalWidth = columns.reduce((sum, col) => sum + (col.width as number || 200), 0);
+  const totalWidth = columns.reduce((sum, col) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
   const enableVirtual = mergedDisplayData.length >= 200;
 
   return (
     <div className={gridId} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {/* Toolbar */}
-        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
-            {onReload && <Button icon={<ReloadOutlined />} onClick={() => {
-                setAddedRows([]);
-                setModifiedRows({});
-               setDeletedRowKeys(new Set());
-               setSelectedRowKeys([]);
-               onReload();
-           }}>刷新</Button>}
-           {tableName && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
-           {tableName && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
-           
-           {!readOnly && tableName && (
-               <>
-                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
-                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
-                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
-                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
-                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
-                   <Button icon={<SaveOutlined />} type="primary" disabled={!hasChanges} onClick={handleCommit}>提交事务 ({addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size})</Button>
-                   {hasChanges && (<Button icon={<UndoOutlined />} onClick={() => {
-                        setAddedRows([]);
+	       {/* Toolbar */}
+	        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
+	            {onReload && <Button icon={<ReloadOutlined />} onClick={() => {
+	                setAddedRows([]);
+	                setModifiedRows({});
+	               setDeletedRowKeys(new Set());
+	               setSelectedRowKeys([]);
+	               setActiveCell(null);
+	               onReload();
+	           }}>刷新</Button>}
+	           {tableName && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
+	           {tableName && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
+	           
+	           {!readOnly && tableName && (
+	               <>
+	                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
+	                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
+	                   <Button
+                           icon={<EditOutlined />}
+                           disabled={selectedRowKeys.length > 1 || (selectedRowKeys.length !== 1 && !activeCell)}
+                           onClick={openRowEditor}
+                       >
+                           编辑行
+                       </Button>
+	                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
+	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
+	                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
+	                   <Button icon={<SaveOutlined />} type="primary" disabled={!hasChanges} onClick={handleCommit}>提交事务 ({addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size})</Button>
+	                   {hasChanges && (<Button icon={<UndoOutlined />} onClick={() => {
+	                        setAddedRows([]);
                         setModifiedRows({});
                         setDeletedRowKeys(new Set());
                    }}>回滚</Button>)}
@@ -783,10 +1167,62 @@ const DataGrid: React.FC<DataGridProps> = ({
        {showFilter && (
            <div style={{ padding: '8px', background: '#f5f5f5', borderBottom: '1px solid #eee' }}>
                {filterConditions.map(cond => (
-                   <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                       <Select style={{ width: 150 }} value={cond.column} onChange={v => updateFilter(cond.id, 'column', v)} options={columnNames.map(c => ({ value: c, label: c }))} />
-                       <Select style={{ width: 100 }} value={cond.op} onChange={v => updateFilter(cond.id, 'op', v)} options={[{ value: '=', label: '=' }, { value: 'LIKE', label: '包含' }]} />
-                       <Input style={{ width: 200 }} value={cond.value} onChange={e => updateFilter(cond.id, 'value', e.target.value)} />
+                   <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                       <Select
+                           style={{ width: 180 }}
+                           value={cond.column}
+                           onChange={v => updateFilter(cond.id, 'column', v)}
+                           options={columnNames.map(c => ({ value: c, label: c }))}
+                           disabled={cond.op === 'CUSTOM'}
+                       />
+                       <Select
+                           style={{ width: 140 }}
+                           value={cond.op}
+                           onChange={v => updateFilter(cond.id, 'op', v)}
+                           options={filterOpOptions as any}
+                       />
+
+                       {cond.op === 'CUSTOM' ? (
+                           <Input.TextArea
+                               style={{ flex: 1 }}
+                               autoSize={{ minRows: 1, maxRows: 4 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                               placeholder="输入自定义 WHERE 表达式（不需要再写 WHERE），例如：status IN ('A','B')"
+                           />
+                       ) : isListOp(cond.op) ? (
+                           <Input.TextArea
+                               style={{ flex: 1 }}
+                               autoSize={{ minRows: 1, maxRows: 4 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                               placeholder="多个值用逗号或换行分隔"
+                           />
+                       ) : isBetweenOp(cond.op) ? (
+                           <>
+                               <Input
+                                   style={{ width: 220 }}
+                                   value={cond.value}
+                                   onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                                   placeholder="开始值"
+                               />
+                               <Input
+                                   style={{ width: 220 }}
+                                   value={cond.value2 || ''}
+                                   onChange={e => updateFilter(cond.id, 'value2', e.target.value)}
+                                   placeholder="结束值"
+                               />
+                           </>
+                       ) : isNoValueOp(cond.op) ? (
+                           <Input style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
+                       ) : (
+                           <Input
+                               style={{ width: 280 }}
+                               value={cond.value}
+                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
+                           />
+                       )}
+
                        <Button icon={<CloseOutlined />} onClick={() => removeFilter(cond.id)} type="text" danger />
                    </div>
                ))}
@@ -801,8 +1237,90 @@ const DataGrid: React.FC<DataGridProps> = ({
            </div>
        )}
 
-       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
-        {contextHolder}
+	       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+	        {contextHolder}
+            <Modal
+                title="编辑行"
+                open={rowEditorOpen}
+                onCancel={closeRowEditor}
+                width={980}
+                destroyOnClose
+                maskClosable={false}
+                footer={[
+                    <Button key="cancel" onClick={closeRowEditor}>取消</Button>,
+                    <Button key="ok" type="primary" onClick={applyRowEditor}>应用</Button>,
+                ]}
+            >
+                <div style={{ marginBottom: 8, color: '#888', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>{tableName ? `${tableName}` : ''}</span>
+                    <span>{rowEditorRowKey ? `rowKey: ${rowEditorRowKey}` : ''}</span>
+                </div>
+                <Form form={rowEditorForm} layout="vertical">
+                    <div style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
+                        {columnNames.map((col) => {
+                            const sample = rowEditorDisplayRef.current?.[col] ?? '';
+                            const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
+                            const isJson = looksLikeJsonText(sample);
+                            const useArea = isJson || sample.includes('\n') || sample.length >= 160;
+
+                            return (
+                                <Form.Item key={col} label={col} style={{ marginBottom: 12 }}>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                        <Form.Item name={col} noStyle>
+                                            {useArea ? (
+                                                <Input.TextArea
+                                                    style={{ flex: 1 }}
+                                                    autoSize={{ minRows: isJson ? 4 : 1, maxRows: 10 }}
+                                                    placeholder={placeholder}
+                                                />
+                                            ) : (
+                                                <Input style={{ flex: 1 }} placeholder={placeholder} />
+                                            )}
+                                        </Form.Item>
+                                        <Button size="small" onClick={() => openRowEditorFieldEditor(col)} title="弹窗编辑">...</Button>
+                                    </div>
+                                </Form.Item>
+                            );
+                        })}
+                    </div>
+                </Form>
+            </Modal>
+	        <Modal
+	            title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
+	            open={cellEditorOpen}
+	            onCancel={closeCellEditor}
+            width={960}
+            destroyOnClose
+            maskClosable={false}
+            footer={[
+                <Button key="format" onClick={handleFormatJsonInEditor} disabled={!cellEditorIsJson}>
+                    格式化 JSON
+                </Button>,
+                <Button key="cancel" onClick={closeCellEditor}>取消</Button>,
+                <Button key="ok" type="primary" onClick={handleCellEditorSave}>保存</Button>,
+            ]}
+        >
+            <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
+                {cellEditorMeta ? `${tableName || ''}${tableName ? '.' : ''}${cellEditorMeta.dataIndex}` : ''}
+            </div>
+            {cellEditorOpen && (
+                <Editor
+                    height="56vh"
+                    language={cellEditorIsJson ? "json" : "plaintext"}
+                    theme={darkMode ? "vs-dark" : "light"}
+                    value={cellEditorValue}
+                    onChange={(val) => setCellEditorValue(val || '')}
+                    options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: "on",
+                        fontSize: 14,
+                        tabSize: 2,
+                        automaticLayout: true,
+                    }}
+                />
+            )}
+        </Modal>
         <Form component={false} form={form}>
             <DataContext.Provider value={{ selectedRowKeysRef, displayDataRef, handleCopyInsert, handleCopyJson, handleCopyCsv, handleExportSelected, copyToClipboard, tableName }}>
                 <EditableContext.Provider value={form}>
@@ -811,6 +1329,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         dataSource={mergedDisplayData} 
                         columns={mergedColumns} 
                         size="small" 
+                        tableLayout="fixed"
                         scroll={{ x: Math.max(totalWidth, 1000), y: tableHeight }}
                         virtual={enableVirtual}
                         loading={loading}
@@ -821,6 +1340,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         rowSelection={{
                             selectedRowKeys,
                             onChange: setSelectedRowKeys,
+                            columnWidth: selectionColumnWidth,
                         }}
                         rowClassName={(record) => {
                             const k = record?.[GONAVI_ROW_KEY];
@@ -854,13 +1374,14 @@ const DataGrid: React.FC<DataGridProps> = ({
            </div>
        )}
 
-        <style>{`
-            .${gridId} .row-added td { background-color: #f6ffed !important; }
-            .${gridId} .row-modified td { background-color: #e6f7ff !important; }
-            .${gridId} .ant-table-body {
-                max-height: ${tableHeight}px !important;
-            }
-        `}</style>
+	        <style>{`
+	            .${gridId} .row-added td { background-color: #f6ffed !important; }
+	            .${gridId} .row-modified td { background-color: #e6f7ff !important; }
+                .${gridId} td.gonavi-active-cell {
+                    outline: 2px solid #1677ff;
+                    outline-offset: -2px;
+                }
+	        `}</style>
        
        {/* Ghost Resize Line for Columns */}
        <div 

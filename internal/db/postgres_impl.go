@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -77,6 +78,20 @@ func (p *PostgresDB) Ping() error {
 	return p.conn.PingContext(ctx)
 }
 
+func (p *PostgresDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if p.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := p.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if p.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -114,6 +129,17 @@ func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, er
 	}
 
 	return resultData, columns, nil
+}
+
+func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if p.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := p.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (p *PostgresDB) Exec(query string) (int64, error) {
