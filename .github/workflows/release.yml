@@ -29,6 +29,28 @@ jobs:
             platform: windows/amd64
             artifact_name: GoNavi-windows-amd64
             asset_ext: .exe
+          - os: windows-latest
+            platform: windows/arm64
+            artifact_name: GoNavi-windows-arm64
+            asset_ext: .exe
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            artifact_name: GoNavi-linux-amd64
+            asset_ext: .tar.gz
+          - os: ubuntu-22.04
+            platform: linux/arm64
+            artifact_name: GoNavi-linux-arm64
+            asset_ext: .tar.gz
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            artifact_name: GoNavi-linux-amd64
+            asset_ext: .AppImage
+            build_appimage: true
+          - os: ubuntu-22.04
+            platform: linux/arm64
+            artifact_name: GoNavi-linux-arm64
+            asset_ext: .AppImage
+            build_appimage: true
 
     steps:
       - name: Checkout code
@@ -45,12 +67,48 @@ jobs:
         with:
           node-version: '20'
 
+      # Linux Dependencies (GTK3, WebKit2GTK required by Wails)
+      - name: Install Linux Dependencies
+        if: contains(matrix.platform, 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+          # Cross-compile dependencies for ARM64
+          if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            sudo apt-get install -y libgtk-3-dev:arm64 libwebkit2gtk-4.0-dev:arm64 || true
+          fi
+
+          # AppImage tools
+          if [ "${{ matrix.build_appimage }}" = "true" ]; then
+            sudo apt-get install -y libfuse2
+            if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
+              wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage -O /tmp/linuxdeploy
+              wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-aarch64.AppImage -O /tmp/linuxdeploy-plugin-gtk
+            else
+              wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy
+              wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage -O /tmp/linuxdeploy-plugin-gtk
+            fi
+            chmod +x /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk
+          fi
+
       - name: Install Wails
         run: go install -v github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build
         shell: bash
         run: |
+          # Set cross-compile environment for Linux ARM64
+          if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
+            export CC=aarch64-linux-gnu-gcc
+            export CXX=aarch64-linux-gnu-g++
+            export CGO_ENABLED=1
+            export GOOS=linux
+            export GOARCH=arm64
+          fi
           wails build -platform ${{ matrix.platform }} -clean -o ${{ matrix.artifact_name }}
 
       # macOS Packaging
@@ -106,6 +164,78 @@ jobs:
           
           echo "📦 正在移动 $FINAL_EXE 到根目录..."
           mv "$FINAL_EXE" "../../$FINAL_EXE"
+
+      # Linux Packaging
+      - name: Package Linux tar.gz
+        if: contains(matrix.platform, 'linux') && matrix.build_appimage != true
+        run: |
+          cd build/bin
+          TARGET="${{ matrix.artifact_name }}"
+
+          if [ -f "$TARGET" ]; then
+              chmod +x "$TARGET"
+              echo "📦 正在打包 $TARGET.tar.gz..."
+              tar -czvf "$TARGET.tar.gz" "$TARGET"
+              mv "$TARGET.tar.gz" ../../
+          else
+              echo "❌ 未找到构建产物 '$TARGET'!"
+              exit 1
+          fi
+
+      # Linux AppImage Packaging
+      - name: Package Linux AppImage
+        if: matrix.build_appimage == true
+        run: |
+          cd build/bin
+          TARGET="${{ matrix.artifact_name }}"
+
+          if [ ! -f "$TARGET" ]; then
+              echo "❌ 未找到构建产物 '$TARGET'!"
+              exit 1
+          fi
+
+          chmod +x "$TARGET"
+
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp "$TARGET" AppDir/usr/bin/gonavi
+
+          # Create desktop file
+          cat > AppDir/usr/share/applications/gonavi.desktop << 'EOF'
+[Desktop Entry]
+Name=GoNavi
+Exec=gonavi
+Icon=gonavi
+Type=Application
+Categories=Development;Database;
+Comment=Database Management Tool
+EOF
+
+          cp AppDir/usr/share/applications/gonavi.desktop AppDir/gonavi.desktop
+
+          # Create a simple icon (or use existing if available)
+          if [ -f "../../build/appicon.png" ]; then
+              cp "../../build/appicon.png" AppDir/usr/share/icons/hicolor/256x256/apps/gonavi.png
+              cp "../../build/appicon.png" AppDir/gonavi.png
+          else
+              # Create a placeholder icon
+              convert -size 256x256 xc:#336791 -fill white -gravity center -pointsize 48 -annotate 0 "GoNavi" AppDir/gonavi.png || \
+              wget -q "https://via.placeholder.com/256/336791/FFFFFF?text=GoNavi" -O AppDir/gonavi.png || \
+              touch AppDir/gonavi.png
+              cp AppDir/gonavi.png AppDir/usr/share/icons/hicolor/256x256/apps/gonavi.png
+          fi
+
+          # Build AppImage
+          echo "📦 正在生成 AppImage..."
+          export DEPLOY_GTK_VERSION=3
+          /tmp/linuxdeploy --appdir AppDir --plugin gtk --output appimage
+
+          # Rename output
+          mv GoNavi*.AppImage "$TARGET.AppImage"
+          mv "$TARGET.AppImage" ../../
 
       # Upload to Actions Artifacts (Temporary Storage)
       - name: Upload Artifact
