@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } 
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal } from 'antd';
 import type { SortOrder } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined } from '@ant-design/icons';
+import Editor from '@monaco-editor/react';
 import { ImportData, ExportTable, ExportData, ApplyChanges } from '../../wailsjs/go/app/App';
 import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
@@ -27,11 +28,38 @@ const formatCellValue = (val: any) => {
     return String(val);
 };
 
+const toEditableText = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    try {
+        return JSON.stringify(val, null, 2);
+    } catch {
+        return String(val);
+    }
+};
+
+const looksLikeJsonText = (text: string): boolean => {
+    const raw = (text || '').trim();
+    if (!raw) return false;
+    const first = raw[0];
+    const last = raw[raw.length - 1];
+    return (first === '{' && last === '}') || (first === '[' && last === ']');
+};
+
+const shouldUseModalEditorForValue = (val: any): boolean => {
+    if (val === null || val === undefined) return false;
+    if (typeof val === 'object') return true;
+    const s = toEditableText(val);
+    if (s.includes('\n') || s.includes('\r')) return true;
+    if (s.length >= 160) return true;
+    return looksLikeJsonText(s);
+};
+
 // --- Resizable Header (Native Implementation) ---
 const ResizableTitle = (props: any) => {
   const { onResizeStart, width, ...restProps } = props;
 
-  if (!width) {
+  if (!width || typeof onResizeStart !== 'function') {
     return <th {...restProps} />;
   }
 
@@ -85,6 +113,7 @@ interface EditableCellProps {
   dataIndex: string;
   record: Item;
   handleSave: (record: Item) => void;
+  openEditor?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   [key: string]: any;
 }
 
@@ -95,6 +124,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   dataIndex,
   record,
   handleSave,
+  openEditor,
   ...restProps
 }) => {
   const [editing, setEditing] = useState(false);
@@ -139,7 +169,16 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     );
   }
 
-  return <td {...restProps} onDoubleClick={editable ? toggleEdit : undefined}>{childNode}</td>;
+  const handleDoubleClick = () => {
+      if (!editable) return;
+      if (openEditor && shouldUseModalEditorForValue(record?.[dataIndex])) {
+          openEditor(record, dataIndex, title);
+          return;
+      }
+      toggleEdit();
+  };
+
+  return <td {...restProps} onDoubleClick={editable ? handleDoubleClick : undefined}>{childNode}</td>;
 });
 
 const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
@@ -221,9 +260,15 @@ const DataGrid: React.FC<DataGridProps> = ({
 }) => {
   const { connections } = useStore();
   const addSqlLog = useStore(state => state.addSqlLog);
+  const darkMode = useStore(state => state.darkMode);
+  const selectionColumnWidth = 46;
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
   const gridId = useMemo(() => `grid-${uuidv4()}`, []);
+  const [cellEditorOpen, setCellEditorOpen] = useState(false);
+  const [cellEditorValue, setCellEditorValue] = useState('');
+  const [cellEditorIsJson, setCellEditorIsJson] = useState(false);
+  const [cellEditorMeta, setCellEditorMeta] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
   
   // Helper to export specific data
   const exportData = async (rows: any[], format: string) => {
@@ -237,6 +282,26 @@ const DataGrid: React.FC<DataGridProps> = ({
   
   const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(null);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+
+  const closeCellEditor = useCallback(() => {
+      setCellEditorOpen(false);
+      setCellEditorMeta(null);
+      setCellEditorValue('');
+      setCellEditorIsJson(false);
+  }, []);
+
+  const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
+      if (!record || !dataIndex) return;
+      const raw = record?.[dataIndex];
+      const text = toEditableText(raw);
+      const isJson = looksLikeJsonText(text);
+      const titleText = typeof title === 'string' ? title : (typeof title === 'number' ? String(title) : String(dataIndex));
+
+      setCellEditorMeta({ record, dataIndex, title: titleText });
+      setCellEditorValue(text);
+      setCellEditorIsJson(isJson);
+      setCellEditorOpen(true);
+  }, []);
   
   // Dynamic Height
   const [tableHeight, setTableHeight] = useState(500);
@@ -452,6 +517,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   }, [addedRows]);
 
+  const handleCellEditorSave = useCallback(() => {
+      if (!cellEditorMeta) return;
+      const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
+      handleCellSave(nextRow);
+      closeCellEditor();
+  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor]);
+
+  const handleFormatJsonInEditor = useCallback(() => {
+      if (!cellEditorIsJson) return;
+      try {
+          const obj = JSON.parse(cellEditorValue);
+          setCellEditorValue(JSON.stringify(obj, null, 2));
+      } catch (e: any) {
+          message.error("JSON 格式无效：" + (e?.message || String(e)));
+      }
+  }, [cellEditorIsJson, cellEditorValue]);
+
   // Merge Data for Display
   // 'displayData' already merges addedRows. 
   // We need to merge modifiedRows into it for rendering.
@@ -493,9 +575,10 @@ const DataGrid: React.FC<DataGridProps> = ({
               dataIndex: col.dataIndex,
               title: col.title,
               handleSave: handleCellSave,
+              openEditor: openCellEditor,
           }),
       };
-  }), [columns, handleCellSave]);
+  }), [columns, handleCellSave, openCellEditor]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -735,7 +818,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       header: { cell: ResizableTitle }
   }), []); 
 
-  const totalWidth = columns.reduce((sum, col) => sum + (col.width as number || 200), 0);
+  const totalWidth = columns.reduce((sum, col) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
   const enableVirtual = mergedDisplayData.length >= 200;
 
   return (
@@ -803,6 +886,42 @@ const DataGrid: React.FC<DataGridProps> = ({
 
        <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
         {contextHolder}
+        <Modal
+            title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
+            open={cellEditorOpen}
+            onCancel={closeCellEditor}
+            width={960}
+            destroyOnClose
+            maskClosable={false}
+            footer={[
+                <Button key="format" onClick={handleFormatJsonInEditor} disabled={!cellEditorIsJson}>
+                    格式化 JSON
+                </Button>,
+                <Button key="cancel" onClick={closeCellEditor}>取消</Button>,
+                <Button key="ok" type="primary" onClick={handleCellEditorSave}>保存</Button>,
+            ]}
+        >
+            <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
+                {cellEditorMeta ? `${tableName || ''}${tableName ? '.' : ''}${cellEditorMeta.dataIndex}` : ''}
+            </div>
+            {cellEditorOpen && (
+                <Editor
+                    height="56vh"
+                    language={cellEditorIsJson ? "json" : "plaintext"}
+                    theme={darkMode ? "vs-dark" : "light"}
+                    value={cellEditorValue}
+                    onChange={(val) => setCellEditorValue(val || '')}
+                    options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: "on",
+                        fontSize: 14,
+                        tabSize: 2,
+                        automaticLayout: true,
+                    }}
+                />
+            )}
+        </Modal>
         <Form component={false} form={form}>
             <DataContext.Provider value={{ selectedRowKeysRef, displayDataRef, handleCopyInsert, handleCopyJson, handleCopyCsv, handleExportSelected, copyToClipboard, tableName }}>
                 <EditableContext.Provider value={form}>
@@ -811,6 +930,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         dataSource={mergedDisplayData} 
                         columns={mergedColumns} 
                         size="small" 
+                        tableLayout="fixed"
                         scroll={{ x: Math.max(totalWidth, 1000), y: tableHeight }}
                         virtual={enableVirtual}
                         loading={loading}
@@ -821,6 +941,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         rowSelection={{
                             selectedRowKeys,
                             onChange: setSelectedRowKeys,
+                            columnWidth: selectionColumnWidth,
                         }}
                         rowClassName={(record) => {
                             const k = record?.[GONAVI_ROW_KEY];
@@ -857,9 +978,6 @@ const DataGrid: React.FC<DataGridProps> = ({
         <style>{`
             .${gridId} .row-added td { background-color: #f6ffed !important; }
             .${gridId} .row-modified td { background-color: #e6f7ff !important; }
-            .${gridId} .ant-table-body {
-                max-height: ${tableHeight}px !important;
-            }
         `}</style>
        
        {/* Ghost Resize Line for Columns */}

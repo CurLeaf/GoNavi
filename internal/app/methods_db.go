@@ -91,6 +91,8 @@ func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query s
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
+	query = sanitizeSQLForPgLike(runConfig.Type, query)
+
 	lowerQuery := strings.TrimSpace(strings.ToLower(query))
 	if strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "show") || strings.HasPrefix(lowerQuery, "describe") || strings.HasPrefix(lowerQuery, "explain") {
 		data, columns, err := dbInst.Query(query)
