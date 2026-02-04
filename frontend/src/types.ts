@@ -23,6 +23,7 @@ export interface SavedConnection {
   name: string;
   config: ConnectionConfig;
   includeDatabases?: string[];
+  includeRedisDatabases?: number[]; // Redis databases to show (0-15)
 }
 
 export interface ColumnDefinition {

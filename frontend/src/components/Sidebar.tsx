@@ -136,14 +136,19 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   const res = await (window as any).go.app.App.RedisGetDatabases(config);
                   if (res.success) {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-                      const dbs = (res.data as any[]).map((db: any) => ({
+                      let dbs = (res.data as any[]).map((db: any) => ({
                           title: `db${db.index}${db.keys > 0 ? ` (${db.keys})` : ''}`,
                           key: `${conn.id}-db${db.index}`,
                           icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
                           type: 'redis-db' as const,
                           dataRef: { ...conn, redisDB: db.index },
                           isLeaf: true,
+                          dbIndex: db.index,
                       }));
+                      // Filter Redis databases if configured
+                      if (conn.includeRedisDatabases && conn.includeRedisDatabases.length > 0) {
+                          dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));
+                      }
                       setTreeData(origin => updateTreeData(origin, node.key, dbs));
                   } else {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));

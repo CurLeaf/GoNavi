@@ -16,6 +16,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   const [step, setStep] = useState(1); // 1: Select Type, 2: Configure
   const [testResult, setTestResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [dbList, setDbList] = useState<string[]>([]);
+  const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
   const addConnection = useStore((state) => state.addConnection);
   const updateConnection = useStore((state) => state.updateConnection);
 
@@ -23,6 +24,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       if (open) {
           setTestResult(null); // Reset test result
           setDbList([]);
+          setRedisDbList([]);
           if (initialValues) {
               // Edit mode: Go directly to step 2
               setStep(2);
@@ -35,6 +37,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
                   password: initialValues.config.password,
                   database: initialValues.config.database,
                   includeDatabases: initialValues.includeDatabases,
+                  includeRedisDatabases: initialValues.includeRedisDatabases,
                   useSSH: initialValues.config.useSSH,
                   sshHost: initialValues.config.ssh?.host,
                   sshPort: initialValues.config.ssh?.port,
@@ -43,11 +46,14 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
                   sshKeyPath: initialValues.config.ssh?.keyPath,
                   driver: (initialValues.config as any).driver,
                   dsn: (initialValues.config as any).dsn,
-                  timeout: (initialValues.config as any).timeout || 30,
-                  redisDB: (initialValues.config as any).redisDB || 0
+                  timeout: (initialValues.config as any).timeout || 30
               });
               setUseSSH(initialValues.config.useSSH || false);
               setDbType(initialValues.config.type);
+              // 如果是 Redis 编辑模式，设置已保存的 Redis 数据库列表
+              if (initialValues.config.type === 'redis') {
+                  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+              }
           } else {
               // Create mode: Start at step 1
               setStep(1);
@@ -78,7 +84,8 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           id: initialValues ? initialValues.id : Date.now().toString(),
           name: values.name || (values.type === 'sqlite' ? 'SQLite DB' : (values.type === 'redis' ? `Redis ${values.host}` : values.host)),
           config: config,
-          includeDatabases: values.includeDatabases
+          includeDatabases: values.includeDatabases,
+          includeRedisDatabases: isRedisType ? values.includeRedisDatabases : undefined
         };
 
         if (initialValues) {
@@ -118,8 +125,11 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           setLoading(false);
           if (res.success) {
               setTestResult({ type: 'success', message: res.message });
-              // Only fetch database list for non-Redis connections
-              if (!isRedisType) {
+              if (isRedisType) {
+                  // Redis: generate database list 0-15
+                  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+              } else {
+                  // Other databases: fetch database list
                   const dbRes = await DBGetDatabases(config as any);
                   if (dbRes.success) {
                       const dbs = (dbRes.data as any[]).map((row: any) => row.Database || row.database);
@@ -154,8 +164,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ssh: sshConfig,
           driver: values.driver,
           dsn: values.dsn,
-          timeout: Number(values.timeout || 30),
-          redisDB: Number(values.redisDB || 0)
+          timeout: Number(values.timeout || 30)
       };
   };
 
@@ -176,10 +185,6 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       }
       if (type !== 'sqlite' && type !== 'custom') {
           form.setFieldsValue({ port: defaultPort });
-      }
-      // Set default redisDB for Redis
-      if (type === 'redis') {
-          form.setFieldsValue({ redisDB: 0 });
       }
 
       setStep(2);
@@ -260,14 +265,16 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
 
         {/* Redis specific: password only, no username */}
         {isRedis && (
-        <div style={{ display: 'flex', gap: 16 }}>
-            <Form.Item name="password" label="密码 (可选)" style={{ flex: 1 }}>
+        <>
+            <Form.Item name="password" label="密码 (可选)">
               <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
             </Form.Item>
-            <Form.Item name="redisDB" label="数据库 (0-15)" style={{ width: 120 }}>
-              <InputNumber style={{ width: '100%' }} min={0} max={15} />
+            <Form.Item name="includeRedisDatabases" label="显示数据库 (留空显示全部)" help="连接测试成功后可选择">
+                <Select mode="multiple" placeholder="选择显示的数据库 (0-15)" allowClear>
+                    {redisDbList.map(db => <Select.Option key={db} value={db}>db{db}</Select.Option>)}
+                </Select>
             </Form.Item>
-        </div>
+        </>
         )}
 
         {/* Non-Redis, non-SQLite: username and password */}
