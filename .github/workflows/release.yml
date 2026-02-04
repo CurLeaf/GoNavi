@@ -72,14 +72,34 @@ jobs:
 
           # AppImage tools (always install for Linux)
           sudo apt-get install -y libfuse2
+
+          # Download linuxdeploy tools with retry
           if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
-            wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage -O /tmp/linuxdeploy
-            wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-aarch64.AppImage -O /tmp/linuxdeploy-plugin-gtk
+            LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage"
+            PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-aarch64.AppImage"
           else
-            wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /tmp/linuxdeploy
-            wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage -O /tmp/linuxdeploy-plugin-gtk
+            LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+            PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage"
           fi
-          chmod +x /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk
+
+          echo "📥 下载 linuxdeploy..."
+          wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
+            -O /tmp/linuxdeploy "$LINUXDEPLOY_URL" || {
+            echo "⚠️ linuxdeploy 下载失败，AppImage 打包将跳过"
+            touch /tmp/linuxdeploy-failed
+          }
+
+          echo "📥 下载 linuxdeploy-plugin-gtk..."
+          wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
+            -O /tmp/linuxdeploy-plugin-gtk "$PLUGIN_URL" || {
+            echo "⚠️ linuxdeploy-plugin-gtk 下载失败，AppImage 打包将跳过"
+            touch /tmp/linuxdeploy-failed
+          }
+
+          if [ ! -f /tmp/linuxdeploy-failed ]; then
+            chmod +x /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk
+            echo "✅ AppImage 工具准备完成"
+          fi
 
       - name: Install Wails
         run: go install -v github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -170,7 +190,12 @@ jobs:
           tar -czvf "$TARGET.tar.gz" "$TARGET"
           mv "$TARGET.tar.gz" ../../
 
-          # 2. Create AppImage
+          # 2. Create AppImage (skip if tools download failed)
+          if [ -f /tmp/linuxdeploy-failed ]; then
+              echo "⚠️ AppImage 工具下载失败，跳过 AppImage 打包"
+              exit 0
+          fi
+
           echo "📦 正在生成 AppImage..."
 
           # Create AppDir structure
@@ -207,12 +232,20 @@ jobs:
 
           # Build AppImage
           export DEPLOY_GTK_VERSION=3
-          /tmp/linuxdeploy --appdir AppDir --plugin gtk --output appimage
+          /tmp/linuxdeploy --appdir AppDir --plugin gtk --output appimage || {
+              echo "⚠️ AppImage 生成失败，但 tar.gz 已成功生成"
+              exit 0
+          }
 
           # Rename output
-          mv GoNavi*.AppImage "$TARGET.AppImage" 2>/dev/null || echo "⚠️ AppImage 生成失败，跳过"
+          mv GoNavi*.AppImage "$TARGET.AppImage" 2>/dev/null || {
+              echo "⚠️ AppImage 重命名失败"
+              exit 0
+          }
+
           if [ -f "$TARGET.AppImage" ]; then
               mv "$TARGET.AppImage" ../../
+              echo "✅ AppImage 生成成功"
           fi
 
       # Upload to Actions Artifacts (Temporary Storage)
