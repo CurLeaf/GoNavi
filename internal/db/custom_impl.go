@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -57,6 +58,20 @@ func (c *CustomDB) Ping() error {
 	return c.conn.PingContext(ctx)
 }
 
+func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if c.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := c.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -94,6 +109,17 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 
 	return resultData, columns, nil
+}
+
+func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if c.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := c.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (c *CustomDB) Exec(query string) (int64, error) {

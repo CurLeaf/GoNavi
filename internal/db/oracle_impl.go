@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -94,6 +95,20 @@ func (o *OracleDB) Ping() error {
 	return o.conn.PingContext(ctx)
 }
 
+func (o *OracleDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if o.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := o.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if o.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -131,6 +146,17 @@ func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 
 	return resultData, columns, nil
+}
+
+func (o *OracleDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if o.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := o.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (o *OracleDB) Exec(query string) (int64, error) {
