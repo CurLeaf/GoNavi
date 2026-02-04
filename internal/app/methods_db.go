@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/utils"
 )
 
 // Generic DB Methods
@@ -92,17 +95,38 @@ func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query s
 	}
 
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	timeoutSeconds := runConfig.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	defer cancel()
 
 	lowerQuery := strings.TrimSpace(strings.ToLower(query))
 	if strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "show") || strings.HasPrefix(lowerQuery, "describe") || strings.HasPrefix(lowerQuery, "explain") {
-		data, columns, err := dbInst.Query(query)
+		var data []map[string]interface{}
+		var columns []string
+		if q, ok := dbInst.(interface {
+			QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+		}); ok {
+			data, columns, err = q.QueryContext(ctx, query)
+		} else {
+			data, columns, err = dbInst.Query(query)
+		}
 		if err != nil {
 			logger.Error(err, "DBQuery 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		return connection.QueryResult{Success: true, Data: data, Fields: columns}
 	} else {
-		affected, err := dbInst.Exec(query)
+		var affected int64
+		if e, ok := dbInst.(interface {
+			ExecContext(context.Context, string) (int64, error)
+		}); ok {
+			affected, err = e.ExecContext(ctx, query)
+		} else {
+			affected, err = dbInst.Exec(query)
+		}
 		if err != nil {
 			logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error()}

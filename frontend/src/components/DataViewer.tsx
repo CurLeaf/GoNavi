@@ -14,6 +14,8 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const fetchSeqRef = useRef(0);
   const countSeqRef = useRef(0);
   const countKeyRef = useRef<string>('');
+  const pkSeqRef = useRef(0);
+  const pkKeyRef = useRef<string>('');
 
   const [pagination, setPagination] = useState({
       current: 1,
@@ -26,6 +28,13 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   
   const [showFilter, setShowFilter] = useState(false);
   const [filterConditions, setFilterConditions] = useState<any[]>([]);
+
+  useEffect(() => {
+    setPkColumns([]);
+    pkKeyRef.current = '';
+    countKeyRef.current = '';
+    setPagination(prev => ({ ...prev, current: 1, total: 0, totalKnown: false }));
+  }, [tab.connectionId, tab.dbName, tab.tableName]);
 
   const fetchData = useCallback(async (page = pagination.current, size = pagination.pageSize) => {
     const seq = ++fetchSeqRef.current;
@@ -103,11 +112,6 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
     try {
         const pData = DBQuery(config as any, dbName, sql);
 
-        let pCols: Promise<any> | null = null;
-        if (pkColumns.length === 0) {
-             pCols = DBGetColumns(config as any, dbName, tableName);
-        }
-
         const resData = await pData;
         const duration = Date.now() - startTime;
         
@@ -123,11 +127,23 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             dbName
         });
         
-        if (pCols) {
-            const resCols = await pCols;
-            if (resCols.success) {
-                const pks = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                setPkColumns(pks);
+        if (pkColumns.length === 0) {
+            const pkKey = `${tab.connectionId}|${dbName}|${tableName}`;
+            if (pkKeyRef.current !== pkKey) {
+                pkKeyRef.current = pkKey;
+                const pkSeq = ++pkSeqRef.current;
+                DBGetColumns(config as any, dbName, tableName)
+                    .then((resCols: any) => {
+                        if (pkSeqRef.current !== pkSeq) return;
+                        if (pkKeyRef.current !== pkKey) return;
+                        if (!resCols?.success) return;
+                        const pks = (resCols.data as ColumnDefinition[]).filter((c: any) => c.key === 'PRI').map((c: any) => c.name);
+                        setPkColumns(pks);
+                    })
+                    .catch(() => {
+                        if (pkSeqRef.current !== pkSeq) return;
+                        if (pkKeyRef.current !== pkKey) return;
+                    });
             }
         }
 
