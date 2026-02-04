@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal } from 'antd';
 import type { SortOrder } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { ImportData, ExportTable, ExportData, ApplyChanges } from '../../wailsjs/go/app/App';
 import { useStore } from '../store';
@@ -38,21 +38,18 @@ const toEditableText = (val: any): string => {
     }
 };
 
+const toFormText = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return normalizeDateTimeString(val);
+    return toEditableText(val);
+};
+
 const looksLikeJsonText = (text: string): boolean => {
     const raw = (text || '').trim();
     if (!raw) return false;
     const first = raw[0];
     const last = raw[raw.length - 1];
     return (first === '{' && last === '}') || (first === '[' && last === ']');
-};
-
-const shouldUseModalEditorForValue = (val: any): boolean => {
-    if (val === null || val === undefined) return false;
-    if (typeof val === 'object') return true;
-    const s = toEditableText(val);
-    if (s.includes('\n') || s.includes('\r')) return true;
-    if (s.length >= 160) return true;
-    return looksLikeJsonText(s);
 };
 
 // --- Resizable Header (Native Implementation) ---
@@ -113,7 +110,7 @@ interface EditableCellProps {
   dataIndex: string;
   record: Item;
   handleSave: (record: Item) => void;
-  openEditor?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
+  focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   [key: string]: any;
 }
 
@@ -124,7 +121,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   dataIndex,
   record,
   handleSave,
-  openEditor,
+  focusCell,
   ...restProps
 }) => {
   const [editing, setEditing] = useState(false);
@@ -171,14 +168,24 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   const handleDoubleClick = () => {
       if (!editable) return;
-      if (openEditor && shouldUseModalEditorForValue(record?.[dataIndex])) {
-          openEditor(record, dataIndex, title);
-          return;
-      }
       toggleEdit();
   };
 
-  return <td {...restProps} onDoubleClick={editable ? handleDoubleClick : undefined}>{childNode}</td>;
+  const handleClick = (e: React.MouseEvent) => {
+      restProps?.onClick?.(e);
+      if (!editable) return;
+      if (typeof focusCell === 'function') focusCell(record, dataIndex, title);
+  };
+
+  return (
+      <td
+          {...restProps}
+          onClick={editable ? handleClick : restProps?.onClick}
+          onDoubleClick={editable ? handleDoubleClick : restProps?.onDoubleClick}
+      >
+          {childNode}
+      </td>
+  );
 });
 
 const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
@@ -269,6 +276,14 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [cellEditorValue, setCellEditorValue] = useState('');
   const [cellEditorIsJson, setCellEditorIsJson] = useState(false);
   const [cellEditorMeta, setCellEditorMeta] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
+  const cellEditorApplyRef = useRef<((val: string) => void) | null>(null);
+  const [activeCell, setActiveCell] = useState<{ rowKey: string; dataIndex: string; title: string } | null>(null);
+  const [rowEditorOpen, setRowEditorOpen] = useState(false);
+  const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
+  const rowEditorBaseRef = useRef<Record<string, string>>({});
+  const rowEditorDisplayRef = useRef<Record<string, string>>({});
+  const rowEditorNullColsRef = useRef<Set<string>>(new Set());
+  const [rowEditorForm] = Form.useForm();
   
   // Helper to export specific data
   const exportData = async (rows: any[], format: string) => {
@@ -288,9 +303,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       setCellEditorMeta(null);
       setCellEditorValue('');
       setCellEditorIsJson(false);
+      cellEditorApplyRef.current = null;
   }, []);
 
-  const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
+  const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode, onApplyValue?: (val: string) => void) => {
       if (!record || !dataIndex) return;
       const raw = record?.[dataIndex];
       const text = toEditableText(raw);
@@ -301,6 +317,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setCellEditorValue(text);
       setCellEditorIsJson(isJson);
       setCellEditorOpen(true);
+      cellEditorApplyRef.current = typeof onApplyValue === 'function' ? onApplyValue : null;
   }, []);
   
   // Dynamic Height
@@ -363,6 +380,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
+      setActiveCell(null);
+      setRowEditorOpen(false);
+      setRowEditorRowKey('');
+      rowEditorBaseRef.current = {};
+      rowEditorDisplayRef.current = {};
+      rowEditorNullColsRef.current = new Set();
+      rowEditorForm.resetFields();
+      closeCellEditor();
       form.resetFields();
   }, [tableName, dbName, connectionId]); // Reset on context change
 
@@ -519,6 +544,12 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
+      const apply = cellEditorApplyRef.current;
+      if (apply) {
+          apply(cellEditorValue);
+          closeCellEditor();
+          return;
+      }
       const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
       handleCellSave(nextRow);
       closeCellEditor();
@@ -546,6 +577,110 @@ const DataGrid: React.FC<DataGridProps> = ({
           return row;
       });
   }, [displayData, modifiedRows]);
+
+  const focusCell = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
+      const k = record?.[GONAVI_ROW_KEY];
+      if (k === undefined) return;
+      const titleText = typeof title === 'string' ? title : (typeof title === 'number' ? String(title) : String(dataIndex));
+      setActiveCell({ rowKey: rowKeyStr(k), dataIndex, title: titleText });
+  }, [rowKeyStr]);
+
+  const closeRowEditor = useCallback(() => {
+      setRowEditorOpen(false);
+      setRowEditorRowKey('');
+      rowEditorBaseRef.current = {};
+      rowEditorDisplayRef.current = {};
+      rowEditorNullColsRef.current = new Set();
+      rowEditorForm.resetFields();
+  }, [rowEditorForm]);
+
+  const openRowEditor = useCallback(() => {
+      if (readOnly || !tableName) return;
+      if (selectedRowKeys.length > 1) {
+          message.info('一次只能编辑一行，请仅选择一行');
+          return;
+      }
+
+      const keyStr =
+          selectedRowKeys.length === 1 ? rowKeyStr(selectedRowKeys[0]) : activeCell?.rowKey;
+      if (!keyStr) {
+          message.info('请先选择一行（勾选一行或点击任意单元格）');
+          return;
+      }
+
+      const displayRow = mergedDisplayData.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+      if (!displayRow) {
+          message.error('未找到目标行，请刷新后重试');
+          return;
+      }
+
+      const baseRow =
+          data.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
+          addedRows.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
+          displayRow;
+
+      const baseMap: Record<string, string> = {};
+      const displayMap: Record<string, string> = {};
+      const nullCols = new Set<string>();
+
+      columnNames.forEach((col) => {
+          const baseVal = (baseRow as any)?.[col];
+          const displayVal = (displayRow as any)?.[col];
+          baseMap[col] = toFormText(baseVal);
+          displayMap[col] = toFormText(displayVal);
+          if (baseVal === null || baseVal === undefined) nullCols.add(col);
+      });
+
+      rowEditorBaseRef.current = baseMap;
+      rowEditorDisplayRef.current = displayMap;
+      rowEditorNullColsRef.current = nullCols;
+
+      rowEditorForm.setFieldsValue(displayMap);
+      setRowEditorRowKey(keyStr);
+      setRowEditorOpen(true);
+  }, [readOnly, tableName, selectedRowKeys, activeCell, mergedDisplayData, data, addedRows, columnNames, rowEditorForm, rowKeyStr]);
+
+  const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
+      if (!dataIndex) return;
+      const val = rowEditorForm.getFieldValue(dataIndex);
+      openCellEditor(
+          { [dataIndex]: val ?? '' },
+          dataIndex,
+          dataIndex,
+          (nextVal) => rowEditorForm.setFieldsValue({ [dataIndex]: nextVal }),
+      );
+  }, [rowEditorForm, openCellEditor]);
+
+  const applyRowEditor = useCallback(() => {
+      const keyStr = rowEditorRowKey;
+      if (!keyStr) return;
+      const values = rowEditorForm.getFieldsValue(true) || {};
+
+      const isAdded = addedRows.some(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+      if (isAdded) {
+          setAddedRows(prev => prev.map(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr ? { ...r, ...values } : r));
+          closeRowEditor();
+          return;
+      }
+
+      const baseMap = rowEditorBaseRef.current || {};
+      const patch: Record<string, any> = {};
+      columnNames.forEach((col) => {
+          const nextVal = values[col];
+          const nextStr = toFormText(nextVal);
+          const baseStr = baseMap[col] ?? '';
+          if (nextStr !== baseStr) patch[col] = nextStr;
+      });
+
+      setModifiedRows(prev => {
+          const next = { ...prev };
+          if (Object.keys(patch).length === 0) delete next[keyStr];
+          else next[keyStr] = patch;
+          return next;
+      });
+
+      closeRowEditor();
+  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
 
   const columns = useMemo(() => {
       return columnNames.map(key => ({
@@ -575,10 +710,13 @@ const DataGrid: React.FC<DataGridProps> = ({
               dataIndex: col.dataIndex,
               title: col.title,
               handleSave: handleCellSave,
-              openEditor: openCellEditor,
+              focusCell,
+              className: (activeCell && rowKeyStr(record?.[GONAVI_ROW_KEY]) === activeCell.rowKey && col.dataIndex === activeCell.dataIndex)
+                ? 'gonavi-active-cell'
+                : undefined,
           }),
       };
-  }), [columns, handleCellSave, openCellEditor]);
+  }), [columns, handleCellSave, openCellEditor, focusCell, activeCell, rowKeyStr]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -823,28 +961,36 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   return (
     <div className={gridId} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        {/* Toolbar */}
-        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
-            {onReload && <Button icon={<ReloadOutlined />} onClick={() => {
-                setAddedRows([]);
-                setModifiedRows({});
-               setDeletedRowKeys(new Set());
-               setSelectedRowKeys([]);
-               onReload();
-           }}>刷新</Button>}
-           {tableName && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
-           {tableName && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
-           
-           {!readOnly && tableName && (
-               <>
-                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
-                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
-                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
-                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
-                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
-                   <Button icon={<SaveOutlined />} type="primary" disabled={!hasChanges} onClick={handleCommit}>提交事务 ({addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size})</Button>
-                   {hasChanges && (<Button icon={<UndoOutlined />} onClick={() => {
-                        setAddedRows([]);
+	       {/* Toolbar */}
+	        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
+	            {onReload && <Button icon={<ReloadOutlined />} onClick={() => {
+	                setAddedRows([]);
+	                setModifiedRows({});
+	               setDeletedRowKeys(new Set());
+	               setSelectedRowKeys([]);
+	               setActiveCell(null);
+	               onReload();
+	           }}>刷新</Button>}
+	           {tableName && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
+	           {tableName && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
+	           
+	           {!readOnly && tableName && (
+	               <>
+	                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
+	                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
+	                   <Button
+                           icon={<EditOutlined />}
+                           disabled={selectedRowKeys.length > 1 || (selectedRowKeys.length !== 1 && !activeCell)}
+                           onClick={openRowEditor}
+                       >
+                           编辑行
+                       </Button>
+	                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
+	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
+	                   <div style={{ width: 1, background: '#eee', height: 20, margin: '0 8px' }} />
+	                   <Button icon={<SaveOutlined />} type="primary" disabled={!hasChanges} onClick={handleCommit}>提交事务 ({addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size})</Button>
+	                   {hasChanges && (<Button icon={<UndoOutlined />} onClick={() => {
+	                        setAddedRows([]);
                         setModifiedRows({});
                         setDeletedRowKeys(new Set());
                    }}>回滚</Button>)}
@@ -884,12 +1030,58 @@ const DataGrid: React.FC<DataGridProps> = ({
            </div>
        )}
 
-       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
-        {contextHolder}
-        <Modal
-            title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
-            open={cellEditorOpen}
-            onCancel={closeCellEditor}
+	       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+	        {contextHolder}
+            <Modal
+                title="编辑行"
+                open={rowEditorOpen}
+                onCancel={closeRowEditor}
+                width={980}
+                destroyOnClose
+                maskClosable={false}
+                footer={[
+                    <Button key="cancel" onClick={closeRowEditor}>取消</Button>,
+                    <Button key="ok" type="primary" onClick={applyRowEditor}>应用</Button>,
+                ]}
+            >
+                <div style={{ marginBottom: 8, color: '#888', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>{tableName ? `${tableName}` : ''}</span>
+                    <span>{rowEditorRowKey ? `rowKey: ${rowEditorRowKey}` : ''}</span>
+                </div>
+                <Form form={rowEditorForm} layout="vertical">
+                    <div style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
+                        {columnNames.map((col) => {
+                            const sample = rowEditorDisplayRef.current?.[col] ?? '';
+                            const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
+                            const isJson = looksLikeJsonText(sample);
+                            const useArea = isJson || sample.includes('\n') || sample.length >= 160;
+
+                            return (
+                                <Form.Item key={col} label={col} style={{ marginBottom: 12 }}>
+                                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                        <Form.Item name={col} noStyle>
+                                            {useArea ? (
+                                                <Input.TextArea
+                                                    style={{ flex: 1 }}
+                                                    autoSize={{ minRows: isJson ? 4 : 1, maxRows: 10 }}
+                                                    placeholder={placeholder}
+                                                />
+                                            ) : (
+                                                <Input style={{ flex: 1 }} placeholder={placeholder} />
+                                            )}
+                                        </Form.Item>
+                                        <Button size="small" onClick={() => openRowEditorFieldEditor(col)} title="弹窗编辑">...</Button>
+                                    </div>
+                                </Form.Item>
+                            );
+                        })}
+                    </div>
+                </Form>
+            </Modal>
+	        <Modal
+	            title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
+	            open={cellEditorOpen}
+	            onCancel={closeCellEditor}
             width={960}
             destroyOnClose
             maskClosable={false}
@@ -975,10 +1167,14 @@ const DataGrid: React.FC<DataGridProps> = ({
            </div>
        )}
 
-        <style>{`
-            .${gridId} .row-added td { background-color: #f6ffed !important; }
-            .${gridId} .row-modified td { background-color: #e6f7ff !important; }
-        `}</style>
+	        <style>{`
+	            .${gridId} .row-added td { background-color: #f6ffed !important; }
+	            .${gridId} .row-modified td { background-color: #e6f7ff !important; }
+                .${gridId} td.gonavi-active-cell {
+                    outline: 2px solid #1677ff;
+                    outline-offset: -2px;
+                }
+	        `}</style>
        
        {/* Ghost Resize Line for Columns */}
        <div 
