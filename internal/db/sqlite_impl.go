@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -53,6 +54,20 @@ func (s *SQLiteDB) Ping() error {
 	return s.conn.PingContext(ctx)
 }
 
+func (s *SQLiteDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if s.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := s.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (s *SQLiteDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -90,6 +105,17 @@ func (s *SQLiteDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 
 	return resultData, columns, nil
+}
+
+func (s *SQLiteDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if s.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := s.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (s *SQLiteDB) Exec(query string) (int64, error) {

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -88,6 +89,20 @@ func (d *DamengDB) Ping() error {
 	return d.conn.PingContext(ctx)
 }
 
+func (d *DamengDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if d.conn == nil {
+		return nil, nil, fmt.Errorf("connection not open")
+	}
+
+	rows, err := d.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	return scanRows(rows)
+}
+
 func (d *DamengDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if d.conn == nil {
 		return nil, nil, fmt.Errorf("connection not open")
@@ -125,6 +140,17 @@ func (d *DamengDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 
 	return resultData, columns, nil
+}
+
+func (d *DamengDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	if d.conn == nil {
+		return 0, fmt.Errorf("connection not open")
+	}
+	res, err := d.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (d *DamengDB) Exec(query string) (int64, error) {

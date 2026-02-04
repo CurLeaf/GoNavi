@@ -19,6 +19,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       tableName?: string;
       pkColumns: string[];
       readOnly: boolean;
+      truncated?: boolean;
+      pkLoading?: boolean;
   };
 
   // Result Sets
@@ -26,6 +28,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [activeResultKey, setActiveResultKey] = useState<string>('');
   
   const [loading, setLoading] = useState(false);
+  const runSeqRef = useRef(0);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [saveForm] = Form.useForm();
   
@@ -47,6 +50,13 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const darkMode = useStore(state => state.darkMode);
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
+  const queryOptions = useStore(state => state.queryOptions);
+  const setQueryOptions = useStore(state => state.setQueryOptions);
+
+  const currentDbRef = useRef(currentDb);
+  useEffect(() => {
+      currentDbRef.current = currentDb;
+  }, [currentDb]);
 
   // If opening a saved query, load its SQL
   useEffect(() => {
@@ -72,7 +82,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           if (res.success && Array.isArray(res.data)) {
               const dbs = res.data.map((row: any) => row.Database || row.database);
               setDbList(dbs);
-              if (!currentDb) {
+              if (!currentDbRef.current) {
                   if (conn.config.database) setCurrentDb(conn.config.database);
                   else if (dbs.length > 0 && dbs[0] !== 'information_schema') setCurrentDb(dbs[0]);
               }
@@ -81,7 +91,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           }
       };
       fetchDbs();
-  }, [currentConnectionId, connections, currentDb]);
+  }, [currentConnectionId, connections]);
 
   // Fetch Metadata for Autocomplete
   useEffect(() => {
@@ -343,6 +353,327 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     return statements;
   };
 
+  const getLeadingKeyword = (sql: string): string => {
+      const text = (sql || '').replace(/\r\n/g, '\n');
+      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
+
+      let inSingle = false;
+      let inDouble = false;
+      let inBacktick = false;
+      let escaped = false;
+      let inLineComment = false;
+      let inBlockComment = false;
+      let dollarTag: string | null = null;
+
+      for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          const next = i + 1 < text.length ? text[i + 1] : '';
+          const prev = i > 0 ? text[i - 1] : '';
+          const next2 = i + 2 < text.length ? text[i + 2] : '';
+
+          if (!inSingle && !inDouble && !inBacktick) {
+              if (inLineComment) {
+                  if (ch === '\n') inLineComment = false;
+                  continue;
+              }
+              if (inBlockComment) {
+                  if (ch === '*' && next === '/') {
+                      i++;
+                      inBlockComment = false;
+                  }
+                  continue;
+              }
+
+              if (ch === '/' && next === '*') {
+                  i++;
+                  inBlockComment = true;
+                  continue;
+              }
+              if (ch === '#') {
+                  inLineComment = true;
+                  continue;
+              }
+              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
+                  i++;
+                  inLineComment = true;
+                  continue;
+              }
+
+              if (dollarTag) {
+                  if (text.startsWith(dollarTag, i)) {
+                      i += dollarTag.length - 1;
+                      dollarTag = null;
+                  }
+                  continue;
+              }
+              if (ch === '$') {
+                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
+                  if (m && m[0]) {
+                      dollarTag = m[0];
+                      i += dollarTag.length - 1;
+                      continue;
+                  }
+              }
+          }
+
+          if (escaped) {
+              escaped = false;
+              continue;
+          }
+          if ((inSingle || inDouble) && ch === '\\') {
+              escaped = true;
+              continue;
+          }
+
+          if (!inDouble && !inBacktick && ch === '\'') {
+              inSingle = !inSingle;
+              continue;
+          }
+          if (!inSingle && !inBacktick && ch === '"') {
+              inDouble = !inDouble;
+              continue;
+          }
+          if (!inSingle && !inDouble && ch === '`') {
+              inBacktick = !inBacktick;
+              continue;
+          }
+
+          if (inSingle || inDouble || inBacktick || dollarTag) continue;
+          if (isWS(ch)) continue;
+
+          if (isWord(ch)) {
+              let j = i;
+              while (j < text.length && isWord(text[j])) j++;
+              return text.slice(i, j).toLowerCase();
+          }
+          return '';
+      }
+      return '';
+  };
+
+  const splitSqlTail = (sql: string): { main: string; tail: string } => {
+      const text = (sql || '').replace(/\r\n/g, '\n');
+      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+
+      let inSingle = false;
+      let inDouble = false;
+      let inBacktick = false;
+      let escaped = false;
+      let inLineComment = false;
+      let inBlockComment = false;
+      let dollarTag: string | null = null;
+      let lastMeaningful = -1;
+
+      for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          const next = i + 1 < text.length ? text[i + 1] : '';
+          const prev = i > 0 ? text[i - 1] : '';
+          const next2 = i + 2 < text.length ? text[i + 2] : '';
+
+          if (!inSingle && !inDouble && !inBacktick) {
+              if (dollarTag) {
+                  if (text.startsWith(dollarTag, i)) {
+                      lastMeaningful = i + dollarTag.length - 1;
+                      i += dollarTag.length - 1;
+                      dollarTag = null;
+                  } else if (!isWS(ch)) {
+                      lastMeaningful = i;
+                  }
+                  continue;
+              }
+              if (inLineComment) {
+                  if (ch === '\n') inLineComment = false;
+                  continue;
+              }
+              if (inBlockComment) {
+                  if (ch === '*' && next === '/') {
+                      i++;
+                      inBlockComment = false;
+                  }
+                  continue;
+              }
+
+              // Start comments
+              if (ch === '/' && next === '*') {
+                  i++;
+                  inBlockComment = true;
+                  continue;
+              }
+              if (ch === '#') {
+                  inLineComment = true;
+                  continue;
+              }
+              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
+                  i++;
+                  inLineComment = true;
+                  continue;
+              }
+
+              if (ch === '$') {
+                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
+                  if (m && m[0]) {
+                      dollarTag = m[0];
+                      lastMeaningful = i + dollarTag.length - 1;
+                      i += dollarTag.length - 1;
+                      continue;
+                  }
+              }
+          }
+
+          if (escaped) {
+              escaped = false;
+          } else if ((inSingle || inDouble) && ch === '\\') {
+              escaped = true;
+          } else {
+              if (!inDouble && !inBacktick && ch === '\'') inSingle = !inSingle;
+              else if (!inSingle && !inBacktick && ch === '"') inDouble = !inDouble;
+              else if (!inSingle && !inDouble && ch === '`') inBacktick = !inBacktick;
+          }
+
+          if (!inLineComment && !inBlockComment && !isWS(ch)) {
+              lastMeaningful = i;
+          }
+      }
+
+      if (lastMeaningful < 0) return { main: '', tail: text };
+      return { main: text.slice(0, lastMeaningful + 1), tail: text.slice(lastMeaningful + 1) };
+  };
+
+  const findTopLevelKeyword = (sql: string, keyword: string): number => {
+      const text = sql;
+      const kw = keyword.toLowerCase();
+      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
+
+      let inSingle = false;
+      let inDouble = false;
+      let inBacktick = false;
+      let escaped = false;
+      let inLineComment = false;
+      let inBlockComment = false;
+      let dollarTag: string | null = null;
+      let parenDepth = 0;
+
+      for (let i = 0; i < text.length; i++) {
+          const ch = text[i];
+          const next = i + 1 < text.length ? text[i + 1] : '';
+          const prev = i > 0 ? text[i - 1] : '';
+          const next2 = i + 2 < text.length ? text[i + 2] : '';
+
+          if (!inSingle && !inDouble && !inBacktick) {
+              if (inLineComment) {
+                  if (ch === '\n') inLineComment = false;
+                  continue;
+              }
+              if (inBlockComment) {
+                  if (ch === '*' && next === '/') {
+                      i++;
+                      inBlockComment = false;
+                  }
+                  continue;
+              }
+
+              if (ch === '/' && next === '*') {
+                  i++;
+                  inBlockComment = true;
+                  continue;
+              }
+              if (ch === '#') {
+                  inLineComment = true;
+                  continue;
+              }
+              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
+                  i++;
+                  inLineComment = true;
+                  continue;
+              }
+
+              if (dollarTag) {
+                  if (text.startsWith(dollarTag, i)) {
+                      i += dollarTag.length - 1;
+                      dollarTag = null;
+                  }
+                  continue;
+              }
+              if (ch === '$') {
+                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
+                  if (m && m[0]) {
+                      dollarTag = m[0];
+                      i += dollarTag.length - 1;
+                      continue;
+                  }
+              }
+          }
+
+          if (escaped) {
+              escaped = false;
+              continue;
+          }
+          if ((inSingle || inDouble) && ch === '\\') {
+              escaped = true;
+              continue;
+          }
+
+          if (!inDouble && !inBacktick && ch === '\'') {
+              inSingle = !inSingle;
+              continue;
+          }
+          if (!inSingle && !inBacktick && ch === '"') {
+              inDouble = !inDouble;
+              continue;
+          }
+          if (!inSingle && !inDouble && ch === '`') {
+              inBacktick = !inBacktick;
+              continue;
+          }
+
+          if (inSingle || inDouble || inBacktick || dollarTag) continue;
+
+          if (ch === '(') { parenDepth++; continue; }
+          if (ch === ')') { if (parenDepth > 0) parenDepth--; continue; }
+          if (parenDepth !== 0) continue;
+
+          if (!isWord(ch)) continue;
+
+          if (text.slice(i, i + kw.length).toLowerCase() !== kw) continue;
+          const before = i - 1 >= 0 ? text[i - 1] : '';
+          const after = i + kw.length < text.length ? text[i + kw.length] : '';
+          if ((before && isWord(before)) || (after && isWord(after))) continue;
+          return i;
+      }
+      return -1;
+  };
+
+  const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
+      const normalizedType = (dbType || 'mysql').toLowerCase();
+      const supportsLimit = normalizedType === 'mysql' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === '';
+      if (!supportsLimit) return { sql, applied: false, maxRows };
+      if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
+
+      const { main, tail } = splitSqlTail(sql);
+      if (!main.trim()) return { sql, applied: false, maxRows };
+
+      const fromPos = findTopLevelKeyword(main, 'from');
+      const limitPos = findTopLevelKeyword(main, 'limit');
+      if (limitPos >= 0 && (fromPos < 0 || limitPos > fromPos)) return { sql, applied: false, maxRows };
+      const fetchPos = findTopLevelKeyword(main, 'fetch');
+      if (fetchPos >= 0 && (fromPos < 0 || fetchPos > fromPos)) return { sql, applied: false, maxRows };
+
+      const offsetPos = findTopLevelKeyword(main, 'offset');
+      const forPos = findTopLevelKeyword(main, 'for');
+      const lockPos = findTopLevelKeyword(main, 'lock');
+
+      const candidates = [offsetPos, forPos, lockPos]
+          .filter(pos => pos >= 0 && (fromPos < 0 || pos > fromPos));
+
+      const insertAt = candidates.length > 0 ? Math.min(...candidates) : main.length;
+      const before = main.slice(0, insertAt).trimEnd();
+      const after = main.slice(insertAt).trimStart();
+      const nextMain = [before, `LIMIT ${maxRows}`, after].filter(Boolean).join(' ').trim();
+      return { sql: nextMain + tail, applied: true, maxRows };
+  };
+
   const getSelectedSQL = (): string => {
       const editor = editorRef.current;
       if (!editor) return '';
@@ -362,12 +693,13 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         message.error("请先选择数据库");
         return;
     }
+    const runSeq = ++runSeqRef.current;
     setLoading(true);
     const runStartTime = Date.now();
     const conn = connections.find(c => c.id === currentConnectionId);
     if (!conn) {
         message.error("Connection not found");
-        setLoading(false);
+        if (runSeqRef.current === runSeq) setLoading(false);
         return;
     }
 
@@ -391,17 +723,29 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         }
 
         const nextResultSets: ResultSet[] = [];
+        const maxRows = Number(queryOptions?.maxRows) || 0;
+        const dbType = String((config as any).type || 'mysql');
+        const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
+        const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
+        let anyTruncated = false;
+        const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
 
         for (let idx = 0; idx < statements.length; idx++) {
-            const sql = statements[idx];
+            const rawStatement = statements[idx];
+            const leadingKeyword = getLeadingKeyword(rawStatement);
+            const shouldAutoLimit = leadingKeyword === 'select' || leadingKeyword === 'with';
+
+            const limitApplied = shouldAutoLimit && wantsLimitProbe;
+            const limited = limitApplied ? applyAutoLimit(rawStatement, dbType, probeLimit) : { sql: rawStatement, applied: false, maxRows: probeLimit };
+            const executedSql = limited.sql;
             const startTime = Date.now();
-            const res = await DBQuery(config as any, currentDb, sql);
+            const res = await DBQuery(config as any, currentDb, executedSql);
             const duration = Date.now() - startTime;
 
             addSqlLog({
                 id: `log-${Date.now()}-query-${idx + 1}`,
                 timestamp: Date.now(),
-                sql,
+                sql: executedSql,
                 status: res.success ? 'success' : 'error',
                 duration,
                 message: res.success ? '' : res.message,
@@ -418,7 +762,13 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
 
             if (Array.isArray(res.data)) {
-                const rows = (res.data as any[]) || [];
+                let rows = (res.data as any[]) || [];
+                let truncated = false;
+                if (limited.applied && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                    truncated = true;
+                    anyTruncated = true;
+                    rows = rows.slice(0, maxRows);
+                }
                 const cols = (res.fields && res.fields.length > 0)
                     ? (res.fields as string[])
                     : (rows.length > 0 ? Object.keys(rows[0]) : []);
@@ -428,24 +778,22 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 });
 
                 let simpleTableName: string | undefined = undefined;
-                let primaryKeys: string[] = [];
-                const tableMatch = sql.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
+                const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
                 if (tableMatch) {
                     simpleTableName = tableMatch[1];
-                    const resCols = await DBGetColumns(config as any, currentDb, simpleTableName);
-                    if (resCols.success) {
-                        primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                    }
+                    pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
                 }
 
                 nextResultSets.push({
                     key: `result-${idx + 1}`,
-                    sql,
+                    sql: rawStatement,
                     rows,
                     columns: cols,
                     tableName: simpleTableName,
-                    pkColumns: primaryKeys,
-                    readOnly: !simpleTableName
+                    pkColumns: [],
+                    readOnly: true,
+                    pkLoading: !!simpleTableName,
+                    truncated
                 });
             } else {
                 const affected = Number((res.data as any)?.affectedRows);
@@ -454,7 +802,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                     (row as any)[GONAVI_ROW_KEY] = 0;
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
-                        sql,
+                        sql: rawStatement,
                         rows: [row],
                         columns: ['affectedRows'],
                         pkColumns: [],
@@ -467,10 +815,30 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         setResultSets(nextResultSets);
         setActiveResultKey(nextResultSets[0]?.key || '');
 
+        pendingPk.forEach(({ resultKey, tableName }) => {
+            DBGetColumns(config as any, currentDb, tableName)
+                .then((resCols: any) => {
+                    if (runSeqRef.current !== runSeq) return;
+                    if (!resCols?.success) {
+                        setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
+                        return;
+                    }
+                    const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
+                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
+                })
+                .catch(() => {
+                    if (runSeqRef.current !== runSeq) return;
+                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
+                });
+        });
+
         if (statements.length > 1) {
             message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
         } else if (nextResultSets.length === 0) {
             message.success('执行成功。');
+        }
+        if (anyTruncated && maxRows > 0) {
+            message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
         }
     } catch (e: any) {
         message.error("Error executing query: " + e.message);
@@ -486,7 +854,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         setResultSets([]);
         setActiveResultKey('');
     } finally {
-        setLoading(false);
+        if (runSeqRef.current === runSeq) setLoading(false);
     }
   };
 
@@ -587,6 +955,20 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             options={dbList.map(db => ({ label: db, value: db }))}
             showSearch
         />
+        <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
+            <Select
+                style={{ width: 170 }}
+                value={queryOptions?.maxRows ?? 5000}
+                onChange={(val) => setQueryOptions({ maxRows: Number(val) })}
+                options={[
+                    { label: '最大行数：500', value: 500 },
+                    { label: '最大行数：1000', value: 1000 },
+                    { label: '最大行数：5000', value: 5000 },
+                    { label: '最大行数：20000', value: 20000 },
+                    { label: '最大行数：不限', value: 0 },
+                ]}
+            />
+        </Tooltip>
         <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}>
           运行
         </Button>
@@ -649,7 +1031,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   label: (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <Tooltip title={rs.sql}>
-                              <span>{`结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length})` : ''}`}</span>
+                              <span>{`结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length}${rs.truncated ? '+' : ''})` : ''}`}</span>
                           </Tooltip>
                           <Tooltip title="关闭结果">
                               <span

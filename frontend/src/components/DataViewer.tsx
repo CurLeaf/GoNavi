@@ -4,6 +4,7 @@ import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
+import { buildWhereSQL, quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 
 const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [data, setData] = useState<any[]>([]);
@@ -14,6 +15,8 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const fetchSeqRef = useRef(0);
   const countSeqRef = useRef(0);
   const countKeyRef = useRef<string>('');
+  const pkSeqRef = useRef(0);
+  const pkKeyRef = useRef<string>('');
 
   const [pagination, setPagination] = useState({
       current: 1,
@@ -26,6 +29,13 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   
   const [showFilter, setShowFilter] = useState(false);
   const [filterConditions, setFilterConditions] = useState<any[]>([]);
+
+  useEffect(() => {
+    setPkColumns([]);
+    pkKeyRef.current = '';
+    countKeyRef.current = '';
+    setPagination(prev => ({ ...prev, current: 1, total: 0, totalKnown: false }));
+  }, [tab.connectionId, tab.dbName, tab.tableName]);
 
   const fetchData = useCallback(async (page = pagination.current, size = pagination.pageSize) => {
     const seq = ++fetchSeqRef.current;
@@ -46,54 +56,18 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
         ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
     };
 
-    const normalizeIdentPart = (ident: string) => {
-        let raw = (ident || '').trim();
-        if (!raw) return raw;
-        const first = raw[0];
-        const last = raw[raw.length - 1];
-        if ((first === '"' && last === '"') || (first === '`' && last === '`')) {
-            raw = raw.slice(1, -1).trim();
-        }
-        // 防御：如果传入已包含引号（例如 `"schema"."table"` 的拆分结果），移除残留引号再重新安全转义。
-        raw = raw.replace(/["`]/g, '').trim();
-        return raw;
-    };
-
-    const quoteIdentPart = (ident: string) => {
-        const raw = normalizeIdentPart(ident);
-        if (!raw) return raw;
-        if (config.type === 'mysql') return `\`${raw.replace(/`/g, '``')}\``;
-        return `"${raw.replace(/"/g, '""')}"`;
-    };
-    const quoteQualifiedIdent = (ident: string) => {
-        const raw = (ident || '').trim();
-        if (!raw) return raw;
-        const parts = raw.split('.').map(normalizeIdentPart).filter(Boolean);
-        if (parts.length <= 1) return quoteIdentPart(raw);
-        return parts.map(quoteIdentPart).join('.');
-    };
-    const escapeLiteral = (val: string) => val.replace(/'/g, "''");
+    const dbType = config.type || '';
 
     const dbName = tab.dbName || '';
     const tableName = tab.tableName || '';
 
-    const whereParts: string[] = [];
-    filterConditions.forEach(cond => {
-        if (cond.column && cond.value) {
-            if (cond.op === 'LIKE') {
-                whereParts.push(`${quoteIdentPart(cond.column)} LIKE '%${escapeLiteral(cond.value)}%'`);
-            } else {
-                whereParts.push(`${quoteIdentPart(cond.column)} ${cond.op} '${escapeLiteral(cond.value)}'`);
-            }
-        }
-    });
-    const whereSQL = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : "";
+    const whereSQL = buildWhereSQL(dbType, filterConditions);
 
-    const countSql = `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(tableName)} ${whereSQL}`;
+    const countSql = `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
     
-    let sql = `SELECT * FROM ${quoteQualifiedIdent(tableName)} ${whereSQL}`;
+    let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
     if (sortInfo && sortInfo.order) {
-        sql += ` ORDER BY ${quoteIdentPart(sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
+        sql += ` ORDER BY ${quoteIdentPart(dbType, sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
     }
     const offset = (page - 1) * size;
     // 大表性能：打开表不阻塞在 COUNT(*)，先通过多取 1 条判断是否还有下一页；总数在后台统计并异步回填。
@@ -102,11 +76,6 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
     const startTime = Date.now();
     try {
         const pData = DBQuery(config as any, dbName, sql);
-
-        let pCols: Promise<any> | null = null;
-        if (pkColumns.length === 0) {
-             pCols = DBGetColumns(config as any, dbName, tableName);
-        }
 
         const resData = await pData;
         const duration = Date.now() - startTime;
@@ -123,11 +92,23 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             dbName
         });
         
-        if (pCols) {
-            const resCols = await pCols;
-            if (resCols.success) {
-                const pks = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                setPkColumns(pks);
+        if (pkColumns.length === 0) {
+            const pkKey = `${tab.connectionId}|${dbName}|${tableName}`;
+            if (pkKeyRef.current !== pkKey) {
+                pkKeyRef.current = pkKey;
+                const pkSeq = ++pkSeqRef.current;
+                DBGetColumns(config as any, dbName, tableName)
+                    .then((resCols: any) => {
+                        if (pkSeqRef.current !== pkSeq) return;
+                        if (pkKeyRef.current !== pkKey) return;
+                        if (!resCols?.success) return;
+                        const pks = (resCols.data as ColumnDefinition[]).filter((c: any) => c.key === 'PRI').map((c: any) => c.name);
+                        setPkColumns(pks);
+                    })
+                    .catch(() => {
+                        if (pkSeqRef.current !== pkSeq) return;
+                        if (pkKeyRef.current !== pkKey) return;
+                    });
             }
         }
 

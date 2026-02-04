@@ -260,70 +260,8 @@ data, columns, err := dbInst.Query(query)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	defer f.Close()
-
-	var csvWriter *csv.Writer
-	var jsonEncoder *json.Encoder
-	var isJsonFirstRow = true
-
-	switch format {
-	case "csv", "xlsx":
-		f.Write([]byte{0xEF, 0xBB, 0xBF})
-		csvWriter = csv.NewWriter(f)
-		defer csvWriter.Flush()
-		if err := csvWriter.Write(columns); err != nil {
-			return connection.QueryResult{Success: false, Message: err.Error()}
-		}
-	case "json":
-		f.WriteString("[\n")
-		jsonEncoder = json.NewEncoder(f)
-		jsonEncoder.SetIndent("  ", "  ")
-	case "md":
-		fmt.Fprintf(f, "| %s |\n", strings.Join(columns, " | "))
-		seps := make([]string, len(columns))
-		for i := range seps {
-			seps[i] = "---"
-		}
-		fmt.Fprintf(f, "| %s |\n", strings.Join(seps, " | "))
-	default:
-		return connection.QueryResult{Success: false, Message: "Unsupported format: " + format}
-	}
-
-	for _, rowMap := range data {
-		record := make([]string, len(columns))
-		for i, col := range columns {
-			val := rowMap[col]
-			if val == nil {
-				record[i] = "NULL"
-			} else {
-				s := fmt.Sprintf("%v", val)
-				if format == "md" {
-					s = strings.ReplaceAll(s, "|", "\\|")
-					s = strings.ReplaceAll(s, "\n", "<br>")
-				}
-				record[i] = s
-			}
-		}
-
-		switch format {
-		case "csv", "xlsx":
-			if err := csvWriter.Write(record); err != nil {
-				return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
-			}
-		case "json":
-			if !isJsonFirstRow {
-				f.WriteString(",\n")
-			}
-			if err := jsonEncoder.Encode(rowMap); err != nil {
-				return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
-			}
-			isJsonFirstRow = false
-		case "md":
-			fmt.Fprintf(f, "| %s |\n", strings.Join(record, " | "))
-		}
-	}
-
-	if format == "json" {
-		f.WriteString("\n]")
+	if err := writeRowsToFile(f, data, columns, format); err != nil {
+		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
 	}
 
 	return connection.QueryResult{Success: true, Message: "Export successful"}
@@ -675,33 +613,101 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	defer f.Close()
+	if err := writeRowsToFile(f, data, columns, format); err != nil {
+		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+	}
 
-	format = strings.ToLower(format)
+	return connection.QueryResult{Success: true, Message: "Export successful"}
+}
+
+// ExportQuery exports by executing the provided SELECT query on backend side.
+// This avoids frontend IPC payload limits when exporting very large/long-text columns (e.g. base64).
+func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, query string, defaultName string, format string) connection.QueryResult {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return connection.QueryResult{Success: false, Message: "query required"}
+	}
+
+	if defaultName == "" {
+		defaultName = "export"
+	}
+
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Export Query Result",
+		DefaultFilename: fmt.Sprintf("%s.%s", defaultName, strings.ToLower(format)),
+	})
+	if err != nil || filename == "" {
+		return connection.QueryResult{Success: false, Message: "Cancelled"}
+	}
+
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
+	if !(strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "with")) {
+		return connection.QueryResult{Success: false, Message: "Only SELECT/WITH queries are supported"}
+	}
+
+	data, columns, err := dbInst.Query(query)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	defer f.Close()
+
+	if err := writeRowsToFile(f, data, columns, format); err != nil {
+		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: "Export successful"}
+}
+
+func writeRowsToFile(f *os.File, data []map[string]interface{}, columns []string, format string) error {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if f == nil {
+		return fmt.Errorf("file required")
+	}
+
 	var csvWriter *csv.Writer
 	var jsonEncoder *json.Encoder
-	var isJsonFirstRow = true
+	isJsonFirstRow := true
 
 	switch format {
 	case "csv", "xlsx":
-		f.Write([]byte{0xEF, 0xBB, 0xBF})
+		if _, err := f.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+			return err
+		}
 		csvWriter = csv.NewWriter(f)
-		defer csvWriter.Flush()
 		if err := csvWriter.Write(columns); err != nil {
-			return connection.QueryResult{Success: false, Message: err.Error()}
+			return err
 		}
 	case "json":
-		f.WriteString("[\n")
+		if _, err := f.WriteString("[\n"); err != nil {
+			return err
+		}
 		jsonEncoder = json.NewEncoder(f)
 		jsonEncoder.SetIndent("  ", "  ")
 	case "md":
-		fmt.Fprintf(f, "| %s |\n", strings.Join(columns, " | "))
+		if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(columns, " | ")); err != nil {
+			return err
+		}
 		seps := make([]string, len(columns))
 		for i := range seps {
 			seps[i] = "---"
 		}
-		fmt.Fprintf(f, "| %s |\n", strings.Join(seps, " | "))
+		if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(seps, " | ")); err != nil {
+			return err
+		}
 	default:
-		return connection.QueryResult{Success: false, Message: "Unsupported format: " + format}
+		return fmt.Errorf("unsupported format: %s", format)
 	}
 
 	for _, rowMap := range data {
@@ -710,37 +716,51 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 			val := rowMap[col]
 			if val == nil {
 				record[i] = "NULL"
-			} else {
-				s := fmt.Sprintf("%v", val)
-				if format == "md" {
-					s = strings.ReplaceAll(s, "|", "\\|")
-					s = strings.ReplaceAll(s, "\n", "<br>")
-				}
-				record[i] = s
+				continue
 			}
+
+			s := fmt.Sprintf("%v", val)
+			if format == "md" {
+				s = strings.ReplaceAll(s, "|", "\\|")
+				s = strings.ReplaceAll(s, "\n", "<br>")
+			}
+			record[i] = s
 		}
 
 		switch format {
 		case "csv", "xlsx":
 			if err := csvWriter.Write(record); err != nil {
-				return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+				return err
 			}
 		case "json":
 			if !isJsonFirstRow {
-				f.WriteString(",\n")
+				if _, err := f.WriteString(",\n"); err != nil {
+					return err
+				}
 			}
 			if err := jsonEncoder.Encode(rowMap); err != nil {
-				return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+				return err
 			}
 			isJsonFirstRow = false
 		case "md":
-			fmt.Fprintf(f, "| %s |\n", strings.Join(record, " | "))
+			if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(record, " | ")); err != nil {
+				return err
+			}
+		}
+	}
+
+	if format == "csv" || format == "xlsx" {
+		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			return err
 		}
 	}
 
 	if format == "json" {
-		f.WriteString("\n]")
+		if _, err := f.WriteString("\n]"); err != nil {
+			return err
+		}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return nil
 }
