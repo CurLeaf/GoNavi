@@ -204,15 +204,15 @@ jobs:
           cp "$TARGET" AppDir/usr/bin/gonavi
 
           # Create desktop file
-          cat > AppDir/usr/share/applications/gonavi.desktop << 'EOF'
-[Desktop Entry]
-Name=GoNavi
-Exec=gonavi
-Icon=gonavi
-Type=Application
-Categories=Development;Database;
-Comment=Database Management Tool
-EOF
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Name=GoNavi' \
+            'Exec=gonavi' \
+            'Icon=gonavi' \
+            'Type=Application' \
+            'Categories=Development;Database;' \
+            'Comment=Database Management Tool' \
+            > AppDir/usr/share/applications/gonavi.desktop
 
           cp AppDir/usr/share/applications/gonavi.desktop AppDir/gonavi.desktop
 
