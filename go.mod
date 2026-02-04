@@ -7,6 +7,7 @@ require (
 	gitee.com/chunanyong/dm v1.8.22
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/lib/pq v1.11.1
+	github.com/redis/go-redis/v9 v9.17.3
 	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/crypto v0.47.0
@@ -16,6 +17,8 @@ require (
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect

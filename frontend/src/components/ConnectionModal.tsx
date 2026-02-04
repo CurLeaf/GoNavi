@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
-import { DBConnect, DBGetDatabases, TestConnection } from '../../wailsjs/go/app/App';
+import { DBConnect, DBGetDatabases, TestConnection, RedisConnect } from '../../wailsjs/go/app/App';
 import { SavedConnection } from '../types';
 
 const { Meta } = Card;
@@ -43,7 +43,8 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
                   sshKeyPath: initialValues.config.ssh?.keyPath,
                   driver: (initialValues.config as any).driver,
                   dsn: (initialValues.config as any).dsn,
-                  timeout: (initialValues.config as any).timeout || 30
+                  timeout: (initialValues.config as any).timeout || 30,
+                  redisDB: (initialValues.config as any).redisDB || 0
               });
               setUseSSH(initialValues.config.useSSH || false);
               setDbType(initialValues.config.type);
@@ -61,16 +62,21 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
     try {
       const values = await form.validateFields();
       setLoading(true);
-      
+
       const config = await buildConfig(values);
-      
-      const res = await DBConnect(config as any);
+
+      // Use different API for Redis
+      const isRedisType = values.type === 'redis';
+      const res = isRedisType
+          ? await RedisConnect(config as any)
+          : await DBConnect(config as any);
+
       setLoading(false);
-      
+
       if (res.success) {
         const newConn = {
           id: initialValues ? initialValues.id : Date.now().toString(),
-          name: values.name || (values.type === 'sqlite' ? 'SQLite DB' : values.host),
+          name: values.name || (values.type === 'sqlite' ? 'SQLite DB' : (values.type === 'redis' ? `Redis ${values.host}` : values.host)),
           config: config,
           includeDatabases: values.includeDatabases
         };
@@ -82,7 +88,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             addConnection(newConn);
             message.success('连接已保存！');
         }
-        
+
         form.resetFields();
         setUseSSH(false);
         setDbType('mysql');
@@ -102,14 +108,23 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           setLoading(true);
           setTestResult(null);
           const config = await buildConfig(values);
-          const res = await TestConnection(config as any);
+
+          // Use different API for Redis
+          const isRedisType = values.type === 'redis';
+          const res = isRedisType
+              ? await RedisConnect(config as any)
+              : await TestConnection(config as any);
+
           setLoading(false);
           if (res.success) {
               setTestResult({ type: 'success', message: res.message });
-              const dbRes = await DBGetDatabases(config as any);
-              if (dbRes.success) {
-                  const dbs = (dbRes.data as any[]).map((row: any) => row.Database || row.database);
-                  setDbList(dbs);
+              // Only fetch database list for non-Redis connections
+              if (!isRedisType) {
+                  const dbRes = await DBGetDatabases(config as any);
+                  if (dbRes.success) {
+                      const dbs = (dbRes.data as any[]).map((row: any) => row.Database || row.database);
+                      setDbList(dbs);
+                  }
               }
           } else {
               setTestResult({ type: 'error', message: "测试失败: " + res.message });
@@ -128,7 +143,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           keyPath: values.sshKeyPath || ""
       } : { host: "", port: 22, user: "", password: "", keyPath: "" };
 
-      return { 
+      return {
           type: values.type,
           host: values.host || "",
           port: Number(values.port || 0),
@@ -139,19 +154,21 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ssh: sshConfig,
           driver: values.driver,
           dsn: values.dsn,
-          timeout: Number(values.timeout || 30)
+          timeout: Number(values.timeout || 30),
+          redisDB: Number(values.redisDB || 0)
       };
   };
 
   const handleTypeSelect = (type: string) => {
       setDbType(type);
       form.setFieldsValue({ type: type });
-      
+
       // Auto-fill default port
       let defaultPort = 3306;
       switch (type) {
           case 'mysql': defaultPort = 3306; break;
           case 'postgres': defaultPort = 5432; break;
+          case 'redis': defaultPort = 6379; break;
           case 'oracle': defaultPort = 1521; break;
           case 'dameng': defaultPort = 5236; break;
           case 'kingbase': defaultPort = 54321; break;
@@ -160,16 +177,22 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       if (type !== 'sqlite' && type !== 'custom') {
           form.setFieldsValue({ port: defaultPort });
       }
+      // Set default redisDB for Redis
+      if (type === 'redis') {
+          form.setFieldsValue({ redisDB: 0 });
+      }
 
       setStep(2);
   };
 
   const isSqlite = dbType === 'sqlite';
   const isCustom = dbType === 'custom';
+  const isRedis = dbType === 'redis';
 
   const dbTypes = [
       { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
       { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
+      { key: 'redis', name: 'Redis', icon: <CloudOutlined style={{ fontSize: 24, color: '#DC382D' }} /> },
       { key: 'sqlite', name: 'SQLite', icon: <FileTextOutlined style={{ fontSize: 24, color: '#003B57' }} /> },
       { key: 'oracle', name: 'Oracle', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#F80000' }} /> },
       { key: 'dameng', name: 'Dameng (达梦)', icon: <CloudServerOutlined style={{ fontSize: 24, color: '#1890ff' }} /> },
@@ -235,7 +258,20 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             )}
         </div>
 
-        {!isSqlite && (
+        {/* Redis specific: password only, no username */}
+        {isRedis && (
+        <div style={{ display: 'flex', gap: 16 }}>
+            <Form.Item name="password" label="密码 (可选)" style={{ flex: 1 }}>
+              <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
+            </Form.Item>
+            <Form.Item name="redisDB" label="数据库 (0-15)" style={{ width: 120 }}>
+              <InputNumber style={{ width: '100%' }} min={0} max={15} />
+            </Form.Item>
+        </div>
+        )}
+
+        {/* Non-Redis, non-SQLite: username and password */}
+        {!isSqlite && !isRedis && (
         <div style={{ display: 'flex', gap: 16 }}>
             <Form.Item name="user" label="用户名" rules={[{ required: true, message: '请输入用户名' }]} style={{ flex: 1 }}>
               <Input />
@@ -245,8 +281,8 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             </Form.Item>
         </div>
         )}
-        
-        {!isSqlite && (
+
+        {!isSqlite && !isRedis && (
         <Form.Item name="includeDatabases" label="显示数据库 (留空显示全部)" help="连接测试成功后可选择">
             <Select mode="multiple" placeholder="选择显示的数据库" allowClear>
                 {dbList.map(db => <Select.Option key={db} value={db}>{db}</Select.Option>)}
