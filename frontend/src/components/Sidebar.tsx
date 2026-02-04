@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge } from 'antd';
 	import {
-	  DatabaseOutlined, 
-	  TableOutlined, 
-	  ConsoleSqlOutlined, 
-  HddOutlined, 
-  FolderOpenOutlined, 
+	  DatabaseOutlined,
+	  TableOutlined,
+	  ConsoleSqlOutlined,
+  HddOutlined,
+  FolderOpenOutlined,
   FileTextOutlined,
   CopyOutlined,
   ExportOutlined,
@@ -22,7 +22,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge }
   PlusOutlined,
   ReloadOutlined,
   DeleteOutlined,
-  DisconnectOutlined
+  DisconnectOutlined,
+  CloudOutlined
 	} from '@ant-design/icons';
 	import { useStore } from '../store';
 	import { SavedConnection } from '../types';
@@ -37,7 +38,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers';
+  type?: 'connection' | 'database' | 'table' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db';
 }
 
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
@@ -99,7 +100,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     setTreeData(connections.map(conn => ({
       title: conn.name,
       key: conn.id,
-      icon: <HddOutlined />,
+      icon: conn.config.type === 'redis' ? <CloudOutlined style={{ color: '#DC382D' }} /> : <HddOutlined />,
       type: 'connection',
       dataRef: conn,
       isLeaf: false,
@@ -120,14 +121,46 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
 	  const loadDatabases = async (node: any) => {
 	      const conn = node.dataRef as SavedConnection;
-	      const config = { 
-	          ...conn.config, 
+	      const config = {
+	          ...conn.config,
           port: Number(conn.config.port),
           password: conn.config.password || "",
           database: conn.config.database || "",
 	          useSSH: conn.config.useSSH || false,
 	          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
 	      };
+
+          // Handle Redis connections differently
+          if (conn.config.type === 'redis') {
+              try {
+                  const res = await (window as any).go.app.App.RedisGetDatabases(config);
+                  if (res.success) {
+                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
+                      let dbs = (res.data as any[]).map((db: any) => ({
+                          title: `db${db.index}${db.keys > 0 ? ` (${db.keys})` : ''}`,
+                          key: `${conn.id}-db${db.index}`,
+                          icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
+                          type: 'redis-db' as const,
+                          dataRef: { ...conn, redisDB: db.index },
+                          isLeaf: true,
+                          dbIndex: db.index,
+                      }));
+                      // Filter Redis databases if configured
+                      if (conn.includeRedisDatabases && conn.includeRedisDatabases.length > 0) {
+                          dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));
+                      }
+                      setTreeData(origin => updateTreeData(origin, node.key, dbs));
+                  } else {
+                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+                      message.error(res.message);
+                  }
+              } catch (e: any) {
+                  setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+                  message.error('连接失败: ' + (e?.message || String(e)));
+              }
+              return;
+          }
+
 	      const res = await DBGetDatabases(config as any);
 	      if (res.success) {
 	        setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
@@ -293,9 +326,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           return;
       }
       if (!info.selected) return;
-      
+
       const { type, dataRef, key, title } = info.node;
-      
+
       // Update active context
       if (type === 'connection') {
           setActiveContext({ connectionId: key, dbName: '' });
@@ -305,6 +338,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
+      } else if (type === 'redis-db') {
+          setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
       }
 
       if (type === 'folder-columns') openDesign(info.node, 'columns', true);
@@ -339,6 +374,16 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               connectionId: q.connectionId,
               dbName: q.dbName,
               query: q.sql
+          });
+          return;
+      } else if (node.type === 'redis-db') {
+          const { id, redisDB } = node.dataRef;
+          addTab({
+              id: `redis-keys-${id}-db${redisDB}`,
+              title: `db${redisDB}`,
+              type: 'redis-keys',
+              connectionId: id,
+              redisDB: redisDB
           });
           return;
       }
@@ -519,7 +564,80 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   }, [searchValue, treeData]);
 
   const getNodeMenuItems = (node: any): MenuProps['items'] => {
+    const conn = node.dataRef as SavedConnection;
+    const isRedis = conn?.config?.type === 'redis';
+
     if (node.type === 'connection') {
+        // Redis connection menu
+        if (isRedis) {
+            return [
+                {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <ReloadOutlined />,
+                    onClick: () => loadDatabases(node)
+                },
+                { type: 'divider' },
+                {
+                    key: 'new-command',
+                    label: '新建命令窗口',
+                    icon: <ConsoleSqlOutlined />,
+                    onClick: () => {
+                        addTab({
+                            id: `redis-cmd-${node.key}-${Date.now()}`,
+                            title: `命令 - ${node.title}`,
+                            type: 'redis-command',
+                            connectionId: node.key,
+                            redisDB: 0
+                        });
+                    }
+                },
+                { type: 'divider' },
+                {
+                    key: 'edit',
+                    label: '编辑连接',
+                    icon: <EditOutlined />,
+                    onClick: () => {
+                        if (onEditConnection) onEditConnection(node.dataRef);
+                    }
+                },
+                {
+                    key: 'disconnect',
+                    label: '断开连接',
+                    icon: <DisconnectOutlined />,
+                    onClick: () => {
+                        setConnectionStates(prev => {
+                            const next = { ...prev };
+                            Object.keys(next).forEach(k => {
+                                if (k === node.key || k.startsWith(`${node.key}-`)) {
+                                    delete next[k];
+                                }
+                            });
+                            return next;
+                        });
+                        setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
+                        setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
+                        setTreeData(origin => updateTreeData(origin, node.key, undefined));
+                        message.success("已断开连接");
+                    }
+                },
+                {
+                    key: 'delete',
+                    label: '删除连接',
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => {
+                        Modal.confirm({
+                            title: '确认删除',
+                            content: `确定要删除连接 "${node.title}" 吗？`,
+                            onOk: () => removeConnection(node.key)
+                        });
+                    }
+                }
+            ];
+        }
+
+        // Regular database connection menu
         return [
             {
                 key: 'new-db',
@@ -537,9 +655,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 onClick: () => loadDatabases(node)
             },
             { type: 'divider' },
-            { 
-               key: 'new-query', 
-               label: '新建查询', 
+            {
+               key: 'new-query',
+               label: '新建查询',
                icon: <ConsoleSqlOutlined />,
                onClick: () => {
                    addTab({
@@ -597,6 +715,39 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                      });
                  }
              }
+        ];
+    } else if (node.type === 'redis-db') {
+        // Redis database menu
+        const { id, redisDB } = node.dataRef;
+        return [
+            {
+                key: 'open-keys',
+                label: '浏览 Key',
+                icon: <KeyOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-keys-${id}-db${redisDB}`,
+                        title: `db${redisDB}`,
+                        type: 'redis-keys',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'new-command',
+                label: '新建命令窗口',
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-cmd-${id}-db${redisDB}-${Date.now()}`,
+                        title: `命令 - db${redisDB}`,
+                        type: 'redis-command',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            }
         ];
     } else if (node.type === 'database') {
        return [
