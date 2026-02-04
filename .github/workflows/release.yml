@@ -36,9 +36,6 @@ jobs:
           - os: ubuntu-22.04
             platform: linux/amd64
             artifact_name: GoNavi-linux-amd64
-          - os: ubuntu-22.04
-            platform: linux/arm64
-            artifact_name: GoNavi-linux-arm64
 
     steps:
       - name: Checkout code
@@ -60,42 +57,29 @@ jobs:
         if: contains(matrix.platform, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libfuse2
 
-          # Cross-compile toolchain for ARM64
-          if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
-            echo "📦 安装 ARM64 交叉编译工具链..."
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            echo "✅ ARM64 工具链安装完成"
-            echo "⚠️ ARM64 AppImage 打包将跳过（交叉编译限制）"
+          # Download linuxdeploy tools for AppImage packaging
+          LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage"
+
+          echo "📥 下载 linuxdeploy..."
+          wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
+            -O /tmp/linuxdeploy "$LINUXDEPLOY_URL" || {
+            echo "⚠️ linuxdeploy 下载失败，AppImage 打包将跳过"
             touch /tmp/skip-appimage
-          fi
+          }
 
-          # AppImage tools (AMD64 only)
-          if [ "${{ matrix.platform }}" = "linux/amd64" ]; then
-            sudo apt-get install -y libfuse2
+          echo "📥 下载 linuxdeploy-plugin-gtk..."
+          wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
+            -O /tmp/linuxdeploy-plugin-gtk "$PLUGIN_URL" || {
+            echo "⚠️ linuxdeploy-plugin-gtk 下载失败，AppImage 打包将跳过"
+            touch /tmp/skip-appimage
+          }
 
-            LINUXDEPLOY_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-            PLUGIN_URL="https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/releases/download/continuous/linuxdeploy-plugin-gtk-x86_64.AppImage"
-
-            echo "📥 下载 linuxdeploy..."
-            wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
-              -O /tmp/linuxdeploy "$LINUXDEPLOY_URL" || {
-              echo "⚠️ linuxdeploy 下载失败，AppImage 打包将跳过"
-              touch /tmp/skip-appimage
-            }
-
-            echo "📥 下载 linuxdeploy-plugin-gtk..."
-            wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 --tries=3 \
-              -O /tmp/linuxdeploy-plugin-gtk "$PLUGIN_URL" || {
-              echo "⚠️ linuxdeploy-plugin-gtk 下载失败，AppImage 打包将跳过"
-              touch /tmp/skip-appimage
-            }
-
-            if [ ! -f /tmp/skip-appimage ]; then
-              chmod +x /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk
-              echo "✅ AppImage 工具准备完成"
-            fi
+          if [ ! -f /tmp/skip-appimage ]; then
+            chmod +x /tmp/linuxdeploy /tmp/linuxdeploy-plugin-gtk
+            echo "✅ AppImage 工具准备完成"
           fi
 
       - name: Install Wails
@@ -104,14 +88,6 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          # Set cross-compile environment for Linux ARM64
-          if [ "${{ matrix.platform }}" = "linux/arm64" ]; then
-            export CC=aarch64-linux-gnu-gcc
-            export CXX=aarch64-linux-gnu-g++
-            export CGO_ENABLED=1
-            export GOOS=linux
-            export GOARCH=arm64
-          fi
           wails build -platform ${{ matrix.platform }} -clean -o ${{ matrix.artifact_name }}
 
       # macOS Packaging
