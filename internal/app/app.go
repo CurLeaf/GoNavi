@@ -48,6 +48,8 @@ func (a *App) Shutdown(ctx context.Context) {
 			logger.Error(err, "关闭数据库连接失败")
 		}
 	}
+	// Close all Redis connections
+	CloseAllRedisClients()
 	logger.Infof("资源释放完成，应用已关闭")
 	logger.Close()
 }

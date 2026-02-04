@@ -18,10 +18,35 @@ const normalizeIdentPart = (ident: string) => {
   return raw;
 };
 
+// 检查标识符是否需要引号（包含特殊字符或是保留字）
+const needsQuote = (ident: string): boolean => {
+  if (!ident) return false;
+  // 如果包含特殊字符（非字母、数字、下划线）则需要引号
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(ident)) return true;
+  // 常见 SQL 保留字列表（简化版）
+  const reserved = ['select', 'from', 'where', 'table', 'index', 'user', 'order', 'group', 'by', 'limit', 'offset', 'and', 'or', 'not', 'null', 'true', 'false', 'key', 'primary', 'foreign', 'references', 'default', 'constraint', 'create', 'drop', 'alter', 'insert', 'update', 'delete', 'set', 'values', 'into', 'join', 'left', 'right', 'inner', 'outer', 'on', 'as', 'is', 'in', 'like', 'between', 'case', 'when', 'then', 'else', 'end', 'having', 'distinct', 'all', 'any', 'exists', 'union', 'except', 'intersect'];
+  return reserved.includes(ident.toLowerCase());
+};
+
 export const quoteIdentPart = (dbType: string, ident: string) => {
   const raw = normalizeIdentPart(ident);
   if (!raw) return raw;
-  if ((dbType || '').toLowerCase() === 'mysql') return `\`${raw.replace(/`/g, '``')}\``;
+  const dbTypeLower = (dbType || '').toLowerCase();
+
+  if (dbTypeLower === 'mysql') {
+    return `\`${raw.replace(/`/g, '``')}\``;
+  }
+
+  // 对于 KingBase/PostgreSQL，只在必要时加引号
+  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres') {
+    if (needsQuote(raw)) {
+      return `"${raw.replace(/"/g, '""')}"`;
+    }
+    // 不加引号，保持原样（数据库会自动转小写处理）
+    return raw;
+  }
+
+  // 其他数据库默认加双引号
   return `"${raw.replace(/"/g, '""')}"`;
 };
 

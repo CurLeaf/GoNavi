@@ -5,6 +5,8 @@ import { useStore } from '../store';
 import DataViewer from './DataViewer';
 import QueryEditor from './QueryEditor';
 import TableDesigner from './TableDesigner';
+import RedisViewer from './RedisViewer';
+import RedisCommandEditor from './RedisCommandEditor';
 
 const TabManager: React.FC = () => {
   const { tabs, activeTabId, setActiveTab, closeTab, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs } = useStore();
@@ -27,6 +29,10 @@ const TabManager: React.FC = () => {
       content = <DataViewer tab={tab} />;
     } else if (tab.type === 'design') {
       content = <TableDesigner tab={tab} />;
+    } else if (tab.type === 'redis-keys') {
+      content = <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+    } else if (tab.type === 'redis-command') {
+      content = <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
     }
 
     const menuItems: MenuProps['items'] = [

@@ -15,6 +15,7 @@ export interface ConnectionConfig {
   database?: string;
   useSSH?: boolean;
   ssh?: SSHConfig;
+  redisDB?: number; // Redis database index (0-15)
 }
 
 export interface SavedConnection {
@@ -22,6 +23,7 @@ export interface SavedConnection {
   name: string;
   config: ConnectionConfig;
   includeDatabases?: string[];
+  includeRedisDatabases?: number[]; // Redis databases to show (0-15)
 }
 
 export interface ColumnDefinition {
@@ -60,13 +62,14 @@ export interface TriggerDefinition {
 export interface TabData {
   id: string;
   title: string;
-  type: 'query' | 'table' | 'design';
+  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command';
   connectionId: string;
   dbName?: string;
   tableName?: string;
   query?: string;
   initialTab?: string;
   readOnly?: boolean;
+  redisDB?: number; // Redis database index for redis tabs
 }
 
 export interface DatabaseNode {
@@ -84,4 +87,33 @@ export interface SavedQuery {
   connectionId: string;
   dbName: string;
   createdAt: number;
+}
+
+// Redis types
+export interface RedisKeyInfo {
+  key: string;
+  type: string;
+  ttl: number;
+}
+
+export interface RedisScanResult {
+  keys: RedisKeyInfo[];
+  cursor: number;
+}
+
+export interface RedisValue {
+  type: 'string' | 'hash' | 'list' | 'set' | 'zset';
+  ttl: number;
+  value: any;
+  length: number;
+}
+
+export interface RedisDBInfo {
+  index: number;
+  keys: number;
+}
+
+export interface ZSetMember {
+  member: string;
+  score: number;
 }

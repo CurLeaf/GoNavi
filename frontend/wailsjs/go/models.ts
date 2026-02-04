@@ -80,6 +80,7 @@ export namespace connection {
 	    driver?: string;
 	    dsn?: string;
 	    timeout?: number;
+	    redisDB?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionConfig(source);
@@ -98,6 +99,7 @@ export namespace connection {
 	        this.driver = source["driver"];
 	        this.dsn = source["dsn"];
 	        this.timeout = source["timeout"];
+	        this.redisDB = source["redisDB"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -137,6 +139,25 @@ export namespace connection {
 	    }
 	}
 	
+
+}
+
+export namespace redis {
+	
+	export class ZSetMember {
+	    member: string;
+	    score: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ZSetMember(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.member = source["member"];
+	        this.score = source["score"];
+	    }
+	}
 
 }
 

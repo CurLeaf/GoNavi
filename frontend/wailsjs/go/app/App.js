@@ -114,6 +114,90 @@ export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
 }
 
+export function RedisConnect(arg1) {
+  return window['go']['app']['App']['RedisConnect'](arg1);
+}
+
+export function RedisDeleteHashField(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisDeleteHashField'](arg1, arg2, arg3);
+}
+
+export function RedisDeleteKeys(arg1, arg2) {
+  return window['go']['app']['App']['RedisDeleteKeys'](arg1, arg2);
+}
+
+export function RedisExecuteCommand(arg1, arg2) {
+  return window['go']['app']['App']['RedisExecuteCommand'](arg1, arg2);
+}
+
+export function RedisFlushDB(arg1) {
+  return window['go']['app']['App']['RedisFlushDB'](arg1);
+}
+
+export function RedisGetDatabases(arg1) {
+  return window['go']['app']['App']['RedisGetDatabases'](arg1);
+}
+
+export function RedisGetServerInfo(arg1) {
+  return window['go']['app']['App']['RedisGetServerInfo'](arg1);
+}
+
+export function RedisGetValue(arg1, arg2) {
+  return window['go']['app']['App']['RedisGetValue'](arg1, arg2);
+}
+
+export function RedisListPush(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisListPush'](arg1, arg2, arg3);
+}
+
+export function RedisListSet(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RedisListSet'](arg1, arg2, arg3, arg4);
+}
+
+export function RedisRenameKey(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisRenameKey'](arg1, arg2, arg3);
+}
+
+export function RedisScanKeys(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RedisScanKeys'](arg1, arg2, arg3, arg4);
+}
+
+export function RedisSelectDB(arg1, arg2) {
+  return window['go']['app']['App']['RedisSelectDB'](arg1, arg2);
+}
+
+export function RedisSetAdd(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisSetAdd'](arg1, arg2, arg3);
+}
+
+export function RedisSetHashField(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RedisSetHashField'](arg1, arg2, arg3, arg4);
+}
+
+export function RedisSetRemove(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisSetRemove'](arg1, arg2, arg3);
+}
+
+export function RedisSetString(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RedisSetString'](arg1, arg2, arg3, arg4);
+}
+
+export function RedisSetTTL(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisSetTTL'](arg1, arg2, arg3);
+}
+
+export function RedisTestConnection(arg1) {
+  return window['go']['app']['App']['RedisTestConnection'](arg1);
+}
+
+export function RedisZSetAdd(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisZSetAdd'](arg1, arg2, arg3);
+}
+
+export function RedisZSetRemove(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RedisZSetRemove'](arg1, arg2, arg3);
+}
+
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
