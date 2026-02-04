@@ -136,14 +136,121 @@ if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
         mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$DIST_DIR/${APP_NAME}-${VERSION}-windows-amd64.exe"
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-amd64.exe"
     else
-        echo -e "${RED}   ❌ Windows 构建失败。${NC}"
+        echo -e "${RED}   ❌ Windows amd64 构建失败。${NC}"
     fi
 else
-    echo -e "${YELLOW}   ⚠️  未找到 MinGW 工具 (x86_64-w64-mingw32-gcc)，跳过 Windows 构建。${NC}"
+    echo -e "${YELLOW}   ⚠️  未找到 MinGW 工具 (x86_64-w64-mingw32-gcc)，跳过 Windows amd64 构建。${NC}"
+fi
+
+# --- Windows ARM64 构建 ---
+echo -e "${GREEN}🪟 正在构建 Windows (arm64)...${NC}"
+if command -v aarch64-w64-mingw32-gcc &> /dev/null; then
+    wails build -platform windows/arm64 -clean
+    if [ $? -eq 0 ]; then
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$DIST_DIR/${APP_NAME}-${VERSION}-windows-arm64.exe"
+        echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-arm64.exe"
+    else
+        echo -e "${RED}   ❌ Windows arm64 构建失败。${NC}"
+    fi
+else
+    echo -e "${YELLOW}   ⚠️  未找到 MinGW ARM64 工具 (aarch64-w64-mingw32-gcc)，跳过 Windows arm64 构建。${NC}"
+    echo "      安装命令: brew install mingw-w64 (需要支持 ARM64 的版本)"
+fi
+
+# --- Linux AMD64 构建 ---
+echo -e "${GREEN}🐧 正在构建 Linux (amd64)...${NC}"
+# 检测当前系统
+CURRENT_OS=$(uname -s)
+CURRENT_ARCH=$(uname -m)
+
+if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "x86_64" ]; then
+    # 本机 Linux amd64，直接构建
+    wails build -platform linux/amd64 -clean
+    if [ $? -eq 0 ]; then
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        # 打包为 tar.gz
+        cd "$DIST_DIR"
+        tar -czvf "${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-${VERSION}-linux-amd64"
+        rm "${APP_NAME}-${VERSION}-linux-amd64"
+        cd ..
+        echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-amd64.tar.gz"
+    else
+        echo -e "${RED}   ❌ Linux amd64 构建失败。${NC}"
+    fi
+elif command -v x86_64-linux-gnu-gcc &> /dev/null; then
+    # macOS 或其他系统，尝试交叉编译
+    export CC=x86_64-linux-gnu-gcc
+    export CXX=x86_64-linux-gnu-g++
+    export CGO_ENABLED=1
+    wails build -platform linux/amd64 -clean
+    if [ $? -eq 0 ]; then
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        cd "$DIST_DIR"
+        tar -czvf "${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-${VERSION}-linux-amd64"
+        rm "${APP_NAME}-${VERSION}-linux-amd64"
+        cd ..
+        echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-amd64.tar.gz"
+    else
+        echo -e "${RED}   ❌ Linux amd64 交叉编译失败。${NC}"
+    fi
+    unset CC CXX CGO_ENABLED
+else
+    echo -e "${YELLOW}   ⚠️  非 Linux 系统且未找到交叉编译工具，跳过 Linux amd64 构建。${NC}"
+    echo "      在 Linux 上运行此脚本可直接构建，或安装交叉编译工具链。"
+fi
+
+# --- Linux ARM64 构建 ---
+echo -e "${GREEN}🐧 正在构建 Linux (arm64)...${NC}"
+if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "aarch64" ]; then
+    # 本机 Linux arm64，直接构建
+    wails build -platform linux/arm64 -clean
+    if [ $? -eq 0 ]; then
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        cd "$DIST_DIR"
+        tar -czvf "${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-${VERSION}-linux-arm64"
+        rm "${APP_NAME}-${VERSION}-linux-arm64"
+        cd ..
+        echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-arm64.tar.gz"
+    else
+        echo -e "${RED}   ❌ Linux arm64 构建失败。${NC}"
+    fi
+elif command -v aarch64-linux-gnu-gcc &> /dev/null; then
+    # 交叉编译
+    export CC=aarch64-linux-gnu-gcc
+    export CXX=aarch64-linux-gnu-g++
+    export CGO_ENABLED=1
+    wails build -platform linux/arm64 -clean
+    if [ $? -eq 0 ]; then
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        cd "$DIST_DIR"
+        tar -czvf "${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-${VERSION}-linux-arm64"
+        rm "${APP_NAME}-${VERSION}-linux-arm64"
+        cd ..
+        echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-arm64.tar.gz"
+    else
+        echo -e "${RED}   ❌ Linux arm64 交叉编译失败。${NC}"
+    fi
+    unset CC CXX CGO_ENABLED
+else
+    echo -e "${YELLOW}   ⚠️  非 Linux ARM64 系统且未找到交叉编译工具，跳过 Linux arm64 构建。${NC}"
+    echo "      安装命令 (Ubuntu): sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu"
+    echo "      安装命令 (macOS): brew install aarch64-linux-gnu-gcc (需要第三方 tap)"
 fi
 
 # 清理中间构建目录
 rm -rf "build/bin"
 
+echo ""
 echo -e "${GREEN}🎉 所有任务完成！构建产物在 'dist/' 目录下：${NC}"
-ls -1 "$DIST_DIR"
+ls -lh "$DIST_DIR"
+echo ""
+echo -e "${GREEN}📋 支持的平台：${NC}"
+echo "   • macOS (Intel/Apple Silicon): .dmg"
+echo "   • Windows (x64/ARM64): .exe"
+echo "   • Linux (x64/ARM64): .tar.gz"
+echo ""
+echo -e "${YELLOW}💡 提示：Linux AppImage 包请使用 GitHub Actions CI/CD 构建。${NC}"
