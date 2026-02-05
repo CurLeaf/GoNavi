@@ -12,7 +12,8 @@ interface LogPanelProps {
 const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) => {
     const sqlLogs = useStore(state => state.sqlLogs);
     const clearSqlLogs = useStore(state => state.clearSqlLogs);
-    const darkMode = useStore(state => state.darkMode);
+    const theme = useStore(state => state.theme);
+    const darkMode = theme === 'dark';
 
     const columns = [
         {

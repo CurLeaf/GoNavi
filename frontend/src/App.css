@@ -31,3 +31,34 @@ html, body, #root {
   white-space: nowrap;
   padding-right: 8px;
 }
+
+/* Scrollbar styling for dark mode */
+body[data-theme='dark'] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+body[data-theme='dark'] ::-webkit-scrollbar-track {
+    background: #1f1f1f;
+}
+body[data-theme='dark'] ::-webkit-scrollbar-corner {
+    background: #1f1f1f;
+}
+body[data-theme='dark'] ::-webkit-scrollbar-thumb {
+    background: #424242;
+    border-radius: 4px;
+    border: 2px solid #1f1f1f;
+}
+body[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+/* Ensure body background matches theme to avoid white flashes */
+body {
+    transition: background-color 0.3s, color 0.3s;
+}
+
+/* Custom Title Bar Close Button Hover */
+.titlebar-close-btn:hover {
+    background-color: #ff4d4f !important;
+    color: #fff !important;
+}

@@ -354,7 +354,8 @@ const DataGrid: React.FC<DataGridProps> = ({
 }) => {
   const connections = useStore(state => state.connections);
   const addSqlLog = useStore(state => state.addSqlLog);
-  const darkMode = useStore(state => state.darkMode);
+  const theme = useStore(state => state.theme);
+  const darkMode = theme === 'dark';
   const selectionColumnWidth = 46;
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
@@ -1287,7 +1288,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const enableVirtual = mergedDisplayData.length >= 200;
 
   return (
-    <div className={gridId} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className={gridId} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: darkMode ? '#1d1d1d' : '#fff' }}>
 	       {/* Toolbar */}
 	        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
 	            {onReload && <Button icon={<ReloadOutlined />} disabled={loading} onClick={() => {
@@ -1336,7 +1337,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
        {/* Filter Panel */}
        {showFilter && (
-           <div style={{ padding: '8px', background: '#f5f5f5', borderBottom: '1px solid #eee' }}>
+           <div style={{ padding: '8px', background: darkMode ? '#141414' : '#f5f5f5', borderBottom: darkMode ? '1px solid #303030' : '1px solid #eee' }}>
                {filterConditions.map(cond => (
                    <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
                        <Select
@@ -1427,7 +1428,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     <span>{rowEditorRowKey ? `rowKey: ${rowEditorRowKey}` : ''}</span>
                 </div>
                 <Form form={rowEditorForm} layout="vertical">
-                    <div style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
+                    <div className="custom-scrollbar" style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
                         {columnNames.map((col) => {
                             const sample = rowEditorDisplayRef.current?.[col] ?? '';
                             const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
@@ -1535,11 +1536,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                     left: cellContextMenu.x,
                     top: cellContextMenu.y,
                     zIndex: 10000,
-                    background: '#fff',
-                    border: '1px solid #d9d9d9',
+                    background: darkMode ? '#1f1f1f' : '#fff',
+                    border: darkMode ? '1px solid #303030' : '1px solid #d9d9d9',
                     borderRadius: 4,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                     minWidth: 120,
+                    color: darkMode ? '#fff' : 'rgba(0, 0, 0, 0.88)'
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
@@ -1549,7 +1551,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         cursor: 'pointer',
                         transition: 'background 0.2s',
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     onClick={handleCellSetNull}
                 >
@@ -1560,7 +1562,7 @@ const DataGrid: React.FC<DataGridProps> = ({
        </div>
        
        {pagination && (
-           <div style={{ padding: '8px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'flex-end', background: '#fff' }}>
+           <div style={{ padding: '8px', borderTop: darkMode ? '1px solid #303030' : '1px solid #eee', display: 'flex', justifyContent: 'flex-end', background: darkMode ? '#1d1d1d' : '#fff' }}>
                    <Pagination 
                    current={pagination.current}
                    pageSize={pagination.pageSize}
@@ -1579,8 +1581,10 @@ const DataGrid: React.FC<DataGridProps> = ({
        )}
 
 	        <style>{`
-	            .${gridId} .row-added td { background-color: #f6ffed !important; }
-	            .${gridId} .row-modified td { background-color: #e6f7ff !important; }
+	            .${gridId} .row-added td { background-color: ${darkMode ? '#162b16' : '#f6ffed'} !important; color: ${darkMode ? '#e6fffb' : 'inherit'}; }
+	            .${gridId} .row-modified td { background-color: ${darkMode ? '#162238' : '#e6f7ff'} !important; color: ${darkMode ? '#e6f7ff' : 'inherit'}; }
+                .${gridId} .ant-table-tbody > tr.row-added:hover > td { background-color: ${darkMode ? '#1f3d1f' : '#d9f7be'} !important; }
+                .${gridId} .ant-table-tbody > tr.row-modified:hover > td { background-color: ${darkMode ? '#1d355e' : '#bae7ff'} !important; }
 	        `}</style>
        
        {/* Ghost Resize Line for Columns */}

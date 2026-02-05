@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, BulbOutlined, BulbFilled, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, InfoCircleOutlined, GithubOutlined } from '@ant-design/icons';
+import { PlusOutlined, BulbOutlined, BulbFilled, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined } from '@ant-design/icons';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -17,8 +17,9 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
-  const darkMode = useStore(state => state.darkMode);
-  const toggleDarkMode = useStore(state => state.toggleDarkMode);
+  const themeMode = useStore(state => state.theme);
+  const setTheme = useStore(state => state.setTheme);
+  const darkMode = themeMode === 'dark';
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
@@ -228,6 +229,21 @@ function App() {
       }
   ];
 
+  const themeMenu: MenuProps['items'] = [
+      {
+          key: 'light',
+          label: '亮色主题',
+          icon: themeMode === 'light' ? <CheckOutlined /> : undefined,
+          onClick: () => setTheme('light')
+      },
+      {
+          key: 'dark',
+          label: '暗色主题',
+          icon: themeMode === 'dark' ? <CheckOutlined /> : undefined,
+          onClick: () => setTheme('dark')
+      }
+  ];
+
 
   // Log Panel
   const [logPanelHeight, setLogPanelHeight] = useState(200);
@@ -386,6 +402,49 @@ function App() {
         }}
     >
         <Layout style={{ height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* Custom Title Bar */}
+          <div
+            style={{
+                height: 32,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: darkMode ? '#141414' : '#fff',
+                borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0',
+                userSelect: 'none',
+                WebkitAppRegion: 'drag', // Wails drag region
+                paddingLeft: 16
+            } as any}
+          >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+                  {/* Logo can be added here if available */}
+                  GoNavi
+              </div>
+              <div style={{ display: 'flex', height: '100%', WebkitAppRegion: 'no-drag' } as any}>
+                  <Button 
+                    type="text" 
+                    icon={<MinusOutlined />} 
+                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    onClick={() => (window as any).runtime.WindowMinimise()} 
+                  />
+                  <Button 
+                    type="text" 
+                    icon={<BorderOutlined />} 
+                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    onClick={() => (window as any).runtime.WindowToggleMaximise()} 
+                  />
+                  <Button 
+                    type="text" 
+                    icon={<CloseOutlined />} 
+                    danger
+                    className="titlebar-close-btn"
+                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    onClick={() => (window as any).runtime.Quit()} 
+                  />
+              </div>
+          </div>
+
           <div
             style={{
                 height: 36,
@@ -402,35 +461,37 @@ function App() {
             <Dropdown menu={{ items: toolsMenu }} placement="bottomLeft">
                 <Button type="text" icon={<ToolOutlined />} title="工具">工具</Button>
             </Dropdown>
+            <Dropdown menu={{ items: themeMenu }} placement="bottomLeft">
+                <Button type="text" icon={<SkinOutlined />} title="主题">主题</Button>
+            </Dropdown>
             <Button type="text" icon={<InfoCircleOutlined />} title="关于" onClick={() => setIsAboutOpen(true)}>关于</Button>
           </div>
           <Layout style={{ flex: 1, minHeight: 0 }}>
           <Sider 
-            theme={darkMode ? "dark" : "light"} 
             width={sidebarWidth} 
             style={{ 
                 borderRight: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', 
-                position: 'relative'
+                position: 'relative',
+                background: darkMode ? '#141414' : '#fff'
             }}
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <div style={{ padding: '10px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-                <span style={{ fontWeight: 'bold', paddingLeft: 8 }}>GoNavi</span>
+                <div style={{ padding: '10px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0, background: darkMode ? '#141414' : '#fff' }}>
+                
                 <div>
-                    <Button type="text" icon={darkMode ? <BulbFilled /> : <BulbOutlined />} onClick={toggleDarkMode} title="切换主题" />
                     <Button type="text" icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" />
                     <Button type="text" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)} title="新建连接" />
                 </div>
             </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div style={{ flex: 1, overflow: 'hidden', background: darkMode ? '#141414' : '#fff' }}>
                     <Sidebar onEditConnection={handleEditConnection} />
                 </div>
 
                 {/* Sidebar Footer for Log Toggle */}
-                <div style={{ padding: '8px', borderTop: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ padding: '8px', borderTop: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', justifyContent: 'center', flexShrink: 0, background: darkMode ? '#141414' : '#fff' }}>
                     <Button 
-                        type={isLogPanelOpen ? "primary" : "text"} 
+                        type={isLogPanelOpen ? "primary" : "text"}  
                         icon={<BugOutlined />} 
                         onClick={() => setIsLogPanelOpen(!isLogPanelOpen)}
                         block
@@ -456,7 +517,7 @@ function App() {
                 title="拖动调整宽度"
             />
           </Sider>
-           <Content style={{ background: darkMode ? '#141414' : '#fff', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+           <Content style={{ background: darkMode ? '#1d1d1d' : '#fff', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                  <TabManager />
              </div>

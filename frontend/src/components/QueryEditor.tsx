@@ -52,7 +52,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const connectionsRef = useRef(connections);
   const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
-  const darkMode = useStore(state => state.darkMode);
+  const theme = useStore(state => state.theme);
+  const darkMode = theme === 'dark';
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
