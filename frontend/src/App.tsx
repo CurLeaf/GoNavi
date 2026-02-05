@@ -29,9 +29,13 @@ function App() {
   const updateDownloadInFlightRef = React.useRef(false);
   const updateDownloadedVersionRef = React.useRef<string | null>(null);
   const updateDeferredVersionRef = React.useRef<string | null>(null);
+  const updateNotifiedVersionRef = React.useRef<string | null>(null);
+  const updateMutedVersionRef = React.useRef<string | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string } | null>(null);
+  const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
+  const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
 
   type UpdateInfo = {
       hasUpdate: boolean;
@@ -94,23 +98,40 @@ function App() {
   const checkForUpdates = React.useCallback(async (silent: boolean) => {
       if (updateCheckInFlightRef.current) return;
       updateCheckInFlightRef.current = true;
+      if (!silent) {
+          setAboutUpdateStatus('正在检查更新...');
+      }
       const res = await (window as any).go.app.App.CheckForUpdates();
       updateCheckInFlightRef.current = false;
       if (!res?.success) {
           if (!silent) {
               message.error('检查更新失败: ' + (res?.message || '未知错误'));
+              setAboutUpdateStatus('检查更新失败: ' + (res?.message || '未知错误'));
           }
           return;
       }
       const info: UpdateInfo = res.data;
       if (!info) return;
+      setLastUpdateInfo(info);
       if (info.hasUpdate) {
           if (!silent) {
-              message.info(`发现新版本 ${info.latestVersion}，开始下载...`);
+              message.info(`发现新版本 ${info.latestVersion}`);
+              setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（未下载）`);
           }
-          await downloadUpdate(info, silent);
+          if (silent && isAboutOpen) {
+              setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（未下载）`);
+          }
+          if (silent && !isAboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
+              updateNotifiedVersionRef.current = info.latestVersion;
+              setIsAboutOpen(true);
+          }
       } else if (!silent) {
-          message.success(`当前已是最新版本（${info.currentVersion || '未知'}）`);
+          const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
+          message.success(text);
+          setAboutUpdateStatus(text);
+      } else if (silent && isAboutOpen) {
+          const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
+          setAboutUpdateStatus(text);
       }
   }, [downloadUpdate]);
 
@@ -333,9 +354,16 @@ function App() {
 
   useEffect(() => {
       if (isAboutOpen) {
+          if (lastUpdateInfo?.hasUpdate) {
+              setAboutUpdateStatus(`发现新版本 ${lastUpdateInfo.latestVersion}（未下载）`);
+          } else if (lastUpdateInfo) {
+              setAboutUpdateStatus(`当前已是最新版本（${lastUpdateInfo.currentVersion || '未知'}）`);
+          } else {
+              setAboutUpdateStatus('未检查');
+          }
           loadAboutInfo();
       }
-  }, [isAboutOpen, loadAboutInfo]);
+  }, [isAboutOpen, lastUpdateInfo, loadAboutInfo]);
 
   useEffect(() => {
       const startupTimer = window.setTimeout(() => {
@@ -455,9 +483,15 @@ function App() {
             open={isAboutOpen}
             onCancel={() => setIsAboutOpen(false)}
             footer={[
+                lastUpdateInfo?.hasUpdate ? (
+                    <Button key="download" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>下载更新</Button>
+                ) : null,
+                lastUpdateInfo?.hasUpdate ? (
+                    <Button key="mute" onClick={() => { updateMutedVersionRef.current = lastUpdateInfo.latestVersion; setIsAboutOpen(false); }}>本次不再提示</Button>
+                ) : null,
                 <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>检查更新</Button>,
                 <Button key="close" type="primary" onClick={() => setIsAboutOpen(false)}>关闭</Button>
-            ]}
+            ].filter(Boolean)}
           >
             {aboutLoading ? (
                 <div style={{ padding: '16px 0', textAlign: 'center' }}>
@@ -467,9 +501,10 @@ function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div>版本：{aboutInfo?.version || '未知'}</div>
                     <div>作者：{aboutInfo?.author || '未知'}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <GithubOutlined />
-                    {aboutInfo?.repoUrl ? (
+                    <div>更新状态：{aboutUpdateStatus || '未检查'}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <GithubOutlined />
+                        {aboutInfo?.repoUrl ? (
                         <a onClick={(e) => { e.preventDefault(); (window as any).runtime.BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>
                             {aboutInfo.repoUrl}
                         </a>
