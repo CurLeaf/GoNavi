@@ -6,6 +6,10 @@ export function ApplyChanges(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ApplyChanges'](arg1, arg2, arg3, arg4);
 }
 
+export function CheckForUpdates() {
+  return window['go']['app']['App']['CheckForUpdates']();
+}
+
 export function CreateDatabase(arg1, arg2) {
   return window['go']['app']['App']['CreateDatabase'](arg1, arg2);
 }
@@ -62,6 +66,10 @@ export function DataSyncPreview(arg1, arg2, arg3) {
   return window['go']['app']['App']['DataSyncPreview'](arg1, arg2, arg3);
 }
 
+export function DownloadUpdate() {
+  return window['go']['app']['App']['DownloadUpdate']();
+}
+
 export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }
@@ -82,12 +90,20 @@ export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTablesSQL'](arg1, arg2, arg3, arg4);
 }
 
+export function GetAppInfo() {
+  return window['go']['app']['App']['GetAppInfo']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
 
 export function ImportData(arg1, arg2, arg3) {
   return window['go']['app']['App']['ImportData'](arg1, arg2, arg3);
+}
+
+export function InstallUpdateAndRestart() {
+  return window['go']['app']['App']['InstallUpdateAndRestart']();
 }
 
 export function MySQLConnect(arg1) {

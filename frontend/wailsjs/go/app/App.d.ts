@@ -6,6 +6,8 @@ import {redis} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
+export function CheckForUpdates():Promise<connection.QueryResult>;
+
 export function CreateDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -34,6 +36,8 @@ export function DataSyncAnalyze(arg1:sync.SyncConfig):Promise<connection.QueryRe
 
 export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Promise<connection.QueryResult>;
 
+export function DownloadUpdate():Promise<connection.QueryResult>;
+
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
@@ -44,9 +48,13 @@ export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:st
 
 export function ExportTablesSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean):Promise<connection.QueryResult>;
 
+export function GetAppInfo():Promise<connection.QueryResult>;
+
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
 
 export function MySQLConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 

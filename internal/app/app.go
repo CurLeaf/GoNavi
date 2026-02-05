@@ -29,6 +29,8 @@ type App struct {
 	ctx     context.Context
 	dbCache map[string]cachedDatabase // Cache for DB connections
 	mu      sync.RWMutex              // Mutex for cache access
+	updateMu    sync.Mutex
+	updateState updateState
 }
 
 // NewApp creates a new App application struct
