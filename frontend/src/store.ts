@@ -20,6 +20,7 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   theme: 'light' | 'dark';
+  appearance: { opacity: number; blur: number };
   sqlFormatOptions: { keywordCase: 'upper' | 'lower' };
   queryOptions: { maxRows: number };
   sqlLogs: SqlLog[];
@@ -41,6 +42,7 @@ interface AppState {
   deleteQuery: (id: string) => void;
 
   setTheme: (theme: 'light' | 'dark') => void;
+  setAppearance: (appearance: Partial<{ opacity: number; blur: number }>) => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
   setQueryOptions: (options: Partial<{ maxRows: number }>) => void;
   
@@ -57,6 +59,7 @@ export const useStore = create<AppState>()(
       activeContext: null,
       savedQueries: [],
       theme: 'light',
+      appearance: { opacity: 0.95, blur: 0 },
       sqlFormatOptions: { keywordCase: 'upper' },
       queryOptions: { maxRows: 5000 },
       sqlLogs: [],
@@ -126,6 +129,7 @@ export const useStore = create<AppState>()(
       deleteQuery: (id) => set((state) => ({ savedQueries: state.savedQueries.filter(q => q.id !== id) })),
 
       setTheme: (theme) => set({ theme }),
+      setAppearance: (appearance) => set((state) => ({ appearance: { ...state.appearance, ...appearance } })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
       
@@ -134,7 +138,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
-      partialize: (state) => ({ connections: state.connections, savedQueries: state.savedQueries, theme: state.theme, sqlFormatOptions: state.sqlFormatOptions, queryOptions: state.queryOptions }), // Don't persist logs
+      partialize: (state) => ({ connections: state.connections, savedQueries: state.savedQueries, theme: state.theme, appearance: state.appearance, sqlFormatOptions: state.sqlFormatOptions, queryOptions: state.queryOptions }), // Don't persist logs
     }
   )
 );
