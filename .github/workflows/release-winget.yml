@@ -1,0 +1,22 @@
+name: Publish to WinGet
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        required: true
+        description: 'Tag of release you want to publish'
+        type: string
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: Syngnat.GoNavi
+          installers-regex: 'GoNavi-windows-(amd64|arm64)\.exe$'
+          release-tag: ${{ inputs.release_tag || github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
