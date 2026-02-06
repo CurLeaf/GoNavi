@@ -40,6 +40,10 @@ const getPlatformFactors = () => {
 
 export const normalizeOpacityForPlatform = (opacity: number | undefined): number => {
   const raw = clamp(opacity ?? DEFAULT_OPACITY, MIN_OPACITY, MAX_OPACITY);
+  // 用户显式拉到 100%% 时，必须保持完全不透明，不能再被平台映射压低。
+  if (raw >= MAX_OPACITY - 1e-6) {
+    return MAX_OPACITY;
+  }
   const factors = getPlatformFactors();
   if (!factors) {
     return raw;
