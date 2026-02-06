@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Table, Input, Button, Space, Tag, message, Modal, Form, InputNumber, Popconfirm, Tooltip, Radio } from 'antd';
-import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Table, Input, Button, Space, Tag, Tree, Spin, message, Modal, Form, InputNumber, Popconfirm, Tooltip, Radio } from 'antd';
+import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue } from '../types';
 import Editor from '@monaco-editor/react';
-import type { ColumnType } from 'antd/es/table';
+import type { DataNode } from 'antd/es/tree';
 
 const { Search } = Input;
+
+const KEY_GROUP_DELIMITER = ':';
+const EMPTY_SEGMENT_LABEL = '(empty)';
 
 interface RedisViewerProps {
     connectionId: string;
@@ -222,86 +225,167 @@ const ResizableDivider: React.FC<{
 };
 
 // 可拖拽列头组件 - 纯 DOM 操作实现
-const ResizableTitle: React.FC<any> = (props) => {
-    const { onResize, width, children, ...restProps } = props;
-    const thRef = useRef<HTMLTableCellElement>(null);
+type RedisKeyTreeLeaf = {
+    keyInfo: RedisKeyInfo;
+    label: string;
+};
 
-    // 如果没有 onResize 或 width，说明这列不需要拖拽（如复选框列）
-    if (!onResize || !width) {
-        return <th {...restProps}>{children}</th>;
-    }
+type RedisKeyTreeGroup = {
+    name: string;
+    path: string;
+    children: Map<string, RedisKeyTreeGroup>;
+    leaves: RedisKeyTreeLeaf[];
+};
 
-    const handleMouseDown = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        e.preventDefault();
+type RedisKeyTreeResult = {
+    treeData: DataNode[];
+    rawKeyByNodeKey: Map<string, string>;
+    leafNodeKeyByRawKey: Map<string, string>;
+    groupKeys: string[];
+};
 
-        const startX = e.clientX;
-        const startWidth = width;
-        const th = thRef.current;
-        if (!th) return;
+const normalizeKeySegment = (segment: string): string => {
+    return segment === '' ? EMPTY_SEGMENT_LABEL : segment;
+};
 
-        // 找到对应的 colgroup col 元素来同步更新列宽
-        const table = th.closest('table');
-        const thIndex = Array.from(th.parentElement?.children || []).indexOf(th);
-        const col = table?.querySelector(`colgroup col:nth-child(${thIndex + 1})`) as HTMLElement | null;
+const createTreeGroup = (name: string, path: string): RedisKeyTreeGroup => {
+    return { name, path, children: new Map(), leaves: [] };
+};
 
-        // 创建遮罩层防止文本选择
-        const overlay = document.createElement('div');
-        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;cursor:col-resize;z-index:9999;';
-        document.body.appendChild(overlay);
+const countGroupLeafNodes = (group: RedisKeyTreeGroup): number => {
+    let count = group.leaves.length;
+    group.children.forEach((child) => {
+        count += countGroupLeafNodes(child);
+    });
+    return count;
+};
 
-        let currentWidth = startWidth;
+const buildRedisKeyTree = (
+    keys: RedisKeyInfo[],
+    formatTTL: (ttl: number) => string,
+    getTypeColor: (type: string) => string
+): RedisKeyTreeResult => {
+    const root = createTreeGroup('__root__', '__root__');
 
-        const handleMouseMove = (moveEvent: MouseEvent) => {
-            moveEvent.preventDefault();
-            const delta = moveEvent.clientX - startX;
-            currentWidth = Math.max(50, startWidth + delta);
-            // 直接操作 DOM
-            th.style.width = `${currentWidth}px`;
-            if (col) {
-                col.style.width = `${currentWidth}px`;
+    keys.forEach((keyInfo) => {
+        const segments = keyInfo.key.split(KEY_GROUP_DELIMITER);
+        if (segments.length <= 1) {
+            root.leaves.push({ keyInfo, label: keyInfo.key });
+            return;
+        }
+
+        const groupSegments = segments.slice(0, -1);
+        const leafLabel = normalizeKeySegment(segments[segments.length - 1]);
+        let current = root;
+        const pathParts: string[] = [];
+
+        groupSegments.forEach((segment) => {
+            const normalized = normalizeKeySegment(segment);
+            pathParts.push(normalized);
+            const groupPath = pathParts.join(KEY_GROUP_DELIMITER);
+            let child = current.children.get(normalized);
+            if (!child) {
+                child = createTreeGroup(normalized, groupPath);
+                current.children.set(normalized, child);
             }
-        };
+            current = child;
+        });
 
-        const handleMouseUp = () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-            document.body.removeChild(overlay);
-            // 拖拽结束时更新 React state
-            onResize(null, { size: { width: currentWidth } });
-        };
+        current.leaves.push({ keyInfo, label: leafLabel });
+    });
 
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
+    const rawKeyByNodeKey = new Map<string, string>();
+    const leafNodeKeyByRawKey = new Map<string, string>();
+    const groupKeys: string[] = [];
+
+    const toTreeNodes = (group: RedisKeyTreeGroup): DataNode[] => {
+        const childGroups = Array.from(group.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+        const childLeaves = [...group.leaves].sort((a, b) => a.keyInfo.key.localeCompare(b.keyInfo.key));
+
+        const groupNodes: DataNode[] = childGroups.map((child) => {
+            const groupNodeKey = `group:${child.path}`;
+            groupKeys.push(groupNodeKey);
+            return {
+                key: groupNodeKey,
+                title: (
+                    <Space size={6}>
+                        <FolderOpenOutlined style={{ color: '#8c8c8c' }} />
+                        <span>{child.name}</span>
+                        <span style={{ fontSize: 12, color: '#999' }}>({countGroupLeafNodes(child)})</span>
+                    </Space>
+                ),
+                selectable: false,
+                disableCheckbox: true,
+                children: toTreeNodes(child),
+            };
+        });
+
+        const leafNodes: DataNode[] = childLeaves.map((leaf) => {
+            const nodeKey = `key:${leaf.keyInfo.key}`;
+            rawKeyByNodeKey.set(nodeKey, leaf.keyInfo.key);
+            leafNodeKeyByRawKey.set(leaf.keyInfo.key, nodeKey);
+            return {
+                key: nodeKey,
+                isLeaf: true,
+                title: (
+                    <div
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'minmax(0, 1fr) 92px 92px',
+                            columnGap: 8,
+                            alignItems: 'center',
+                            minWidth: 0,
+                            width: '100%',
+                        }}
+                    >
+                        <Space size={6} style={{ minWidth: 0 }}>
+                            <KeyOutlined style={{ color: '#1677ff' }} />
+                            <Tooltip title={leaf.keyInfo.key}>
+                                <span
+                                    style={{
+                                        maxWidth: '100%',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        display: 'inline-block',
+                                        verticalAlign: 'bottom',
+                                    }}
+                                >
+                                    {leaf.label}
+                                </span>
+                            </Tooltip>
+                        </Space>
+                        <Tag
+                            color={getTypeColor(leaf.keyInfo.type)}
+                            style={{ marginInlineEnd: 0, width: '100%', textAlign: 'center' }}
+                        >
+                            {leaf.keyInfo.type}
+                        </Tag>
+                        <span
+                            style={{
+                                width: '100%',
+                                fontSize: 12,
+                                color: '#999',
+                                textAlign: 'left',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {formatTTL(leaf.keyInfo.ttl)}
+                        </span>
+                    </div>
+                ),
+            };
+        });
+
+        return [...groupNodes, ...leafNodes];
     };
 
-    return (
-        <th
-            ref={thRef}
-            {...restProps}
-            style={{
-                ...restProps.style,
-                position: 'relative'
-            }}
-        >
-            {children}
-            <div
-                style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 10,
-                    cursor: 'col-resize',
-                    zIndex: 1,
-                    background: 'transparent'
-                }}
-                onMouseDown={handleMouseDown}
-                onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            />
-        </th>
-    );
+    return {
+        treeData: toTreeNodes(root),
+        rawKeyByNodeKey,
+        leafNodeKeyByRawKey,
+        groupKeys,
+    };
 };
 
 const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
@@ -317,7 +401,6 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [keyValue, setKeyValue] = useState<RedisValue | null>(null);
     const [valueLoading, setValueLoading] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
-    const [editForm] = Form.useForm();
     const [newKeyModalOpen, setNewKeyModalOpen] = useState(false);
     const [newKeyForm] = Form.useForm();
     const [ttlModalOpen, setTtlModalOpen] = useState(false);
@@ -341,15 +424,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     // 面板宽度状态和 ref - 默认占据 50% 宽度
     const [leftPanelWidth, setLeftPanelWidth] = useState<number | string>('50%');
     const leftPanelRef = useRef<HTMLDivElement>(null);
-
-    // 列宽状态 - 复选框列约 32px，总宽度需要接近面板宽度
-    // Key 列自适应剩余空间，其他列固定宽度
-    const [columnWidths, setColumnWidths] = useState({
-        key: 220,    // Key 名称，需要较宽
-        type: 65,    // 类型标签
-        ttl: 80,     // TTL 显示
-        action: 50   // 操作按钮
-    });
+    const [expandedGroupKeys, setExpandedGroupKeys] = useState<string[]>([]);
 
     const getConfig = useCallback(() => {
         if (!connection) return null;
@@ -373,7 +448,12 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             if (res.success) {
                 const result = res.data;
                 if (append) {
-                    setKeys(prev => [...prev, ...result.keys]);
+                    setKeys(prev => {
+                        const keyMap = new Map<string, RedisKeyInfo>();
+                        prev.forEach(item => keyMap.set(item.key, item));
+                        result.keys.forEach((item: RedisKeyInfo) => keyMap.set(item.key, item));
+                        return Array.from(keyMap.values());
+                    });
                 } else {
                     setKeys(result.keys);
                 }
@@ -449,6 +529,11 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         } catch (e: any) {
             message.error('删除失败: ' + (e?.message || String(e)));
         }
+    };
+
+    const handleDeleteCurrentKey = async () => {
+        if (!selectedKey) return;
+        await handleDeleteKeys([selectedKey]);
     };
 
     const handleSetTTL = async () => {
@@ -529,65 +614,54 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         return `${Math.floor(ttl / 86400)}天${Math.floor((ttl % 86400) / 3600)}时`;
     };
 
-    // 处理列宽调整 - react-resizable 的 onResize 回调格式
-    const handleColumnResize = (key: string) => (_e: any, { size }: { size: { width: number } }) => {
-        setColumnWidths(prev => ({ ...prev, [key]: size.width }));
+    const keyTree = useMemo(() => {
+        return buildRedisKeyTree(keys, formatTTL, getTypeColor);
+    }, [keys]);
+
+    const selectedTreeNodeKeys = useMemo(() => {
+        if (!selectedKey) {
+            return [] as string[];
+        }
+        const nodeKey = keyTree.leafNodeKeyByRawKey.get(selectedKey);
+        return nodeKey ? [nodeKey] : [];
+    }, [selectedKey, keyTree]);
+
+    const checkedTreeNodeKeys = useMemo(() => {
+        return selectedKeys
+            .map(rawKey => keyTree.leafNodeKeyByRawKey.get(rawKey))
+            .filter((nodeKey): nodeKey is string => Boolean(nodeKey));
+    }, [selectedKeys, keyTree]);
+
+    useEffect(() => {
+        const existingKeySet = new Set(keys.map(item => item.key));
+        setSelectedKeys(prev => prev.filter(rawKey => existingKeySet.has(rawKey)));
+    }, [keys]);
+
+    useEffect(() => {
+        setExpandedGroupKeys((prev) => {
+            const validKeys = prev.filter(nodeKey => keyTree.groupKeys.includes(nodeKey));
+            return validKeys;
+        });
+    }, [keyTree]);
+
+    const handleTreeSelect = (nodeKeys: React.Key[]) => {
+        if (nodeKeys.length === 0) {
+            return;
+        }
+        const rawKey = keyTree.rawKeyByNodeKey.get(String(nodeKeys[0]));
+        if (!rawKey) {
+            return;
+        }
+        loadKeyValue(rawKey);
     };
 
-    const columns: ColumnType<RedisKeyInfo>[] = [
-        {
-            title: 'Key',
-            dataIndex: 'key',
-            key: 'key',
-            width: columnWidths.key,
-            ellipsis: true,
-            onHeaderCell: (column: any) => ({
-                width: column.width,
-                onResize: handleColumnResize('key')
-            }),
-            render: (text: string) => (
-                <Tooltip title={text}>
-                    <span style={{ cursor: 'pointer' }} onClick={() => loadKeyValue(text)}>{text}</span>
-                </Tooltip>
-            )
-        },
-        {
-            title: '类型',
-            dataIndex: 'type',
-            key: 'type',
-            width: columnWidths.type,
-            onHeaderCell: (column: any) => ({
-                width: column.width,
-                onResize: handleColumnResize('type')
-            }),
-            render: (type: string) => <Tag color={getTypeColor(type)}>{type}</Tag>
-        },
-        {
-            title: 'TTL',
-            dataIndex: 'ttl',
-            key: 'ttl',
-            width: columnWidths.ttl,
-            onHeaderCell: (column: any) => ({
-                width: column.width,
-                onResize: handleColumnResize('ttl')
-            }),
-            render: (ttl: number) => formatTTL(ttl)
-        },
-        {
-            title: '操作',
-            key: 'action',
-            width: columnWidths.action,
-            onHeaderCell: (column: any) => ({
-                width: column.width,
-                onResize: handleColumnResize('action')
-            }),
-            render: (_: any, record: RedisKeyInfo) => (
-                <Popconfirm title="确定删除此 Key？" onConfirm={() => handleDeleteKeys([record.key])}>
-                    <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-                </Popconfirm>
-            )
-        }
-    ];
+    const handleTreeCheck = (checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }) => {
+        const checkedNodeKeys = Array.isArray(checked) ? checked : checked.checked;
+        const rawKeys = checkedNodeKeys
+            .map(nodeKey => keyTree.rawKeyByNodeKey.get(String(nodeKey)))
+            .filter((rawKey): rawKey is string => Boolean(rawKey));
+        setSelectedKeys(rawKeys);
+    };
 
     const renderValueEditor = () => {
         if (!keyValue || !selectedKey) {
@@ -1375,6 +1449,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             setTtlModalOpen(true);
                         }}>设置 TTL</Button>
                         <Button size="small" onClick={() => loadKeyValue(selectedKey)} icon={<ReloadOutlined />}>刷新</Button>
+                        <Popconfirm title={`确定删除 Key "${selectedKey}"？`} onConfirm={handleDeleteCurrentKey}>
+                            <Button size="small" danger icon={<DeleteOutlined />}>删除 Key</Button>
+                        </Popconfirm>
                     </Space>
                 </div>
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -1410,36 +1487,35 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
                             <Button size="small" icon={<PlusOutlined />} onClick={() => setNewKeyModalOpen(true)}>新建</Button>
                         </Space>
-                        {selectedKeys.length > 0 && (
-                            <Popconfirm title={`确定删除选中的 ${selectedKeys.length} 个 Key？`} onConfirm={() => handleDeleteKeys(selectedKeys)}>
-                                <Button size="small" danger icon={<DeleteOutlined />}>删除选中</Button>
-                            </Popconfirm>
-                        )}
+                        <Popconfirm
+                            title={`确定删除选中的 ${selectedKeys.length} 个 Key？`}
+                            onConfirm={() => handleDeleteKeys(selectedKeys)}
+                            disabled={selectedKeys.length === 0}
+                        >
+                            <Button size="small" danger icon={<DeleteOutlined />} disabled={selectedKeys.length === 0}>
+                                删除选中({selectedKeys.length})
+                            </Button>
+                        </Popconfirm>
                     </div>
                 </div>
                 <div style={{ flex: 1, overflow: 'auto' }}>
-                    <Table
-                        dataSource={keys}
-                        columns={columns}
-                        rowKey="key"
-                        size="small"
-                        loading={loading}
-                        pagination={false}
-                        components={{
-                            header: {
-                                cell: ResizableTitle
-                            }
-                        }}
-                        rowSelection={{
-                            selectedRowKeys: selectedKeys,
-                            onChange: (keys) => setSelectedKeys(keys as string[])
-                        }}
-                        onRow={(record) => ({
-                            onClick: () => loadKeyValue(record.key),
-                            style: { cursor: 'pointer', background: selectedKey === record.key ? '#e6f7ff' : undefined }
-                        })}
-                        style={{ width: '100%' }}
-                    />
+                    <Spin spinning={loading} size="small">
+                        <Tree
+                            blockNode
+                            showIcon={false}
+                            checkable
+                            checkStrictly
+                            selectable
+                            treeData={keyTree.treeData}
+                            selectedKeys={selectedTreeNodeKeys}
+                            checkedKeys={checkedTreeNodeKeys}
+                            expandedKeys={expandedGroupKeys}
+                            onExpand={(nextExpandedKeys) => setExpandedGroupKeys(nextExpandedKeys as string[])}
+                            onSelect={(nodeKeys) => handleTreeSelect(nodeKeys)}
+                            onCheck={(checked) => handleTreeCheck(checked)}
+                            style={{ padding: '8px 6px' }}
+                        />
+                    </Spin>
                     {hasMore && (
                         <div style={{ padding: 8, textAlign: 'center' }}>
                             <Button onClick={handleLoadMore} loading={loading}>加载更多</Button>

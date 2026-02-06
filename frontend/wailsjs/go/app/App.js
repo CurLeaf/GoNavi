@@ -70,6 +70,14 @@ export function DownloadUpdate() {
   return window['go']['app']['App']['DownloadUpdate']();
 }
 
+export function DropDatabase(arg1, arg2) {
+  return window['go']['app']['App']['DropDatabase'](arg1, arg2);
+}
+
+export function DropTable(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropTable'](arg1, arg2, arg3);
+}
+
 export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }
@@ -84,6 +92,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
 
 export function ExportTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTable'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportTablesDataSQL(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ExportTablesDataSQL'](arg1, arg2, arg3);
 }
 
 export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
@@ -212,6 +224,14 @@ export function RedisZSetAdd(arg1, arg2, arg3) {
 
 export function RedisZSetRemove(arg1, arg2, arg3) {
   return window['go']['app']['App']['RedisZSetRemove'](arg1, arg2, arg3);
+}
+
+export function RenameDatabase(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RenameDatabase'](arg1, arg2, arg3);
+}
+
+export function RenameTable(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RenameTable'](arg1, arg2, arg3, arg4);
 }
 
 export function TestConnection(arg1) {

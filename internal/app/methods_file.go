@@ -102,8 +102,8 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 	}
 	defer f.Close()
 
-	var rows []map[string]interface{ } 
-	
+	var rows []map[string]interface{}
+
 	if strings.HasSuffix(strings.ToLower(selection), ".json") {
 		decoder := json.NewDecoder(f)
 		if err := decoder.Decode(&rows); err != nil {
@@ -120,7 +120,7 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 		}
 		headers := records[0]
 		for _, record := range records[1:] {
-			row := make(map[string]interface{ })
+			row := make(map[string]interface{})
 			for i, val := range record {
 				if i < len(headers) {
 					if val == "NULL" {
@@ -153,7 +153,7 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 	for k := range firstRow {
 		cols = append(cols, k)
 	}
-	
+
 	for _, row := range rows {
 		var values []string
 		for _, col := range cols {
@@ -195,7 +195,7 @@ func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	
+
 	if applier, ok := dbInst.(db.BatchApplier); ok {
 		err := applier.ApplyChanges(tableName, changes)
 		if err != nil {
@@ -219,7 +219,7 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 
 	runConfig := normalizeRunConfig(config, dbName)
 
-dbInst, err := a.getDatabase(runConfig)
+	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -238,7 +238,7 @@ dbInst, err := a.getDatabase(runConfig)
 		if err := writeSQLHeader(w, runConfig, dbName); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		if err := dumpTableSQL(w, dbInst, runConfig, dbName, tableName, true); err != nil {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, tableName, true, true); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		if err := writeSQLFooter(w, runConfig); err != nil {
@@ -249,8 +249,8 @@ dbInst, err := a.getDatabase(runConfig)
 	}
 
 	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(runConfig.Type, tableName))
-	
-data, columns, err := dbInst.Query(query)
+
+	data, columns, err := dbInst.Query(query)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -268,13 +268,27 @@ data, columns, err := dbInst.Query(query)
 }
 
 func (a *App) ExportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeData bool) connection.QueryResult {
+	return a.exportTablesSQL(config, dbName, tableNames, true, includeData)
+}
+
+func (a *App) ExportTablesDataSQL(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+	return a.exportTablesSQL(config, dbName, tableNames, false, true)
+}
+
+func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeSchema bool, includeData bool) connection.QueryResult {
+	if !includeSchema && !includeData {
+		return connection.QueryResult{Success: false, Message: "invalid export mode"}
+	}
+
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
 		safeDbName = "export"
 	}
 	suffix := "schema"
-	if includeData {
+	if includeSchema && includeData {
 		suffix = "backup"
+	} else if !includeSchema && includeData {
+		suffix = "data"
 	}
 	defaultFilename := fmt.Sprintf("%s_%s_%dtables.sql", safeDbName, suffix, len(tableNames))
 	if len(tableNames) == 1 && strings.TrimSpace(tableNames[0]) != "" {
@@ -323,7 +337,7 @@ func (a *App) ExportTablesSQL(config connection.ConnectionConfig, dbName string,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	for _, t := range tables {
-		if err := dumpTableSQL(w, dbInst, runConfig, dbName, t, includeData); err != nil {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, t, includeSchema, includeData); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 	}
@@ -377,7 +391,7 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	for _, t := range tables {
-		if err := dumpTableSQL(w, dbInst, runConfig, dbName, t, includeData); err != nil {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, t, true, includeData); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 	}
@@ -534,7 +548,7 @@ func formatSQLValue(dbType string, v interface{}) string {
 	}
 }
 
-func dumpTableSQL(w *bufio.Writer, dbInst db.Database, config connection.ConnectionConfig, dbName, tableName string, includeData bool) error {
+func dumpTableSQL(w *bufio.Writer, dbInst db.Database, config connection.ConnectionConfig, dbName, tableName string, includeSchema bool, includeData bool) error {
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 
 	if _, err := w.WriteString("\n-- ----------------------------\n"); err != nil {
@@ -547,15 +561,17 @@ func dumpTableSQL(w *bufio.Writer, dbInst db.Database, config connection.Connect
 		return err
 	}
 
-	createSQL, err := dbInst.GetCreateStatement(schemaName, pureTableName)
-	if err != nil {
-		return err
-	}
-	if _, err := w.WriteString(ensureSQLTerminator(createSQL)); err != nil {
-		return err
-	}
-	if _, err := w.WriteString("\n\n"); err != nil {
-		return err
+	if includeSchema {
+		createSQL, err := dbInst.GetCreateStatement(schemaName, pureTableName)
+		if err != nil {
+			return err
+		}
+		if _, err := w.WriteString(ensureSQLTerminator(createSQL)); err != nil {
+			return err
+		}
+		if _, err := w.WriteString("\n\n"); err != nil {
+			return err
+		}
 	}
 
 	if !includeData {

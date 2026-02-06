@@ -28,7 +28,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 	} from '@ant-design/icons';
 	import { useStore } from '../store';
 	import { SavedConnection } from '../types';
-	import { DBGetDatabases, DBGetTables, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase } from '../../wailsjs/go/app/App';
+	import { DBGetDatabases, DBGetTables, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable } from '../../wailsjs/go/app/App';
   import { normalizeOpacityForPlatform } from '../utils/appearance';
 
 const { Search } = Input;
@@ -42,6 +42,8 @@ interface TreeNode {
   dataRef?: any;
   type?: 'connection' | 'database' | 'table' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db';
 }
+
+type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
@@ -96,6 +98,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [isCreateDbModalOpen, setIsCreateDbModalOpen] = useState(false);
   const [createDbForm] = Form.useForm();
   const [targetConnection, setTargetConnection] = useState<any>(null);
+  const [isRenameDbModalOpen, setIsRenameDbModalOpen] = useState(false);
+  const [renameDbForm] = Form.useForm();
+  const [renameDbTarget, setRenameDbTarget] = useState<any>(null);
+  const [isRenameTableModalOpen, setIsRenameTableModalOpen] = useState(false);
+  const [renameTableForm] = Form.useForm();
+  const [renameTableTarget, setRenameTableTarget] = useState<any>(null);
 
   // Batch Operations Modal
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -661,7 +669,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       }
   };
 
-  const handleBatchExport = async (includeData: boolean) => {
+  const handleBatchExport = async (mode: BatchTableExportMode) => {
       const selectedTables = batchTables.filter(t => checkedTableKeys.includes(t.key));
       if (selectedTables.length === 0) {
           message.warning('请至少选择一张表');
@@ -673,9 +681,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const { conn, dbName } = batchDbContext;
       const tableNames = selectedTables.map(t => t.tableName);
 
-      const hide = message.loading(includeData ? `正在备份选中表 (${tableNames.length})...` : `正在导出选中表结构 (${tableNames.length})...`, 0);
+      const loadingText = mode === 'backup'
+          ? `正在备份选中表 (${tableNames.length})...`
+          : mode === 'dataOnly'
+              ? `正在导出选中表数据 (INSERT) (${tableNames.length})...`
+              : `正在导出选中表结构 (${tableNames.length})...`;
+      const hide = message.loading(loadingText, 0);
       try {
-          const res = await (window as any).go.app.App.ExportTablesSQL(normalizeConnConfig(conn.config), dbName, tableNames, includeData);
+          const app = (window as any).go.app.App;
+          const res = mode === 'dataOnly'
+              ? await app.ExportTablesDataSQL(normalizeConnConfig(conn.config), dbName, tableNames)
+              : await app.ExportTablesSQL(normalizeConnConfig(conn.config), dbName, tableNames, mode === 'backup');
           hide();
           if (res.success) {
               message.success('导出成功');
@@ -863,6 +879,148 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       } catch (e) {
           // Validate failed
       }
+  };
+
+  const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
+      return {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: clearDatabase ? "" : ((overrideDatabase ?? conn.config.database) || ""),
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+  };
+
+  const getConnectionNodeRef = (connRef: any) => {
+      const latestConn = connections.find(c => c.id === connRef.id);
+      return { key: connRef.id, dataRef: latestConn || connRef };
+  };
+
+  const getDatabaseNodeRef = (connRef: any, dbName: string) => {
+      const latestConn = connections.find(c => c.id === connRef.id);
+      return {
+          key: `${connRef.id}-${dbName}`,
+          dataRef: { ...(latestConn || connRef), dbName }
+      };
+  };
+
+  const extractObjectName = (fullName: string) => {
+      const raw = String(fullName || '').trim();
+      const idx = raw.lastIndexOf('.');
+      if (idx >= 0 && idx < raw.length - 1) {
+          return raw.substring(idx + 1);
+      }
+      return raw;
+  };
+
+  const handleRenameDatabase = async () => {
+      if (!renameDbTarget) return;
+      try {
+          const values = await renameDbForm.validateFields();
+          const conn = renameDbTarget.dataRef;
+          const oldDbName = String(conn.dbName || '').trim();
+          const newDbName = String(values.newName || '').trim();
+          if (!oldDbName || !newDbName) {
+              message.error("数据库名称不能为空");
+              return;
+          }
+          if (oldDbName === newDbName) {
+              message.warning("新旧数据库名称相同，无需修改");
+              return;
+          }
+
+          const config = buildRuntimeConfig(conn, conn.dbName);
+          const res = await RenameDatabase(config as any, oldDbName, newDbName);
+          if (res.success) {
+              message.success("数据库重命名成功");
+              setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
+              setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
+              await loadDatabases(getConnectionNodeRef(conn));
+              setIsRenameDbModalOpen(false);
+              setRenameDbTarget(null);
+              renameDbForm.resetFields();
+          } else {
+              message.error("重命名失败: " + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
+  const handleDeleteDatabase = (node: any) => {
+      const conn = node.dataRef;
+      const dbName = String(conn.dbName || '').trim();
+      if (!dbName) return;
+      Modal.confirm({
+          title: '确认删除数据库',
+          content: `确定删除数据库 "${dbName}" 吗？该操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const config = buildRuntimeConfig(conn, conn.dbName);
+              const res = await DropDatabase(config as any, dbName);
+              if (res.success) {
+                  message.success("数据库删除成功");
+                  setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
+                  setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
+                  await loadDatabases(getConnectionNodeRef(conn));
+              } else {
+                  message.error("删除失败: " + res.message);
+              }
+          }
+      });
+  };
+
+  const handleRenameTable = async () => {
+      if (!renameTableTarget) return;
+      try {
+          const values = await renameTableForm.validateFields();
+          const conn = renameTableTarget.dataRef;
+          const oldTableName = String(conn.tableName || '').trim();
+          const newTableName = String(values.newName || '').trim();
+          if (!oldTableName || !newTableName) {
+              message.error("表名不能为空");
+              return;
+          }
+          if (extractObjectName(oldTableName) === newTableName || oldTableName === newTableName) {
+              message.warning("新旧表名相同，无需修改");
+              return;
+          }
+          const config = buildRuntimeConfig(conn, conn.dbName);
+          const res = await RenameTable(config as any, conn.dbName, oldTableName, newTableName);
+          if (res.success) {
+              message.success("表重命名成功");
+              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              setIsRenameTableModalOpen(false);
+              setRenameTableTarget(null);
+              renameTableForm.resetFields();
+          } else {
+              message.error("重命名失败: " + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
+  const handleDeleteTable = (node: any) => {
+      const conn = node.dataRef;
+      const tableName = String(conn.tableName || '').trim();
+      if (!tableName) return;
+      Modal.confirm({
+          title: '确认删除表',
+          content: `确定删除表 "${tableName}" 吗？该操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const config = buildRuntimeConfig(conn, conn.dbName);
+              const res = await DropTable(config as any, conn.dbName, tableName);
+              if (res.success) {
+                  message.success("表删除成功");
+                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              } else {
+                  message.error("删除失败: " + res.message);
+              }
+          }
+      });
   };
 
   const onSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1089,6 +1247,23 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                onClick: () => openNewTableDesign(node)
            },
            {
+               key: 'rename-db',
+               label: '重命名数据库',
+               icon: <EditOutlined />,
+               onClick: () => {
+                   setRenameDbTarget(node);
+                   renameDbForm.setFieldsValue({ newName: node.dataRef?.dbName || '' });
+                   setIsRenameDbModalOpen(true);
+               }
+           },
+           {
+               key: 'drop-db',
+               label: '删除数据库',
+               icon: <DeleteOutlined />,
+               danger: true,
+               onClick: () => handleDeleteDatabase(node)
+           },
+           {
                key: 'refresh',
                label: '刷新',
                icon: <ReloadOutlined />,
@@ -1179,6 +1354,23 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '备份表 (SQL)',
                 icon: <SaveOutlined />,
                 onClick: () => handleExport(node, 'sql')
+            },
+            {
+                key: 'rename-table',
+                label: '重命名表',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    setRenameTableTarget(node);
+                    renameTableForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.tableName || node.title) });
+                    setIsRenameTableModalOpen(true);
+                }
+            },
+            {
+                key: 'drop-table',
+                label: '删除表',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDeleteTable(node)
             },
             {
                 type: 'divider'
@@ -1296,32 +1488,78 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         </Modal>
 
         <Modal
+            title={`重命名数据库${renameDbTarget?.dataRef?.dbName ? ` (${renameDbTarget.dataRef.dbName})` : ''}`}
+            open={isRenameDbModalOpen}
+            onOk={handleRenameDatabase}
+            onCancel={() => {
+                setIsRenameDbModalOpen(false);
+                setRenameDbTarget(null);
+                renameDbForm.resetFields();
+            }}
+        >
+            <Form form={renameDbForm} layout="vertical">
+                <Form.Item name="newName" label="新数据库名称" rules={[{ required: true, message: '请输入新数据库名称' }]}>
+                    <Input />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`重命名表${renameTableTarget?.dataRef?.tableName ? ` (${renameTableTarget.dataRef.tableName})` : ''}`}
+            open={isRenameTableModalOpen}
+            onOk={handleRenameTable}
+            onCancel={() => {
+                setIsRenameTableModalOpen(false);
+                setRenameTableTarget(null);
+                renameTableForm.resetFields();
+            }}
+        >
+            <Form form={renameTableForm} layout="vertical">
+                <Form.Item name="newName" label="新表名" rules={[{ required: true, message: '请输入新表名' }]}>
+                    <Input />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
             title="批量操作表"
             open={isBatchModalOpen}
             onCancel={() => setIsBatchModalOpen(false)}
-            width={600}
-            footer={[
-                <Button key="cancel" onClick={() => setIsBatchModalOpen(false)}>
-                    取消
-                </Button>,
-                <Button
-                    key="export-schema"
-                    icon={<ExportOutlined />}
-                    onClick={() => handleBatchExport(false)}
-                    disabled={checkedTableKeys.length === 0}
-                >
-                    导出表结构 ({checkedTableKeys.length})
-                </Button>,
-                <Button
-                    key="backup"
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    onClick={() => handleBatchExport(true)}
-                    disabled={checkedTableKeys.length === 0}
-                >
-                    备份表 ({checkedTableKeys.length})
-                </Button>
-            ]}
+            width={680}
+            footer={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Button key="cancel" onClick={() => setIsBatchModalOpen(false)}>
+                        取消
+                    </Button>
+                    <Space size={8} wrap style={{ marginLeft: 'auto' }}>
+                        <Button
+                            key="export-schema"
+                            icon={<ExportOutlined />}
+                            onClick={() => handleBatchExport('schema')}
+                            disabled={checkedTableKeys.length === 0}
+                        >
+                            导出结构
+                        </Button>
+                        <Button
+                            key="export-data-only"
+                            icon={<SaveOutlined />}
+                            onClick={() => handleBatchExport('dataOnly')}
+                            disabled={checkedTableKeys.length === 0}
+                        >
+                            仅数据(INSERT)
+                        </Button>
+                        <Button
+                            key="backup"
+                            type="primary"
+                            icon={<SaveOutlined />}
+                            onClick={() => handleBatchExport('backup')}
+                            disabled={checkedTableKeys.length === 0}
+                        >
+                            备份(结构+数据)
+                        </Button>
+                    </Space>
+                </div>
+            }
         >
             <div style={{ marginBottom: 16 }}>
                 <div style={{ marginBottom: 8 }}>
