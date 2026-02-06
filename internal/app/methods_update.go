@@ -28,9 +28,9 @@ const (
 )
 
 type updateState struct {
-	lastCheck  *UpdateInfo
+	lastCheck   *UpdateInfo
 	downloading bool
-	staged     *stagedUpdate
+	staged      *stagedUpdate
 }
 
 type UpdateInfo struct {
@@ -46,12 +46,12 @@ type UpdateInfo struct {
 }
 
 type AppInfo struct {
-	Version   string `json:"version"`
-	Author    string `json:"author"`
-	RepoURL   string `json:"repoUrl,omitempty"`
-	IssueURL  string `json:"issueUrl,omitempty"`
+	Version    string `json:"version"`
+	Author     string `json:"author"`
+	RepoURL    string `json:"repoUrl,omitempty"`
+	IssueURL   string `json:"issueUrl,omitempty"`
 	ReleaseURL string `json:"releaseUrl,omitempty"`
-	BuildTime string `json:"buildTime,omitempty"`
+	BuildTime  string `json:"buildTime,omitempty"`
 }
 
 type stagedUpdate struct {
@@ -62,11 +62,11 @@ type stagedUpdate struct {
 }
 
 type githubRelease struct {
-	TagName    string         `json:"tag_name"`
-	Name       string         `json:"name"`
-	HTMLURL    string         `json:"html_url"`
-	Prerelease bool           `json:"prerelease"`
-	Assets     []githubAsset  `json:"assets"`
+	TagName    string        `json:"tag_name"`
+	Name       string        `json:"name"`
+	HTMLURL    string        `json:"html_url"`
+	Prerelease bool          `json:"prerelease"`
+	Assets     []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
@@ -95,12 +95,12 @@ func (a *App) CheckForUpdates() connection.QueryResult {
 
 func (a *App) GetAppInfo() connection.QueryResult {
 	info := AppInfo{
-		Version:   getCurrentVersion(),
-		Author:    getCurrentAuthor(),
-		RepoURL:   "https://github.com/" + updateRepo,
-		IssueURL:  "https://github.com/" + updateRepo + "/issues",
+		Version:    getCurrentVersion(),
+		Author:     getCurrentAuthor(),
+		RepoURL:    "https://github.com/" + updateRepo,
+		IssueURL:   "https://github.com/" + updateRepo + "/issues",
 		ReleaseURL: "https://github.com/" + updateRepo + "/releases",
-		BuildTime: strings.TrimSpace(AppBuildTime),
+		BuildTime:  strings.TrimSpace(AppBuildTime),
 	}
 	return connection.QueryResult{Success: true, Message: "OK", Data: info}
 }
@@ -156,6 +156,9 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		wailsRuntime.Quit(a.ctx)
+		// 兜底退出，避免某些平台/窗口状态下 Quit 未真正结束进程，导致更新脚本一直等待。
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
 	}()
 
 	return connection.QueryResult{Success: true, Message: "更新已开始安装"}
@@ -422,32 +425,33 @@ func launchUpdateScript(staged *stagedUpdate) error {
 
 func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 	scriptPath := filepath.Join(staged.StagedDir, "update.cmd")
-	content := buildWindowsScript(staged.FilePath, targetExe, staged.StagedDir, pid)
+	logPath := filepath.Join(staged.StagedDir, "update.log")
+	content := buildWindowsScript(staged.FilePath, targetExe, staged.StagedDir, logPath, pid)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
 		return err
 	}
 
+	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, logPath)
 	cmd := exec.Command("cmd", "/C", "start", "", scriptPath)
 	return cmd.Start()
 }
 
 func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
-	targetApp := detectMacAppPath(targetExe)
-	if targetApp == "" {
-		targetApp = "/Applications/GoNavi.app"
-	}
+	targetApp := resolveMacUpdateTarget(targetExe)
 	mountDir := filepath.Join(staged.StagedDir, "mnt")
 	if err := os.MkdirAll(mountDir, 0o755); err != nil {
 		return err
 	}
+	logPath := filepath.Join(staged.StagedDir, "update.log")
 
 	scriptPath := filepath.Join(staged.StagedDir, "update.sh")
-	content := buildMacScript(staged.FilePath, targetApp, staged.StagedDir, mountDir, pid)
+	content := buildMacScript(staged.FilePath, targetApp, staged.StagedDir, mountDir, logPath, pid)
 	if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("/bin/sh", scriptPath)
+	cmd := exec.Command("/bin/bash", scriptPath)
+	logger.Infof("启动 macOS 更新脚本：target=%s script=%s log=%s", targetApp, scriptPath, logPath)
 	return cmd.Start()
 }
 
@@ -462,49 +466,126 @@ func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 	return cmd.Start()
 }
 
-func buildWindowsScript(source, target, stagedDir string, pid int) string {
+func buildWindowsScript(source, target, stagedDir, logPath string, pid int) string {
 	return fmt.Sprintf(`@echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 set "SOURCE=%s"
 set "TARGET=%s"
 set "STAGED=%s"
+set "LOG_FILE=%s"
 set PID=%d
+
+call :log updater started
+if not exist "%%SOURCE%%" (
+  call :log source file not found: %%SOURCE%%
+  exit /b 1
+)
+
 :waitloop
 tasklist /FI "PID eq %%PID%%" | find "%%PID%%" >nul
 if %%ERRORLEVEL%%==0 (
   timeout /t 1 /nobreak >nul
   goto waitloop
 )
-move /Y "%%SOURCE%%" "%%TARGET%%" >nul
-start "" "%%TARGET%%"
-rmdir /S /Q "%%STAGED%%"
+call :log host process exited
+
+set /a RETRY=0
+:move_retry
+move /Y "%%SOURCE%%" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
+if %%ERRORLEVEL%%==0 goto move_done
+
+copy /Y "%%SOURCE%%" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
+if %%ERRORLEVEL%%==0 goto move_done
+
+set /a RETRY+=1
+if !RETRY! LSS 20 (
+  timeout /t 1 /nobreak >nul
+  goto move_retry
+)
+
+call :log replace failed after retries (portable mode, no elevation): check directory write permission or file lock
+exit /b 1
+
+:move_done
+start "" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
+if %%ERRORLEVEL%% NEQ 0 (
+  call :log relaunch failed
+  exit /b 1
+)
+rmdir /S /Q "%%STAGED%%" >> "%%LOG_FILE%%" 2>&1
+call :log update finished
 exit /b 0
-`, source, target, stagedDir, pid)
+
+:log
+echo [%%date%% %%time%%] %%*>>"%%LOG_FILE%%"
+exit /b 0
+`, source, target, stagedDir, logPath, pid)
 }
 
-func buildMacScript(dmgPath, targetApp, stagedDir, mountDir string, pid int) string {
+func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
 	return fmt.Sprintf(`#!/bin/bash
-set -e
+set -euo pipefail
 PID=%d
 DMG="%s"
 TARGET_APP="%s"
 STAGED="%s"
 MOUNT_DIR="%s"
+LOG_FILE="%s"
+
+log() {
+  echo "[$(date '+%%Y-%%m-%%d %%H:%%M:%%S')] $*" >> "$LOG_FILE"
+}
+
+run_admin_install() {
+  /usr/bin/osascript <<'APPLESCRIPT' "$APP_SRC" "$TARGET_APP" "$LOG_FILE"
+on run argv
+  set srcPath to item 1 of argv
+  set dstPath to item 2 of argv
+  set logPath to item 3 of argv
+  do shell script "rm -rf " & quoted form of dstPath & " && cp -R " & quoted form of srcPath & " " & quoted form of dstPath & " >> " & quoted form of logPath & " 2>&1" with administrator privileges
+end run
+APPLESCRIPT
+}
+
+run_admin_xattr() {
+  /usr/bin/osascript <<'APPLESCRIPT' "$TARGET_APP" "$LOG_FILE"
+on run argv
+  set dstPath to item 1 of argv
+  set logPath to item 2 of argv
+  do shell script "xattr -rd com.apple.quarantine " & quoted form of dstPath & " >> " & quoted form of logPath & " 2>&1" with administrator privileges
+end run
+APPLESCRIPT
+}
+
+log "updater started"
 while kill -0 $PID 2>/dev/null; do
   sleep 1
 done
-hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT_DIR"
-APP_SRC=$(ls "$MOUNT_DIR"/*.app 2>/dev/null | head -n 1)
+log "host process exited"
+hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT_DIR" >>"$LOG_FILE" 2>&1
+APP_SRC=$(ls "$MOUNT_DIR"/*.app 2>/dev/null | head -n 1 || true)
 if [ -z "$APP_SRC" ]; then
-  hdiutil detach "$MOUNT_DIR" -quiet || true
+  log "no .app found inside dmg"
+  hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
   exit 1
 fi
-rm -rf "$TARGET_APP"
-cp -R "$APP_SRC" "$TARGET_APP"
-hdiutil detach "$MOUNT_DIR" -quiet
-rm -rf "$MOUNT_DIR" "$DMG" "$STAGED"
-open "$TARGET_APP"
-`, pid, dmgPath, targetApp, stagedDir, mountDir)
+
+log "install target: $TARGET_APP"
+if ! rm -rf "$TARGET_APP" >>"$LOG_FILE" 2>&1 || ! cp -R "$APP_SRC" "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+  log "direct install failed, trying admin install"
+  run_admin_install >>"$LOG_FILE" 2>&1
+fi
+
+if ! xattr -rd com.apple.quarantine "$TARGET_APP" >>"$LOG_FILE" 2>&1; then
+  log "direct xattr failed, trying admin xattr"
+  run_admin_xattr >>"$LOG_FILE" 2>&1 || true
+fi
+
+hdiutil detach "$MOUNT_DIR" -quiet >>"$LOG_FILE" 2>&1 || true
+rm -rf "$MOUNT_DIR" "$DMG" "$STAGED" >>"$LOG_FILE" 2>&1 || true
+open "$TARGET_APP" >>"$LOG_FILE" 2>&1
+log "relaunch requested"
+`, pid, dmgPath, targetApp, stagedDir, mountDir, logPath)
 }
 
 func buildLinuxScript(tarPath, targetExe, stagedDir string, pid int) string {
@@ -541,6 +622,20 @@ func detectMacAppPath(exePath string) string {
 		}
 	}
 	return ""
+}
+
+func resolveMacUpdateTarget(exePath string) string {
+	targetApp := detectMacAppPath(exePath)
+	if targetApp == "" {
+		return "/Applications/GoNavi.app"
+	}
+	targetApp = filepath.Clean(targetApp)
+	// Gatekeeper App Translocation 路径不可用于稳定覆盖更新，统一回退到 /Applications。
+	if strings.Contains(targetApp, string(filepath.Separator)+"AppTranslocation"+string(filepath.Separator)) {
+		logger.Warnf("检测到 AppTranslocation 运行路径，更新目标回退至 /Applications/GoNavi.app：%s", targetApp)
+		return "/Applications/GoNavi.app"
+	}
+	return targetApp
 }
 
 func normalizeVersion(version string) string {
