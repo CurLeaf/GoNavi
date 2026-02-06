@@ -20,7 +20,7 @@ func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResu
 		logger.Error(err, "DBConnect 连接失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	
+
 	logger.Infof("DBConnect 连接成功：%s", formatConnSummary(config))
 	return connection.QueryResult{Success: true, Message: "连接成功"}
 }
@@ -31,14 +31,14 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 		logger.Error(err, "TestConnection 连接测试失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	
+
 	logger.Infof("TestConnection 连接测试成功：%s", formatConnSummary(config))
 	return connection.QueryResult{Success: true, Message: "连接成功"}
 }
 
 func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	runConfig := config
-	runConfig.Database = "" 
+	runConfig.Database = ""
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -58,6 +58,221 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	}
 
 	return connection.QueryResult{Success: true, Message: "Database created successfully"}
+}
+
+func resolveDDLDBType(config connection.ConnectionConfig) string {
+	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType != "custom" {
+		return dbType
+	}
+
+	driver := strings.ToLower(strings.TrimSpace(config.Driver))
+	switch driver {
+	case "postgresql":
+		return "postgres"
+	case "dm":
+		return "dameng"
+	case "sqlite3":
+		return "sqlite"
+	default:
+		return driver
+	}
+}
+
+func normalizeSchemaAndTableByType(dbType string, dbName string, tableName string) (string, string) {
+	rawTable := strings.TrimSpace(tableName)
+	rawDB := strings.TrimSpace(dbName)
+	if rawTable == "" {
+		return rawDB, rawTable
+	}
+
+	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
+		schema := strings.TrimSpace(parts[0])
+		table := strings.TrimSpace(parts[1])
+		if schema != "" && table != "" {
+			return schema, table
+		}
+	}
+
+	switch dbType {
+	case "postgres", "kingbase":
+		return "public", rawTable
+	default:
+		return rawDB, rawTable
+	}
+}
+
+func quoteTableIdentByType(dbType string, schema string, table string) string {
+	s := strings.TrimSpace(schema)
+	t := strings.TrimSpace(table)
+	if s == "" {
+		return quoteIdentByType(dbType, t)
+	}
+	return fmt.Sprintf("%s.%s", quoteIdentByType(dbType, s), quoteIdentByType(dbType, t))
+}
+
+func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbName string) connection.ConnectionConfig {
+	runConfig := normalizeRunConfig(config, dbName)
+	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
+		// custom 连接的 dbName 语义依赖 driver，尽量在常见驱动上对齐内置类型行为。
+		switch dbType {
+		case "mysql", "postgres", "kingbase", "dameng":
+			if strings.TrimSpace(dbName) != "" {
+				runConfig.Database = strings.TrimSpace(dbName)
+			}
+		}
+	}
+	return runConfig
+}
+
+func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string, newName string) connection.QueryResult {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+	if strings.EqualFold(oldName, newName) {
+		return connection.QueryResult{Success: false, Message: "新旧数据库名称不能相同"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	switch dbType {
+	case "mysql":
+		return connection.QueryResult{Success: false, Message: "MySQL 不支持直接重命名数据库，请新建库后迁移数据"}
+	case "postgres", "kingbase":
+		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
+			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}
+		}
+		runConfig := config
+		if strings.TrimSpace(runConfig.Database) == "" {
+			runConfig.Database = "postgres"
+		}
+		dbInst, err := a.getDatabase(runConfig)
+		if err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		sql := fmt.Sprintf("ALTER DATABASE %s RENAME TO %s", quoteIdentByType(dbType, oldName), quoteIdentByType(dbType, newName))
+		if _, err := dbInst.Exec(sql); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		return connection.QueryResult{Success: true, Message: "数据库重命名成功"}
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名数据库", dbType)}
+	}
+}
+
+func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	dbName = strings.TrimSpace(dbName)
+	if dbName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	var (
+		runConfig connection.ConnectionConfig
+		sql       string
+	)
+	switch dbType {
+	case "mysql":
+		runConfig = config
+		runConfig.Database = ""
+		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
+	case "postgres", "kingbase":
+		if strings.EqualFold(strings.TrimSpace(config.Database), dbName) {
+			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再删除"}
+		}
+		runConfig = config
+		if strings.TrimSpace(runConfig.Database) == "" {
+			runConfig.Database = "postgres"
+		}
+		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除数据库", dbType)}
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "数据库删除成功"}
+}
+
+func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, oldTableName string, newTableName string) connection.QueryResult {
+	oldTableName = strings.TrimSpace(oldTableName)
+	newTableName = strings.TrimSpace(newTableName)
+	if oldTableName == "" || newTableName == "" {
+		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+	}
+	if strings.EqualFold(oldTableName, newTableName) {
+		return connection.QueryResult{Success: false, Message: "新旧表名不能相同"}
+	}
+	if strings.Contains(newTableName, ".") {
+		return connection.QueryResult{Success: false, Message: "新表名不能包含 schema 或数据库前缀"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	switch dbType {
+	case "mysql", "postgres", "kingbase", "sqlite", "oracle", "dameng":
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名表", dbType)}
+	}
+
+	schemaName, pureOldTableName := normalizeSchemaAndTableByType(dbType, dbName, oldTableName)
+	if pureOldTableName == "" {
+		return connection.QueryResult{Success: false, Message: "旧表名不能为空"}
+	}
+	oldQualifiedTable := quoteTableIdentByType(dbType, schemaName, pureOldTableName)
+	newTableQuoted := quoteIdentByType(dbType, newTableName)
+
+	sql := fmt.Sprintf("ALTER TABLE %s RENAME TO %s", oldQualifiedTable, newTableQuoted)
+	if dbType == "mysql" {
+		newQualifiedTable := quoteTableIdentByType(dbType, schemaName, newTableName)
+		sql = fmt.Sprintf("RENAME TABLE %s TO %s", oldQualifiedTable, newQualifiedTable)
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "表重命名成功"}
+}
+
+func (a *App) DropTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	tableName = strings.TrimSpace(tableName)
+	if tableName == "" {
+		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	switch dbType {
+	case "mysql", "postgres", "kingbase", "sqlite", "oracle", "dameng":
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除表", dbType)}
+	}
+
+	schemaName, pureTableName := normalizeSchemaAndTableByType(dbType, dbName, tableName)
+	if pureTableName == "" {
+		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+	}
+	qualifiedTable := quoteTableIdentByType(dbType, schemaName, pureTableName)
+	sql := fmt.Sprintf("DROP TABLE %s", qualifiedTable)
+
+	runConfig := buildRunConfigForDDL(config, dbType, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "表删除成功"}
 }
 
 func (a *App) MySQLConnect(config connection.ConnectionConfig) connection.QueryResult {
@@ -156,12 +371,12 @@ func (a *App) DBGetDatabases(config connection.ConnectionConfig) connection.Quer
 		logger.Error(err, "DBGetDatabases 获取数据库列表失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	
+
 	var resData []map[string]string
 	for _, name := range dbs {
 		resData = append(resData, map[string]string{"Database": name})
 	}
-	
+
 	return connection.QueryResult{Success: true, Data: resData}
 }
 

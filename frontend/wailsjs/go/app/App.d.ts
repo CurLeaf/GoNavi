@@ -38,6 +38,10 @@ export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Pr
 
 export function DownloadUpdate():Promise<connection.QueryResult>;
 
+export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
@@ -45,6 +49,8 @@ export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,a
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function ExportTablesDataSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ExportTablesSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean):Promise<connection.QueryResult>;
 
@@ -109,5 +115,9 @@ export function RedisTestConnection(arg1:connection.ConnectionConfig):Promise<co
 export function RedisZSetAdd(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<redis.ZSetMember>):Promise<connection.QueryResult>;
 
 export function RedisZSetRemove(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
+
+export function RenameDatabase(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
