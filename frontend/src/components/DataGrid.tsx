@@ -60,7 +60,13 @@ class DataGridErrorBoundary extends React.Component<
 export const GONAVI_ROW_KEY = '__gonavi_row_key__';
 
 // Normalize RFC3339-like datetime strings to `YYYY-MM-DD HH:mm:ss` for display/editing.
+// Also handle invalid datetime values like '0000-00-00 00:00:00'
 const normalizeDateTimeString = (val: string) => {
+    // 检查是否为无效日期时间（0000-00-00 或类似格式）
+    if (/^0{4}-0{2}-0{2}/.test(val)) {
+        return val; // 保持原样显示，不尝试转换
+    }
+
     const match = val.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
     if (!match) return val;
     return `${match[1]} ${match[2]}`;
