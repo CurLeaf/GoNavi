@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } 
 import { createPortal } from 'react-dom';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal } from 'antd';
 import type { SortOrder } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges } from '../../wailsjs/go/app/App';
 import { useStore } from '../store';
@@ -11,11 +11,62 @@ import 'react-resizable/css/styles.css';
 import { buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform } from '../utils/appearance';
 
+// --- Error Boundary ---
+interface DataGridErrorBoundaryState {
+    hasError: boolean;
+    error: Error | null;
+}
+
+class DataGridErrorBoundary extends React.Component<
+    { children: React.ReactNode },
+    DataGridErrorBoundaryState
+> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: Error): DataGridErrorBoundaryState {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+        console.error('DataGrid render error:', error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div style={{ padding: 16, color: '#ff4d4f' }}>
+                    <h4>渲染错误</h4>
+                    <p>数据表格渲染时发生错误，可能是数据格式问题。</p>
+                    <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {this.state.error?.message}
+                    </pre>
+                    <Button
+                        size="small"
+                        onClick={() => this.setState({ hasError: false, error: null })}
+                    >
+                        重试
+                    </Button>
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
+
 // 内部行标识字段：避免与真实业务字段（如 `key` 列）冲突。
 export const GONAVI_ROW_KEY = '__gonavi_row_key__';
 
 // Normalize RFC3339-like datetime strings to `YYYY-MM-DD HH:mm:ss` for display/editing.
+// Also handle invalid datetime values like '0000-00-00 00:00:00'
 const normalizeDateTimeString = (val: string) => {
+    // 检查是否为无效日期时间（0000-00-00 或类似格式）
+    if (/^0{4}-0{2}-0{2}/.test(val)) {
+        return val; // 保持原样显示，不尝试转换
+    }
+
     const match = val.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
     if (!match) return val;
     return `${match[1]} ${match[2]}`;
@@ -23,12 +74,23 @@ const normalizeDateTimeString = (val: string) => {
 
 // --- Helper: Format Value ---
 const formatCellValue = (val: any) => {
-    if (val === null) return <span style={{ color: '#ccc' }}>NULL</span>;
-    if (typeof val === 'object') return JSON.stringify(val);
-    if (typeof val === 'string') {
-        return normalizeDateTimeString(val);
+    try {
+        if (val === null) return <span style={{ color: '#ccc' }}>NULL</span>;
+        if (typeof val === 'object') {
+            try {
+                return JSON.stringify(val);
+            } catch {
+                return '[Object]';
+            }
+        }
+        if (typeof val === 'string') {
+            return normalizeDateTimeString(val);
+        }
+        return String(val);
+    } catch (e) {
+        console.error('formatCellValue error:', e);
+        return '[Error]';
     }
-    return String(val);
 };
 
 const toEditableText = (val: any): string => {
@@ -48,6 +110,46 @@ const toFormText = (val: any): string => {
 };
 
 const INLINE_EDIT_MAX_CHARS = 2000;
+
+/**
+ * 智能自增算法：
+ * - 纯数字：+1
+ * - 字符串末尾数字：末尾数字 +1（保持前导零位数）
+ * - 无数字：原值不变
+ */
+const smartIncrement = (value: any, step: number = 1): any => {
+    if (value === null || value === undefined) return value;
+
+    // 纯数字类型
+    if (typeof value === 'number') {
+        return value + step;
+    }
+
+    const str = String(value);
+
+    // 纯数字字符串
+    if (/^-?\d+(\.\d+)?$/.test(str)) {
+        const num = parseFloat(str);
+        if (Number.isInteger(num)) {
+            return String(num + step);
+        }
+        return String((num + step).toFixed((str.split('.')[1] || '').length));
+    }
+
+    // 字符串末尾数字模式（如 item_1, user001）
+    const match = str.match(/^(.*?)(\d+)$/);
+    if (match) {
+        const prefix = match[1];
+        const numStr = match[2];
+        const num = parseInt(numStr, 10) + step;
+        // 保持前导零位数
+        const newNumStr = String(num).padStart(numStr.length, '0');
+        return prefix + newNumStr;
+    }
+
+    // 无法自增，返回原值
+    return value;
+};
 
 const shouldOpenModalEditor = (val: any): boolean => {
     if (val === null || val === undefined) return false;
@@ -129,6 +231,8 @@ const ResizableTitle = (props: any) => {
 const EditableContext = React.createContext<any>(null);
 const CellContextMenuContext = React.createContext<{
     showMenu: (e: React.MouseEvent, record: Item, dataIndex: string, title: React.ReactNode) => void;
+    handleBatchFillToSelected: (record: Item, dataIndex: string) => void;
+    handleDragFillStart: (record: Item, dataIndex: string, cellElement: HTMLElement) => void;
 } | null>(null);
 const DataContext = React.createContext<{
     selectedRowKeysRef: React.MutableRefObject<React.Key[]>;
@@ -167,6 +271,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   ...restProps
 }) => {
   const [editing, setEditing] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const inputRef = useRef<any>(null);
   const cellRef = useRef<HTMLTableCellElement>(null);
   const form = useContext(EditableContext);
@@ -247,10 +352,37 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     ) : (
       <div
         className="editable-cell-value-wrap"
-        style={{ paddingRight: 24, minHeight: 20 }}
+        style={{ paddingRight: 24, minHeight: 20, position: 'relative' }}
         onContextMenu={handleContextMenu}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         {children}
+        {/* 填充柄 - 仅在悬停时显示 */}
+        {isHovered && cellContextMenuContext && (
+          <div
+            className="fill-handle"
+            style={{
+              position: 'absolute',
+              right: 2,
+              bottom: 2,
+              width: 8,
+              height: 8,
+              background: '#1890ff',
+              cursor: 'crosshair',
+              borderRadius: 1,
+              zIndex: 10,
+            }}
+            title="拖拽向下填充"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (cellRef.current && cellContextMenuContext) {
+                cellContextMenuContext.handleDragFillStart(record, dataIndex, cellRef.current);
+              }
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -420,6 +552,34 @@ const DataGrid: React.FC<DataGridProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingScrollToBottomRef = useRef(false);
 
+  // 拖拽填充状态 - 只保留必要的 React 状态
+  const [dragFillActive, setDragFillActive] = useState(false);
+  const dragFillGhostRef = useRef<HTMLDivElement>(null);
+  const dragFillRafRef = useRef<number | null>(null);
+  // 使用 ref 存储拖拽数据，避免状态更新导致重渲染
+  const dragFillDataRef = useRef<{
+    startRecord: Item | null;
+    dataIndex: string;
+    startRowIndex: number;
+    currentRowIndex: number;
+    startCellRect: DOMRect | null;
+    colIndex: number;
+    // 缓存 DOM 查询结果
+    cachedRows: HTMLElement[];
+    cachedRowKeys: string[];
+    cachedStartEl: HTMLElement | null;
+  }>({
+    startRecord: null,
+    dataIndex: '',
+    startRowIndex: -1,
+    currentRowIndex: -1,
+    startCellRect: null,
+    colIndex: -1,
+    cachedRows: [],
+    cachedRowKeys: [],
+    cachedStartEl: null,
+  });
+
   const scrollTableBodyToBottom = useCallback(() => {
       const root = containerRef.current;
       if (!root) return;
@@ -579,6 +739,270 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [tableName, dbName, connectionId]); // Reset on context change
 
   const rowKeyStr = useCallback((k: React.Key) => String(k), []);
+
+  // 批量填充到选中行
+  const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {
+    const sourceValue = sourceRecord[dataIndex];
+    const selKeys = selectedRowKeysRef.current;
+
+    if (selKeys.length === 0) {
+      message.info('请先选择要填充的行');
+      return;
+    }
+
+    const sourceKey = sourceRecord?.[GONAVI_ROW_KEY];
+    // 过滤掉源行本身
+    const targetKeys = selKeys.filter(k => k !== sourceKey);
+
+    if (targetKeys.length === 0) {
+      message.info('没有其他选中的行可以填充');
+      return;
+    }
+
+    // 批量更新
+    let updatedCount = 0;
+    targetKeys.forEach(key => {
+      const keyStr = rowKeyStr(key);
+      const isAdded = addedRows.some(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+
+      if (isAdded) {
+        setAddedRows(prev => prev.map(r => {
+          if (rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) {
+            updatedCount++;
+            return { ...r, [dataIndex]: sourceValue };
+          }
+          return r;
+        }));
+      } else {
+        setModifiedRows(prev => {
+          const existing = prev[keyStr] || {};
+          // 获取原始行数据
+          const originalRow = displayDataRef.current.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+          updatedCount++;
+          return {
+            ...prev,
+            [keyStr]: { ...originalRow, ...existing, [dataIndex]: sourceValue }
+          };
+        });
+      }
+    });
+
+    message.success(`已填充 ${updatedCount} 行`);
+    setCellContextMenu(prev => ({ ...prev, visible: false }));
+  }, [addedRows, rowKeyStr]);
+
+  // 拖拽填充开始
+  const handleDragFillStart = useCallback((record: Item, dataIndex: string, cellElement: HTMLElement) => {
+    const currentData = displayDataRef.current;
+    const rowKey = record?.[GONAVI_ROW_KEY];
+    const rowIndex = currentData.findIndex(r => r?.[GONAVI_ROW_KEY] === rowKey);
+
+    if (rowIndex === -1) return;
+
+    const cellRect = cellElement.getBoundingClientRect();
+
+    // 预先计算列索引
+    let colIndex = -1;
+    const headerRow = containerRef.current?.querySelector('.ant-table-thead tr');
+    if (headerRow) {
+      const headerCells = headerRow.querySelectorAll('th');
+      headerCells.forEach((th, idx) => {
+        const titleSpan = th.querySelector('.ant-table-column-title');
+        const titleText = titleSpan?.textContent?.trim() || th.textContent?.trim();
+        if (titleText === dataIndex) {
+          colIndex = idx;
+        }
+      });
+    }
+
+    // 预先缓存所有行的 DOM 元素和 key
+    const tableBody = containerRef.current?.querySelector('.ant-table-body');
+    const rows = tableBody ? Array.from(tableBody.querySelectorAll('tr[data-row-key]')) as HTMLElement[] : [];
+    const rowKeys = rows.map(r => r.getAttribute('data-row-key') || '');
+    const startKey = String(rowKey);
+    const startEl = rows.find((_, i) => rowKeys[i] === startKey) || null;
+
+    // 存储到 ref
+    dragFillDataRef.current = {
+      startRecord: record,
+      dataIndex,
+      startRowIndex: rowIndex,
+      currentRowIndex: rowIndex,
+      startCellRect: cellRect,
+      colIndex,
+      cachedRows: rows,
+      cachedRowKeys: rowKeys,
+      cachedStartEl: startEl,
+    };
+
+    setDragFillActive(true);
+    document.body.style.cursor = 'crosshair';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // 拖拽填充移动（极致优化：最小化 DOM 操作）
+  const handleDragFillMove = useCallback((e: MouseEvent) => {
+    const data = dragFillDataRef.current;
+    if (!data.startRecord) return;
+
+    const ghost = dragFillGhostRef.current;
+    if (!ghost) return;
+
+    const mouseY = e.clientY;
+    const rows = data.cachedRows;
+    const rowKeys = data.cachedRowKeys;
+    const startEl = data.cachedStartEl;
+
+    if (!startEl || rows.length === 0) {
+      ghost.style.display = 'none';
+      return;
+    }
+
+    // 二分查找优化：找到鼠标所在的行
+    let endEl: HTMLElement = startEl;
+    let endIdx = data.startRowIndex;
+
+    // 使用简单遍历（行数通常不多，二分查找收益有限）
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rect = row.getBoundingClientRect();
+
+      // 只需要检查行的底部边界
+      if (mouseY >= rect.top) {
+        const currentData = displayDataRef.current;
+        const rowKey = rowKeys[i];
+        const dataIdx = currentData.findIndex(r => String(r?.[GONAVI_ROW_KEY]) === rowKey);
+
+        if (dataIdx > data.startRowIndex) {
+          endEl = row;
+          endIdx = dataIdx;
+        }
+      }
+    }
+
+    data.currentRowIndex = endIdx;
+
+    // 直接读取位置并更新样式（单次 reflow）
+    const startRect = startEl.getBoundingClientRect();
+    const endRect = endEl.getBoundingClientRect();
+
+    const cells = startEl.querySelectorAll('td');
+    const targetCell = (data.colIndex >= 0 && cells[data.colIndex]) ? cells[data.colIndex] : null;
+    const cellLeft = targetCell ? targetCell.getBoundingClientRect().left : data.startCellRect!.left;
+    const cellWidth = targetCell ? targetCell.getBoundingClientRect().width : data.startCellRect!.width;
+
+    // 批量设置样式（浏览器会合并为一次重绘）
+    ghost.style.cssText = `
+      position: fixed;
+      display: block;
+      left: ${cellLeft}px;
+      top: ${startRect.top}px;
+      width: ${cellWidth}px;
+      height: ${endRect.bottom - startRect.top}px;
+      border: 2px solid #1890ff;
+      background: rgba(24, 144, 255, 0.1);
+      pointer-events: none;
+      z-index: 9998;
+    `;
+  }, []);
+
+  // 拖拽填充结束
+  const handleDragFillEnd = useCallback(() => {
+    // 清理 RAF
+    if (dragFillRafRef.current !== null) {
+      cancelAnimationFrame(dragFillRafRef.current);
+      dragFillRafRef.current = null;
+    }
+
+    const data = dragFillDataRef.current;
+
+    if (!data.startRecord) {
+      setDragFillActive(false);
+      return;
+    }
+
+    const { startRecord, dataIndex, startRowIndex, currentRowIndex } = data;
+    const sourceValue = startRecord[dataIndex];
+    const currentData = displayDataRef.current;
+
+    // 计算需要填充的行
+    if (currentRowIndex > startRowIndex) {
+      let updatedCount = 0;
+      for (let i = startRowIndex + 1; i <= currentRowIndex && i < currentData.length; i++) {
+        const targetRow = currentData[i];
+        const targetKey = targetRow?.[GONAVI_ROW_KEY];
+        if (targetKey === undefined) continue;
+
+        const keyStr = rowKeyStr(targetKey);
+        const step = i - startRowIndex;
+        const fillValue = smartIncrement(sourceValue, step);
+
+        const isAdded = addedRows.some(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
+
+        if (isAdded) {
+          setAddedRows(prev => prev.map(r => {
+            if (rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) {
+              updatedCount++;
+              return { ...r, [dataIndex]: fillValue };
+            }
+            return r;
+          }));
+        } else {
+          setModifiedRows(prev => {
+            const existing = prev[keyStr] || {};
+            updatedCount++;
+            return {
+              ...prev,
+              [keyStr]: { ...targetRow, ...existing, [dataIndex]: fillValue }
+            };
+          });
+        }
+      }
+
+      if (updatedCount > 0) {
+        message.success(`已填充 ${updatedCount} 行`);
+      }
+    }
+
+    // 重置状态
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+
+    if (dragFillGhostRef.current) {
+      dragFillGhostRef.current.style.display = 'none';
+    }
+
+    // 重置 ref
+    dragFillDataRef.current = {
+      startRecord: null,
+      dataIndex: '',
+      startRowIndex: -1,
+      currentRowIndex: -1,
+      startCellRect: null,
+      colIndex: -1,
+      cachedRows: [],
+      cachedRowKeys: [],
+      cachedStartEl: null,
+    };
+
+    setDragFillActive(false);
+  }, [addedRows, rowKeyStr]);
+
+  // 全局鼠标事件监听（拖拽填充）
+  useEffect(() => {
+    if (!dragFillActive) return;
+
+    const handleMouseMove = (e: MouseEvent) => handleDragFillMove(e);
+    const handleMouseUp = () => handleDragFillEnd();
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragFillActive, handleDragFillMove, handleDragFillEnd]);
 
   const displayData = useMemo(() => {
       return [...data, ...addedRows].filter(item => {
@@ -1528,7 +1952,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         </Modal>
         <Form component={false} form={form}>
             <DataContext.Provider value={{ selectedRowKeysRef, displayDataRef, handleCopyInsert, handleCopyJson, handleCopyCsv, handleExportSelected, copyToClipboard, tableName }}>
-                <CellContextMenuContext.Provider value={{ showMenu: showCellContextMenu }}>
+                <CellContextMenuContext.Provider value={{ showMenu: showCellContextMenu, handleBatchFillToSelected, handleDragFillStart }}>
                     <EditableContext.Provider value={form}>
                         <Table
                             components={tableComponents}
@@ -1591,6 +2015,26 @@ const DataGrid: React.FC<DataGridProps> = ({
                     onClick={handleCellSetNull}
                 >
                     设置为 NULL
+                </div>
+                <div
+                    style={{
+                        padding: '8px 12px',
+                        cursor: selectedRowKeys.length > 0 ? 'pointer' : 'not-allowed',
+                        transition: 'background 0.2s',
+                        opacity: selectedRowKeys.length > 0 ? 1 : 0.5,
+                    }}
+                    onMouseEnter={(e) => {
+                        if (selectedRowKeys.length > 0) e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    onClick={() => {
+                        if (selectedRowKeys.length > 0 && cellContextMenu.record) {
+                            handleBatchFillToSelected(cellContextMenu.record, cellContextMenu.dataIndex);
+                        }
+                    }}
+                >
+                    <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
+                    填充到选中行 ({selectedRowKeys.length})
                 </div>
                 <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
                 <div
@@ -1741,10 +2185,11 @@ const DataGrid: React.FC<DataGridProps> = ({
 	            .${gridId} .row-modified td { background-color: ${rowModBg} !important; color: ${darkMode ? '#e6f7ff' : 'inherit'}; }
                 .${gridId} .ant-table-tbody > tr.row-added:hover > td { background-color: ${rowAddedHover} !important; }
                 .${gridId} .ant-table-tbody > tr.row-modified:hover > td { background-color: ${rowModHover} !important; }
+                .${gridId} .fill-handle:hover { background: #0050b3 !important; transform: scale(1.2); }
 	        `}</style>
        
        {/* Ghost Resize Line for Columns */}
-       <div 
+       <div
            ref={ghostRef}
            style={{
                position: 'absolute',
@@ -1759,8 +2204,32 @@ const DataGrid: React.FC<DataGridProps> = ({
                willChange: 'transform'
            }}
        />
+       {/* 拖拽填充选区指示器 - 使用 fixed 定位基于视口 */}
+       {dragFillActive && createPortal(
+           <div
+               ref={dragFillGhostRef}
+               style={{
+                   position: 'fixed',
+                   border: '2px solid #1890ff',
+                   background: 'rgba(24, 144, 255, 0.1)',
+                   pointerEvents: 'none',
+                   zIndex: 9998,
+                   display: 'none',
+               }}
+           />,
+           document.body
+       )}
     </div>
   );
 };
 
-export default React.memo(DataGrid);
+// 使用 ErrorBoundary 包裹 DataGrid，防止数据渲染错误导致应用崩溃
+const MemoizedDataGrid = React.memo(DataGrid);
+
+const DataGridWithErrorBoundary: React.FC<DataGridProps> = (props) => (
+    <DataGridErrorBoundary>
+        <MemoizedDataGrid {...props} />
+    </DataGridErrorBoundary>
+);
+
+export default DataGridWithErrorBoundary;
