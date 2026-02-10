@@ -386,8 +386,13 @@ function App() {
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
 
 
-  // Log Panel
-  const [logPanelHeight, setLogPanelHeight] = useState(200);
+  // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
+  const LOG_PANEL_TOOLBAR_HEIGHT = 32;
+  const LOG_PANEL_SINGLE_ROW_HEIGHT = 39;
+  const LOG_PANEL_MIN_VISIBLE_ROWS = 1;
+  const LOG_PANEL_MIN_HEIGHT = LOG_PANEL_TOOLBAR_HEIGHT + (LOG_PANEL_SINGLE_ROW_HEIGHT * LOG_PANEL_MIN_VISIBLE_ROWS);
+  const LOG_PANEL_MAX_HEIGHT = 800;
+  const [logPanelHeight, setLogPanelHeight] = useState(Math.max(200, LOG_PANEL_MIN_HEIGHT));
   const [isLogPanelOpen, setIsLogPanelOpen] = useState(false);
   const logResizeRef = React.useRef<{ startY: number, startHeight: number } | null>(null);
   const logGhostRef = React.useRef<HTMLDivElement>(null);
@@ -416,7 +421,10 @@ function App() {
   const handleLogResizeUp = (e: MouseEvent) => {
       if (logResizeRef.current) {
           const delta = logResizeRef.current.startY - e.clientY; 
-          const newHeight = Math.max(100, Math.min(800, logResizeRef.current.startHeight + delta));
+          const newHeight = Math.max(
+              LOG_PANEL_MIN_HEIGHT,
+              Math.min(LOG_PANEL_MAX_HEIGHT, logResizeRef.current.startHeight + delta)
+          );
           setLogPanelHeight(newHeight);
       }
       

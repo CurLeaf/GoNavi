@@ -29,6 +29,8 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
     };
     const bgMain = getBg('#1f1f1f');
     const bgToolbar = getBg('#2a2a2a');
+    const logScrollbarThumb = darkMode ? 'rgba(255, 255, 255, 0.34)' : 'rgba(0, 0, 0, 0.26)';
+    const logScrollbarThumbHover = darkMode ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.36)';
 
     const columns = [
         {
@@ -113,8 +115,9 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
             </div>
 
             {/* List */}
-            <div style={{ flex: 1, overflow: 'auto' }}>
+            <div className="log-panel-scroll" style={{ flex: 1, overflow: 'auto' }}>
                 <Table 
+                    className="log-panel-table"
                     dataSource={sqlLogs} 
                     columns={columns} 
                     size="small" 
@@ -124,6 +127,35 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
                     // scroll={{ y: height - 32 }} // Let flex handle it
                 />
             </div>
+            <style>{`
+                .log-panel-scroll {
+                    scrollbar-width: thin;
+                    scrollbar-color: ${logScrollbarThumb} transparent;
+                }
+                .log-panel-scroll::-webkit-scrollbar {
+                    width: 10px;
+                    height: 10px;
+                }
+                .log-panel-scroll::-webkit-scrollbar-track,
+                .log-panel-scroll::-webkit-scrollbar-corner {
+                    background: transparent;
+                }
+                .log-panel-scroll::-webkit-scrollbar-thumb {
+                    background: ${logScrollbarThumb};
+                    border-radius: 8px;
+                    border: 2px solid transparent;
+                    background-clip: padding-box;
+                }
+                .log-panel-scroll::-webkit-scrollbar-thumb:hover {
+                    background: ${logScrollbarThumbHover};
+                    background-clip: padding-box;
+                }
+                .log-panel-table .ant-table,
+                .log-panel-table .ant-table-container,
+                .log-panel-table .ant-table-tbody > tr > td {
+                    background: transparent !important;
+                }
+            `}</style>
         </div>
     );
 };
