@@ -196,6 +196,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       editorRef.current = editor;
       monacoRef.current = monaco;
 
+      // 应用透明主题（主题已在 main.tsx 全局注册）
+      monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
+
       monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['.'],
           provideCompletionItems: async (model: any, position: any) => {
@@ -1211,7 +1214,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           transition: none !important;
         }
       `}</style>
-      <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+      <div style={{ padding: '8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
             placeholder="选择连接"
@@ -1265,11 +1268,11 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         </Button.Group>
       </div>
       
-      <div style={{ height: editorHeight, minHeight: '100px', borderBottom: '1px solid #eee' }}>
+      <div style={{ height: editorHeight, minHeight: '100px' }}>
         <Editor 
           height="100%" 
           defaultLanguage="sql" 
-          theme={darkMode ? "vs-dark" : "light"}
+          theme={darkMode ? "transparent-dark" : "transparent-light"}
           value={query} 
           onChange={(val) => setQuery(val || '')}
           onMount={handleEditorDidMount}
@@ -1287,7 +1290,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         style={{ 
             height: '5px', 
             cursor: 'row-resize', 
-            background: darkMode ? '#333' : '#f0f0f0',
+            background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
             flexShrink: 0,
             zIndex: 10 
         }} 

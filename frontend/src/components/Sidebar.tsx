@@ -25,11 +25,12 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   DeleteOutlined,
   DisconnectOutlined,
   CloudOutlined,
-  CheckSquareOutlined
+  CheckSquareOutlined,
+  CodeOutlined
 	} from '@ant-design/icons';
 	import { useStore } from '../store';
 	import { SavedConnection } from '../types';
-	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable } from '../../wailsjs/go/app/App';
+	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
   import { normalizeOpacityForPlatform } from '../utils/appearance';
 
 const { Search } = Input;
@@ -41,7 +42,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'object-group' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db';
 }
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -109,6 +110,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [isRenameTableModalOpen, setIsRenameTableModalOpen] = useState(false);
   const [renameTableForm] = Form.useForm();
   const [renameTableTarget, setRenameTableTarget] = useState<any>(null);
+  const [isRenameViewModalOpen, setIsRenameViewModalOpen] = useState(false);
+  const [renameViewForm] = Form.useForm();
+  const [renameViewTarget, setRenameViewTarget] = useState<any>(null);
 
   // Batch Operations Modal
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
@@ -374,6 +378,54 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       return triggers;
   };
 
+  const buildFunctionsMetadataQuery = (dialect: string, dbName: string): string => {
+      const safeDbName = escapeSQLLiteral(dbName);
+      switch (dialect) {
+          case 'mysql':
+              if (!safeDbName) return '';
+              return `SELECT ROUTINE_NAME AS routine_name, ROUTINE_TYPE AS routine_type FROM information_schema.routines WHERE routine_schema = '${safeDbName}' ORDER BY ROUTINE_TYPE, ROUTINE_NAME`;
+          case 'postgres':
+          case 'kingbase':
+          case 'highgo':
+          case 'vastbase':
+              return `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname, routine_type, p.proname`;
+          case 'sqlserver': {
+              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
+              return `SELECT s.name AS schema_name, o.name AS routine_name, CASE o.type WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'FUNCTION' WHEN 'IF' THEN 'FUNCTION' WHEN 'TF' THEN 'FUNCTION' END AS routine_type FROM ${safeDb}.sys.objects o JOIN ${safeDb}.sys.schemas s ON o.schema_id = s.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY o.type, s.name, o.name`;
+          }
+          case 'oracle':
+          case 'dm': {
+              if (!safeDbName) {
+                  return `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`;
+              }
+              return `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`;
+          }
+          default:
+              return '';
+      }
+  };
+
+  const loadFunctions = async (conn: any, dbName: string): Promise<Array<{ displayName: string; routineName: string; routineType: string }>> => {
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      const query = buildFunctionsMetadataQuery(dialect, dbName);
+      const rows = await queryMetadataRows(conn, dbName, query);
+      const seen = new Set<string>();
+      const routines: Array<{ displayName: string; routineName: string; routineType: string }> = [];
+
+      rows.forEach((row) => {
+          const routineName = getCaseInsensitiveValue(row, ['routine_name', 'object_name', 'proname', 'name']);
+          if (!routineName) return;
+          const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'owner']);
+          const routineType = getCaseInsensitiveValue(row, ['routine_type', 'object_type']) || 'FUNCTION';
+          const fullName = buildQualifiedName(schemaName, routineName);
+          if (!fullName || seen.has(fullName)) return;
+          seen.add(fullName);
+          const typeLabel = routineType.toUpperCase() === 'PROCEDURE' ? 'P' : 'F';
+          routines.push({ displayName: `${fullName} [${typeLabel}]`, routineName: fullName, routineType: routineType.toUpperCase() });
+      });
+      return routines;
+  };
+
 	  const loadDatabases = async (node: any) => {
 	      const conn = node.dataRef as SavedConnection;
 	      const loadKey = `dbs-${conn.id}`;
@@ -500,9 +552,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 };
             });
 
-            const [views, triggers] = await Promise.all([
+            const [views, triggers, routines] = await Promise.all([
                 loadViews(conn, conn.dbName),
                 loadDatabaseTriggers(conn, conn.dbName),
+                loadFunctions(conn, conn.dbName),
             ]);
 
             // 获取当前数据库的排序偏好
@@ -534,6 +587,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             // Sort triggers by display name (case-insensitive)
             triggers.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
+            // Sort routines by display name (case-insensitive)
+            routines.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+
             const viewNodes: TreeNode[] = views.map((viewName) => ({
                 title: getSidebarTableDisplayName(conn, viewName),
                 key: `${conn.id}-${conn.dbName}-view-${viewName}`,
@@ -552,6 +608,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 isLeaf: true,
             }));
 
+            const routineNodes: TreeNode[] = routines.map((r) => ({
+                title: r.displayName,
+                key: `${conn.id}-${conn.dbName}-routine-${r.routineName}`,
+                icon: <CodeOutlined />,
+                type: 'routine',
+                dataRef: { ...conn, routineName: r.routineName, routineType: r.routineType },
+                isLeaf: true,
+            }));
+
             const buildObjectGroup = (groupKey: string, groupTitle: string, groupIcon: React.ReactNode, children: TreeNode[]): TreeNode => ({
                 title: `${groupTitle} (${children.length})`,
                 key: `${key}-${groupKey}`,
@@ -565,6 +630,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             const groupedNodes: TreeNode[] = [
                 buildObjectGroup('tables', '表', <TableOutlined />, tables),
                 buildObjectGroup('views', '视图', <EyeOutlined />, viewNodes),
+                buildObjectGroup('routines', '函数', <CodeOutlined />, routineNodes),
                 buildObjectGroup('triggers', '触发器', <FunctionOutlined />, triggerNodes),
             ];
 
@@ -675,7 +741,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           setActiveContext({ connectionId: dataRef.id, dbName: title });
       } else if (type === 'table') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
-      } else if (type === 'view' || type === 'db-trigger') {
+      } else if (type === 'view' || type === 'db-trigger' || type === 'routine') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -749,6 +815,19 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               connectionId: id,
               dbName,
               triggerName
+          });
+          return;
+      } else if (node.type === 'routine') {
+          const { routineName, routineType, dbName, id } = node.dataRef;
+          const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
+          addTab({
+              id: `routine-def-${node.key}`,
+              title: `${typeLabel}: ${routineName}`,
+              type: 'routine-def',
+              connectionId: id,
+              dbName,
+              routineName,
+              routineType
           });
           return;
       }
@@ -1326,6 +1405,298 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       });
   };
 
+  // --- 视图操作 ---
+  const openViewDefinition = (node: any) => {
+      const { viewName, dbName, id } = node.dataRef;
+      addTab({
+          id: `view-def-${id}-${dbName}-${viewName}`,
+          title: `视图: ${viewName}`,
+          type: 'view-def',
+          connectionId: id,
+          dbName,
+          viewName,
+      });
+  };
+
+  const openEditView = async (node: any) => {
+      const conn = node.dataRef;
+      const { viewName, dbName, id } = conn;
+      // 获取视图定义后打开查询编辑器
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      let template = `-- 编辑视图 ${viewName}\n-- 请修改后执行\nCREATE OR REPLACE VIEW ${viewName} AS\nSELECT * FROM your_table;`;
+
+      try {
+          const config = buildRuntimeConfig(conn, dbName);
+          let query = '';
+          switch (dialect) {
+              case 'mysql':
+                  query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
+                  break;
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': {
+                  const parts = viewName.split('.');
+                  const schema = parts.length > 1 ? parts[0] : 'public';
+                  const name = parts.length > 1 ? parts[1] : viewName;
+                  query = `SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`;
+                  break;
+              }
+              case 'sqlserver':
+                  query = `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`;
+                  break;
+              case 'sqlite':
+                  query = `SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${escapeSQLLiteral(viewName)}'`;
+                  break;
+          }
+          if (query) {
+              const result = await DBQuery(config as any, dbName, query);
+              if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                  const row = result.data[0] as Record<string, any>;
+                  const def = row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
+                  if (def) {
+                      template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
+                  }
+              }
+          }
+      } catch { /* 降级使用模板 */ }
+
+      addTab({
+          id: `query-edit-view-${Date.now()}`,
+          title: `编辑视图: ${viewName}`,
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: template
+      });
+  };
+
+  const openCreateView = (node: any) => {
+      const conn = node.dataRef;
+      const { dbName, id } = conn;
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      let template: string;
+      switch (dialect) {
+          case 'mysql':
+              template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+              break;
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase':
+              template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+              break;
+          case 'sqlserver':
+              template = `CREATE VIEW dbo.view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+              break;
+          case 'oracle': case 'dm':
+              template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+              break;
+          case 'sqlite':
+              template = `CREATE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+              break;
+          default:
+              template = `CREATE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
+      }
+      addTab({
+          id: `query-create-view-${Date.now()}`,
+          title: `新建视图`,
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: template
+      });
+  };
+
+  const handleDropView = (node: any) => {
+      const conn = node.dataRef;
+      const viewName = String(conn.viewName || '').trim();
+      if (!viewName) return;
+      Modal.confirm({
+          title: '确认删除视图',
+          content: `确定删除视图 "${viewName}" 吗？该操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const config = buildRuntimeConfig(conn, conn.dbName);
+              const res = await DropView(config as any, conn.dbName, viewName);
+              if (res.success) {
+                  message.success("视图删除成功");
+                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              } else {
+                  message.error("删除失败: " + res.message);
+              }
+          }
+      });
+  };
+
+  const handleRenameView = async () => {
+      if (!renameViewTarget) return;
+      try {
+          const values = await renameViewForm.validateFields();
+          const conn = renameViewTarget.dataRef;
+          const oldViewName = String(conn.viewName || '').trim();
+          const newViewName = String(values.newName || '').trim();
+          if (!oldViewName || !newViewName) {
+              message.error("视图名称不能为空");
+              return;
+          }
+          if (extractObjectName(oldViewName) === newViewName || oldViewName === newViewName) {
+              message.warning("新旧视图名相同，无需修改");
+              return;
+          }
+          const config = buildRuntimeConfig(conn, conn.dbName);
+          const res = await RenameView(config as any, conn.dbName, oldViewName, newViewName);
+          if (res.success) {
+              message.success("视图重命名成功");
+              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              setIsRenameViewModalOpen(false);
+              setRenameViewTarget(null);
+              renameViewForm.resetFields();
+          } else {
+              message.error("重命名失败: " + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
+  // --- 函数/存储过程操作 ---
+  const openRoutineDefinition = (node: any) => {
+      const { routineName, routineType, dbName, id } = node.dataRef;
+      const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
+      addTab({
+          id: `routine-def-${id}-${dbName}-${routineName}`,
+          title: `${typeLabel}: ${routineName}`,
+          type: 'routine-def',
+          connectionId: id,
+          dbName,
+          routineName,
+          routineType
+      });
+  };
+
+  const openEditRoutine = async (node: any) => {
+      const conn = node.dataRef;
+      const { routineName, routineType, dbName, id } = conn;
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
+      let template = `-- 编辑${typeLabel} ${routineName}`;
+
+      try {
+          const config = buildRuntimeConfig(conn, dbName);
+          let query = '';
+          const parts = routineName.split('.');
+          const name = parts.length > 1 ? parts[1] : routineName;
+          const schema = parts.length > 1 ? parts[0] : '';
+
+          switch (dialect) {
+              case 'mysql':
+                  query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
+                  break;
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': {
+                  const schemaRef = schema || 'public';
+                  query = `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${escapeSQLLiteral(name)}' LIMIT 1`;
+                  break;
+              }
+              case 'sqlserver':
+                  query = `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`;
+                  break;
+              case 'oracle': case 'dm': {
+                  const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : '';
+                  if (owner) {
+                      query = `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${escapeSQLLiteral(name).toUpperCase()}' AND TYPE = '${routineType}' ORDER BY LINE`;
+                  } else {
+                      query = `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${escapeSQLLiteral(name).toUpperCase()}' AND TYPE = '${routineType}' ORDER BY LINE`;
+                  }
+                  break;
+              }
+          }
+          if (query) {
+              const result = await DBQuery(config as any, dbName, query);
+              if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                  if (dialect === 'oracle' || dialect === 'dm') {
+                      const lines = result.data.map((row: any) => row.text || row.TEXT || Object.values(row)[0] || '').join('');
+                      if (lines) template = `-- 编辑${typeLabel} ${routineName}\nCREATE OR REPLACE ${lines}`;
+                  } else {
+                      const row = result.data[0] as Record<string, any>;
+                      const def = row.routine_definition || row.ROUTINE_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
+                      if (def) template = `-- 编辑${typeLabel} ${routineName}\n${def}`;
+                  }
+              }
+          }
+      } catch { /* 降级使用模板 */ }
+
+      addTab({
+          id: `query-edit-routine-${Date.now()}`,
+          title: `编辑${typeLabel}: ${routineName}`,
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: template
+      });
+  };
+
+  const openCreateRoutine = (node: any, type: 'FUNCTION' | 'PROCEDURE') => {
+      const conn = node.dataRef;
+      const { dbName, id } = conn;
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      const isProc = type === 'PROCEDURE';
+      let template: string;
+
+      switch (dialect) {
+          case 'mysql':
+              template = isProc
+                  ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
+                  : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
+              break;
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase':
+              template = isProc
+                  ? `CREATE OR REPLACE PROCEDURE proc_name(param1 integer)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- procedure body\nEND;\n$$;`
+                  : `CREATE OR REPLACE FUNCTION func_name(param1 integer)\nRETURNS integer\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    RETURN param1 * 2;\nEND;\n$$;`;
+              break;
+          case 'sqlserver':
+              template = isProc
+                  ? `CREATE PROCEDURE dbo.proc_name\n    @param1 INT\nAS\nBEGIN\n    SELECT * FROM table_name WHERE id = @param1;\nEND;`
+                  : `CREATE FUNCTION dbo.func_name(@param1 INT)\nRETURNS INT\nAS\nBEGIN\n    RETURN @param1 * 2;\nEND;`;
+              break;
+          case 'oracle': case 'dm':
+              template = isProc
+                  ? `CREATE OR REPLACE PROCEDURE proc_name(param1 IN NUMBER)\nIS\nBEGIN\n    -- procedure body\n    NULL;\nEND;`
+                  : `CREATE OR REPLACE FUNCTION func_name(param1 IN NUMBER)\nRETURN NUMBER\nIS\nBEGIN\n    RETURN param1 * 2;\nEND;`;
+              break;
+          default:
+              template = isProc
+                  ? `CREATE PROCEDURE proc_name()\nBEGIN\n    -- procedure body\nEND;`
+                  : `CREATE FUNCTION func_name()\nRETURNS INTEGER\nBEGIN\n    RETURN 0;\nEND;`;
+      }
+
+      addTab({
+          id: `query-create-routine-${Date.now()}`,
+          title: isProc ? '新建存储过程' : '新建函数',
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: template
+      });
+  };
+
+  const handleDropRoutine = (node: any) => {
+      const conn = node.dataRef;
+      const routineName = String(conn.routineName || '').trim();
+      const routineType = String(conn.routineType || 'FUNCTION').trim();
+      if (!routineName) return;
+      const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
+      Modal.confirm({
+          title: `确认删除${typeLabel}`,
+          content: `确定删除${typeLabel} "${routineName}" 吗？该操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const config = buildRuntimeConfig(conn, conn.dbName);
+              const res = await DropFunction(config as any, conn.dbName, routineName, routineType);
+              if (res.success) {
+                  message.success(`${typeLabel}删除成功`);
+                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              } else {
+                  message.error("删除失败: " + res.message);
+              }
+          }
+      });
+  };
+
   const onSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { value } = e.target;
     setSearchValue(value);
@@ -1391,6 +1762,36 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     loadTables(dbNode);
                 }
             }
+        ];
+    }
+
+    // 视图分组节点的右键菜单
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'views') {
+        return [
+            {
+                key: 'create-view',
+                label: '新建视图',
+                icon: <PlusOutlined />,
+                onClick: () => openCreateView(node)
+            },
+        ];
+    }
+
+    // 函数分组节点的右键菜单
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'routines') {
+        return [
+            {
+                key: 'create-function',
+                label: '新建函数',
+                icon: <PlusOutlined />,
+                onClick: () => openCreateRoutine(node, 'FUNCTION')
+            },
+            {
+                key: 'create-procedure',
+                label: '新建存储过程',
+                icon: <PlusOutlined />,
+                onClick: () => openCreateRoutine(node, 'PROCEDURE')
+            },
         ];
     }
 
@@ -1667,6 +2068,19 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 onClick: () => onDoubleClick(null, node)
             },
             {
+                key: 'view-definition',
+                label: '查看视图定义',
+                icon: <CodeOutlined />,
+                onClick: () => openViewDefinition(node)
+            },
+            { type: 'divider' },
+            {
+                key: 'edit-view',
+                label: '编辑视图',
+                icon: <EditOutlined />,
+                onClick: () => openEditView(node)
+            },
+            {
                 key: 'new-query',
                 label: '新建查询',
                 icon: <ConsoleSqlOutlined />,
@@ -1680,7 +2094,50 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         query: ''
                     });
                 }
-            }
+            },
+            { type: 'divider' },
+            {
+                key: 'rename-view',
+                label: '重命名视图',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    setRenameViewTarget(node);
+                    renameViewForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.viewName || node.title) });
+                    setIsRenameViewModalOpen(true);
+                }
+            },
+            {
+                key: 'drop-view',
+                label: '删除视图',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDropView(node)
+            },
+        ];
+    } else if (node.type === 'routine') {
+        const routineType = node.dataRef?.routineType || 'FUNCTION';
+        const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
+        return [
+            {
+                key: 'view-routine-def',
+                label: '查看定义',
+                icon: <CodeOutlined />,
+                onClick: () => openRoutineDefinition(node)
+            },
+            {
+                key: 'edit-routine',
+                label: '编辑定义',
+                icon: <EditOutlined />,
+                onClick: () => openEditRoutine(node)
+            },
+            { type: 'divider' },
+            {
+                key: 'drop-routine',
+                label: `删除${typeLabel}`,
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDropRoutine(node)
+            },
         ];
     } else if (node.type === 'table') {
         return [
@@ -1892,6 +2349,23 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameTableForm} layout="vertical">
                 <Form.Item name="newName" label="新表名" rules={[{ required: true, message: '请输入新表名' }]}>
+                    <Input />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`重命名视图${renameViewTarget?.dataRef?.viewName ? ` (${renameViewTarget.dataRef.viewName})` : ''}`}
+            open={isRenameViewModalOpen}
+            onOk={handleRenameView}
+            onCancel={() => {
+                setIsRenameViewModalOpen(false);
+                setRenameViewTarget(null);
+                renameViewForm.resetFields();
+            }}
+        >
+            <Form form={renameViewForm} layout="vertical">
+                <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
                     <Input />
                 </Form.Item>
             </Form>

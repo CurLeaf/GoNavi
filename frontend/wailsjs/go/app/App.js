@@ -74,8 +74,16 @@ export function DropDatabase(arg1, arg2) {
   return window['go']['app']['App']['DropDatabase'](arg1, arg2);
 }
 
+export function DropFunction(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DropFunction'](arg1, arg2, arg3, arg4);
+}
+
 export function DropTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropTable'](arg1, arg2, arg3);
+}
+
+export function DropView(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropView'](arg1, arg2, arg3);
 }
 
 export function ExportData(arg1, arg2, arg3, arg4) {
@@ -236,6 +244,14 @@ export function RenameDatabase(arg1, arg2, arg3) {
 
 export function RenameTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RenameTable'](arg1, arg2, arg3, arg4);
+}
+
+export function RenameView(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RenameView'](arg1, arg2, arg3, arg4);
+}
+
+export function SetWindowTranslucency(arg1, arg2) {
+  return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2);
 }
 
 export function TestConnection(arg1) {

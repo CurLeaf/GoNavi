@@ -49,6 +49,13 @@ func (a *App) Startup(ctx context.Context) {
 	logger.Infof("应用启动完成")
 }
 
+// SetWindowTranslucency 动态调整 macOS 窗口透明度。
+// 前端在加载用户外观设置后、以及用户修改外观时调用此方法。
+// opacity=1.0 且 blur=0 时窗口标记为 opaque，GPU 不再持续计算窗口背后的模糊合成。
+func (a *App) SetWindowTranslucency(opacity float64, blur float64) {
+	setMacWindowTranslucency(opacity, blur)
+}
+
 // Shutdown is called when the app terminates
 func (a *App) Shutdown(ctx context.Context) {
 	logger.Infof("应用开始关闭，准备释放资源")

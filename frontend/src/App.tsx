@@ -11,6 +11,7 @@ import LogPanel from './components/LogPanel';
 import { useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform } from './utils/appearance';
+import { SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -28,6 +29,12 @@ function App() {
   const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const windowCornerRadius = 14;
+
+  // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
+  // 避免 GPU 持续计算窗口背后的模糊合成
+  useEffect(() => {
+    SetWindowTranslucency(appearance.opacity, appearance.blur).catch(() => {});
+  }, [appearance.opacity, appearance.blur]);
 
   // Background Helper
   const getBg = (darkHex: string, lightHex: string) => {
@@ -601,8 +608,6 @@ function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 background: bgMain,
-                backdropFilter: blurFilter,
-                WebkitBackdropFilter: blurFilter,
                 borderBottom: 'none',
                 userSelect: 'none',
                 WebkitAppRegion: 'drag', // Wails drag region
@@ -653,8 +658,6 @@ function App() {
                 padding: '0 8px',
                 borderBottom: 'none',
                 background: bgMain,
-                backdropFilter: blurFilter,
-                WebkitBackdropFilter: blurFilter,
             }}
           >
             <Dropdown menu={{ items: toolsMenu }} placement="bottomLeft">
@@ -717,7 +720,7 @@ function App() {
             />
           </Sider>
            <Content style={{ background: 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, backdropFilter: blurFilter, WebkitBackdropFilter: blurFilter }}>
+             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent }}>
                  <TabManager />
              </div>
              {isLogPanelOpen && (

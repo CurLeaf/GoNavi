@@ -9,7 +9,7 @@ import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, type FilterCondition } from '../utils/sql';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform } from '../utils/appearance';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -135,7 +135,10 @@ const INLINE_EDIT_MAX_CHARS = 2000;
 const shouldOpenModalEditor = (val: any): boolean => {
     if (val === null || val === undefined) return false;
     if (typeof val === 'string') {
-        return val.length > INLINE_EDIT_MAX_CHARS || val.includes('\n');
+        if (val.length > INLINE_EDIT_MAX_CHARS || val.includes('\n')) return true;
+        const trimmed = val.trimStart();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) return true;
+        return false;
     }
     if (typeof val === 'object') {
         return true;
@@ -451,8 +454,6 @@ const DataGrid: React.FC<DataGridProps> = ({
   const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
   const opacity = normalizeOpacityForPlatform(appearance.opacity);
-  const blur = normalizeBlurForPlatform(appearance.blur);
-  const blurFilter = blurToFilter(blur);
   const selectionColumnWidth = 46;
 
   // Background Helper
@@ -1732,7 +1733,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const enableVirtual = mergedDisplayData.length >= 200;
 
   return (
-    <div className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''}`} ref={containerRef} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: bgContent, backdropFilter: blurFilter, WebkitBackdropFilter: blurFilter }}>
+    <div className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''}`} ref={containerRef} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: bgContent }}>
 	       {/* Toolbar */}
 	        <div style={{ padding: '8px', borderBottom: '1px solid #eee', display: 'flex', gap: 8, alignItems: 'center' }}>
 	            {onReload && <Button icon={<ReloadOutlined />} disabled={loading} onClick={() => {
@@ -1960,7 +1961,6 @@ const DataGrid: React.FC<DataGridProps> = ({
 	            open={cellEditorOpen}
 	            onCancel={closeCellEditor}
             width={960}
-            destroyOnHidden
             maskClosable={false}
             footer={[
                 <Button key="format" onClick={handleFormatJsonInEditor} disabled={!cellEditorIsJson}>
@@ -1973,23 +1973,21 @@ const DataGrid: React.FC<DataGridProps> = ({
             <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
                 {cellEditorMeta ? `${tableName || ''}${tableName ? '.' : ''}${cellEditorMeta.dataIndex}` : ''}
             </div>
-            {cellEditorOpen && (
-                <Editor
-                    height="56vh"
-                    language={cellEditorIsJson ? "json" : "plaintext"}
-                    theme={darkMode ? "vs-dark" : "light"}
-                    value={cellEditorValue}
-                    onChange={(val) => setCellEditorValue(val || '')}
-                    options={{
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: "on",
-                        fontSize: 14,
-                        tabSize: 2,
-                        automaticLayout: true,
-                    }}
-                />
-            )}
+            <Editor
+                height="56vh"
+                language={cellEditorIsJson ? "json" : "plaintext"}
+                theme={darkMode ? "transparent-dark" : "transparent-light"}
+                value={cellEditorValue}
+                onChange={(val) => setCellEditorValue(val || '')}
+                options={{
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: "on",
+                    fontSize: 14,
+                    tabSize: 2,
+                    automaticLayout: true,
+                }}
+            />
         </Modal>
 
         {/* 批量编辑弹窗 */}
@@ -2063,8 +2061,6 @@ const DataGrid: React.FC<DataGridProps> = ({
                     top: cellContextMenu.y,
                     zIndex: 10000,
                     background: bgContextMenu,
-                    backdropFilter: blurFilter,
-                    WebkitBackdropFilter: blurFilter,
                     border: darkMode ? '1px solid #303030' : '1px solid #d9d9d9',
                     borderRadius: 4,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.15)',

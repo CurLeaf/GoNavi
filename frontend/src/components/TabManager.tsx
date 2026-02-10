@@ -8,6 +8,7 @@ import TableDesigner from './TableDesigner';
 import RedisViewer from './RedisViewer';
 import RedisCommandEditor from './RedisCommandEditor';
 import TriggerViewer from './TriggerViewer';
+import DefinitionViewer from './DefinitionViewer';
 import type { TabData } from '../types';
 
 const detectConnectionEnvLabel = (connectionName: string): string | null => {
@@ -65,6 +66,8 @@ const TabManager: React.FC = () => {
       content = <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
     } else if (tab.type === 'trigger') {
       content = <TriggerViewer tab={tab} />;
+    } else if (tab.type === 'view-def' || tab.type === 'routine-def') {
+      content = <DefinitionViewer tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [

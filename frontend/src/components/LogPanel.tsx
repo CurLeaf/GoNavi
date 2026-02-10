@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Table, Tag, Button, Tooltip } from 'antd';
 import { ClearOutlined, CloseOutlined, CaretRightOutlined, BugOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform } from '../utils/appearance';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 
 interface LogPanelProps {
     height: number;
@@ -17,7 +17,6 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
     const appearance = useStore(state => state.appearance);
     const darkMode = theme === 'dark';
     const opacity = normalizeOpacityForPlatform(appearance.opacity);
-    const blur = normalizeBlurForPlatform(appearance.blur);
 
     // Background Helper
     const getBg = (darkHex: string) => {
@@ -30,7 +29,6 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
     };
     const bgMain = getBg('#1f1f1f');
     const bgToolbar = getBg('#2a2a2a');
-    const blurFilter = blurToFilter(blur);
 
     const columns = [
         {
@@ -73,8 +71,6 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
             height, 
             borderTop: 'none', 
             background: bgMain,
-            backdropFilter: blurFilter,
-            WebkitBackdropFilter: blurFilter,
             display: 'flex',
             flexDirection: 'column',
             position: 'relative',
