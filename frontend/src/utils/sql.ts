@@ -63,6 +63,41 @@ export const quoteQualifiedIdent = (dbType: string, ident: string) => {
 
 export const escapeLiteral = (val: string) => (val || '').replace(/'/g, "''");
 
+type SortInfo = {
+  columnKey?: string;
+  order?: string;
+} | null | undefined;
+
+export const buildOrderBySQL = (
+  dbType: string,
+  sortInfo: SortInfo,
+  fallbackColumns: string[] = [],
+) => {
+  const sortColumn = normalizeIdentPart(String(sortInfo?.columnKey || ''));
+  const sortOrder = String(sortInfo?.order || '');
+  const direction = sortOrder === 'ascend' ? 'ASC' : sortOrder === 'descend' ? 'DESC' : '';
+  if (sortColumn && direction) {
+    return ` ORDER BY ${quoteIdentPart(dbType, sortColumn)} ${direction}`;
+  }
+
+  const seen = new Set<string>();
+  const stableColumns = (fallbackColumns || [])
+    .map((col) => normalizeIdentPart(String(col || '')))
+    .filter((col) => {
+      if (!col) return false;
+      const key = col.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  if (stableColumns.length > 0) {
+    const parts = stableColumns.map((col) => `${quoteIdentPart(dbType, col)} ASC`);
+    return ` ORDER BY ${parts.join(', ')}`;
+  }
+
+  return '';
+};
+
 export const parseListValues = (val: string) => {
   const raw = (val || '').trim();
   if (!raw) return [];

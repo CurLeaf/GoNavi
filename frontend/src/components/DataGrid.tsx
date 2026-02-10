@@ -9,7 +9,7 @@ import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 import 'react-resizable/css/styles.css';
-import { buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform } from '../utils/appearance';
 
 // --- Error Boundary ---
@@ -1819,13 +1819,11 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!tableName || !pagination) return '';
       const whereSQL = buildWhereSQL(dbType, filterConditions);
       let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-      if (sortInfo && sortInfo.order) {
-          sql += ` ORDER BY ${quoteIdentPart(dbType, sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
-      }
+      sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
       const offset = (pagination.current - 1) * pagination.pageSize;
       sql += ` LIMIT ${pagination.pageSize} OFFSET ${offset}`;
       return sql;
-  }, [tableName, pagination, filterConditions, sortInfo]);
+  }, [tableName, pagination, filterConditions, sortInfo, pkColumns]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
