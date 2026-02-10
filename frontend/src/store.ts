@@ -1,10 +1,230 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { SavedConnection, TabData, SavedQuery } from './types';
+import { ConnectionConfig, SavedConnection, TabData, SavedQuery } from './types';
 
 const DEFAULT_APPEARANCE = { opacity: 1.0, blur: 0 };
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
+const MAX_URI_LENGTH = 4096;
+const MAX_HOST_ENTRY_LENGTH = 512;
+const MAX_HOST_ENTRIES = 64;
+const DEFAULT_TIMEOUT_SECONDS = 30;
+const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_CONNECTION_TYPE = 'mysql';
+const SUPPORTED_CONNECTION_TYPES = new Set([
+  'mysql',
+  'mariadb',
+  'sphinx',
+  'postgres',
+  'redis',
+  'tdengine',
+  'oracle',
+  'dameng',
+  'kingbase',
+  'sqlserver',
+  'mongodb',
+  'highgo',
+  'vastbase',
+  'sqlite',
+  'custom',
+]);
+
+const getDefaultPortByType = (type: string): number => {
+  switch (type) {
+    case 'mysql':
+    case 'mariadb':
+      return 3306;
+    case 'sphinx':
+      return 9306;
+    case 'postgres':
+    case 'vastbase':
+      return 5432;
+    case 'redis':
+      return 6379;
+    case 'tdengine':
+      return 6041;
+    case 'oracle':
+      return 1521;
+    case 'dameng':
+      return 5236;
+    case 'kingbase':
+      return 54321;
+    case 'sqlserver':
+      return 1433;
+    case 'mongodb':
+      return 27017;
+    case 'highgo':
+      return 5866;
+    default:
+      return 3306;
+  }
+};
+
+const toTrimmedString = (value: unknown, fallback = ''): string => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim();
+  }
+  return fallback;
+};
+
+const normalizePort = (value: unknown, fallbackPort: number): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallbackPort;
+  const port = Math.trunc(parsed);
+  if (port <= 0 || port > 65535) return fallbackPort;
+  return port;
+};
+
+const normalizeIntegerInRange = (value: unknown, fallbackValue: number, min: number, max: number): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallbackValue;
+  const normalized = Math.trunc(parsed);
+  if (normalized < min || normalized > max) return fallbackValue;
+  return normalized;
+};
+
+const isValidHostEntry = (entry: string): boolean => {
+  if (!entry) return false;
+  if (entry.length > MAX_HOST_ENTRY_LENGTH) return false;
+  if (/[()\\/\s]/.test(entry)) return false;
+  return true;
+};
+
+const sanitizeStringArray = (value: unknown, maxLength = 256): string[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  value.forEach((entry) => {
+    const normalized = toTrimmedString(entry);
+    if (!normalized || normalized.length > maxLength) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result;
+};
+
+const sanitizeNumberArray = (value: unknown, min: number, max: number): number[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  const result: number[] = [];
+  value.forEach((entry) => {
+    const parsed = Number(entry);
+    if (!Number.isFinite(parsed)) return;
+    const num = Math.trunc(parsed);
+    if (num < min || num > max) return;
+    if (seen.has(num)) return;
+    seen.add(num);
+    result.push(num);
+  });
+  return result;
+};
+
+const sanitizeAddressList = (value: unknown): string[] => {
+  const all = sanitizeStringArray(value, MAX_HOST_ENTRY_LENGTH)
+    .filter((entry) => isValidHostEntry(entry));
+  return all.slice(0, MAX_HOST_ENTRIES);
+};
+
+const normalizeConnectionType = (value: unknown): string => {
+  const type = toTrimmedString(value).toLowerCase();
+  return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
+};
+
+const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const type = normalizeConnectionType(raw.type);
+  const defaultPort = getDefaultPortByType(type);
+  const savePassword = typeof raw.savePassword === 'boolean' ? raw.savePassword : true;
+  const mongoSrv = !!raw.mongoSrv;
+
+  const sshRaw = (raw.ssh && typeof raw.ssh === 'object') ? raw.ssh as Record<string, unknown> : {};
+  const ssh = {
+    host: toTrimmedString(sshRaw.host),
+    port: normalizePort(sshRaw.port, 22),
+    user: toTrimmedString(sshRaw.user),
+    password: toTrimmedString(sshRaw.password),
+    keyPath: toTrimmedString(sshRaw.keyPath),
+  };
+
+  const safeConfig: ConnectionConfig & Record<string, unknown> = {
+    ...raw,
+    type,
+    host: toTrimmedString(raw.host, 'localhost') || 'localhost',
+    port: normalizePort(raw.port, defaultPort),
+    user: toTrimmedString(raw.user),
+    password: savePassword ? toTrimmedString(raw.password) : '',
+    savePassword,
+    database: toTrimmedString(raw.database),
+    useSSH: !!raw.useSSH,
+    ssh,
+    uri: toTrimmedString(raw.uri).slice(0, MAX_URI_LENGTH),
+    hosts: sanitizeAddressList(raw.hosts),
+    topology: raw.topology === 'replica' ? 'replica' : 'single',
+    mysqlReplicaUser: toTrimmedString(raw.mysqlReplicaUser),
+    mysqlReplicaPassword: savePassword ? toTrimmedString(raw.mysqlReplicaPassword) : '',
+    replicaSet: toTrimmedString(raw.replicaSet),
+    authSource: toTrimmedString(raw.authSource),
+    readPreference: toTrimmedString(raw.readPreference),
+    mongoSrv,
+    mongoAuthMechanism: toTrimmedString(raw.mongoAuthMechanism),
+    mongoReplicaUser: toTrimmedString(raw.mongoReplicaUser),
+    mongoReplicaPassword: savePassword ? toTrimmedString(raw.mongoReplicaPassword) : '',
+    timeout: normalizeIntegerInRange(raw.timeout, DEFAULT_TIMEOUT_SECONDS, 1, MAX_TIMEOUT_SECONDS),
+  };
+
+  if (type === 'redis') {
+    safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+  }
+
+  if (type === 'custom') {
+    safeConfig.driver = toTrimmedString(raw.driver);
+    safeConfig.dsn = toTrimmedString(raw.dsn).slice(0, MAX_URI_LENGTH);
+  }
+
+  return safeConfig;
+};
+
+const sanitizeSavedConnection = (value: unknown, index: number): SavedConnection | null => {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const config = sanitizeConnectionConfig(raw.config);
+  const id = toTrimmedString(raw.id, `conn-${index + 1}`) || `conn-${index + 1}`;
+  const fallbackName = config.host ? `${config.type}-${config.host}` : `连接-${index + 1}`;
+  const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
+  const includeDatabases = sanitizeStringArray(raw.includeDatabases, 256);
+  const includeRedisDatabases = sanitizeNumberArray(raw.includeRedisDatabases, 0, 15);
+
+  return {
+    id,
+    name,
+    config,
+    includeDatabases: includeDatabases.length > 0 ? includeDatabases : undefined,
+    includeRedisDatabases: includeRedisDatabases.length > 0 ? includeRedisDatabases : undefined,
+  };
+};
+
+const sanitizeConnections = (value: unknown): SavedConnection[] => {
+  if (!Array.isArray(value)) return [];
+  const result: SavedConnection[] = [];
+  const idSet = new Set<string>();
+
+  value.forEach((entry, index) => {
+    const conn = sanitizeSavedConnection(entry, index);
+    if (!conn) return;
+    let nextId = conn.id;
+    if (idSet.has(nextId)) {
+      nextId = `${nextId}-${index + 1}`;
+    }
+    idSet.add(nextId);
+    result.push({ ...conn, id: nextId });
+  });
+
+  return result;
+};
 
 const isLegacyDefaultAppearance = (appearance: Partial<{ opacity: number; blur: number }> | undefined): boolean => {
   if (!appearance) {
@@ -67,6 +287,82 @@ interface AppState {
   recordTableAccess: (connectionId: string, dbName: string, tableName: string) => void;
   setTableSortPreference: (connectionId: string, dbName: string, sortBy: 'name' | 'frequency') => void;
 }
+
+const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
+  if (!Array.isArray(value)) return [];
+  const result: SavedQuery[] = [];
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const raw = entry as Record<string, unknown>;
+    const id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
+    const sql = toTrimmedString(raw.sql);
+    const connectionId = toTrimmedString(raw.connectionId);
+    const dbName = toTrimmedString(raw.dbName);
+    if (!sql || !connectionId || !dbName) return;
+    result.push({
+      id,
+      name: toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
+      sql,
+      connectionId,
+      dbName,
+      createdAt: Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now(),
+    });
+  });
+  return result;
+};
+
+const sanitizeTheme = (value: unknown): 'light' | 'dark' => (value === 'dark' ? 'dark' : 'light');
+
+const sanitizeSqlFormatOptions = (value: unknown): { keywordCase: 'upper' | 'lower' } => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  return { keywordCase: raw.keywordCase === 'lower' ? 'lower' : 'upper' };
+};
+
+const sanitizeQueryOptions = (value: unknown): { maxRows: number } => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const maxRows = Number(raw.maxRows);
+  if (!Number.isFinite(maxRows) || maxRows <= 0) {
+    return { maxRows: 5000 };
+  }
+  return { maxRows: Math.min(50000, Math.trunc(maxRows)) };
+};
+
+const sanitizeTableAccessCount = (value: unknown): Record<string, number> => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const result: Record<string, number> = {};
+  Object.entries(raw).forEach(([key, count]) => {
+    const parsed = Number(count);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    result[key] = Math.trunc(parsed);
+  });
+  return result;
+};
+
+const sanitizeTableSortPreference = (value: unknown): Record<string, 'name' | 'frequency'> => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const result: Record<string, 'name' | 'frequency'> = {};
+  Object.entries(raw).forEach(([key, preference]) => {
+    result[key] = preference === 'frequency' ? 'frequency' : 'name';
+  });
+  return result;
+};
+
+const sanitizeAppearance = (
+  appearance: Partial<{ opacity: number; blur: number }> | undefined,
+  version: number
+): { opacity: number; blur: number } => {
+  if (!appearance || typeof appearance !== 'object') {
+    return { ...DEFAULT_APPEARANCE };
+  }
+  const nextAppearance = {
+    opacity: typeof appearance.opacity === 'number' ? appearance.opacity : DEFAULT_APPEARANCE.opacity,
+    blur: typeof appearance.blur === 'number' ? appearance.blur : DEFAULT_APPEARANCE.blur,
+  };
+  if (version < 2 && isLegacyDefaultAppearance(appearance)) {
+    return { ...DEFAULT_APPEARANCE };
+  }
+  return nextAppearance;
+};
 
 export const useStore = create<AppState>()(
   persist(
@@ -179,32 +475,39 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
         if (!persistedState || typeof persistedState !== 'object') {
           return persistedState as AppState;
         }
         const state = persistedState as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
-        const appearance = state.appearance;
-
-        if (!appearance || typeof appearance !== 'object') {
-          nextState.appearance = { ...DEFAULT_APPEARANCE };
-          return nextState as AppState;
-        }
-
-        const nextAppearance = {
-          opacity: typeof appearance.opacity === 'number' ? appearance.opacity : DEFAULT_APPEARANCE.opacity,
-          blur: typeof appearance.blur === 'number' ? appearance.blur : DEFAULT_APPEARANCE.blur,
-        };
-
-        if (version < 2 && isLegacyDefaultAppearance(appearance)) {
-          nextState.appearance = { ...DEFAULT_APPEARANCE };
-        } else {
-          nextState.appearance = nextAppearance;
-        }
-
+        nextState.connections = sanitizeConnections(state.connections);
+        nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
+        nextState.theme = sanitizeTheme(state.theme);
+        nextState.appearance = sanitizeAppearance(state.appearance, version);
+        nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
+        nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.tableAccessCount = sanitizeTableAccessCount(state.tableAccessCount);
+        nextState.tableSortPreference = sanitizeTableSortPreference(state.tableSortPreference);
         return nextState as AppState;
+      },
+      merge: (persistedState, currentState) => {
+        const state = (persistedState && typeof persistedState === 'object')
+          ? persistedState as Partial<AppState>
+          : {};
+        return {
+          ...currentState,
+          ...state,
+          connections: sanitizeConnections(state.connections),
+          savedQueries: sanitizeSavedQueries(state.savedQueries),
+          theme: sanitizeTheme(state.theme),
+          appearance: sanitizeAppearance(state.appearance, 3),
+          sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
+          queryOptions: sanitizeQueryOptions(state.queryOptions),
+          tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
+          tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
+        };
       },
       partialize: (state) => ({
         connections: state.connections,

@@ -7,6 +7,9 @@ import { MongoMemberInfo, SavedConnection } from '../types';
 
 const { Meta } = Card;
 const { Text } = Typography;
+const MAX_URI_LENGTH = 4096;
+const MAX_URI_HOSTS = 32;
+const MAX_TIMEOUT_SECONDS = 3600;
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
@@ -60,7 +63,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               const parsedPort = Number(portText);
               return {
                   host: host || 'localhost',
-                  port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort,
+                  port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : defaultPort,
               };
           }
       }
@@ -73,7 +76,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           const parsedPort = Number(portText);
           return {
               host: host || 'localhost',
-              port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort,
+              port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : defaultPort,
           };
       }
 
@@ -103,6 +106,15 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           result.push(normalized);
       });
       return result;
+  };
+
+  const isValidUriHostEntry = (entry: string): boolean => {
+      const text = String(entry || '').trim();
+      if (!text) return false;
+      if (text.length > 255) return false;
+      // 拒绝明显的 DSN 片段或路径/空白，避免把非 URI 主机段误判为合法地址。
+      if (/[()\\/\s]/.test(text)) return false;
+      return true;
   };
 
   const normalizeMongoSrvHostList = (rawList: unknown, defaultPort: number): string[] => {
@@ -138,6 +150,10 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           return null;
       }
       let rest = uriText.slice(prefix.length);
+      const hashIndex = rest.indexOf('#');
+      if (hashIndex >= 0) {
+          rest = rest.slice(0, hashIndex);
+      }
       let queryText = '';
       const queryIndex = rest.indexOf('?');
       if (queryIndex >= 0) {
@@ -187,6 +203,9 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       if (!trimmedUri) {
           return null;
       }
+      if (trimmedUri.length > MAX_URI_LENGTH) {
+          return null;
+      }
 
       if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
           const mysqlDefaultPort = getDefaultPortByType(type);
@@ -194,18 +213,30 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           if (!parsed) {
               return null;
           }
+          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+              return null;
+          }
+          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+              return null;
+          }
           const hostList = normalizeAddressList(parsed.hosts, mysqlDefaultPort);
+          if (!hostList.length) {
+              return null;
+          }
           const primary = parseHostPort(hostList[0] || `localhost:${mysqlDefaultPort}`, mysqlDefaultPort);
           const timeoutValue = Number(parsed.params.get('timeout'));
+          const topology = String(parsed.params.get('topology') || '').toLowerCase();
           return {
               host: primary?.host || 'localhost',
               port: primary?.port || mysqlDefaultPort,
               user: parsed.username,
               password: parsed.password,
               database: parsed.database || '',
-              mysqlTopology: hostList.length > 1 || parsed.params.get('topology') === 'replica' ? 'replica' : 'single',
+              mysqlTopology: hostList.length > 1 || topology === 'replica' ? 'replica' : 'single',
               mysqlReplicaHosts: hostList.slice(1),
-              timeout: Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : undefined,
+              timeout: Number.isFinite(timeoutValue) && timeoutValue > 0
+                  ? Math.min(3600, Math.trunc(timeoutValue))
+                  : undefined,
           };
       }
 
@@ -214,10 +245,19 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           if (!parsed) {
               return null;
           }
+          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+              return null;
+          }
+          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+              return null;
+          }
           const isSrv = trimmedUri.toLowerCase().startsWith('mongodb+srv://');
           const hostList = isSrv
               ? normalizeMongoSrvHostList(parsed.hosts, 27017)
               : normalizeAddressList(parsed.hosts, 27017);
+          if (!hostList.length) {
+              return null;
+          }
           const primary = isSrv
               ? { host: hostList[0] || 'localhost', port: 27017 }
               : parseHostPort(hostList[0] || 'localhost:27017', 27017);
@@ -235,7 +275,9 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               mongoAuthSource: parsed.params.get('authSource') || '',
               mongoReadPreference: parsed.params.get('readPreference') || 'primary',
               mongoAuthMechanism: parsed.params.get('authMechanism') || '',
-              timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.ceil(timeoutMs / 1000) : undefined,
+              timeout: Number.isFinite(timeoutMs) && timeoutMs > 0
+                  ? Math.min(MAX_TIMEOUT_SECONDS, Math.ceil(timeoutMs / 1000))
+                  : undefined,
               savePassword: true,
           };
       }
@@ -357,22 +399,26 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   };
 
   const handleParseURI = () => {
-      const uriText = String(form.getFieldValue('uri') || '').trim();
-      const type = String(form.getFieldValue('type') || dbType).trim().toLowerCase();
-      if (!uriText) {
-          message.warning('请先输入 URI');
-          return;
+      try {
+          const uriText = String(form.getFieldValue('uri') || '').trim();
+          const type = String(form.getFieldValue('type') || dbType).trim().toLowerCase();
+          if (!uriText) {
+              message.warning('请先输入 URI');
+              return;
+          }
+          const parsedValues = parseUriToValues(uriText, type);
+          if (!parsedValues) {
+              message.error('当前 URI 与数据源类型不匹配，或 URI 格式不支持');
+              return;
+          }
+          form.setFieldsValue({ ...parsedValues, uri: uriText });
+          if (testResult) {
+              setTestResult(null);
+          }
+          message.success('已根据 URI 回填连接参数');
+      } catch {
+          message.error('URI 解析失败，请检查格式后重试');
       }
-      const parsedValues = parseUriToValues(uriText, type);
-      if (!parsedValues) {
-          message.error('当前 URI 与数据源类型不匹配，或 URI 格式不支持');
-          return;
-      }
-      form.setFieldsValue({ ...parsedValues, uri: uriText });
-      if (testResult) {
-          setTestResult(null);
-      }
-      message.success('已根据 URI 回填连接参数');
   };
 
   const handleCopyURI = async () => {

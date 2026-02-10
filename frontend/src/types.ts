@@ -16,6 +16,9 @@ export interface ConnectionConfig {
   database?: string;
   useSSH?: boolean;
   ssh?: SSHConfig;
+  driver?: string;
+  dsn?: string;
+  timeout?: number;
   redisDB?: number; // Redis database index (0-15)
   uri?: string; // Connection URI for copy/paste
   hosts?: string[]; // Multi-host addresses: host:port
