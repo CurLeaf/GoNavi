@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBGetDatabases, MongoDiscoverMembers, TestConnection, RedisConnect } from '../../wailsjs/go/app/App';
 import { MongoMemberInfo, SavedConnection } from '../types';
 
 const { Meta } = Card;
 const { Text } = Typography;
+const MAX_URI_LENGTH = 4096;
+const MAX_URI_HOSTS = 32;
+const MAX_TIMEOUT_SECONDS = 3600;
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
     case 'mysql': return 3306;
+    case 'sphinx': return 9306;
     case 'postgres': return 5432;
     case 'redis': return 6379;
     case 'tdengine': return 6041;
@@ -34,6 +38,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   const [step, setStep] = useState(1); // 1: Select Type, 2: Configure
   const [activeGroup, setActiveGroup] = useState(0); // Active category index in step 1
   const [testResult, setTestResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
   const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
@@ -59,7 +64,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               const parsedPort = Number(portText);
               return {
                   host: host || 'localhost',
-                  port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort,
+                  port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : defaultPort,
               };
           }
       }
@@ -72,7 +77,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           const parsedPort = Number(portText);
           return {
               host: host || 'localhost',
-              port: Number.isFinite(parsedPort) && parsedPort > 0 ? parsedPort : defaultPort,
+              port: Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : defaultPort,
           };
       }
 
@@ -102,6 +107,15 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           result.push(normalized);
       });
       return result;
+  };
+
+  const isValidUriHostEntry = (entry: string): boolean => {
+      const text = String(entry || '').trim();
+      if (!text) return false;
+      if (text.length > 255) return false;
+      // 拒绝明显的 DSN 片段或路径/空白，避免把非 URI 主机段误判为合法地址。
+      if (/[()\\/\s]/.test(text)) return false;
+      return true;
   };
 
   const normalizeMongoSrvHostList = (rawList: unknown, defaultPort: number): string[] => {
@@ -137,6 +151,10 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           return null;
       }
       let rest = uriText.slice(prefix.length);
+      const hashIndex = rest.indexOf('#');
+      if (hashIndex >= 0) {
+          rest = rest.slice(0, hashIndex);
+      }
       let queryText = '';
       const queryIndex = rest.indexOf('?');
       if (queryIndex >= 0) {
@@ -186,24 +204,40 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       if (!trimmedUri) {
           return null;
       }
+      if (trimmedUri.length > MAX_URI_LENGTH) {
+          return null;
+      }
 
-      if (type === 'mysql' || type === 'mariadb') {
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
+          const mysqlDefaultPort = getDefaultPortByType(type);
           const parsed = parseMultiHostUri(trimmedUri, 'mysql');
           if (!parsed) {
               return null;
           }
-          const hostList = normalizeAddressList(parsed.hosts, 3306);
-          const primary = parseHostPort(hostList[0] || 'localhost:3306', 3306);
+          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+              return null;
+          }
+          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+              return null;
+          }
+          const hostList = normalizeAddressList(parsed.hosts, mysqlDefaultPort);
+          if (!hostList.length) {
+              return null;
+          }
+          const primary = parseHostPort(hostList[0] || `localhost:${mysqlDefaultPort}`, mysqlDefaultPort);
           const timeoutValue = Number(parsed.params.get('timeout'));
+          const topology = String(parsed.params.get('topology') || '').toLowerCase();
           return {
               host: primary?.host || 'localhost',
-              port: primary?.port || 3306,
+              port: primary?.port || mysqlDefaultPort,
               user: parsed.username,
               password: parsed.password,
               database: parsed.database || '',
-              mysqlTopology: hostList.length > 1 || parsed.params.get('topology') === 'replica' ? 'replica' : 'single',
+              mysqlTopology: hostList.length > 1 || topology === 'replica' ? 'replica' : 'single',
               mysqlReplicaHosts: hostList.slice(1),
-              timeout: Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : undefined,
+              timeout: Number.isFinite(timeoutValue) && timeoutValue > 0
+                  ? Math.min(3600, Math.trunc(timeoutValue))
+                  : undefined,
           };
       }
 
@@ -212,10 +246,19 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           if (!parsed) {
               return null;
           }
+          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+              return null;
+          }
+          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+              return null;
+          }
           const isSrv = trimmedUri.toLowerCase().startsWith('mongodb+srv://');
           const hostList = isSrv
               ? normalizeMongoSrvHostList(parsed.hosts, 27017)
               : normalizeAddressList(parsed.hosts, 27017);
+          if (!hostList.length) {
+              return null;
+          }
           const primary = isSrv
               ? { host: hostList[0] || 'localhost', port: 27017 }
               : parseHostPort(hostList[0] || 'localhost:27017', 27017);
@@ -233,7 +276,9 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               mongoAuthSource: parsed.params.get('authSource') || '',
               mongoReadPreference: parsed.params.get('readPreference') || 'primary',
               mongoAuthMechanism: parsed.params.get('authMechanism') || '',
-              timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.ceil(timeoutMs / 1000) : undefined,
+              timeout: Number.isFinite(timeoutMs) && timeoutMs > 0
+                  ? Math.min(MAX_TIMEOUT_SECONDS, Math.ceil(timeoutMs / 1000))
+                  : undefined,
               savePassword: true,
           };
       }
@@ -259,8 +304,9 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   });
 
   const getUriPlaceholder = () => {
-      if (dbType === 'mysql' || dbType === 'mariadb') {
-          return 'mysql://user:pass@127.0.0.1:3306,127.0.0.2:3306/db_name?topology=replica';
+      if (dbType === 'mysql' || dbType === 'mariadb' || dbType === 'sphinx') {
+          const defaultPort = getDefaultPortByType(dbType);
+          return `mysql://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
       }
       if (dbType === 'mongodb') {
           return 'mongodb+srv://user:pass@cluster0.example.com/db_name?authSource=admin&authMechanism=SCRAM-SHA-256';
@@ -281,12 +327,12 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ''}@`
           : '';
 
-      if (type === 'mysql' || type === 'mariadb') {
-          const primary = toAddress(host, port, 3306);
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
+          const primary = toAddress(host, port, defaultPort);
           const replicas = values.mysqlTopology === 'replica'
-              ? normalizeAddressList(values.mysqlReplicaHosts, 3306)
+              ? normalizeAddressList(values.mysqlReplicaHosts, defaultPort)
               : [];
-          const hosts = normalizeAddressList([primary, ...replicas], 3306);
+          const hosts = normalizeAddressList([primary, ...replicas], defaultPort);
           const params = new URLSearchParams();
           if (hosts.length > 1 || values.mysqlTopology === 'replica') {
               params.set('topology', 'replica');
@@ -354,22 +400,26 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   };
 
   const handleParseURI = () => {
-      const uriText = String(form.getFieldValue('uri') || '').trim();
-      const type = String(form.getFieldValue('type') || dbType).trim().toLowerCase();
-      if (!uriText) {
-          message.warning('请先输入 URI');
-          return;
+      try {
+          const uriText = String(form.getFieldValue('uri') || '').trim();
+          const type = String(form.getFieldValue('type') || dbType).trim().toLowerCase();
+          if (!uriText) {
+              message.warning('请先输入 URI');
+              return;
+          }
+          const parsedValues = parseUriToValues(uriText, type);
+          if (!parsedValues) {
+              message.error('当前 URI 与数据源类型不匹配，或 URI 格式不支持');
+              return;
+          }
+          form.setFieldsValue({ ...parsedValues, uri: uriText });
+          if (testResult) {
+              setTestResult(null);
+          }
+          message.success('已根据 URI 回填连接参数');
+      } catch {
+          message.error('URI 解析失败，请检查格式后重试');
       }
-      const parsedValues = parseUriToValues(uriText, type);
-      if (!parsedValues) {
-          message.error('当前 URI 与数据源类型不匹配，或 URI 格式不支持');
-          return;
-      }
-      form.setFieldsValue({ ...parsedValues, uri: uriText });
-      if (testResult) {
-          setTestResult(null);
-      }
-      message.success('已根据 URI 回填连接参数');
   };
 
   const handleCopyURI = async () => {
@@ -394,6 +444,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   useEffect(() => {
       if (open) {
           setTestResult(null); // Reset test result
+          setTestErrorLogOpen(false);
           setDbList([]);
           setRedisDbList([]);
           setMongoMembers([]);
@@ -410,7 +461,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               );
               const primaryHost = primaryAddress?.host || String(config.host || 'localhost');
               const primaryPort = primaryAddress?.port || Number(config.port || defaultPort);
-              const mysqlReplicaHosts = (configType === 'mysql' || configType === 'mariadb') ? normalizedHosts.slice(1) : [];
+              const mysqlReplicaHosts = (configType === 'mysql' || configType === 'mariadb' || configType === 'sphinx') ? normalizedHosts.slice(1) : [];
               const mongoHosts = configType === 'mongodb' ? normalizedHosts.slice(1) : [];
               const mysqlIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mysqlReplicaHosts.length > 0;
               const mongoIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mongoHosts.length > 0 || !!config.replicaSet;
@@ -520,6 +571,12 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       }, 0);
   };
 
+  const buildTestFailureMessage = (reason: unknown, fallback: string) => {
+      const text = String(reason ?? '').trim();
+      const normalized = text && text !== 'undefined' && text !== 'null' ? text : fallback;
+      return `测试失败: ${normalized}`;
+  };
+
   const handleTest = async () => {
       if (testInFlightRef.current) return;
       testInFlightRef.current = true;
@@ -549,10 +606,23 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
                   }
               }
           } else {
-              setTestResult({ type: 'error', message: "测试失败: " + res.message });
+              const failMessage = buildTestFailureMessage(
+                  res?.message,
+                  '连接被拒绝或参数无效，请检查后重试'
+              );
+              setTestResult({ type: 'error', message: failMessage });
           }
-      } catch (e) {
-          // ignore
+      } catch (e: unknown) {
+          if (e && typeof e === 'object' && 'errorFields' in e) {
+              const failMessage = '测试失败: 请先完善必填项后再测试连接';
+              setTestResult({ type: 'error', message: failMessage });
+              return;
+          }
+          const reason = e instanceof Error
+              ? e.message
+              : (typeof e === 'string' ? e : '未知异常');
+          const failMessage = buildTestFailureMessage(reason, '未知异常');
+          setTestResult({ type: 'error', message: failMessage });
       } finally {
           testInFlightRef.current = false;
           setLoading(false);
@@ -638,7 +708,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ? mergedValues.savePassword !== false
           : true;
 
-      if (type === 'mysql' || type === 'mariadb') {
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
           const replicas = mergedValues.mysqlTopology === 'replica'
               ? normalizeAddressList(mergedValues.mysqlReplicaHosts, defaultPort)
               : [];
@@ -753,6 +823,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       { label: '关系型数据库', items: [
           { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
           { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
+          { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
           { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
           { key: 'sqlserver', name: 'SQL Server', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#CC2927' }} /> },
           { key: 'sqlite', name: 'SQLite', icon: <FileTextOutlined style={{ fontSize: 24, color: '#003B57' }} /> },
@@ -850,7 +921,10 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             mongoReplicaPassword: '',
         }}
         onValuesChange={(changed) => {
-            if (testResult) setTestResult(null); // Clear result on change
+            if (testResult) {
+                setTestResult(null); // Clear result on change
+                setTestErrorLogOpen(false);
+            }
             if (changed.useSSH !== undefined) setUseSSH(changed.useSSH);
             // Type change handled by step 1, but keep sync if select changes (hidden now)
             if (changed.type !== undefined) setDbType(changed.type);
@@ -920,7 +994,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             )}
         </div>
 
-        {(dbType === 'mysql' || dbType === 'mariadb') && (
+        {(dbType === 'mysql' || dbType === 'mariadb' || dbType === 'sphinx') && (
         <>
             <Form.Item name="mysqlTopology" label="连接模式">
                 <Select
@@ -1183,14 +1257,6 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
         </>
         )}
         
-        {testResult && (
-          <Alert
-              message={testResult.message}
-              type={testResult.type}
-              showIcon
-              style={{ marginTop: 16 }}
-          />
-        )}
       </Form>
   );
 
@@ -1200,12 +1266,59 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
              <Button key="cancel" onClick={onClose}>取消</Button>
           ];
       }
-      return [
-          !initialValues && <Button key="back" onClick={() => setStep(1)} style={{ float: 'left' }}>上一步</Button>,
-          <Button key="test" loading={loading} onClick={requestTest}>测试连接</Button>,
-          <Button key="cancel" onClick={onClose}>取消</Button>,
-          <Button key="submit" type="primary" loading={loading} onClick={handleOk}>保存</Button>
-      ];
+      const isTestSuccess = testResult?.type === 'success';
+      const hasTestError = !!testResult && !isTestSuccess;
+      return (
+          <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                  {!initialValues && <Button key="back" onClick={() => setStep(1)}>上一步</Button>}
+                  {testResult ? (
+                      <span
+                          style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              height: 24,
+                              padding: '0 10px',
+                              borderRadius: 999,
+                              border: isTestSuccess ? '1px solid rgba(82, 196, 26, 0.35)' : '1px solid rgba(255, 77, 79, 0.35)',
+                              background: isTestSuccess ? 'rgba(82, 196, 26, 0.10)' : 'rgba(255, 77, 79, 0.10)',
+                              color: isTestSuccess ? '#389e0d' : '#cf1322',
+                              fontSize: 12,
+                              lineHeight: '22px',
+                              whiteSpace: 'nowrap',
+                              boxSizing: 'border-box',
+                          }}
+                      >
+                          {isTestSuccess ? <CheckCircleFilled /> : <CloseCircleFilled />}
+                          <span>{isTestSuccess ? '连接成功' : '连接失败'}</span>
+                      </span>
+                  ) : null}
+                  {hasTestError && (
+                      <Button
+                          size="small"
+                          icon={<FileTextOutlined />}
+                          style={{
+                              height: 24,
+                              borderRadius: 999,
+                              padding: '0 10px',
+                              borderColor: '#ffccc7',
+                              background: '#fff2f0',
+                              color: '#cf1322',
+                          }}
+                          onClick={() => setTestErrorLogOpen(true)}
+                      >
+                          查看原因
+                      </Button>
+                  )}
+              </div>
+              <Space size={8} style={{ flexShrink: 0 }}>
+                  <Button key="test" loading={loading} onClick={requestTest}>测试连接</Button>
+                  <Button key="cancel" onClick={onClose}>取消</Button>
+                  <Button key="submit" type="primary" loading={loading} onClick={handleOk}>保存</Button>
+              </Space>
+          </div>
+      );
   };
 
   const getTitle = () => {
@@ -1218,26 +1331,59 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       ? { padding: '16px 24px', overflow: 'hidden' as const }
       : {
           padding: '16px 24px',
-          maxHeight: 'calc(100vh - 220px)',
           overflowY: 'auto' as const,
           overflowX: 'hidden' as const,
       };
 
   return (
-    <Modal
-        title={getTitle()}
-        open={open}
-        onCancel={onClose}
-        footer={getFooter()}
-        wrapClassName="connection-modal-wrap"
-        width={step === 1 ? 650 : 600}
-        zIndex={10001}
-        destroyOnHidden
-        maskClosable={false}
-        styles={{ body: modalBodyStyle }}
-    >
-      {step === 1 ? renderStep1() : renderStep2()}
-    </Modal>
+    <>
+      <Modal
+          title={getTitle()}
+          open={open}
+          onCancel={onClose}
+          footer={getFooter()}
+          centered
+          wrapClassName="connection-modal-wrap"
+          width={step === 1 ? 650 : 600}
+          zIndex={10001}
+          destroyOnHidden
+          maskClosable={false}
+          styles={{ body: modalBodyStyle }}
+      >
+        {step === 1 ? renderStep1() : renderStep2()}
+      </Modal>
+      <Modal
+          title="测试连接失败原因"
+          open={testErrorLogOpen}
+          onCancel={() => setTestErrorLogOpen(false)}
+          centered
+          width={760}
+          zIndex={10002}
+          destroyOnHidden
+          footer={[
+              <Button key="close" onClick={() => setTestErrorLogOpen(false)}>关闭</Button>,
+          ]}
+      >
+          <pre
+              style={{
+                  margin: 0,
+                  maxHeight: '50vh',
+                  overflowY: 'auto',
+                  padding: 12,
+                  borderRadius: 6,
+                  background: '#fff2f0',
+                  border: '1px solid #ffccc7',
+                  color: '#a8071a',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  lineHeight: '20px',
+                  fontSize: 13,
+              }}
+          >
+              {String(testResult?.message || '暂无失败日志')}
+          </pre>
+      </Modal>
+    </>
   );
 };
 

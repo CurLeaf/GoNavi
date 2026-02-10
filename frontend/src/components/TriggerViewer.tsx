@@ -52,45 +52,119 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             return String(conn?.config?.driver || '').trim().toLowerCase();
         }
-        if (type === 'mariadb') return 'mysql';
+        if (type === 'mariadb' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
     };
 
-    const buildShowTriggerQuery = (dialect: string, triggerName: string, dbName: string): string => {
+    const isSphinxConnection = (conn: any): boolean => {
+        const type = String(conn?.config?.type || '').trim().toLowerCase();
+        if (type === 'sphinx') return true;
+        if (type !== 'custom') return false;
+        const driver = String(conn?.config?.driver || '').trim().toLowerCase();
+        return driver === 'sphinx' || driver === 'sphinxql';
+    };
+
+    const buildShowTriggerQueries = (dialect: string, triggerName: string, dbName: string): string[] => {
         const safeTriggerName = escapeSQLLiteral(triggerName);
         const safeDbName = escapeSQLLiteral(dbName);
         switch (dialect) {
             case 'mysql':
-                return `SHOW CREATE TRIGGER \`${triggerName.replace(/`/g, '``')}\``;
+                return [
+                    `SHOW CREATE TRIGGER \`${triggerName.replace(/`/g, '``')}\``,
+                    safeDbName
+                        ? `SELECT ACTION_STATEMENT AS trigger_definition FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' AND trigger_name = '${safeTriggerName}' LIMIT 1`
+                        : '',
+                    safeDbName
+                        ? `SHOW TRIGGERS FROM \`${dbName.replace(/`/g, '``')}\` LIKE '${safeTriggerName}'`
+                        : `SHOW TRIGGERS LIKE '${safeTriggerName}'`,
+                ].filter(Boolean);
             case 'postgres':
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-                return `SELECT pg_get_triggerdef(t.oid, true) AS trigger_definition
+                return [`SELECT pg_get_triggerdef(t.oid, true) AS trigger_definition
 FROM pg_trigger t
 JOIN pg_class c ON t.tgrelid = c.oid
 WHERE t.tgname = '${safeTriggerName}'
   AND NOT t.tgisinternal
-LIMIT 1`;
+LIMIT 1`];
             case 'sqlserver': {
-                return `SELECT OBJECT_DEFINITION(OBJECT_ID('${safeTriggerName.replace(/'/g, "''")}')) AS trigger_definition`;
+                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${safeTriggerName.replace(/'/g, "''")}')) AS trigger_definition`];
             }
             case 'oracle':
             case 'dm':
                 if (!safeDbName) {
-                    return `SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`;
+                    return [`SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
                 }
-                return `SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`;
+                return [`SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
             case 'sqlite':
-                return `SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${safeTriggerName}'`;
+                return [`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${safeTriggerName}'`];
             case 'tdengine':
-                return `-- TDengine 不支持触发器`;
+                return [`-- TDengine 不支持触发器`];
             case 'mongodb':
-                return `-- MongoDB 不支持触发器`;
+                return [`-- MongoDB 不支持触发器`];
             default:
-                return `-- 暂不支持该数据库类型的触发器定义查看`;
+                return [`-- 暂不支持该数据库类型的触发器定义查看`];
         }
+    };
+
+    const runQueryCandidates = async (
+        config: Record<string, any>,
+        dbName: string,
+        queries: string[]
+    ): Promise<{ success: boolean; data: any[]; message?: string }> => {
+        let lastMessage = '';
+        let hasSuccessfulQuery = false;
+        for (const query of queries) {
+            const sql = String(query || '').trim();
+            if (!sql) continue;
+            try {
+                const result = await DBQuery(config as any, dbName, sql);
+                if (!result.success || !Array.isArray(result.data)) {
+                    lastMessage = result.message || lastMessage;
+                    continue;
+                }
+                hasSuccessfulQuery = true;
+                if (result.data.length > 0) {
+                    return { success: true, data: result.data };
+                }
+            } catch (error: any) {
+                lastMessage = error?.message || String(error);
+            }
+        }
+        if (hasSuccessfulQuery) {
+            return { success: true, data: [] };
+        }
+        return { success: false, data: [], message: lastMessage };
+    };
+
+    const getVersionHint = async (config: Record<string, any>, dbName: string): Promise<string> => {
+        const candidates = [
+            `SELECT VERSION() AS version`,
+            `SHOW VARIABLES LIKE 'version'`,
+        ];
+        for (const query of candidates) {
+            try {
+                const result = await DBQuery(config as any, dbName, query);
+                if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
+                    continue;
+                }
+                const row = result.data[0] as Record<string, any>;
+                const version =
+                    row.version
+                    || row.VERSION
+                    || row.Value
+                    || row.value
+                    || Object.values(row)[1]
+                    || Object.values(row)[0];
+                const text = String(version || '').trim();
+                if (text) return text;
+            } catch {
+                // ignore
+            }
+        }
+        return '';
     };
 
     const extractTriggerDefinition = (dialect: string, data: any[]): string => {
@@ -104,6 +178,12 @@ LIMIT 1`;
             case 'mysql': {
                 // MySQL SHOW CREATE TRIGGER returns: Trigger, sql_mode, SQL Original Statement, ...
                 const keys = Object.keys(row);
+                if (row.trigger_definition || row.TRIGGER_DEFINITION) {
+                    return String(row.trigger_definition || row.TRIGGER_DEFINITION);
+                }
+                if (row.ACTION_STATEMENT || row.action_statement) {
+                    return String(row.ACTION_STATEMENT || row.action_statement);
+                }
                 const sqlKey = keys.find(k => k.toLowerCase().includes('statement') || k.toLowerCase() === 'sql original statement');
                 if (sqlKey) return row[sqlKey];
                 // Fallback: try to find any key containing CREATE TRIGGER
@@ -158,10 +238,11 @@ LIMIT 1`;
             }
 
             const dialect = getMetadataDialect(conn);
-            const query = buildShowTriggerQuery(dialect, triggerName, dbName);
+            const queries = buildShowTriggerQueries(dialect, triggerName, dbName);
+            const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
 
-            if (query.startsWith('--')) {
-                setTriggerDefinition(query);
+            if (!queries.length || String(queries[0] || '').startsWith('--')) {
+                setTriggerDefinition(String(queries[0] || '-- 暂不支持该数据库类型的触发器定义查看'));
                 setLoading(false);
                 return;
             }
@@ -176,11 +257,26 @@ LIMIT 1`;
                     ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
                 };
 
-                const result = await DBQuery(config as any, dbName, query);
+                const result = await runQueryCandidates(config, dbName, queries);
 
-                if (result.success && Array.isArray(result.data)) {
+                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                     const definition = extractTriggerDefinition(dialect, result.data);
                     setTriggerDefinition(definition);
+                    return;
+                }
+
+                if (result.success) {
+                    if (sphinxLike) {
+                        const version = await getVersionHint(config, dbName);
+                        const versionText = version ? `（版本: ${version}）` : '';
+                        setTriggerDefinition(`-- 当前 Sphinx 实例${versionText}未返回触发器定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`);
+                        return;
+                    }
+                    setTriggerDefinition('-- 未找到触发器定义');
+                } else if (sphinxLike) {
+                    const version = await getVersionHint(config, dbName);
+                    const versionText = version ? `（版本: ${version}）` : '';
+                    setTriggerDefinition(`-- 当前 Sphinx 实例${versionText}不支持触发器定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`);
                 } else {
                     setError(result.message || '查询触发器定义失败');
                 }

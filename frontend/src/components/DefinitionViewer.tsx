@@ -25,9 +25,17 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             return String(conn?.config?.driver || '').trim().toLowerCase();
         }
-        if (type === 'mariadb') return 'mysql';
+        if (type === 'mariadb' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
+    };
+
+    const isSphinxConnection = (conn: any): boolean => {
+        const type = String(conn?.config?.type || '').trim().toLowerCase();
+        if (type === 'sphinx') return true;
+        if (type !== 'custom') return false;
+        const driver = String(conn?.config?.driver || '').trim().toLowerCase();
+        return driver === 'sphinx' || driver === 'sphinxql';
     };
 
     const parseSchemaAndName = (fullName: string): { schema: string; name: string } => {
@@ -39,40 +47,46 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         return { schema: '', name: raw };
     };
 
-    const buildShowViewQuery = (dialect: string, viewName: string, dbName: string): string => {
+    const buildShowViewQueries = (dialect: string, viewName: string, dbName: string): string[] => {
         const { schema, name } = parseSchemaAndName(viewName);
         const safeName = escapeSQLLiteral(name);
         const safeDbName = escapeSQLLiteral(dbName);
 
         switch (dialect) {
             case 'mysql':
-                return `SHOW CREATE VIEW \`${name.replace(/`/g, '``')}\``;
+                return [
+                    `SHOW CREATE VIEW \`${name.replace(/`/g, '``')}\``,
+                    safeDbName
+                        ? `SELECT VIEW_DEFINITION AS view_definition FROM information_schema.views WHERE table_schema = '${safeDbName}' AND table_name = '${safeName}' LIMIT 1`
+                        : '',
+                    `SHOW CREATE TABLE \`${name.replace(/`/g, '``')}\``,
+                ].filter(Boolean);
             case 'postgres':
             case 'kingbase':
             case 'highgo':
             case 'vastbase': {
                 const schemaRef = schema || 'public';
-                return `SELECT pg_get_viewdef('${escapeSQLLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`;
+                return [`SELECT pg_get_viewdef('${escapeSQLLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`];
             }
             case 'sqlserver':
-                return `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`;
+                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`];
             case 'oracle':
             case 'dm':
                 if (schema) {
-                    return `SELECT TEXT AS view_definition FROM ALL_VIEWS WHERE OWNER = '${escapeSQLLiteral(schema).toUpperCase()}' AND VIEW_NAME = '${safeName.toUpperCase()}'`;
+                    return [`SELECT TEXT AS view_definition FROM ALL_VIEWS WHERE OWNER = '${escapeSQLLiteral(schema).toUpperCase()}' AND VIEW_NAME = '${safeName.toUpperCase()}'`];
                 }
                 if (safeDbName) {
-                    return `SELECT TEXT AS view_definition FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' AND VIEW_NAME = '${safeName.toUpperCase()}'`;
+                    return [`SELECT TEXT AS view_definition FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' AND VIEW_NAME = '${safeName.toUpperCase()}'`];
                 }
-                return `SELECT TEXT AS view_definition FROM USER_VIEWS WHERE VIEW_NAME = '${safeName.toUpperCase()}'`;
+                return [`SELECT TEXT AS view_definition FROM USER_VIEWS WHERE VIEW_NAME = '${safeName.toUpperCase()}'`];
             case 'sqlite':
-                return `SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${safeName}'`;
+                return [`SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${safeName}'`];
             default:
-                return `-- 暂不支持该数据库类型的视图定义查看`;
+                return [`-- 暂不支持该数据库类型的视图定义查看`];
         }
     };
 
-    const buildShowRoutineQuery = (dialect: string, routineName: string, routineType: string, dbName: string): string => {
+    const buildShowRoutineQueries = (dialect: string, routineName: string, routineType: string, dbName: string): string[] => {
         const { schema, name } = parseSchemaAndName(routineName);
         const safeName = escapeSQLLiteral(name);
         const safeDbName = escapeSQLLiteral(dbName);
@@ -80,29 +94,95 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
         switch (dialect) {
             case 'mysql':
-                return `SHOW CREATE ${upperType} \`${name.replace(/`/g, '``')}\``;
+                return [
+                    `SHOW CREATE ${upperType} \`${name.replace(/`/g, '``')}\``,
+                    safeDbName
+                        ? `SELECT ROUTINE_DEFINITION AS routine_definition, ROUTINE_TYPE AS routine_type FROM information_schema.routines WHERE routine_schema = '${safeDbName}' AND routine_name = '${safeName}' LIMIT 1`
+                        : '',
+                    upperType === 'PROCEDURE'
+                        ? `SHOW PROCEDURE STATUS LIKE '${safeName}'`
+                        : `SHOW FUNCTION STATUS LIKE '${safeName}'`,
+                ].filter(Boolean);
             case 'postgres':
             case 'kingbase':
             case 'highgo':
             case 'vastbase': {
                 const schemaRef = schema || 'public';
-                return `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${safeName}' LIMIT 1`;
+                return [`SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${safeName}' LIMIT 1`];
             }
             case 'sqlserver':
-                return `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`;
+                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`];
             case 'oracle':
             case 'dm': {
                 const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
                 if (owner) {
-                    return `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = '${upperType}' ORDER BY LINE`;
+                    return [`SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = '${upperType}' ORDER BY LINE`];
                 }
-                return `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = '${upperType}' ORDER BY LINE`;
+                return [`SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = '${upperType}' ORDER BY LINE`];
             }
             case 'sqlite':
-                return `-- SQLite 不支持存储函数/存储过程`;
+                return [`-- SQLite 不支持存储函数/存储过程`];
             default:
-                return `-- 暂不支持该数据库类型的函数/存储过程定义查看`;
+                return [`-- 暂不支持该数据库类型的函数/存储过程定义查看`];
         }
+    };
+
+    const runQueryCandidates = async (
+        config: Record<string, any>,
+        dbName: string,
+        queries: string[]
+    ): Promise<{ success: boolean; data: any[]; message?: string }> => {
+        let lastMessage = '';
+        let hasSuccessfulQuery = false;
+        for (const query of queries) {
+            const sql = String(query || '').trim();
+            if (!sql) continue;
+            try {
+                const result = await DBQuery(config as any, dbName, sql);
+                if (!result.success || !Array.isArray(result.data)) {
+                    lastMessage = result.message || lastMessage;
+                    continue;
+                }
+                hasSuccessfulQuery = true;
+                if (result.data.length > 0) {
+                    return { success: true, data: result.data };
+                }
+            } catch (error: any) {
+                lastMessage = error?.message || String(error);
+            }
+        }
+        if (hasSuccessfulQuery) {
+            return { success: true, data: [] };
+        }
+        return { success: false, data: [], message: lastMessage };
+    };
+
+    const getVersionHint = async (config: Record<string, any>, dbName: string): Promise<string> => {
+        const candidates = [
+            `SELECT VERSION() AS version`,
+            `SHOW VARIABLES LIKE 'version'`,
+        ];
+        for (const query of candidates) {
+            try {
+                const result = await DBQuery(config as any, dbName, query);
+                if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
+                    continue;
+                }
+                const row = result.data[0] as Record<string, any>;
+                const version =
+                    row.version
+                    || row.VERSION
+                    || row.Value
+                    || row.value
+                    || Object.values(row)[1]
+                    || Object.values(row)[0];
+                const text = String(version || '').trim();
+                if (text) return text;
+            } catch {
+                // ignore
+            }
+        }
+        return '';
     };
 
     const extractViewDefinition = (dialect: string, data: any[]): string => {
@@ -112,11 +192,15 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         switch (dialect) {
             case 'mysql': {
                 const keys = Object.keys(row);
+                const textDefinition = row.view_definition || row.VIEW_DEFINITION;
+                if (textDefinition) return String(textDefinition);
                 const sqlKey = keys.find(k => k.toLowerCase().includes('create view') || k.toLowerCase() === 'create view');
                 if (sqlKey) return row[sqlKey];
+                const tableSqlKey = keys.find(k => k.toLowerCase().includes('create table'));
+                if (tableSqlKey) return row[tableSqlKey];
                 for (const key of keys) {
                     const val = String(row[key] || '');
-                    if (val.toUpperCase().includes('CREATE') && val.toUpperCase().includes('VIEW')) {
+                    if (val.toUpperCase().includes('CREATE') && (val.toUpperCase().includes('VIEW') || val.toUpperCase().includes('TABLE'))) {
                         return val;
                     }
                 }
@@ -137,6 +221,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'mysql': {
                 const row = data[0];
                 const keys = Object.keys(row);
+                if (row.routine_definition || row.ROUTINE_DEFINITION) {
+                    return String(row.routine_definition || row.ROUTINE_DEFINITION);
+                }
                 const sqlKey = keys.find(k => k.toLowerCase().includes('create function') || k.toLowerCase().includes('create procedure'));
                 if (sqlKey) return row[sqlKey];
                 for (const key of keys) {
@@ -144,6 +231,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     if (val.toUpperCase().includes('CREATE') && (val.toUpperCase().includes('FUNCTION') || val.toUpperCase().includes('PROCEDURE'))) {
                         return val;
                     }
+                }
+                const routineName = String(row.Name || row.name || '').trim();
+                if (routineName) {
+                    const routineType = String(row.Type || row.type || row.ROUTINE_TYPE || row.routine_type || 'FUNCTION').trim().toUpperCase();
+                    return `-- 当前数据源未返回可执行定义文本，已返回元数据\n-- 名称: ${routineName}\n-- 类型: ${routineType}\n${JSON.stringify(row, null, 2)}`;
                 }
                 return JSON.stringify(row, null, 2);
             }
@@ -173,9 +265,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
             const dbName = tab.dbName || '';
             const dialect = getMetadataDialect(conn);
+            const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
 
-            let query: string;
+            let queries: string[];
             let extractFn: (dialect: string, data: any[]) => string;
+            let objectLabel: string;
 
             if (tab.type === 'view-def') {
                 const viewName = tab.viewName || '';
@@ -184,8 +278,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     setLoading(false);
                     return;
                 }
-                query = buildShowViewQuery(dialect, viewName, dbName);
+                queries = buildShowViewQueries(dialect, viewName, dbName);
                 extractFn = extractViewDefinition;
+                objectLabel = '视图';
             } else {
                 const routineName = tab.routineName || '';
                 const routineType = tab.routineType || 'FUNCTION';
@@ -194,12 +289,13 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     setLoading(false);
                     return;
                 }
-                query = buildShowRoutineQuery(dialect, routineName, routineType, dbName);
+                queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
                 extractFn = extractRoutineDefinition;
+                objectLabel = '函数/存储过程';
             }
 
-            if (query.startsWith('--')) {
-                setDefinition(query);
+            if (!queries.length || String(queries[0] || '').startsWith('--')) {
+                setDefinition(String(queries[0] || '-- 暂不支持该对象定义查看'));
                 setLoading(false);
                 return;
             }
@@ -214,11 +310,26 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
                 };
 
-                const result = await DBQuery(config as any, dbName, query);
+                const result = await runQueryCandidates(config, dbName, queries);
 
-                if (result.success && Array.isArray(result.data)) {
+                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                     const def = extractFn(dialect, result.data);
                     setDefinition(def);
+                    return;
+                }
+
+                if (result.success) {
+                    if (sphinxLike) {
+                        const version = await getVersionHint(config, dbName);
+                        const versionText = version ? `（版本: ${version}）` : '';
+                        setDefinition(`-- 当前 Sphinx 实例${versionText}未返回${objectLabel}定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`);
+                        return;
+                    }
+                    setDefinition(`-- 未找到${objectLabel}定义`);
+                } else if (sphinxLike) {
+                    const version = await getVersionHint(config, dbName);
+                    const versionText = version ? `（版本: ${version}）` : '';
+                    setDefinition(`-- 当前 Sphinx 实例${versionText}不支持${objectLabel}定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`);
                 } else {
                     setError(result.message || '查询定义失败');
                 }

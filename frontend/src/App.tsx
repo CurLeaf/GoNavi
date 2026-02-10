@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, BulbOutlined, BulbFilled, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined } from '@ant-design/icons';
-import { EventsOn } from '../wailsjs/runtime/runtime';
+import { Environment, EventsOn } from '../wailsjs/runtime/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -29,12 +29,30 @@ function App() {
   const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const windowCornerRadius = 14;
+  const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
   useEffect(() => {
     SetWindowTranslucency(appearance.opacity, appearance.blur).catch(() => {});
   }, [appearance.opacity, appearance.blur]);
+
+  useEffect(() => {
+      let cancelled = false;
+      Environment()
+          .then((env) => {
+              if (cancelled) return;
+              setIsLinuxRuntime((env?.platform || '').toLowerCase() === 'linux');
+          })
+          .catch(() => {
+              if (cancelled) return;
+              const platform = typeof navigator !== 'undefined' ? navigator.platform : '';
+              setIsLinuxRuntime(/linux/i.test(platform));
+          });
+      return () => {
+          cancelled = true;
+      };
+  }, []);
 
   // Background Helper
   const getBg = (darkHex: string, lightHex: string) => {
@@ -368,8 +386,13 @@ function App() {
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
 
 
-  // Log Panel
-  const [logPanelHeight, setLogPanelHeight] = useState(200);
+  // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
+  const LOG_PANEL_TOOLBAR_HEIGHT = 32;
+  const LOG_PANEL_SINGLE_ROW_HEIGHT = 39;
+  const LOG_PANEL_MIN_VISIBLE_ROWS = 1;
+  const LOG_PANEL_MIN_HEIGHT = LOG_PANEL_TOOLBAR_HEIGHT + (LOG_PANEL_SINGLE_ROW_HEIGHT * LOG_PANEL_MIN_VISIBLE_ROWS);
+  const LOG_PANEL_MAX_HEIGHT = 800;
+  const [logPanelHeight, setLogPanelHeight] = useState(Math.max(200, LOG_PANEL_MIN_HEIGHT));
   const [isLogPanelOpen, setIsLogPanelOpen] = useState(false);
   const logResizeRef = React.useRef<{ startY: number, startHeight: number } | null>(null);
   const logGhostRef = React.useRef<HTMLDivElement>(null);
@@ -398,7 +421,10 @@ function App() {
   const handleLogResizeUp = (e: MouseEvent) => {
       if (logResizeRef.current) {
           const delta = logResizeRef.current.startY - e.clientY; 
-          const newHeight = Math.max(100, Math.min(800, logResizeRef.current.startHeight + delta));
+          const newHeight = Math.max(
+              LOG_PANEL_MIN_HEIGHT,
+              Math.min(LOG_PANEL_MAX_HEIGHT, logResizeRef.current.startHeight + delta)
+          );
           setLogPanelHeight(newHeight);
       }
       
@@ -550,6 +576,17 @@ function App() {
       };
   }, []);
 
+  const linuxResizeHandleStyleBase = {
+      position: 'fixed',
+      zIndex: 12000,
+      background: 'transparent',
+      WebkitAppRegion: 'drag',
+      '--wails-draggable': 'drag',
+      userSelect: 'none'
+  } as any;
+
+  const showLinuxResizeHandles = isLinuxRuntime;
+
   return (
     <ConfigProvider
         locale={zhCN}
@@ -593,8 +630,8 @@ function App() {
             display: 'flex', 
             flexDirection: 'column',
             background: 'transparent',
-            borderRadius: windowCornerRadius,
-            clipPath: `inset(0 round ${windowCornerRadius}px)`,
+            borderRadius: showLinuxResizeHandles ? 0 : windowCornerRadius,
+            clipPath: showLinuxResizeHandles ? 'none' : `inset(0 round ${windowCornerRadius}px)`,
             backdropFilter: blurFilter,
             WebkitBackdropFilter: blurFilter,
         }}>
@@ -891,6 +928,21 @@ function App() {
                   ) : null}
               </div>
           </Modal>
+
+          {showLinuxResizeHandles && (
+              <>
+                  {/* Linux Mint 下 frameless 仅局部可缩放：补四边四角命中层 */}
+                  <div style={{ ...linuxResizeHandleStyleBase, top: 0, left: 14, right: 14, height: 6, cursor: 'ns-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, bottom: 0, left: 14, right: 14, height: 6, cursor: 'ns-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, top: 14, bottom: 14, left: 0, width: 6, cursor: 'ew-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, top: 14, bottom: 14, right: 0, width: 6, cursor: 'ew-resize' }} />
+
+                  <div style={{ ...linuxResizeHandleStyleBase, top: 0, left: 0, width: 14, height: 14, cursor: 'nwse-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, top: 0, right: 0, width: 14, height: 14, cursor: 'nesw-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, bottom: 0, left: 0, width: 14, height: 14, cursor: 'nesw-resize' }} />
+                  <div style={{ ...linuxResizeHandleStyleBase, bottom: 0, right: 0, width: 14, height: 14, cursor: 'nwse-resize' }} />
+              </>
+          )}
           
           {/* Ghost Resize Line for Sidebar */}
           <div 

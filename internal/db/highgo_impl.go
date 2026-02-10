@@ -15,7 +15,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
-	_ "github.com/lib/pq" // HighGo is PostgreSQL compatible
+	_ "github.com/highgo/pq-sm3" // HighGo uses dedicated SM3-capable driver
 )
 
 // HighGoDB implements Database interface for HighGo (瀚高) database
@@ -80,7 +80,7 @@ func (h *HighGoDB) Connect(config connection.ConnectionConfig) error {
 		dsn = h.getDSN(config)
 	}
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("highgo", dsn)
 	if err != nil {
 		return fmt.Errorf("打开数据库连接失败：%w", err)
 	}

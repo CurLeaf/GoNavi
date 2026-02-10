@@ -4,7 +4,7 @@ import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
-import { buildWhereSQL, quoteIdentPart, quoteQualifiedIdent, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildWhereSQL, quoteQualifiedIdent, type FilterCondition } from '../utils/sql';
 
 const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [data, setData] = useState<any[]>([]);
@@ -69,9 +69,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
     const countSql = `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
     
     let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-    if (sortInfo && sortInfo.order) {
-        sql += ` ORDER BY ${quoteIdentPart(dbType, sortInfo.columnKey)} ${sortInfo.order === 'ascend' ? 'ASC' : 'DESC'}`;
-    }
+    sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
     const offset = (page - 1) * size;
     // 大表性能：打开表不阻塞在 COUNT(*)，先通过多取 1 条判断是否还有下一页；总数在后台统计并异步回填。
     sql += ` LIMIT ${size + 1} OFFSET ${offset}`;
@@ -205,13 +203,9 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
         });
     }
     if (fetchSeqRef.current === seq) setLoading(false);
-  }, [connections, tab, sortInfo, filterConditions, pkColumns.length]); 
-  // Depend on pkColumns.length to avoid loop? No, pkColumns is updated inside.
-  // Actually, 'pkColumns' state shouldn't trigger re-fetch.
-  // The 'if (pkColumns.length === 0)' check is inside.
-  // So adding pkColumns to dependency is safer but might trigger double fetch if not careful?
-  // Only if pkColumns changes. It changes once from [] to [...].
-  // So it's fine.
+  }, [connections, tab, sortInfo, filterConditions, pkColumns]); 
+  // 依赖 pkColumns：在无手动排序时可回退到主键稳定排序。
+  // 主键信息只会在首次加载后更新一次，避免循环查询。
 
   // Handlers memoized
   const handleReload = useCallback(() => {
