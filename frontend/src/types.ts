@@ -84,7 +84,7 @@ export interface TriggerDefinition {
 export interface TabData {
   id: string;
   title: string;
-  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'trigger';
+  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'trigger' | 'view-def' | 'routine-def';
   connectionId: string;
   dbName?: string;
   tableName?: string;
@@ -93,6 +93,9 @@ export interface TabData {
   readOnly?: boolean;
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
+  viewName?: string; // View name for view definition tabs
+  routineName?: string; // Routine name for function/procedure definition tabs
+  routineType?: string; // 'FUNCTION' or 'PROCEDURE'
 }
 
 export interface DatabaseNode {

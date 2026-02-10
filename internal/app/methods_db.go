@@ -367,7 +367,12 @@ func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query s
 	defer cancel()
 
 	lowerQuery := strings.TrimSpace(strings.ToLower(query))
-	if strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "show") || strings.HasPrefix(lowerQuery, "describe") || strings.HasPrefix(lowerQuery, "explain") {
+	isReadQuery := strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "show") || strings.HasPrefix(lowerQuery, "describe") || strings.HasPrefix(lowerQuery, "explain")
+	// MongoDB JSON 命令中的 find/count/aggregate 也属于读查询
+	if !isReadQuery && strings.ToLower(strings.TrimSpace(runConfig.Type)) == "mongodb" && strings.HasPrefix(strings.TrimSpace(query), "{") {
+		isReadQuery = true
+	}
+	if isReadQuery {
 		var data []map[string]interface{}
 		var columns []string
 		if q, ok := dbInst.(interface {
@@ -537,6 +542,125 @@ func (a *App) DBGetTriggers(config connection.ConnectionConfig, dbName string, t
 	}
 
 	return connection.QueryResult{Success: true, Data: triggers}
+}
+
+func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewName string) connection.QueryResult {
+	viewName = strings.TrimSpace(viewName)
+	if viewName == "" {
+		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	switch dbType {
+	case "mysql", "mariadb", "postgres", "kingbase", "sqlite", "oracle", "dameng", "highgo", "vastbase", "sqlserver":
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除视图", dbType)}
+	}
+
+	schemaName, pureViewName := normalizeSchemaAndTableByType(dbType, dbName, viewName)
+	if pureViewName == "" {
+		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+	}
+	qualifiedView := quoteTableIdentByType(dbType, schemaName, pureViewName)
+	sql := fmt.Sprintf("DROP VIEW %s", qualifiedView)
+
+	runConfig := buildRunConfigForDDL(config, dbType, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "视图删除成功"}
+}
+
+func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, routineName string, routineType string) connection.QueryResult {
+	routineName = strings.TrimSpace(routineName)
+	routineType = strings.TrimSpace(strings.ToUpper(routineType))
+	if routineName == "" {
+		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
+	}
+	if routineType != "FUNCTION" && routineType != "PROCEDURE" {
+		routineType = "FUNCTION"
+	}
+
+	dbType := resolveDDLDBType(config)
+	switch dbType {
+	case "mysql", "mariadb", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "sqlserver":
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除函数/存储过程", dbType)}
+	}
+
+	schemaName, pureName := normalizeSchemaAndTableByType(dbType, dbName, routineName)
+	if pureName == "" {
+		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
+	}
+	qualifiedName := quoteTableIdentByType(dbType, schemaName, pureName)
+	sql := fmt.Sprintf("DROP %s %s", routineType, qualifiedName)
+
+	runConfig := buildRunConfigForDDL(config, dbType, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	label := "函数"
+	if routineType == "PROCEDURE" {
+		label = "存储过程"
+	}
+	return connection.QueryResult{Success: true, Message: fmt.Sprintf("%s删除成功", label)}
+}
+
+func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldName string, newName string) connection.QueryResult {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+	}
+	if strings.EqualFold(oldName, newName) {
+		return connection.QueryResult{Success: false, Message: "新旧视图名称不能相同"}
+	}
+	if strings.Contains(newName, ".") {
+		return connection.QueryResult{Success: false, Message: "新视图名不能包含 schema 或数据库前缀"}
+	}
+
+	dbType := resolveDDLDBType(config)
+	schemaName, pureOldName := normalizeSchemaAndTableByType(dbType, dbName, oldName)
+	if pureOldName == "" {
+		return connection.QueryResult{Success: false, Message: "旧视图名不能为空"}
+	}
+	oldQualified := quoteTableIdentByType(dbType, schemaName, pureOldName)
+	newQuoted := quoteIdentByType(dbType, newName)
+
+	var sql string
+	switch dbType {
+	case "mysql", "mariadb":
+		newQualified := quoteTableIdentByType(dbType, schemaName, newName)
+		sql = fmt.Sprintf("RENAME TABLE %s TO %s", oldQualified, newQualified)
+	case "postgres", "kingbase", "highgo", "vastbase":
+		sql = fmt.Sprintf("ALTER VIEW %s RENAME TO %s", oldQualified, newQuoted)
+	case "sqlserver":
+		oldFullName := schemaName + "." + pureOldName
+		escapedOld := strings.ReplaceAll(oldFullName, "'", "''")
+		escapedNew := strings.ReplaceAll(newName, "'", "''")
+		sql = fmt.Sprintf("EXEC sp_rename '%s', '%s'", escapedOld, escapedNew)
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名视图", dbType)}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(sql); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "视图重命名成功"}
 }
 
 func (a *App) DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult {

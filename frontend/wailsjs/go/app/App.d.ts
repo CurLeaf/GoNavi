@@ -40,7 +40,11 @@ export function DownloadUpdate():Promise<connection.QueryResult>;
 
 export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -121,5 +125,9 @@ export function RedisZSetRemove(arg1:connection.ConnectionConfig,arg2:string,arg
 export function RenameDatabase(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function RenameView(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;

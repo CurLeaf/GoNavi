@@ -1056,17 +1056,6 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             <Form.Item name="mongoAuthSource" label="认证库 (authSource)">
                 <Input placeholder="默认使用 database 或 admin" />
             </Form.Item>
-            <Form.Item name="mongoAuthMechanism" label="验证方式 (authMechanism)">
-                <Select
-                    allowClear
-                    placeholder="默认由 MongoDB 驱动协商"
-                    options={[
-                        { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
-                        { value: 'SCRAM-SHA-256', label: 'SCRAM-SHA-256' },
-                        { value: 'MONGODB-AWS', label: 'MONGODB-AWS' },
-                    ]}
-                />
-            </Form.Item>
             <Form.Item name="mongoReadPreference" label="读偏好 (readPreference)">
                 <Select
                     options={[
@@ -1109,6 +1098,19 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             <Form.Item name="password" label="密码" style={{ flex: 1 }}>
               <Input.Password />
             </Form.Item>
+            {dbType === 'mongodb' && (
+            <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ width: 160 }}>
+                <Select
+                    allowClear
+                    placeholder="自动协商"
+                    options={[
+                        { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
+                        { value: 'SCRAM-SHA-256', label: 'SCRAM-SHA-256' },
+                        { value: 'MONGODB-AWS', label: 'MONGODB-AWS' },
+                    ]}
+                />
+            </Form.Item>
+            )}
         </div>
         )}
 

@@ -224,7 +224,19 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	// 使用版本号命名的工作目录，便于识别和调试
 	stagedDir := filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s", stdRuntime.GOOS, info.LatestVersion))
 	// 清理可能残留的旧目录（上次下载失败后未清理）
-	_ = os.RemoveAll(stagedDir)
+	// Windows 上文件可能被杀毒软件/索引服务占用，需要重试
+	for retry := 0; retry < 5; retry++ {
+		err := os.RemoveAll(stagedDir)
+		if err == nil {
+			break
+		}
+		if retry < 4 {
+			time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond)
+		} else {
+			// 最后一次仍然失败，换一个带时间戳的目录名避免冲突
+			stagedDir = filepath.Join(workspaceDir, fmt.Sprintf(".gonavi-update-%s-%s-%d", stdRuntime.GOOS, info.LatestVersion, time.Now().UnixNano()))
+		}
+	}
 	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
 		errMsg := fmt.Sprintf("无法在应用目录创建更新工作目录：%s", stagedDir)
 		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, errMsg)
@@ -490,11 +502,21 @@ func downloadFileWithHash(url, filePath string, onProgress func(downloaded, tota
 		return "", fmt.Errorf("下载更新包失败：HTTP %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(filePath)
-	if err != nil {
-		return "", err
+	// Windows 上旧文件可能被杀毒软件/索引服务占用，先尝试删除并重试
+	_ = os.Remove(filePath)
+	var out *os.File
+	for retry := 0; retry < 5; retry++ {
+		out, err = os.Create(filePath)
+		if err == nil {
+			break
+		}
+		if retry < 4 {
+			time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond)
+		}
 	}
-	defer out.Close()
+	if err != nil {
+		return "", fmt.Errorf("更新下载失败，文件被占用：%w", err)
+	}
 
 	hasher := sha256.New()
 	total := resp.ContentLength
@@ -508,10 +530,20 @@ func downloadFileWithHash(url, filePath string, onProgress func(downloaded, tota
 		onProgress(0, total)
 	}
 	if _, err := io.Copy(io.MultiWriter(writers...), resp.Body); err != nil {
+		out.Close()
 		return "", err
 	}
 	if onProgress != nil {
 		onProgress(progressWriter.written, total)
+	}
+
+	// 显式 Sync + Close，确保数据落盘且文件句柄释放
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		return "", err
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
@@ -544,18 +576,13 @@ func buildUpdateInstallLogPath(baseDir string) string {
 }
 
 func resolveUpdateWorkspaceDir() string {
-	exePath, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	exePath, _ = filepath.EvalSymlinks(exePath)
-	if stdRuntime.GOOS == "darwin" {
-		appPath := detectMacAppPath(exePath)
-		if appPath != "" {
-			return filepath.Dir(appPath)
-		}
-	}
-	return filepath.Dir(exePath)
+	// 使用系统临时目录作为更新工作区，避免以下问题：
+	// 1. Windows: exe 所在目录可能被杀毒软件/索引服务锁定，或缺少写权限（如 Program Files）
+	// 2. macOS: /Applications 需要管理员权限才能写入
+	// 3. 运行中的 exe 文件锁与 staging 文件冲突
+	dir := filepath.Join(os.TempDir(), "gonavi-updates")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
 }
 
 func resolveUpdateInstallTarget() string {
