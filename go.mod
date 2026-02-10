@@ -6,6 +6,7 @@ require (
 	gitea.com/kingbase/gokb v0.0.0-20201021123113-29bd62a876c3
 	gitee.com/chunanyong/dm v1.8.22
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/highgo/pq-sm3 v0.0.0
 	github.com/lib/pq v1.11.1
 	github.com/microsoft/go-mssqldb v1.9.6
 	github.com/redis/go-redis/v9 v9.17.3
@@ -75,3 +76,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/highgo/pq-sm3 => ./third_party/highgo-pq
