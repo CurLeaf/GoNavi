@@ -72,6 +72,21 @@ body[data-theme='dark'] {
     overflow: hidden !important;
 }
 
+.connection-modal-wrap .ant-modal-content {
+    max-height: calc(100vh - 72px);
+    display: flex;
+    flex-direction: column;
+}
+
+.connection-modal-wrap .ant-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.connection-modal-wrap .ant-modal-footer {
+    flex-shrink: 0;
+}
+
 /* Custom Title Bar Close Button Hover */
 .titlebar-close-btn:hover {
     background-color: #ff4d4f !important;

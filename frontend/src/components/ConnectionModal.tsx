@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBGetDatabases, MongoDiscoverMembers, TestConnection, RedisConnect } from '../../wailsjs/go/app/App';
 import { MongoMemberInfo, SavedConnection } from '../types';
@@ -38,6 +38,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   const [step, setStep] = useState(1); // 1: Select Type, 2: Configure
   const [activeGroup, setActiveGroup] = useState(0); // Active category index in step 1
   const [testResult, setTestResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
   const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
@@ -443,6 +444,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   useEffect(() => {
       if (open) {
           setTestResult(null); // Reset test result
+          setTestErrorLogOpen(false);
           setDbList([]);
           setRedisDbList([]);
           setMongoMembers([]);
@@ -569,6 +571,12 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       }, 0);
   };
 
+  const buildTestFailureMessage = (reason: unknown, fallback: string) => {
+      const text = String(reason ?? '').trim();
+      const normalized = text && text !== 'undefined' && text !== 'null' ? text : fallback;
+      return `测试失败: ${normalized}`;
+  };
+
   const handleTest = async () => {
       if (testInFlightRef.current) return;
       testInFlightRef.current = true;
@@ -598,10 +606,23 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
                   }
               }
           } else {
-              setTestResult({ type: 'error', message: "测试失败: " + res.message });
+              const failMessage = buildTestFailureMessage(
+                  res?.message,
+                  '连接被拒绝或参数无效，请检查后重试'
+              );
+              setTestResult({ type: 'error', message: failMessage });
           }
-      } catch (e) {
-          // ignore
+      } catch (e: unknown) {
+          if (e && typeof e === 'object' && 'errorFields' in e) {
+              const failMessage = '测试失败: 请先完善必填项后再测试连接';
+              setTestResult({ type: 'error', message: failMessage });
+              return;
+          }
+          const reason = e instanceof Error
+              ? e.message
+              : (typeof e === 'string' ? e : '未知异常');
+          const failMessage = buildTestFailureMessage(reason, '未知异常');
+          setTestResult({ type: 'error', message: failMessage });
       } finally {
           testInFlightRef.current = false;
           setLoading(false);
@@ -900,7 +921,10 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             mongoReplicaPassword: '',
         }}
         onValuesChange={(changed) => {
-            if (testResult) setTestResult(null); // Clear result on change
+            if (testResult) {
+                setTestResult(null); // Clear result on change
+                setTestErrorLogOpen(false);
+            }
             if (changed.useSSH !== undefined) setUseSSH(changed.useSSH);
             // Type change handled by step 1, but keep sync if select changes (hidden now)
             if (changed.type !== undefined) setDbType(changed.type);
@@ -1233,14 +1257,6 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
         </>
         )}
         
-        {testResult && (
-          <Alert
-              message={testResult.message}
-              type={testResult.type}
-              showIcon
-              style={{ marginTop: 16 }}
-          />
-        )}
       </Form>
   );
 
@@ -1250,12 +1266,59 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
              <Button key="cancel" onClick={onClose}>取消</Button>
           ];
       }
-      return [
-          !initialValues && <Button key="back" onClick={() => setStep(1)} style={{ float: 'left' }}>上一步</Button>,
-          <Button key="test" loading={loading} onClick={requestTest}>测试连接</Button>,
-          <Button key="cancel" onClick={onClose}>取消</Button>,
-          <Button key="submit" type="primary" loading={loading} onClick={handleOk}>保存</Button>
-      ];
+      const isTestSuccess = testResult?.type === 'success';
+      const hasTestError = !!testResult && !isTestSuccess;
+      return (
+          <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                  {!initialValues && <Button key="back" onClick={() => setStep(1)}>上一步</Button>}
+                  {testResult ? (
+                      <span
+                          style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              height: 24,
+                              padding: '0 10px',
+                              borderRadius: 999,
+                              border: isTestSuccess ? '1px solid rgba(82, 196, 26, 0.35)' : '1px solid rgba(255, 77, 79, 0.35)',
+                              background: isTestSuccess ? 'rgba(82, 196, 26, 0.10)' : 'rgba(255, 77, 79, 0.10)',
+                              color: isTestSuccess ? '#389e0d' : '#cf1322',
+                              fontSize: 12,
+                              lineHeight: '22px',
+                              whiteSpace: 'nowrap',
+                              boxSizing: 'border-box',
+                          }}
+                      >
+                          {isTestSuccess ? <CheckCircleFilled /> : <CloseCircleFilled />}
+                          <span>{isTestSuccess ? '连接成功' : '连接失败'}</span>
+                      </span>
+                  ) : null}
+                  {hasTestError && (
+                      <Button
+                          size="small"
+                          icon={<FileTextOutlined />}
+                          style={{
+                              height: 24,
+                              borderRadius: 999,
+                              padding: '0 10px',
+                              borderColor: '#ffccc7',
+                              background: '#fff2f0',
+                              color: '#cf1322',
+                          }}
+                          onClick={() => setTestErrorLogOpen(true)}
+                      >
+                          查看原因
+                      </Button>
+                  )}
+              </div>
+              <Space size={8} style={{ flexShrink: 0 }}>
+                  <Button key="test" loading={loading} onClick={requestTest}>测试连接</Button>
+                  <Button key="cancel" onClick={onClose}>取消</Button>
+                  <Button key="submit" type="primary" loading={loading} onClick={handleOk}>保存</Button>
+              </Space>
+          </div>
+      );
   };
 
   const getTitle = () => {
@@ -1268,26 +1331,59 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       ? { padding: '16px 24px', overflow: 'hidden' as const }
       : {
           padding: '16px 24px',
-          maxHeight: 'calc(100vh - 220px)',
           overflowY: 'auto' as const,
           overflowX: 'hidden' as const,
       };
 
   return (
-    <Modal
-        title={getTitle()}
-        open={open}
-        onCancel={onClose}
-        footer={getFooter()}
-        wrapClassName="connection-modal-wrap"
-        width={step === 1 ? 650 : 600}
-        zIndex={10001}
-        destroyOnHidden
-        maskClosable={false}
-        styles={{ body: modalBodyStyle }}
-    >
-      {step === 1 ? renderStep1() : renderStep2()}
-    </Modal>
+    <>
+      <Modal
+          title={getTitle()}
+          open={open}
+          onCancel={onClose}
+          footer={getFooter()}
+          centered
+          wrapClassName="connection-modal-wrap"
+          width={step === 1 ? 650 : 600}
+          zIndex={10001}
+          destroyOnHidden
+          maskClosable={false}
+          styles={{ body: modalBodyStyle }}
+      >
+        {step === 1 ? renderStep1() : renderStep2()}
+      </Modal>
+      <Modal
+          title="测试连接失败原因"
+          open={testErrorLogOpen}
+          onCancel={() => setTestErrorLogOpen(false)}
+          centered
+          width={760}
+          zIndex={10002}
+          destroyOnHidden
+          footer={[
+              <Button key="close" onClick={() => setTestErrorLogOpen(false)}>关闭</Button>,
+          ]}
+      >
+          <pre
+              style={{
+                  margin: 0,
+                  maxHeight: '50vh',
+                  overflowY: 'auto',
+                  padding: 12,
+                  borderRadius: 6,
+                  background: '#fff2f0',
+                  border: '1px solid #ffccc7',
+                  color: '#a8071a',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  lineHeight: '20px',
+                  fontSize: 13,
+              }}
+          >
+              {String(testResult?.message || '暂无失败日志')}
+          </pre>
+      </Modal>
+    </>
   );
 };
 
