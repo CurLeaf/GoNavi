@@ -48,6 +48,8 @@ func NewDatabase(dbType string) (Database, error) {
 		return &HighGoDB{}, nil
 	case "mariadb":
 		return &MariaDB{}, nil
+	case "sphinx":
+		return &SphinxDB{}, nil
 	case "vastbase":
 		return &VastbaseDB{}, nil
 	case "tdengine":

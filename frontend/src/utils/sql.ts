@@ -36,7 +36,7 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   if (!raw) return raw;
   const dbTypeLower = (dbType || '').toLowerCase();
 
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'tdengine') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
 

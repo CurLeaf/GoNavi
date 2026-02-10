@@ -228,13 +228,45 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'custom') {
           return String((conn?.config as any)?.driver || '').trim().toLowerCase();
       }
-      if (type === 'mariadb') return 'mysql';
+      if (type === 'mariadb' || type === 'sphinx') return 'mysql';
       if (type === 'dameng') return 'dm';
       return type;
   };
 
   const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
   const quoteSqlServerIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
+
+  type MetadataQuerySpec = {
+      sql: string;
+      inferredType?: 'FUNCTION' | 'PROCEDURE';
+  };
+
+  type MetadataQueryResult = {
+      rows: Record<string, any>[];
+      inferredType?: 'FUNCTION' | 'PROCEDURE';
+  };
+
+  const isSphinxConnection = (conn: SavedConnection | undefined): boolean => {
+      const type = String(conn?.config?.type || '').trim().toLowerCase();
+      if (type === 'sphinx') return true;
+      if (type !== 'custom') return false;
+      const driver = String((conn?.config as any)?.driver || '').trim().toLowerCase();
+      return driver === 'sphinx' || driver === 'sphinxql';
+  };
+
+  const normalizeMetadataQuerySpecs = (specs: MetadataQuerySpec[]): MetadataQuerySpec[] => {
+      const seen = new Set<string>();
+      const normalized: MetadataQuerySpec[] = [];
+      specs.forEach((spec) => {
+          const sql = String(spec.sql || '').trim();
+          if (!sql) return;
+          const key = `${spec.inferredType || ''}@@${sql}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          normalized.push({ sql, inferredType: spec.inferredType });
+      });
+      return normalized;
+  };
 
   const getCaseInsensitiveValue = (row: Record<string, any>, candidateKeys: string[]): string => {
       const keyMap = new Map<string, any>();
@@ -255,6 +287,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               const normalized = String(value).trim();
               if (normalized !== '') return normalized;
           }
+      }
+      return '';
+  };
+
+  const getMySQLShowTablesName = (row: Record<string, any>): string => {
+      for (const key of Object.keys(row || {})) {
+          if (!key.toLowerCase().startsWith('tables_in_')) continue;
+          const value = row[key];
+          if (value === undefined || value === null) continue;
+          const normalized = String(value).trim();
+          if (normalized !== '') return normalized;
       }
       return '';
   };
@@ -281,162 +324,233 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       };
   };
 
-  const buildViewsMetadataQuery = (dialect: string, dbName: string): string => {
+  const buildViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
       const safeDbName = escapeSQLLiteral(dbName);
       switch (dialect) {
-          case 'mysql':
-              if (!safeDbName) return '';
-              return `SELECT TABLE_NAME AS view_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`;
+          case 'mysql': {
+              const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+              return normalizeMetadataQuerySpecs([
+                  {
+                      sql: safeDbName
+                          ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
+                          : '',
+                  },
+                  { sql: dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '' },
+                  { sql: `SHOW FULL TABLES` },
+              ]);
+          }
           case 'postgres':
           case 'kingbase':
           case 'highgo':
           case 'vastbase':
-              return `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg_%' ORDER BY schemaname, viewname`;
+              return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg_%' ORDER BY schemaname, viewname` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return `SELECT s.name AS schema_name, v.name AS view_name FROM ${safeDb}.sys.views v JOIN ${safeDb}.sys.schemas s ON v.schema_id = s.schema_id ORDER BY s.name, v.name`;
+              return [{ sql: `SELECT s.name AS schema_name, v.name AS view_name FROM ${safeDb}.sys.views v JOIN ${safeDb}.sys.schemas s ON v.schema_id = s.schema_id ORDER BY s.name, v.name` }];
           }
           case 'oracle':
-          case 'dm': {
+          case 'dm':
               if (!safeDbName) {
-                  return `SELECT VIEW_NAME AS view_name FROM USER_VIEWS ORDER BY VIEW_NAME`;
+                  return [{ sql: `SELECT VIEW_NAME AS view_name FROM USER_VIEWS ORDER BY VIEW_NAME` }];
               }
-              return `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME`;
-          }
+              return [{ sql: `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME` }];
           case 'sqlite':
-              return `SELECT name AS view_name FROM sqlite_master WHERE type = 'view' ORDER BY name`;
+              return [{ sql: `SELECT name AS view_name FROM sqlite_master WHERE type = 'view' ORDER BY name` }];
           default:
-              return '';
+              return [];
       }
   };
 
-  const buildTriggersMetadataQuery = (dialect: string, dbName: string): string => {
+  const buildTriggersMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
       const safeDbName = escapeSQLLiteral(dbName);
       switch (dialect) {
-          case 'mysql':
-              if (!safeDbName) return '';
-              return `SELECT TRIGGER_NAME AS trigger_name, EVENT_OBJECT_TABLE AS table_name, TRIGGER_SCHEMA AS schema_name FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME`;
+          case 'mysql': {
+              const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+              return normalizeMetadataQuerySpecs([
+                  {
+                      sql: safeDbName
+                          ? `SELECT TRIGGER_NAME AS trigger_name, EVENT_OBJECT_TABLE AS table_name, TRIGGER_SCHEMA AS schema_name FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME`
+                          : '',
+                  },
+                  { sql: dbIdent ? `SHOW TRIGGERS FROM \`${dbIdent}\`` : '' },
+                  { sql: `SHOW TRIGGERS` },
+              ]);
+          }
           case 'postgres':
           case 'kingbase':
           case 'highgo':
           case 'vastbase':
-              return `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg_%' ORDER BY event_object_schema, event_object_table, trigger_name`;
+              return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg_%' ORDER BY event_object_schema, event_object_table, trigger_name` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return `SELECT s.name AS schema_name, t.name AS table_name, tr.name AS trigger_name FROM ${safeDb}.sys.triggers tr JOIN ${safeDb}.sys.tables t ON tr.parent_id = t.object_id JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id WHERE tr.parent_class = 1 ORDER BY s.name, t.name, tr.name`;
+              return [{ sql: `SELECT s.name AS schema_name, t.name AS table_name, tr.name AS trigger_name FROM ${safeDb}.sys.triggers tr JOIN ${safeDb}.sys.tables t ON tr.parent_id = t.object_id JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id WHERE tr.parent_class = 1 ORDER BY s.name, t.name, tr.name` }];
           }
           case 'oracle':
-          case 'dm': {
+          case 'dm':
               if (!safeDbName) {
-                  return `SELECT TRIGGER_NAME AS trigger_name, TABLE_NAME AS table_name FROM USER_TRIGGERS ORDER BY TABLE_NAME, TRIGGER_NAME`;
+                  return [{ sql: `SELECT TRIGGER_NAME AS trigger_name, TABLE_NAME AS table_name FROM USER_TRIGGERS ORDER BY TABLE_NAME, TRIGGER_NAME` }];
               }
-              return `SELECT OWNER AS schema_name, TABLE_NAME AS table_name, TRIGGER_NAME AS trigger_name FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY TABLE_NAME, TRIGGER_NAME`;
-          }
+              return [{ sql: `SELECT OWNER AS schema_name, TABLE_NAME AS table_name, TRIGGER_NAME AS trigger_name FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY TABLE_NAME, TRIGGER_NAME` }];
           case 'sqlite':
-              return `SELECT name AS trigger_name, tbl_name AS table_name FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name, name`;
+              return [{ sql: `SELECT name AS trigger_name, tbl_name AS table_name FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name, name` }];
           default:
-              return '';
+              return [];
       }
   };
 
-  const queryMetadataRows = async (conn: any, dbName: string, query: string): Promise<Record<string, any>[]> => {
-      if (!query) return [];
-      try {
-          const config = buildRuntimeConfig(conn, dbName);
-          const result = await DBQuery(config as any, dbName, query);
-          if (!result.success || !Array.isArray(result.data)) return [];
-          return result.data as Record<string, any>[];
-      } catch {
-          return [];
+  const buildFunctionsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+      const safeDbName = escapeSQLLiteral(dbName);
+      switch (dialect) {
+          case 'mysql':
+              return normalizeMetadataQuerySpecs([
+                  {
+                      sql: safeDbName
+                          ? `SELECT ROUTINE_NAME AS routine_name, ROUTINE_TYPE AS routine_type, ROUTINE_SCHEMA AS schema_name FROM information_schema.routines WHERE routine_schema = '${safeDbName}' ORDER BY ROUTINE_TYPE, ROUTINE_NAME`
+                          : '',
+                  },
+                  {
+                      sql: safeDbName
+                          ? `SHOW FUNCTION STATUS WHERE Db = '${safeDbName}'`
+                          : `SHOW FUNCTION STATUS`,
+                      inferredType: 'FUNCTION',
+                  },
+                  {
+                      sql: safeDbName
+                          ? `SHOW PROCEDURE STATUS WHERE Db = '${safeDbName}'`
+                          : `SHOW PROCEDURE STATUS`,
+                      inferredType: 'PROCEDURE',
+                  },
+              ]);
+          case 'postgres':
+          case 'kingbase':
+          case 'highgo':
+          case 'vastbase':
+              return [{ sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname, routine_type, p.proname` }];
+          case 'sqlserver': {
+              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
+              return [{ sql: `SELECT s.name AS schema_name, o.name AS routine_name, CASE o.type WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'FUNCTION' WHEN 'IF' THEN 'FUNCTION' WHEN 'TF' THEN 'FUNCTION' END AS routine_type FROM ${safeDb}.sys.objects o JOIN ${safeDb}.sys.schemas s ON o.schema_id = s.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY o.type, s.name, o.name` }];
+          }
+          case 'oracle':
+          case 'dm':
+              if (!safeDbName) {
+                  return [{ sql: `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` }];
+              }
+              return [{ sql: `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` }];
+          default:
+              return [];
       }
   };
 
-  const loadViews = async (conn: any, dbName: string): Promise<string[]> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const query = buildViewsMetadataQuery(dialect, dbName);
-      const rows = await queryMetadataRows(conn, dbName, query);
+  const queryMetadataRowsBySpecs = async (
+      conn: any,
+      dbName: string,
+      specs: MetadataQuerySpec[]
+  ): Promise<{ results: MetadataQueryResult[]; hasSuccessfulQuery: boolean }> => {
+      const normalizedSpecs = normalizeMetadataQuerySpecs(specs);
+      if (normalizedSpecs.length === 0) {
+          return { results: [], hasSuccessfulQuery: false };
+      }
+      const config = buildRuntimeConfig(conn, dbName);
+      const results: MetadataQueryResult[] = [];
+      let hasSuccessfulQuery = false;
+
+      for (const spec of normalizedSpecs) {
+          try {
+              const result = await DBQuery(config as any, dbName, spec.sql);
+              if (!result.success || !Array.isArray(result.data)) {
+                  continue;
+              }
+              hasSuccessfulQuery = true;
+              results.push({
+                  rows: result.data as Record<string, any>[],
+                  inferredType: spec.inferredType,
+              });
+          } catch {
+              // 忽略单条查询失败，继续尝试后续回退语句
+          }
+      }
+      return { results, hasSuccessfulQuery };
+  };
+
+  const loadViews = async (conn: any, dbName: string): Promise<{ views: string[]; supported: boolean }> => {
+      const savedConn = conn as SavedConnection;
+      const dialect = getMetadataDialect(savedConn);
+      const querySpecs = buildViewsMetadataQuerySpecs(dialect, dbName);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
       const views: string[] = [];
 
-      rows.forEach((row) => {
-          const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema']);
-          const viewName = getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name']) || getFirstRowValue(row);
-          const fullName = buildQualifiedName(schemaName, viewName);
-          if (!fullName || seen.has(fullName)) return;
-          seen.add(fullName);
-          views.push(fullName);
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const tableType = getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']);
+              if (tableType && tableType.toUpperCase() !== 'VIEW') return;
+              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']);
+              const viewName =
+                  getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])
+                  || getMySQLShowTablesName(row)
+                  || getFirstRowValue(row);
+              const fullName = buildQualifiedName(schemaName, viewName);
+              if (!fullName || seen.has(fullName)) return;
+              seen.add(fullName);
+              views.push(fullName);
+          });
       });
-      return views;
+      return { views, supported: hasSuccessfulQuery };
   };
 
-  const loadDatabaseTriggers = async (conn: any, dbName: string): Promise<Array<{ displayName: string; triggerName: string; tableName: string }>> => {
+  const loadDatabaseTriggers = async (
+      conn: any,
+      dbName: string
+  ): Promise<{ triggers: Array<{ displayName: string; triggerName: string; tableName: string }>; supported: boolean }> => {
       const dialect = getMetadataDialect(conn as SavedConnection);
-      const query = buildTriggersMetadataQuery(dialect, dbName);
-      const rows = await queryMetadataRows(conn, dbName, query);
+      const querySpecs = buildTriggersMetadataQuerySpecs(dialect, dbName);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
       const triggers: Array<{ displayName: string; triggerName: string; tableName: string }> = [];
 
-      rows.forEach((row) => {
-          const triggerName = getCaseInsensitiveValue(row, ['trigger_name', 'triggername', 'name']) || getFirstRowValue(row);
-          if (!triggerName) return;
-          const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'event_object_schema', 'trigger_schema']);
-          const tableName = getCaseInsensitiveValue(row, ['table_name', 'event_object_table', 'tbl_name']);
-          const fullTableName = buildQualifiedName(schemaName, tableName);
-          const uniqueKey = `${triggerName}@@${fullTableName}`;
-          if (seen.has(uniqueKey)) return;
-          seen.add(uniqueKey);
-          const displayName = fullTableName ? `${triggerName} (${fullTableName})` : triggerName;
-          triggers.push({ displayName, triggerName, tableName: fullTableName });
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const triggerName = getCaseInsensitiveValue(row, ['trigger_name', 'triggername', 'trigger', 'name']) || getFirstRowValue(row);
+              if (!triggerName) return;
+              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'event_object_schema', 'trigger_schema', 'db']);
+              const tableName = getCaseInsensitiveValue(row, ['table_name', 'event_object_table', 'tbl_name', 'table']);
+              const fullTableName = buildQualifiedName(schemaName, tableName);
+              const uniqueKey = `${triggerName}@@${fullTableName}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              const displayName = fullTableName ? `${triggerName} (${fullTableName})` : triggerName;
+              triggers.push({ displayName, triggerName, tableName: fullTableName });
+          });
       });
-      return triggers;
+      return { triggers, supported: hasSuccessfulQuery };
   };
 
-  const buildFunctionsMetadataQuery = (dialect: string, dbName: string): string => {
-      const safeDbName = escapeSQLLiteral(dbName);
-      switch (dialect) {
-          case 'mysql':
-              if (!safeDbName) return '';
-              return `SELECT ROUTINE_NAME AS routine_name, ROUTINE_TYPE AS routine_type FROM information_schema.routines WHERE routine_schema = '${safeDbName}' ORDER BY ROUTINE_TYPE, ROUTINE_NAME`;
-          case 'postgres':
-          case 'kingbase':
-          case 'highgo':
-          case 'vastbase':
-              return `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname, routine_type, p.proname`;
-          case 'sqlserver': {
-              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return `SELECT s.name AS schema_name, o.name AS routine_name, CASE o.type WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'FUNCTION' WHEN 'IF' THEN 'FUNCTION' WHEN 'TF' THEN 'FUNCTION' END AS routine_type FROM ${safeDb}.sys.objects o JOIN ${safeDb}.sys.schemas s ON o.schema_id = s.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY o.type, s.name, o.name`;
-          }
-          case 'oracle':
-          case 'dm': {
-              if (!safeDbName) {
-                  return `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`;
-              }
-              return `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`;
-          }
-          default:
-              return '';
-      }
-  };
-
-  const loadFunctions = async (conn: any, dbName: string): Promise<Array<{ displayName: string; routineName: string; routineType: string }>> => {
+  const loadFunctions = async (
+      conn: any,
+      dbName: string
+  ): Promise<{ routines: Array<{ displayName: string; routineName: string; routineType: string }>; supported: boolean }> => {
       const dialect = getMetadataDialect(conn as SavedConnection);
-      const query = buildFunctionsMetadataQuery(dialect, dbName);
-      const rows = await queryMetadataRows(conn, dbName, query);
+      const querySpecs = buildFunctionsMetadataQuerySpecs(dialect, dbName);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
       const routines: Array<{ displayName: string; routineName: string; routineType: string }> = [];
 
-      rows.forEach((row) => {
-          const routineName = getCaseInsensitiveValue(row, ['routine_name', 'object_name', 'proname', 'name']);
-          if (!routineName) return;
-          const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'owner']);
-          const routineType = getCaseInsensitiveValue(row, ['routine_type', 'object_type']) || 'FUNCTION';
-          const fullName = buildQualifiedName(schemaName, routineName);
-          if (!fullName || seen.has(fullName)) return;
-          seen.add(fullName);
-          const typeLabel = routineType.toUpperCase() === 'PROCEDURE' ? 'P' : 'F';
-          routines.push({ displayName: `${fullName} [${typeLabel}]`, routineName: fullName, routineType: routineType.toUpperCase() });
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const routineName = getCaseInsensitiveValue(row, ['routine_name', 'object_name', 'proname', 'name']);
+              if (!routineName) return;
+              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'owner', 'db', 'database']);
+              const rawType = getCaseInsensitiveValue(row, ['routine_type', 'object_type', 'type']) || queryResult.inferredType || 'FUNCTION';
+              const normalizedType = rawType.toUpperCase().includes('PROC') ? 'PROCEDURE' : 'FUNCTION';
+              const fullName = buildQualifiedName(schemaName, routineName);
+              const uniqueKey = `${fullName}@@${normalizedType}`;
+              if (!fullName || seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              const typeLabel = normalizedType === 'PROCEDURE' ? 'P' : 'F';
+              routines.push({ displayName: `${fullName} [${typeLabel}]`, routineName: fullName, routineType: normalizedType });
+          });
       });
-      return routines;
+      return { routines, supported: hasSuccessfulQuery };
   };
 
 	  const loadDatabases = async (node: any) => {
@@ -563,25 +677,25 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                };
 	            });
 
-	            const [views, triggers, routines] = await Promise.all([
-	                loadViews(conn, conn.dbName),
-	                loadDatabaseTriggers(conn, conn.dbName),
-	                loadFunctions(conn, conn.dbName),
-	            ]);
+            const [viewsResult, triggersResult, routinesResult] = await Promise.all([
+                loadViews(conn, conn.dbName),
+                loadDatabaseTriggers(conn, conn.dbName),
+                loadFunctions(conn, conn.dbName),
+            ]);
 
-	            const viewEntries = views.map((viewName) => {
-	                const parsed = splitQualifiedName(viewName);
-	                return {
-	                    viewName,
+            const viewEntries = viewsResult.views.map((viewName) => {
+                const parsed = splitQualifiedName(viewName);
+                return {
+                    viewName,
 	                    schemaName: parsed.schemaName,
 	                    displayName: getSidebarTableDisplayName(conn, viewName),
 	                };
 	            });
 
-	            const triggerEntries = triggers.map((trigger) => {
-	                const triggerParsed = splitQualifiedName(trigger.triggerName);
-	                const tableParsed = splitQualifiedName(trigger.tableName);
-	                const schemaName = tableParsed.schemaName || triggerParsed.schemaName;
+            const triggerEntries = triggersResult.triggers.map((trigger) => {
+                const triggerParsed = splitQualifiedName(trigger.triggerName);
+                const tableParsed = splitQualifiedName(trigger.tableName);
+                const schemaName = tableParsed.schemaName || triggerParsed.schemaName;
 	                const triggerObjectName = triggerParsed.objectName || trigger.triggerName;
 	                const tableObjectName = tableParsed.objectName || trigger.tableName;
 	                const displayName = tableObjectName ? `${triggerObjectName} (${tableObjectName})` : triggerObjectName;
@@ -592,15 +706,28 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                };
 	            });
 
-	            const routineEntries = routines.map((routine) => {
-	                const parsed = splitQualifiedName(routine.routineName);
-	                const typeLabel = routine.routineType === 'PROCEDURE' ? 'P' : 'F';
-	                return {
+            const routineEntries = routinesResult.routines.map((routine) => {
+                const parsed = splitQualifiedName(routine.routineName);
+                const typeLabel = routine.routineType === 'PROCEDURE' ? 'P' : 'F';
+                return {
 	                    ...routine,
 	                    schemaName: parsed.schemaName,
-	                    displayName: `${parsed.objectName || routine.routineName} [${typeLabel}]`,
-	                };
-	            });
+                    displayName: `${parsed.objectName || routine.routineName} [${typeLabel}]`,
+                };
+            });
+
+            if (isSphinxConnection(conn as SavedConnection)) {
+                const unsupportedObjects: string[] = [];
+                if (!viewsResult.supported) unsupportedObjects.push('视图');
+                if (!routinesResult.supported) unsupportedObjects.push('函数/存储过程');
+                if (!triggersResult.supported) unsupportedObjects.push('触发器');
+                if (unsupportedObjects.length > 0) {
+                    message.info({
+                        key: `sphinx-capability-${conn.id}-${conn.dbName}`,
+                        content: `当前 Sphinx 实例未开放以下对象能力：${unsupportedObjects.join('、')}（已自动降级兼容）`,
+                    });
+                }
+            }
 
 	            // 获取当前数据库的排序偏好
 	            const sortPreferenceKey = `${conn.id}-${conn.dbName}`;

@@ -11,6 +11,7 @@ const { Text } = Typography;
 const getDefaultPortByType = (type: string) => {
   switch (type) {
     case 'mysql': return 3306;
+    case 'sphinx': return 9306;
     case 'postgres': return 5432;
     case 'redis': return 6379;
     case 'tdengine': return 6041;
@@ -187,17 +188,18 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           return null;
       }
 
-      if (type === 'mysql' || type === 'mariadb') {
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
+          const mysqlDefaultPort = getDefaultPortByType(type);
           const parsed = parseMultiHostUri(trimmedUri, 'mysql');
           if (!parsed) {
               return null;
           }
-          const hostList = normalizeAddressList(parsed.hosts, 3306);
-          const primary = parseHostPort(hostList[0] || 'localhost:3306', 3306);
+          const hostList = normalizeAddressList(parsed.hosts, mysqlDefaultPort);
+          const primary = parseHostPort(hostList[0] || `localhost:${mysqlDefaultPort}`, mysqlDefaultPort);
           const timeoutValue = Number(parsed.params.get('timeout'));
           return {
               host: primary?.host || 'localhost',
-              port: primary?.port || 3306,
+              port: primary?.port || mysqlDefaultPort,
               user: parsed.username,
               password: parsed.password,
               database: parsed.database || '',
@@ -259,8 +261,9 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
   });
 
   const getUriPlaceholder = () => {
-      if (dbType === 'mysql' || dbType === 'mariadb') {
-          return 'mysql://user:pass@127.0.0.1:3306,127.0.0.2:3306/db_name?topology=replica';
+      if (dbType === 'mysql' || dbType === 'mariadb' || dbType === 'sphinx') {
+          const defaultPort = getDefaultPortByType(dbType);
+          return `mysql://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
       }
       if (dbType === 'mongodb') {
           return 'mongodb+srv://user:pass@cluster0.example.com/db_name?authSource=admin&authMechanism=SCRAM-SHA-256';
@@ -281,12 +284,12 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ''}@`
           : '';
 
-      if (type === 'mysql' || type === 'mariadb') {
-          const primary = toAddress(host, port, 3306);
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
+          const primary = toAddress(host, port, defaultPort);
           const replicas = values.mysqlTopology === 'replica'
-              ? normalizeAddressList(values.mysqlReplicaHosts, 3306)
+              ? normalizeAddressList(values.mysqlReplicaHosts, defaultPort)
               : [];
-          const hosts = normalizeAddressList([primary, ...replicas], 3306);
+          const hosts = normalizeAddressList([primary, ...replicas], defaultPort);
           const params = new URLSearchParams();
           if (hosts.length > 1 || values.mysqlTopology === 'replica') {
               params.set('topology', 'replica');
@@ -410,7 +413,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
               );
               const primaryHost = primaryAddress?.host || String(config.host || 'localhost');
               const primaryPort = primaryAddress?.port || Number(config.port || defaultPort);
-              const mysqlReplicaHosts = (configType === 'mysql' || configType === 'mariadb') ? normalizedHosts.slice(1) : [];
+              const mysqlReplicaHosts = (configType === 'mysql' || configType === 'mariadb' || configType === 'sphinx') ? normalizedHosts.slice(1) : [];
               const mongoHosts = configType === 'mongodb' ? normalizedHosts.slice(1) : [];
               const mysqlIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mysqlReplicaHosts.length > 0;
               const mongoIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mongoHosts.length > 0 || !!config.replicaSet;
@@ -638,7 +641,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
           ? mergedValues.savePassword !== false
           : true;
 
-      if (type === 'mysql' || type === 'mariadb') {
+      if (type === 'mysql' || type === 'mariadb' || type === 'sphinx') {
           const replicas = mergedValues.mysqlTopology === 'replica'
               ? normalizeAddressList(mergedValues.mysqlReplicaHosts, defaultPort)
               : [];
@@ -753,6 +756,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
       { label: '关系型数据库', items: [
           { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
           { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
+          { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
           { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
           { key: 'sqlserver', name: 'SQL Server', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#CC2927' }} /> },
           { key: 'sqlite', name: 'SQLite', icon: <FileTextOutlined style={{ fontSize: 24, color: '#003B57' }} /> },
@@ -920,7 +924,7 @@ const ConnectionModal: React.FC<{ open: boolean; onClose: () => void; initialVal
             )}
         </div>
 
-        {(dbType === 'mysql' || dbType === 'mariadb') && (
+        {(dbType === 'mysql' || dbType === 'mariadb' || dbType === 'sphinx') && (
         <>
             <Form.Item name="mysqlTopology" label="连接模式">
                 <Select
