@@ -90,6 +90,14 @@ const normalizeDateTimeString = (val: string) => {
     return `${match[1]} ${match[2]}`;
 };
 
+const isTemporalColumnType = (columnType?: string): boolean => {
+    const raw = String(columnType || '').trim().toLowerCase();
+    if (!raw) return false;
+    if (raw.includes('datetime') || raw.includes('timestamp')) return true;
+    const base = raw.split(/[ (]/)[0];
+    return base === 'date' || base === 'time' || base === 'year';
+};
+
 // --- Helper: Format Value ---
 const formatCellValue = (val: any) => {
     try {
@@ -763,6 +771,35 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
       return next;
   }, [columnMetaMap]);
+
+  const normalizeCommitCellValue = useCallback(
+      (columnName: string, value: any, mode: 'insert' | 'update') => {
+          if (value === undefined) return undefined;
+          const normalizedName = String(columnName || '').trim();
+          const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
+          const temporal = isTemporalColumnType(meta?.type);
+
+          if (!temporal) {
+              return value;
+          }
+
+          if (value === null) {
+              return null;
+          }
+
+          if (typeof value === 'string') {
+              const raw = value.trim();
+              if (raw === '') {
+                  // INSERT 空时间值直接忽略字段，让数据库默认值生效；UPDATE 空时间值转 NULL。
+                  return mode === 'insert' ? undefined : null;
+              }
+              return normalizeDateTimeString(value);
+          }
+
+          return value;
+      },
+      [columnMetaMap, columnMetaMapByLowerName]
+  );
 
   const renderColumnTitle = useCallback((name: string): React.ReactNode => {
       const normalizedName = String(name || '');
@@ -1814,7 +1851,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       const updates: any[] = [];
       const deletes: any[] = [];
 
-      addedRows.forEach(row => { const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = row; inserts.push(vals); });
+      addedRows.forEach(row => {
+          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = row;
+          const normalizedValues: Record<string, any> = {};
+          Object.entries(vals).forEach(([col, val]) => {
+              const normalizedVal = normalizeCommitCellValue(col, val, 'insert');
+              if (normalizedVal !== undefined) {
+                  normalizedValues[col] = normalizedVal;
+              }
+          });
+          inserts.push(normalizedValues);
+      });
       deletedRowKeys.forEach(keyStr => {
           // Find original data
           const originalRow = data.find(d => rowKeyStr(d?.[GONAVI_ROW_KEY]) === keyStr) || addedRows.find(d => rowKeyStr(d?.[GONAVI_ROW_KEY]) === keyStr);
@@ -1847,8 +1894,16 @@ const DataGrid: React.FC<DataGridProps> = ({
               });
           }
 
-          if (Object.keys(values).length === 0) return;
-          updates.push({ keys: pkData, values });
+          const normalizedValues: Record<string, any> = {};
+          Object.entries(values).forEach(([col, val]) => {
+              const normalizedVal = normalizeCommitCellValue(col, val, 'update');
+              if (normalizedVal !== undefined) {
+                  normalizedValues[col] = normalizedVal;
+              }
+          });
+
+          if (Object.keys(normalizedValues).length === 0) return;
+          updates.push({ keys: pkData, values: normalizedValues });
       });
 
       if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {

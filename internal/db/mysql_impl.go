@@ -501,6 +501,8 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		return fmt.Errorf("connection not open")
 	}
 
+	columnTypeMap := m.loadColumnTypeMap(tableName)
+
 	tx, err := m.conn.Begin()
 	if err != nil {
 		return err
@@ -513,7 +515,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		var args []interface{}
 		for k, v := range pk {
 			wheres = append(wheres, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLValueForWrite(k, v, columnTypeMap))
 		}
 		if len(wheres) == 0 {
 			continue
@@ -535,7 +537,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 
 		for k, v := range update.Values {
 			sets = append(sets, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLValueForWrite(k, v, columnTypeMap))
 		}
 
 		if len(sets) == 0 {
@@ -545,7 +547,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		var wheres []string
 		for k, v := range update.Keys {
 			wheres = append(wheres, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLValueForWrite(k, v, columnTypeMap))
 		}
 
 		if len(wheres) == 0 {
@@ -569,12 +571,24 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		var args []interface{}
 
 		for k, v := range row {
+			normalizedValue, omit := normalizeMySQLValueForInsert(k, v, columnTypeMap)
+			if omit {
+				continue
+			}
 			cols = append(cols, fmt.Sprintf("`%s`", k))
 			placeholders = append(placeholders, "?")
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizedValue)
 		}
 
 		if len(cols) == 0 {
+			query := fmt.Sprintf("INSERT INTO `%s` () VALUES ()", tableName)
+			res, err := tx.Exec(query)
+			if err != nil {
+				return fmt.Errorf("insert error: %v", err)
+			}
+			if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+				return fmt.Errorf("插入未生效：未影响任何行")
+			}
 			continue
 		}
 
@@ -627,6 +641,69 @@ func normalizeMySQLDateTimeValue(value interface{}) interface{} {
 	}
 
 	return value
+}
+
+func (m *MySQLDB) loadColumnTypeMap(tableName string) map[string]string {
+	result := map[string]string{}
+	table := strings.TrimSpace(tableName)
+	if table == "" {
+		return result
+	}
+
+	columns, err := m.GetColumns("", table)
+	if err != nil {
+		logger.Warnf("加载列元数据失败（不影响提交）：表=%s err=%v", table, err)
+		return result
+	}
+
+	for _, col := range columns {
+		name := strings.ToLower(strings.TrimSpace(col.Name))
+		if name == "" {
+			continue
+		}
+		result[name] = strings.TrimSpace(col.Type)
+	}
+	return result
+}
+
+func normalizeMySQLValueForInsert(columnName string, value interface{}, columnTypeMap map[string]string) (interface{}, bool) {
+	columnType := strings.ToLower(strings.TrimSpace(columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]))
+	if !isMySQLTemporalColumnType(columnType) {
+		return value, false
+	}
+	text, ok := value.(string)
+	if ok && strings.TrimSpace(text) == "" {
+		// INSERT 空时间字段不写入，交给 DB 默认值处理（如 CURRENT_TIMESTAMP）。
+		return nil, true
+	}
+	return normalizeMySQLDateTimeValue(value), false
+}
+
+func normalizeMySQLValueForWrite(columnName string, value interface{}, columnTypeMap map[string]string) interface{} {
+	columnType := strings.ToLower(strings.TrimSpace(columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]))
+	if !isMySQLTemporalColumnType(columnType) {
+		return value
+	}
+	text, ok := value.(string)
+	if ok && strings.TrimSpace(text) == "" {
+		return nil
+	}
+	return normalizeMySQLDateTimeValue(value)
+}
+
+func isMySQLTemporalColumnType(columnType string) bool {
+	raw := strings.ToLower(strings.TrimSpace(columnType))
+	if raw == "" {
+		return false
+	}
+	if strings.Contains(raw, "datetime") || strings.Contains(raw, "timestamp") {
+		return true
+	}
+	base := raw
+	if idx := strings.IndexAny(base, "( "); idx >= 0 {
+		base = base[:idx]
+	}
+	return base == "date" || base == "time" || base == "year"
 }
 
 func hasTimezoneOffset(text string) bool {
