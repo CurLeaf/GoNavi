@@ -1097,7 +1097,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'folder-columns') openDesign(info.node, 'columns', false);
       else if (type === 'folder-indexes') openDesign(info.node, 'indexes', false);
       else if (type === 'folder-fks') openDesign(info.node, 'foreignKeys', false);
-      else if (type === 'folder-triggers') openDesign(info.node, 'triggers', true);
+      else if (type === 'folder-triggers') openDesign(info.node, 'triggers', false);
   };
 
   const onExpand = (newExpandedKeys: React.Key[]) => {
