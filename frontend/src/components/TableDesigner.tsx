@@ -75,6 +75,22 @@ const MYSQL_INDEX_TYPE_OPTIONS = [
     { label: 'RTREE', value: 'RTREE' },
 ];
 
+const PGLIKE_INDEX_TYPE_OPTIONS = [
+    { label: '默认', value: 'DEFAULT' },
+    { label: 'BTREE', value: 'BTREE' },
+    { label: 'HASH', value: 'HASH' },
+    { label: 'GIN', value: 'GIN' },
+    { label: 'GIST', value: 'GIST' },
+    { label: 'BRIN', value: 'BRIN' },
+    { label: 'SPGIST', value: 'SPGIST' },
+];
+
+const SQLSERVER_INDEX_TYPE_OPTIONS = [
+    { label: '默认', value: 'DEFAULT' },
+    { label: 'CLUSTERED', value: 'CLUSTERED' },
+    { label: 'NONCLUSTERED', value: 'NONCLUSTERED' },
+];
+
 const CHARSETS = [
     { label: 'utf8mb4 (Recommended)', value: 'utf8mb4' },
     { label: 'utf8', value: 'utf8' },
@@ -612,9 +628,41 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   // --- Trigger Handlers ---
 
+  const normalizeDbType = (rawType: string): string => {
+      const normalized = String(rawType || '').trim().toLowerCase();
+      if (normalized === 'postgresql' || normalized === 'pg') return 'postgres';
+      if (normalized === 'mssql' || normalized === 'sql_server' || normalized === 'sql-server') return 'sqlserver';
+      if (normalized === 'doris') return 'diros';
+      return normalized;
+  };
+
+  const inferDialectFromCustomDriver = (driver: string): string => {
+      const customDriver = normalizeDbType(driver);
+      if (!customDriver) return 'custom';
+      if (
+          customDriver === 'mariadb'
+          || customDriver === 'diros'
+          || customDriver === 'sphinx'
+          || customDriver === 'tidb'
+          || customDriver === 'oceanbase'
+          || customDriver === 'starrocks'
+          || customDriver.includes('mysql')
+      ) {
+          return 'mysql';
+      }
+      if (customDriver === 'dameng') return 'dm';
+      return customDriver;
+  };
+
   const getDbType = (): string => {
     const conn = connections.find(c => c.id === tab.connectionId);
-    const type = String(conn?.config?.type || '').toLowerCase();
+    const type = normalizeDbType(String(conn?.config?.type || ''));
+    if (!type) return '';
+
+    if (type === 'custom') {
+        return inferDialectFromCustomDriver(String((conn?.config as any)?.driver || ''));
+    }
+
     if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
@@ -1037,24 +1085,141 @@ ${selectedTrigger.statement}`;
   }, [groupedForeignKeys, selectedForeignKey]);
 
   const escapeBacktickIdentifier = (name: string) => String(name || '').replace(/`/g, '``');
+  const escapeBracketIdentifier = (name: string) => String(name || '').replace(/]/g, ']]');
+  const escapeDoubleQuoteIdentifier = (name: string) => String(name || '').replace(/"/g, '""');
   const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
 
-  const quoteMysqlIdentifierPath = (path: string): string => {
-      const trimmed = String(path || '').trim();
-      if (!trimmed) return '';
-      // If user already provided backticks, respect as-is.
-      if (trimmed.includes('`')) return trimmed;
-      return trimmed
-          .split('.')
-          .map(seg => `\`${escapeBacktickIdentifier(seg)}\``)
-          .join('.');
+  const stripIdentifierQuotes = (part: string): string => {
+      const text = String(part || '').trim();
+      if (!text) return '';
+      if ((text.startsWith('`') && text.endsWith('`')) || (text.startsWith('"') && text.endsWith('"'))) {
+          return text.slice(1, -1).trim();
+      }
+      if (text.startsWith('[') && text.endsWith(']')) {
+          return text.slice(1, -1).trim();
+      }
+      return text;
   };
 
-  const getMysqlTableRef = (): string => {
-      const tbl = String(tab.tableName || '').trim();
-      const schema = String(tab.dbName || '').trim();
-      if (!schema) return `\`${escapeBacktickIdentifier(tbl)}\``;
-      return `\`${escapeBacktickIdentifier(schema)}\`.\`${escapeBacktickIdentifier(tbl)}\``;
+  const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
+      const raw = String(qualifiedName || '').trim();
+      if (!raw) return { schemaName: '', objectName: '' };
+      const idx = raw.lastIndexOf('.');
+      if (idx <= 0 || idx >= raw.length - 1) return { schemaName: '', objectName: raw };
+      return {
+          schemaName: stripIdentifierQuotes(raw.substring(0, idx)),
+          objectName: stripIdentifierQuotes(raw.substring(idx + 1)),
+      };
+  };
+
+  const isPgLikeDialect = (dbType: string): boolean =>
+      dbType === 'postgres' || dbType === 'kingbase' || dbType === 'highgo' || dbType === 'vastbase';
+  const isOracleLikeDialect = (dbType: string): boolean => dbType === 'oracle' || dbType === 'dm';
+  const isSqlServerDialect = (dbType: string): boolean => dbType === 'sqlserver';
+  const isMysqlLikeDialect = (dbType: string): boolean => dbType === 'mysql';
+  const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb';
+  const lacksAlterForeignKeySupport = (dbType: string): boolean => dbType === 'sqlite' || dbType === 'duckdb' || dbType === 'tdengine';
+  const lacksTableCommentSupport = (dbType: string): boolean => dbType === 'sqlite';
+
+  const quoteIdentifierPartByDialect = (part: string, dbType: string): string => {
+      const ident = stripIdentifierQuotes(part);
+      if (!ident) return '';
+      if (isMysqlLikeDialect(dbType) || dbType === 'tdengine') {
+          return `\`${escapeBacktickIdentifier(ident)}\``;
+      }
+      if (isSqlServerDialect(dbType)) {
+          return `[${escapeBracketIdentifier(ident)}]`;
+      }
+      return `"${escapeDoubleQuoteIdentifier(ident)}"`;
+  };
+
+  const quoteIdentifierPathByDialect = (path: string, dbType: string): string => {
+      const raw = String(path || '').trim();
+      if (!raw) return '';
+      const parts = raw
+          .split('.')
+          .map(part => stripIdentifierQuotes(part))
+          .filter(Boolean);
+      if (parts.length === 0) return '';
+      return parts.map(part => quoteIdentifierPartByDialect(part, dbType)).join('.');
+  };
+
+  const resolveTableInfo = () => {
+      const dbType = getDbType();
+      const rawTable = String(tab.tableName || '').trim();
+      const rawDb = String(tab.dbName || '').trim();
+      const parsed = splitQualifiedName(rawTable);
+      const table = parsed.objectName || stripIdentifierQuotes(rawTable);
+      let schema = parsed.schemaName;
+
+      if (!schema) {
+          if (isPgLikeDialect(dbType)) {
+              schema = rawDb || 'public';
+          } else if (isSqlServerDialect(dbType)) {
+              schema = 'dbo';
+          } else if (isOracleLikeDialect(dbType)) {
+              schema = rawDb;
+          } else {
+              schema = rawDb;
+          }
+      }
+
+      const qualifiedName = schema ? `${schema}.${table}` : table;
+      return {
+          dbType,
+          schema: stripIdentifierQuotes(schema),
+          table: stripIdentifierQuotes(table),
+          qualifiedName,
+          tableRef: quoteIdentifierPathByDialect(qualifiedName, dbType),
+      };
+  };
+
+  const supportsIndexSchemaOps = (): boolean => {
+      const dbType = getDbType();
+      if (!dbType) return false;
+      if (isNonRelationalDialect(dbType)) return false;
+      return true;
+  };
+
+  const supportsForeignKeySchemaOps = (): boolean => {
+      const dbType = getDbType();
+      if (!dbType) return false;
+      if (isNonRelationalDialect(dbType)) return false;
+      if (lacksAlterForeignKeySupport(dbType)) return false;
+      return true;
+  };
+
+  const supportsTableCommentOps = (): boolean => {
+      const dbType = getDbType();
+      if (!dbType) return false;
+      if (isNonRelationalDialect(dbType)) return false;
+      if (lacksTableCommentSupport(dbType)) return false;
+      return true;
+  };
+
+  const getIndexKindOptions = () => {
+      const dbType = getDbType();
+      if (isMysqlLikeDialect(dbType)) {
+          return [
+              { label: '普通索引（非聚合）', value: 'NORMAL' },
+              { label: '唯一索引', value: 'UNIQUE' },
+              { label: '主键索引（聚合）', value: 'PRIMARY' },
+              { label: '全文索引', value: 'FULLTEXT' },
+              { label: '空间索引', value: 'SPATIAL' },
+          ];
+      }
+      return [
+          { label: '普通索引', value: 'NORMAL' },
+          { label: '唯一索引', value: 'UNIQUE' },
+      ];
+  };
+
+  const getIndexTypeOptions = () => {
+      const dbType = getDbType();
+      if (isMysqlLikeDialect(dbType)) return MYSQL_INDEX_TYPE_OPTIONS;
+      if (isPgLikeDialect(dbType)) return PGLIKE_INDEX_TYPE_OPTIONS;
+      if (isSqlServerDialect(dbType)) return SQLSERVER_INDEX_TYPE_OPTIONS;
+      return [{ label: '默认', value: 'DEFAULT' }];
   };
 
   const buildCreateTableSql = (targetTableName: string, targetColumns: EditableColumn[], targetCharset: string, targetCollation: string) => {
@@ -1127,8 +1292,6 @@ ${selectedTrigger.statement}`;
       }
   };
 
-  const supportsMysqlSchemaOps = () => getDbType() === 'mysql';
-
   const executeSchemaSql = async (sql: string, successMessage: string): Promise<boolean> => {
       const conn = connections.find(c => c.id === tab.connectionId);
       if (!conn) {
@@ -1163,13 +1326,59 @@ ${selectedTrigger.statement}`;
       setIsTableCommentModalOpen(true);
   };
 
+  const buildTableCommentSql = (nextComment: string): string | null => {
+      const tableInfo = resolveTableInfo();
+      const dbType = tableInfo.dbType;
+      const escapedComment = escapeSqlString(nextComment);
+      if (isNonRelationalDialect(dbType)) return null;
+      if (isMysqlLikeDialect(dbType)) {
+          return `ALTER TABLE ${tableInfo.tableRef} COMMENT = '${escapedComment}';`;
+      }
+      if (isPgLikeDialect(dbType) || isOracleLikeDialect(dbType)) {
+          return `COMMENT ON TABLE ${tableInfo.tableRef} IS '${escapedComment}';`;
+      }
+      if (isSqlServerDialect(dbType)) {
+          const schemaName = escapeSqlString(tableInfo.schema || 'dbo');
+          const tableName = escapeSqlString(tableInfo.table);
+          return `IF EXISTS (
+    SELECT 1
+    FROM sys.extended_properties ep
+    JOIN sys.tables t ON ep.major_id = t.object_id AND ep.minor_id = 0
+    JOIN sys.schemas s ON t.schema_id = s.schema_id
+    WHERE ep.name = N'MS_Description'
+      AND s.name = N'${schemaName}'
+      AND t.name = N'${tableName}'
+)
+BEGIN
+    EXEC sp_updateextendedproperty
+        @name = N'MS_Description',
+        @value = N'${escapedComment}',
+        @level0type = N'SCHEMA', @level0name = N'${schemaName}',
+        @level1type = N'TABLE', @level1name = N'${tableName}';
+END
+ELSE
+BEGIN
+    EXEC sp_addextendedproperty
+        @name = N'MS_Description',
+        @value = N'${escapedComment}',
+        @level0type = N'SCHEMA', @level0name = N'${schemaName}',
+        @level1type = N'TABLE', @level1name = N'${tableName}';
+END;`;
+      }
+      return `COMMENT ON TABLE ${tableInfo.tableRef} IS '${escapedComment}';`;
+  };
+
   const handleSaveTableComment = async () => {
-      if (!supportsMysqlSchemaOps()) {
+      if (!supportsTableCommentOps()) {
           message.warning('当前数据库暂不支持在此修改表备注');
           return;
       }
       if (!tab.tableName) return;
-      const sql = `ALTER TABLE ${getMysqlTableRef()} COMMENT = '${escapeSqlString(tableCommentDraft)}';`;
+      const sql = buildTableCommentSql(tableCommentDraft);
+      if (!sql) {
+          message.warning('当前数据库暂不支持在此修改表备注');
+          return;
+      }
       setTableCommentSaving(true);
       const ok = await executeSchemaSql(sql, '表备注更新成功');
       setTableCommentSaving(false);
@@ -1209,6 +1418,10 @@ ${selectedTrigger.statement}`;
       } else if (selectedIndex.nonUnique === 0) {
           kind = 'UNIQUE';
       }
+      const supportedKinds = new Set(getIndexKindOptions().map(item => item.value));
+      if (!supportedKinds.has(kind)) {
+          kind = selectedIndex.nonUnique === 0 ? 'UNIQUE' : 'NORMAL';
+      }
 
       setIndexForm({
           name: kind === 'PRIMARY' ? 'PRIMARY' : selectedName,
@@ -1221,51 +1434,132 @@ ${selectedTrigger.statement}`;
       setIsIndexModalOpen(true);
   };
 
-  const buildIndexAddClause = (form: IndexFormState): string | null => {
+  const buildIndexCreateSql = (form: IndexFormState): string | null => {
+      const tableInfo = resolveTableInfo();
+      const dbType = tableInfo.dbType;
       const kind: IndexKind = form.kind || 'NORMAL';
       const indexName = String(form.name || '').trim();
-      const colSql = form.columnNames.map(col => `\`${escapeBacktickIdentifier(col)}\``).join(', ');
+      const cleanedCols = form.columnNames.map(col => String(col || '').trim()).filter(Boolean);
+      if (cleanedCols.length === 0) {
+          message.error('请至少选择一个字段');
+          return null;
+      }
+      const colSql = cleanedCols
+          .map(col => quoteIdentifierPartByDialect(col, dbType))
+          .join(', ');
 
-      if (kind === 'PRIMARY') {
-          return `ADD PRIMARY KEY (${colSql})`;
+      if (isMysqlLikeDialect(dbType)) {
+          if (kind === 'PRIMARY') {
+              return `ALTER TABLE ${tableInfo.tableRef}\nADD PRIMARY KEY (${colSql});`;
+          }
+
+          if (!indexName) {
+              message.error('请输入索引名');
+              return null;
+          }
+
+          const indexRef = quoteIdentifierPartByDialect(indexName, dbType);
+          if (kind === 'FULLTEXT') {
+              return `ALTER TABLE ${tableInfo.tableRef}\nADD FULLTEXT INDEX ${indexRef} (${colSql});`;
+          }
+          if (kind === 'SPATIAL') {
+              return `ALTER TABLE ${tableInfo.tableRef}\nADD SPATIAL INDEX ${indexRef} (${colSql});`;
+          }
+
+          const normalizedType = String(form.indexType || '').trim().toUpperCase() || 'DEFAULT';
+          if (normalizedType === 'FULLTEXT' || normalizedType === 'SPATIAL') {
+              message.error(`请将“索引类别”切换为 ${normalizedType} 索引`);
+              return null;
+          }
+          const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
+          const prefix = kind === 'UNIQUE' ? 'ADD UNIQUE INDEX' : 'ADD INDEX';
+          return `ALTER TABLE ${tableInfo.tableRef}\n${prefix} ${indexRef}${usingSql} (${colSql});`;
       }
 
+      if (kind === 'PRIMARY' || kind === 'FULLTEXT' || kind === 'SPATIAL') {
+          message.warning('当前数据库仅支持普通索引与唯一索引维护');
+          return null;
+      }
       if (!indexName) {
           message.error('请输入索引名');
           return null;
       }
 
-      if (kind === 'FULLTEXT') {
-          return `ADD FULLTEXT INDEX \`${escapeBacktickIdentifier(indexName)}\` (${colSql})`;
-      }
-      if (kind === 'SPATIAL') {
-          return `ADD SPATIAL INDEX \`${escapeBacktickIdentifier(indexName)}\` (${colSql})`;
+      const indexRef = quoteIdentifierPartByDialect(indexName, dbType);
+      const normalizedType = String(form.indexType || '').trim().toUpperCase() || 'DEFAULT';
+      const uniquePrefix = kind === 'UNIQUE' ? 'UNIQUE ' : '';
+
+      if (isPgLikeDialect(dbType)) {
+          const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
+          return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef}${usingSql} (${colSql});`;
       }
 
-      const normalizedType = String(form.indexType || '').trim().toUpperCase() || 'DEFAULT';
-      if (normalizedType === 'FULLTEXT' || normalizedType === 'SPATIAL') {
-          message.error(`请将“索引类别”切换为 ${normalizedType} 索引`);
+      if (isSqlServerDialect(dbType)) {
+          const methodSql = normalizedType === 'CLUSTERED' || normalizedType === 'NONCLUSTERED'
+              ? `${normalizedType} `
+              : '';
+          return `CREATE ${uniquePrefix}${methodSql}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
+      }
+
+      if (isOracleLikeDialect(dbType) || dbType === 'sqlite') {
+          return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
+      }
+
+      if (isNonRelationalDialect(dbType)) {
+          message.warning('当前数据源不支持关系型索引维护');
           return null;
       }
-
-      const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
-      const prefix = kind === 'UNIQUE' ? 'ADD UNIQUE INDEX' : 'ADD INDEX';
-      return `${prefix} \`${escapeBacktickIdentifier(indexName)}\`${usingSql} (${colSql})`;
+      return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
   };
 
-  const buildIndexDropClause = (indexName: string) => {
-      if (String(indexName || '').trim().toUpperCase() === 'PRIMARY') {
-          return 'DROP PRIMARY KEY';
+  const buildIndexDropSql = (indexName: string): string | null => {
+      const tableInfo = resolveTableInfo();
+      const dbType = tableInfo.dbType;
+      const name = String(indexName || '').trim();
+      if (!name) return null;
+
+      if (isMysqlLikeDialect(dbType)) {
+          if (name.toUpperCase() === 'PRIMARY') {
+              return `ALTER TABLE ${tableInfo.tableRef}\nDROP PRIMARY KEY;`;
+          }
+          const indexRef = quoteIdentifierPartByDialect(name, dbType);
+          return `DROP INDEX ${indexRef} ON ${tableInfo.tableRef};`;
       }
-      return `DROP INDEX \`${escapeBacktickIdentifier(indexName)}\``;
+
+      if (isSqlServerDialect(dbType)) {
+          const indexRef = quoteIdentifierPartByDialect(name, dbType);
+          return `DROP INDEX ${indexRef} ON ${tableInfo.tableRef};`;
+      }
+
+      if (isPgLikeDialect(dbType) || isOracleLikeDialect(dbType) || dbType === 'sqlite') {
+          const fullIndexName = name.includes('.') || !tableInfo.schema
+              ? name
+              : `${tableInfo.schema}.${name}`;
+          const indexRef = quoteIdentifierPathByDialect(fullIndexName, dbType);
+          return `DROP INDEX ${indexRef};`;
+      }
+
+      if (isNonRelationalDialect(dbType)) {
+          return null;
+      }
+      const fullIndexName = name.includes('.') || !tableInfo.schema
+          ? name
+          : `${tableInfo.schema}.${name}`;
+      const indexRef = quoteIdentifierPathByDialect(fullIndexName, dbType);
+      return `DROP INDEX ${indexRef};`;
   };
 
   const handleSubmitIndex = async () => {
-      if (!supportsMysqlSchemaOps()) {
+      if (!supportsIndexSchemaOps()) {
           message.warning('当前数据库暂不支持在此维护索引');
           return;
       }
       if (!tab.tableName) return;
+      const supportedKinds = new Set(getIndexKindOptions().map(item => item.value));
+      if (!supportedKinds.has(indexForm.kind)) {
+          message.warning('当前数据库不支持该索引类型');
+          return;
+      }
       const nextName = indexForm.kind === 'PRIMARY' ? 'PRIMARY' : String(indexForm.name || '').trim();
       if (indexForm.kind !== 'PRIMARY' && !nextName) {
           message.error('请输入索引名');
@@ -1287,16 +1581,21 @@ ${selectedTrigger.statement}`;
       }
 
       setIndexSaving(true);
-      const addClause = buildIndexAddClause({ ...indexForm, name: nextName });
-      if (!addClause) {
+      const addSql = buildIndexCreateSql({ ...indexForm, name: nextName });
+      if (!addSql) {
           setIndexSaving(false);
           return;
       }
-      let sql = `ALTER TABLE ${getMysqlTableRef()}\n${addClause};`;
+      let sql = addSql;
 
       if (indexModalMode === 'edit' && selectedIndex) {
-          const dropClause = buildIndexDropClause(selectedIndex.name);
-          sql = `ALTER TABLE ${getMysqlTableRef()}\n${dropClause},\n${addClause};`;
+          const dropSql = buildIndexDropSql(selectedIndex.name);
+          if (!dropSql) {
+              setIndexSaving(false);
+              message.warning('当前数据库暂不支持删除该索引');
+              return;
+          }
+          sql = `${dropSql}\n${addSql}`;
       }
 
       const ok = await executeSchemaSql(sql, indexModalMode === 'create' ? '索引新增成功' : '索引修改成功');
@@ -1311,7 +1610,7 @@ ${selectedTrigger.statement}`;
           message.warning('请先选择一个索引');
           return;
       }
-      if (!supportsMysqlSchemaOps()) {
+      if (!supportsIndexSchemaOps()) {
           message.warning('当前数据库暂不支持在此维护索引');
           return;
       }
@@ -1323,8 +1622,11 @@ ${selectedTrigger.statement}`;
           okType: 'danger',
           cancelText: '取消',
           onOk: async () => {
-              const dropClause = buildIndexDropClause(selectedIndex.name);
-              const sql = `ALTER TABLE ${getMysqlTableRef()}\n${dropClause};`;
+              const sql = buildIndexDropSql(selectedIndex.name);
+              if (!sql) {
+                  message.warning('当前数据库暂不支持删除该索引');
+                  return;
+              }
               await executeSchemaSql(sql, '索引删除成功');
           }
       });
@@ -1356,18 +1658,40 @@ ${selectedTrigger.statement}`;
       setIsForeignKeyModalOpen(true);
   };
 
-  const buildForeignKeyAddClause = (form: ForeignKeyFormState) => {
-      const localColsSql = form.columnNames.map(col => `\`${escapeBacktickIdentifier(col)}\``).join(', ');
-      const refColsSql = form.refColumnNames.map(col => `\`${escapeBacktickIdentifier(col)}\``).join(', ');
-      const refTableSql = quoteMysqlIdentifierPath(form.refTableName);
-      return `ADD CONSTRAINT \`${escapeBacktickIdentifier(form.constraintName)}\` FOREIGN KEY (${localColsSql}) REFERENCES ${refTableSql} (${refColsSql})`;
+  const buildForeignKeyAddSql = (form: ForeignKeyFormState): string | null => {
+      const tableInfo = resolveTableInfo();
+      const dbType = tableInfo.dbType;
+      if (!supportsForeignKeySchemaOps()) return null;
+
+      const localColsSql = form.columnNames
+          .map(col => quoteIdentifierPartByDialect(col, dbType))
+          .join(', ');
+      const refColsSql = form.refColumnNames
+          .map(col => quoteIdentifierPartByDialect(col, dbType))
+          .join(', ');
+      const refParts = splitQualifiedName(form.refTableName);
+      const refObjectName = refParts.objectName || String(form.refTableName || '').trim();
+      const refTableName = !refParts.schemaName && tableInfo.schema && (isPgLikeDialect(dbType) || isSqlServerDialect(dbType) || isOracleLikeDialect(dbType))
+          ? `${tableInfo.schema}.${refObjectName}`
+          : String(form.refTableName || '').trim();
+      const refTableSql = quoteIdentifierPathByDialect(refTableName, dbType);
+      const constraintSql = quoteIdentifierPartByDialect(form.constraintName, dbType);
+      return `ALTER TABLE ${tableInfo.tableRef}\nADD CONSTRAINT ${constraintSql} FOREIGN KEY (${localColsSql}) REFERENCES ${refTableSql} (${refColsSql});`;
   };
 
-  const buildForeignKeyDropClause = (constraintName: string) =>
-      `DROP FOREIGN KEY \`${escapeBacktickIdentifier(constraintName)}\``;
+  const buildForeignKeyDropSql = (constraintName: string): string | null => {
+      const tableInfo = resolveTableInfo();
+      const dbType = tableInfo.dbType;
+      if (!supportsForeignKeySchemaOps()) return null;
+      const constraintSql = quoteIdentifierPartByDialect(constraintName, dbType);
+      if (isMysqlLikeDialect(dbType)) {
+          return `ALTER TABLE ${tableInfo.tableRef}\nDROP FOREIGN KEY ${constraintSql};`;
+      }
+      return `ALTER TABLE ${tableInfo.tableRef}\nDROP CONSTRAINT ${constraintSql};`;
+  };
 
   const handleSubmitForeignKey = async () => {
-      if (!supportsMysqlSchemaOps()) {
+      if (!supportsForeignKeySchemaOps()) {
           message.warning('当前数据库暂不支持在此维护外键');
           return;
       }
@@ -1408,17 +1732,27 @@ ${selectedTrigger.statement}`;
       }
 
       setForeignKeySaving(true);
-      const addClause = buildForeignKeyAddClause({
+      const addSql = buildForeignKeyAddSql({
           ...foreignKeyForm,
           constraintName: nextConstraint,
           columnNames: localCols,
           refTableName: refTable,
           refColumnNames: refCols,
       });
-      let sql = `ALTER TABLE ${getMysqlTableRef()}\n${addClause};`;
+      if (!addSql) {
+          setForeignKeySaving(false);
+          message.warning('当前数据库暂不支持在此维护外键');
+          return;
+      }
+      let sql = addSql;
       if (foreignKeyModalMode === 'edit' && selectedForeignKey) {
-          const dropClause = buildForeignKeyDropClause(selectedForeignKey.constraintName);
-          sql = `ALTER TABLE ${getMysqlTableRef()}\n${dropClause},\n${addClause};`;
+          const dropSql = buildForeignKeyDropSql(selectedForeignKey.constraintName);
+          if (!dropSql) {
+              setForeignKeySaving(false);
+              message.warning('当前数据库暂不支持删除该外键');
+              return;
+          }
+          sql = `${dropSql}\n${addSql}`;
       }
 
       const ok = await executeSchemaSql(sql, foreignKeyModalMode === 'create' ? '外键新增成功' : '外键修改成功');
@@ -1433,7 +1767,7 @@ ${selectedTrigger.statement}`;
           message.warning('请先选择一个外键');
           return;
       }
-      if (!supportsMysqlSchemaOps()) {
+      if (!supportsForeignKeySchemaOps()) {
           message.warning('当前数据库暂不支持在此维护外键');
           return;
       }
@@ -1445,7 +1779,11 @@ ${selectedTrigger.statement}`;
           okType: 'danger',
           cancelText: '取消',
           onOk: async () => {
-              const sql = `ALTER TABLE ${getMysqlTableRef()}\n${buildForeignKeyDropClause(selectedForeignKey.constraintName)};`;
+              const sql = buildForeignKeyDropSql(selectedForeignKey.constraintName);
+              if (!sql) {
+                  message.warning('当前数据库暂不支持删除该外键');
+                  return;
+              }
               await executeSchemaSql(sql, '外键删除成功');
           }
       });
@@ -1677,7 +2015,7 @@ ${selectedTrigger.statement}`;
             )}
             {!readOnly && <Button icon={<SaveOutlined />} type="primary" onClick={generateDDL}>保存</Button>}
             {!isNewTable && <Button icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>}
-            {!isNewTable && !readOnly && supportsMysqlSchemaOps() && (
+            {!isNewTable && !readOnly && supportsTableCommentOps() && (
                 <Button icon={<EditOutlined />} onClick={openTableCommentModal}>表备注</Button>
             )}
             {!readOnly && <Button icon={<PlusOutlined />} onClick={handleAddColumn}>添加字段</Button>}
@@ -1710,15 +2048,15 @@ ${selectedTrigger.statement}`;
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
                                     <div style={{ display: 'flex', gap: 8 }}>
-                                        <Button size="small" icon={<PlusOutlined />} onClick={openCreateIndexModal}>新增</Button>
-                                        <Button size="small" icon={<EditOutlined />} disabled={!selectedIndex} onClick={openEditIndexModal}>修改</Button>
-                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedIndex} onClick={handleDeleteIndex}>删除</Button>
-                                        {!supportsMysqlSchemaOps() && (
+                                        <Button size="small" icon={<PlusOutlined />} disabled={!supportsIndexSchemaOps()} onClick={openCreateIndexModal}>新增</Button>
+                                        <Button size="small" icon={<EditOutlined />} disabled={!supportsIndexSchemaOps() || !selectedIndex} onClick={openEditIndexModal}>修改</Button>
+                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsIndexSchemaOps() || !selectedIndex} onClick={handleDeleteIndex}>删除</Button>
+                                        {!supportsIndexSchemaOps() && (
                                             <span style={{ marginLeft: 'auto', color: '#faad14', fontSize: 12, alignSelf: 'center' }}>
                                                 当前数据库暂不支持索引编辑，仅支持查看
                                             </span>
                                         )}
-                                        {supportsMysqlSchemaOps() && selectedIndex && (
+                                        {supportsIndexSchemaOps() && selectedIndex && (
                                             <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12, alignSelf: 'center' }}>
                                                 已选择：{selectedIndex.name}
                                             </span>
@@ -1813,15 +2151,15 @@ ${selectedTrigger.statement}`;
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
                                     <div style={{ display: 'flex', gap: 8 }}>
-                                        <Button size="small" icon={<PlusOutlined />} onClick={openCreateForeignKeyModal}>新增</Button>
-                                        <Button size="small" icon={<EditOutlined />} disabled={!selectedForeignKey} onClick={openEditForeignKeyModal}>修改</Button>
-                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedForeignKey} onClick={handleDeleteForeignKey}>删除</Button>
-                                        {!supportsMysqlSchemaOps() && (
+                                        <Button size="small" icon={<PlusOutlined />} disabled={!supportsForeignKeySchemaOps()} onClick={openCreateForeignKeyModal}>新增</Button>
+                                        <Button size="small" icon={<EditOutlined />} disabled={!supportsForeignKeySchemaOps() || !selectedForeignKey} onClick={openEditForeignKeyModal}>修改</Button>
+                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsForeignKeySchemaOps() || !selectedForeignKey} onClick={handleDeleteForeignKey}>删除</Button>
+                                        {!supportsForeignKeySchemaOps() && (
                                             <span style={{ marginLeft: 'auto', color: '#faad14', fontSize: 12, alignSelf: 'center' }}>
                                                 当前数据库暂不支持外键编辑，仅支持查看
                                             </span>
                                         )}
-                                        {supportsMysqlSchemaOps() && selectedForeignKey && (
+                                        {supportsForeignKeySchemaOps() && selectedForeignKey && (
                                             <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12, alignSelf: 'center' }}>
                                                 已选择：{selectedForeignKey.constraintName}
                                             </span>
@@ -2077,13 +2415,7 @@ ${selectedTrigger.statement}`;
                 <Space wrap>
                     <Select
                         value={indexForm.kind}
-                        options={[
-                            { label: '普通索引（非聚合）', value: 'NORMAL' },
-                            { label: '唯一索引', value: 'UNIQUE' },
-                            { label: '主键索引（聚合）', value: 'PRIMARY' },
-                            { label: '全文索引', value: 'FULLTEXT' },
-                            { label: '空间索引', value: 'SPATIAL' },
-                        ]}
+                        options={getIndexKindOptions()}
                         onChange={(val: IndexKind) =>
                             setIndexForm(prev => ({
                                 ...prev,
@@ -2097,7 +2429,7 @@ ${selectedTrigger.statement}`;
                     <Select
                         value={indexForm.indexType}
                         onChange={(val) => setIndexForm(prev => ({ ...prev, indexType: val }))}
-                        options={MYSQL_INDEX_TYPE_OPTIONS}
+                        options={getIndexTypeOptions()}
                         style={{ width: 160 }}
                         disabled={indexForm.kind === 'PRIMARY' || indexForm.kind === 'FULLTEXT' || indexForm.kind === 'SPATIAL'}
                     />

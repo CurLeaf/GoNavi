@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	stdRuntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -857,55 +858,55 @@ func launchLinuxUpdate(staged *stagedUpdate, targetExe string, pid int) error {
 }
 
 func buildWindowsScript(source, target, stagedDir, logPath string, pid int) string {
-	return fmt.Sprintf(`@echo off
+	script := `@echo off
 setlocal EnableExtensions EnableDelayedExpansion
-set "SOURCE=%s"
-set "TARGET=%s"
-set "STAGED=%s"
-set "LOG_FILE=%s"
-set PID=%d
+set "SOURCE=__GONAVI_UPDATE_SOURCE__"
+set "TARGET=__GONAVI_UPDATE_TARGET__"
+set "STAGED=__GONAVI_UPDATE_STAGED__"
+set "LOG_FILE=__GONAVI_UPDATE_LOG__"
+set PID=__GONAVI_UPDATE_PID__
 
 call :log updater started
-if not exist "%%SOURCE%%" (
-  call :log source file not found: %%SOURCE%%
+if not exist "%SOURCE%" (
+  call :log source file not found: %SOURCE%
   exit /b 1
 )
 
-for %%I in ("%%TARGET%%") do set "TARGET_NAME=%%~nxI"
-for %%I in ("%%SOURCE%%") do set "SOURCE_EXT=%%~xI"
+for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
+for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
 set "SOURCE_EXE="
 
-if /I "%%SOURCE_EXT%%"==".zip" (
-  set "EXTRACT_DIR=%%STAGED%%\_extract"
-  if exist "%%EXTRACT_DIR%%" (
-    rmdir /S /Q "%%EXTRACT_DIR%%" >> "%%LOG_FILE%%" 2>&1
+if /I "%SOURCE_EXT%"==".zip" (
+  set "EXTRACT_DIR=%STAGED%\_extract"
+  if exist "%EXTRACT_DIR%" (
+    rmdir /S /Q "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
   )
-  mkdir "%%EXTRACT_DIR%%" >> "%%LOG_FILE%%" 2>&1
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=$env:SOURCE; $dst=$env:EXTRACT_DIR; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force" >> "%%LOG_FILE%%" 2>&1
-  if %%ERRORLEVEL%% NEQ 0 (
-    call :log expand zip failed: %%SOURCE%%
+  mkdir "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=$env:SOURCE; $dst=$env:EXTRACT_DIR; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force" >> "%LOG_FILE%" 2>&1
+  if %ERRORLEVEL% NEQ 0 (
+    call :log expand zip failed: %SOURCE%
     exit /b 1
   )
-  if exist "%%EXTRACT_DIR%%\%%TARGET_NAME%%" (
-    set "SOURCE_EXE=%%EXTRACT_DIR%%\%%TARGET_NAME%%"
+  if exist "%EXTRACT_DIR%\%TARGET_NAME%" (
+    set "SOURCE_EXE=%EXTRACT_DIR%\%TARGET_NAME%"
   ) else (
-    for /R "%%EXTRACT_DIR%%" %%F in (*.exe) do (
+    for /R "%EXTRACT_DIR%" %%F in (*.exe) do (
       if not defined SOURCE_EXE (
         set "SOURCE_EXE=%%~fF"
       )
     )
   )
   if not defined SOURCE_EXE (
-    call :log no executable found in portable zip: %%SOURCE%%
+    call :log no executable found in portable zip: %SOURCE%
     exit /b 1
   )
 ) else (
-  set "SOURCE_EXE=%%SOURCE%%"
+  set "SOURCE_EXE=%SOURCE%"
 )
 
 :waitloop
-tasklist /FI "PID eq %%PID%%" | find "%%PID%%" >nul
-if %%ERRORLEVEL%%==0 (
+tasklist /FI "PID eq %PID%" | find "%PID%" >nul
+if %ERRORLEVEL%==0 (
   timeout /t 1 /nobreak >nul
   goto waitloop
 )
@@ -913,11 +914,11 @@ call :log host process exited
 
 set /a RETRY=0
 :move_retry
-move /Y "%%SOURCE_EXE%%" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
-if %%ERRORLEVEL%%==0 goto move_done
+move /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL%==0 goto move_done
 
-copy /Y "%%SOURCE_EXE%%" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
-if %%ERRORLEVEL%%==0 goto move_done
+copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL%==0 goto move_done
 
 set /a RETRY+=1
 if !RETRY! LSS 20 (
@@ -929,23 +930,30 @@ call :log replace failed after retries (portable mode, no elevation): check dire
 exit /b 1
 
 :move_done
-start "" "%%TARGET%%" >> "%%LOG_FILE%%" 2>&1
-if %%ERRORLEVEL%% NEQ 0 (
+start "" "%TARGET%" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%%TARGET%%'" >> "%%LOG_FILE%%" 2>&1
-  if %%ERRORLEVEL%% NEQ 0 (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%'" >> "%LOG_FILE%" 2>&1
+  if %ERRORLEVEL% NEQ 0 (
     call :log relaunch failed
     exit /b 1
   )
 )
-rmdir /S /Q "%%STAGED%%" >> "%%LOG_FILE%%" 2>&1
+rmdir /S /Q "%STAGED%" >> "%LOG_FILE%" 2>&1
 call :log update finished
 exit /b 0
 
 :log
-echo [%%date%% %%time%%] %%*>>"%%LOG_FILE%%"
+echo [%date% %time%] %*>>"%LOG_FILE%"
 exit /b 0
-`, source, target, stagedDir, logPath, pid)
+`
+	return strings.NewReplacer(
+		"__GONAVI_UPDATE_SOURCE__", source,
+		"__GONAVI_UPDATE_TARGET__", target,
+		"__GONAVI_UPDATE_STAGED__", stagedDir,
+		"__GONAVI_UPDATE_LOG__", logPath,
+		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
+	).Replace(script)
 }
 
 func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {
