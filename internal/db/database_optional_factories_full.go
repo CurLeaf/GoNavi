@@ -15,4 +15,5 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("vastbase"), "vastbase")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("mongodb"), "mongodb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("tdengine"), "tdengine")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("clickhouse"), "clickhouse")
 }

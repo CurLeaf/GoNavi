@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress, Switch } from 'antd';
+import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, BulbOutlined, BulbFilled, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined } from '@ant-design/icons';
+import { PlusOutlined, BulbOutlined, BulbFilled, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined } from '@ant-design/icons';
 import { Environment, EventsOn, WindowFullscreen, WindowIsFullscreen, WindowIsMaximised, WindowMaximise } from '../wailsjs/runtime/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -12,7 +12,7 @@ import LogPanel from './components/LogPanel';
 import { useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform } from './utils/appearance';
-import { SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ConfigureGlobalProxy, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -28,12 +28,16 @@ function App() {
   const setAppearance = useStore(state => state.setAppearance);
   const startupFullscreen = useStore(state => state.startupFullscreen);
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
+  const globalProxy = useStore(state => state.globalProxy);
+  const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const darkMode = themeMode === 'dark';
   const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
   const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const windowCornerRadius = 14;
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
+  const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
+  const globalProxyInvalidHintShownRef = React.useRef(false);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -57,6 +61,83 @@ function App() {
           cancelled = true;
       };
   }, []);
+
+  useEffect(() => {
+      if (isStoreHydrated) {
+          return;
+      }
+      const unsubscribe = useStore.persist.onFinishHydration(() => {
+          setIsStoreHydrated(true);
+      });
+      return () => {
+          unsubscribe();
+      };
+  }, [isStoreHydrated]);
+
+  useEffect(() => {
+      if (!isStoreHydrated) {
+          return;
+      }
+
+      const host = String(globalProxy.host || '').trim();
+      const port = Number(globalProxy.port);
+      const portValid = Number.isFinite(port) && port > 0 && port <= 65535;
+      const invalidWhenEnabled = globalProxy.enabled && (!host || !portValid);
+
+      if (invalidWhenEnabled) {
+          if (!globalProxyInvalidHintShownRef.current) {
+              message.warning({
+                  content: '全局代理已开启，但地址或端口无效，当前按未启用处理',
+                  key: 'global-proxy-invalid',
+              });
+              globalProxyInvalidHintShownRef.current = true;
+          }
+      } else {
+          globalProxyInvalidHintShownRef.current = false;
+          message.destroy('global-proxy-invalid');
+      }
+
+      const enabledForBackend = globalProxy.enabled && !invalidWhenEnabled;
+      let cancelled = false;
+      ConfigureGlobalProxy(enabledForBackend, {
+          type: globalProxy.type,
+          host,
+          port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
+          user: String(globalProxy.user || '').trim(),
+          password: globalProxy.password || '',
+      })
+          .then((res) => {
+              if (cancelled || res?.success) {
+                  return;
+              }
+              message.error({
+                  content: '全局代理配置失败: ' + (res?.message || '未知错误'),
+                  key: 'global-proxy-sync-error',
+              });
+          })
+          .catch((err) => {
+              if (cancelled) {
+                  return;
+              }
+              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+              message.error({
+                  content: '全局代理配置失败: ' + errMsg,
+                  key: 'global-proxy-sync-error',
+              });
+          });
+
+      return () => {
+          cancelled = true;
+      };
+  }, [
+      isStoreHydrated,
+      globalProxy.enabled,
+      globalProxy.type,
+      globalProxy.host,
+      globalProxy.port,
+      globalProxy.user,
+      globalProxy.password,
+  ]);
 
   useEffect(() => {
       let cancelled = false;
@@ -492,6 +573,7 @@ function App() {
   ];
 
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
+  const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -814,6 +896,7 @@ function App() {
             <Dropdown menu={{ items: toolsMenu }} placement="bottomLeft">
                 <Button type="text" icon={<ToolOutlined />} title="工具">工具</Button>
             </Dropdown>
+            <Button type="text" icon={<GlobalOutlined />} title="代理" onClick={() => setIsProxyModalOpen(true)}>代理</Button>
             <Dropdown menu={{ items: themeMenu }} placement="bottomLeft">
                 <Button type="text" icon={<SkinOutlined />} title="主题">主题</Button>
             </Dropdown>
@@ -954,7 +1037,7 @@ function App() {
               open={isAppearanceModalOpen}
               onCancel={() => setIsAppearanceModalOpen(false)}
               footer={null}
-              width={400}
+              width={460}
           >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '12px 0' }}>
                   <div>
@@ -1003,6 +1086,81 @@ function App() {
                       </div>
                       <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
                           * 修改后下次启动生效
+                      </div>
+                  </div>
+              </div>
+          </Modal>
+
+          <Modal
+              title="全局代理设置"
+              open={isProxyModalOpen}
+              onCancel={() => setIsProxyModalOpen(false)}
+              footer={null}
+              width={460}
+          >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '12px 0' }}>
+                  <div>
+                      <div style={{ marginBottom: 8, fontWeight: 500 }}>全局代理</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <span>启用全局代理</span>
+                          <Switch checked={globalProxy.enabled} onChange={(checked) => setGlobalProxy({ enabled: checked })} />
+                      </div>
+                      <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
+                          <div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>代理类型</div>
+                              <Select
+                                  value={globalProxy.type}
+                                  disabled={!globalProxy.enabled}
+                                  options={[
+                                      { value: 'socks5', label: 'SOCKS5' },
+                                      { value: 'http', label: 'HTTP' },
+                                  ]}
+                                  onChange={(value) => setGlobalProxy({ type: value as 'socks5' | 'http' })}
+                              />
+                          </div>
+                          <div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>端口</div>
+                              <InputNumber
+                                  min={1}
+                                  max={65535}
+                                  style={{ width: '100%' }}
+                                  value={globalProxy.port}
+                                  disabled={!globalProxy.enabled}
+                                  onChange={(value) => setGlobalProxy({
+                                      port: typeof value === 'number' ? value : (globalProxy.type === 'http' ? 8080 : 1080),
+                                  })}
+                              />
+                          </div>
+                          <div style={{ gridColumn: '1 / span 2' }}>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>代理地址</div>
+                              <Input
+                                  placeholder="例如：127.0.0.1"
+                                  value={globalProxy.host}
+                                  disabled={!globalProxy.enabled}
+                                  onChange={(e) => setGlobalProxy({ host: e.target.value })}
+                              />
+                          </div>
+                          <div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>用户名（可选）</div>
+                              <Input
+                                  placeholder="proxy-user"
+                                  value={globalProxy.user}
+                                  disabled={!globalProxy.enabled}
+                                  onChange={(e) => setGlobalProxy({ user: e.target.value })}
+                              />
+                          </div>
+                          <div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>密码（可选）</div>
+                              <Input.Password
+                                  placeholder="proxy-password"
+                                  value={globalProxy.password}
+                                  disabled={!globalProxy.enabled}
+                                  onChange={(e) => setGlobalProxy({ password: e.target.value })}
+                              />
+                          </div>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
+                          * 作用于更新检查、驱动管理网络请求，以及未单独配置代理的数据库连接
                       </div>
                   </div>
               </div>

@@ -701,7 +701,7 @@ func quoteIdentByType(dbType string, ident string) string {
 	}
 
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "tdengine":
+	case "mysql", "mariadb", "diros", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "sqlserver":
 		escaped := strings.ReplaceAll(ident, "]", "]]")
@@ -950,6 +950,15 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 		return []string{
 			`SELECT table_schema AS schema_name, table_name AS object_name FROM information_schema.views WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name`,
 		}
+	case "clickhouse":
+		if strings.TrimSpace(dbName) == "" {
+			return []string{
+				`SELECT database AS schema_name, name AS object_name FROM system.tables WHERE engine LIKE '%View%' ORDER BY database, name`,
+			}
+		}
+		return []string{
+			fmt.Sprintf(`SELECT database AS schema_name, name AS object_name FROM system.tables WHERE engine LIKE '%%View%%' AND database='%s' ORDER BY name`, escapedDbName),
+		}
 	default:
 		if strings.TrimSpace(dbName) == "" {
 			return []string{
@@ -1069,6 +1078,18 @@ WHERE s.name = '%s' AND v.name = '%s'`,
 		return []string{
 			fmt.Sprintf("SELECT sql AS ddl FROM duckdb_views() WHERE view_name = '%s' AND schema_name = '%s' LIMIT 1", escapedView, escapedSchema),
 			fmt.Sprintf("SELECT view_definition AS ddl FROM information_schema.views WHERE table_name = '%s' AND table_schema = '%s' LIMIT 1", escapedView, escapedSchema),
+		}
+	case "clickhouse":
+		if safeSchema == "" {
+			safeSchema = strings.TrimSpace(dbName)
+		}
+		if safeSchema != "" {
+			return []string{
+				fmt.Sprintf("SHOW CREATE TABLE %s.%s", quoteIdentByType("clickhouse", safeSchema), quoteIdentByType("clickhouse", safeView)),
+			}
+		}
+		return []string{
+			fmt.Sprintf("SHOW CREATE TABLE %s", quoteIdentByType("clickhouse", safeView)),
 		}
 	default:
 		if safeSchema != "" {

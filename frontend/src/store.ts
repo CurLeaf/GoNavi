@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, SavedConnection, TabData, SavedQuery } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery } from './types';
 
 const DEFAULT_APPEARANCE = { opacity: 1.0, blur: 0 };
 const DEFAULT_STARTUP_FULLSCREEN = false;
@@ -11,12 +11,22 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
+const PERSIST_VERSION = 4;
 const DEFAULT_CONNECTION_TYPE = 'mysql';
+const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
+  enabled: false,
+  type: 'socks5',
+  host: '',
+  port: 1080,
+  user: '',
+  password: '',
+};
 const SUPPORTED_CONNECTION_TYPES = new Set([
   'mysql',
   'mariadb',
   'diros',
   'sphinx',
+  'clickhouse',
   'postgres',
   'redis',
   'tdengine',
@@ -43,6 +53,8 @@ const getDefaultPortByType = (type: string): number => {
       return 0;
     case 'sphinx':
       return 9306;
+    case 'clickhouse':
+      return 9000;
     case 'postgres':
     case 'vastbase':
       return 5432;
@@ -288,6 +300,10 @@ export interface QueryOptions {
   showColumnType: boolean;
 }
 
+export interface GlobalProxyConfig extends ProxyConfig {
+  enabled: boolean;
+}
+
 interface AppState {
   connections: SavedConnection[];
   tabs: TabData[];
@@ -297,6 +313,7 @@ interface AppState {
   theme: 'light' | 'dark';
   appearance: { opacity: number; blur: number };
   startupFullscreen: boolean;
+  globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: 'upper' | 'lower' };
   queryOptions: QueryOptions;
   sqlLogs: SqlLog[];
@@ -324,6 +341,7 @@ interface AppState {
   setTheme: (theme: 'light' | 'dark') => void;
   setAppearance: (appearance: Partial<{ opacity: number; blur: number }>) => void;
   setStartupFullscreen: (enabled: boolean) => void;
+  setGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
 
@@ -416,6 +434,21 @@ const sanitizeStartupFullscreen = (value: unknown): boolean => {
   return value === true;
 };
 
+const sanitizeGlobalProxy = (value: unknown): GlobalProxyConfig => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const typeRaw = toTrimmedString(raw.type, DEFAULT_GLOBAL_PROXY.type).toLowerCase();
+  const type: 'socks5' | 'http' = typeRaw === 'http' ? 'http' : 'socks5';
+  const fallbackPort = type === 'http' ? 8080 : 1080;
+  return {
+    enabled: raw.enabled === true,
+    type,
+    host: toTrimmedString(raw.host),
+    port: normalizePort(raw.port, fallbackPort),
+    user: toTrimmedString(raw.user),
+    password: toTrimmedString(raw.password),
+  };
+};
+
 const unwrapPersistedAppState = (persistedState: unknown): Record<string, unknown> => {
   if (!persistedState || typeof persistedState !== 'object') {
     return {};
@@ -438,6 +471,7 @@ export const useStore = create<AppState>()(
       theme: 'light',
       appearance: { ...DEFAULT_APPEARANCE },
       startupFullscreen: DEFAULT_STARTUP_FULLSCREEN,
+      globalProxy: { ...DEFAULT_GLOBAL_PROXY },
       sqlFormatOptions: { keywordCase: 'upper' },
       queryOptions: { maxRows: 5000, showColumnComment: true, showColumnType: true },
       sqlLogs: [],
@@ -550,6 +584,7 @@ export const useStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       setAppearance: (appearance) => set((state) => ({ appearance: { ...state.appearance, ...appearance } })),
       setStartupFullscreen: (enabled) => set({ startupFullscreen: !!enabled }),
+      setGlobalProxy: (proxy) => set((state) => ({ globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }) })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
 
@@ -579,7 +614,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
-      version: 3,
+      version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
@@ -588,6 +623,7 @@ export const useStore = create<AppState>()(
         nextState.theme = sanitizeTheme(state.theme);
         nextState.appearance = sanitizeAppearance(state.appearance, version);
         nextState.startupFullscreen = sanitizeStartupFullscreen(state.startupFullscreen);
+        nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
         nextState.tableAccessCount = sanitizeTableAccessCount(state.tableAccessCount);
@@ -602,8 +638,9 @@ export const useStore = create<AppState>()(
           connections: sanitizeConnections(state.connections),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           theme: sanitizeTheme(state.theme),
-          appearance: sanitizeAppearance(state.appearance, 3),
+          appearance: sanitizeAppearance(state.appearance, PERSIST_VERSION),
           startupFullscreen: sanitizeStartupFullscreen(state.startupFullscreen),
+          globalProxy: sanitizeGlobalProxy(state.globalProxy),
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
@@ -616,6 +653,7 @@ export const useStore = create<AppState>()(
         theme: state.theme,
         appearance: state.appearance,
         startupFullscreen: state.startupFullscreen,
+        globalProxy: state.globalProxy,
         sqlFormatOptions: state.sqlFormatOptions,
         queryOptions: state.queryOptions,
         tableAccessCount: state.tableAccessCount,

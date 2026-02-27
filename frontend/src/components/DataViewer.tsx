@@ -31,7 +31,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [showFilter, setShowFilter] = useState(false);
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
   const currentConnType = (connections.find(c => c.id === tab.connectionId)?.config?.type || '').toLowerCase();
-  const forceReadOnly = currentConnType === 'tdengine';
+  const forceReadOnly = currentConnType === 'tdengine' || currentConnType === 'clickhouse';
 
   useEffect(() => {
     setPkColumns([]);

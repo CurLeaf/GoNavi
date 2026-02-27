@@ -194,6 +194,8 @@ func defaultPortByType(driverType string) int {
 		return 1433
 	case "mongodb":
 		return 27017
+	case "clickhouse":
+		return 9000
 	case "highgo":
 		return 5866
 	default:

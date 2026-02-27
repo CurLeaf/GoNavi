@@ -374,7 +374,7 @@ func getCurrentAuthor() string {
 }
 
 func fetchLatestRelease() (*githubRelease, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := newHTTPClientWithGlobalProxy(15 * time.Second)
 	req, err := http.NewRequest(http.MethodGet, updateAPIURL, nil)
 	if err != nil {
 		return nil, err
@@ -451,7 +451,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 		return nil, errors.New("Release 未提供 SHA256SUMS")
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := newHTTPClientWithGlobalProxy(15 * time.Second)
 	req, err := http.NewRequest(http.MethodGet, checksumURL, nil)
 	if err != nil {
 		return nil, err
@@ -522,7 +522,7 @@ func (w *downloadProgressWriter) Write(p []byte) (int, error) {
 }
 
 func downloadFileWithHash(url, filePath string, onProgress func(downloaded, total int64)) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Minute}
+	client := newHTTPClientWithGlobalProxy(10 * time.Minute)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return "", err

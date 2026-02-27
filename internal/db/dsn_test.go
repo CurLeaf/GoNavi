@@ -114,3 +114,30 @@ func TestTDengineDSN_UsesWebSocketFormat(t *testing.T) {
 		t.Fatalf("tdengine dsn 格式不正确：%s", dsn)
 	}
 }
+
+func TestClickHouseDSN_EscapesPasswordAndSetsTimeout(t *testing.T) {
+	c := &ClickHouseDB{}
+	cfg := normalizeClickHouseConfig(connection.ConnectionConfig{
+		Type:     "clickhouse",
+		Host:     "127.0.0.1",
+		Port:     9000,
+		User:     "default",
+		Password: "p@ss:wo/rd",
+		Database: "analytics",
+		Timeout:  15,
+	})
+
+	dsn := c.getDSN(cfg)
+	if strings.Contains(dsn, cfg.Password) {
+		t.Fatalf("dsn 包含原始密码：%s", dsn)
+	}
+	if !strings.Contains(dsn, "p%40ss%3Awo%2Frd") {
+		t.Fatalf("dsn 未正确转义密码：%s", dsn)
+	}
+	if !strings.Contains(dsn, "dial_timeout=15s") {
+		t.Fatalf("dsn 缺少 dial_timeout 参数：%s", dsn)
+	}
+	if !strings.Contains(dsn, "/analytics") {
+		t.Fatalf("dsn 缺少数据库路径：%s", dsn)
+	}
+}
