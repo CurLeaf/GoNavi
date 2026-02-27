@@ -922,7 +922,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
       const normalizedType = (dbType || 'mysql').toLowerCase();
-      const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === '';
+      const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === 'clickhouse' || normalizedType === '';
       if (!supportsLimit) return { sql, applied: false, maxRows };
       if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
 
@@ -1001,7 +1001,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         const maxRows = Number(queryOptions?.maxRows) || 0;
         const dbType = String((config as any).type || 'mysql');
         const normalizedDbType = dbType.toLowerCase();
-        const forceReadOnlyResult = normalizedDbType === 'tdengine';
+        const forceReadOnlyResult = normalizedDbType === 'tdengine' || normalizedDbType === 'clickhouse';
         const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
         const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
         let anyTruncated = false;

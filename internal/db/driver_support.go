@@ -18,18 +18,19 @@ var coreBuiltinDrivers = map[string]struct{}{
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
 // 注意：这是一种运行时门控（installed.json 标记），并不减少主二进制体积。
 var optionalGoDrivers = map[string]struct{}{
-	"mariadb":   {},
-	"diros":     {},
-	"sphinx":    {},
-	"sqlserver": {},
-	"sqlite":    {},
-	"duckdb":    {},
-	"dameng":    {},
-	"kingbase":  {},
-	"highgo":    {},
-	"vastbase":  {},
-	"mongodb":   {},
-	"tdengine":  {},
+	"mariadb":    {},
+	"diros":      {},
+	"sphinx":     {},
+	"sqlserver":  {},
+	"sqlite":     {},
+	"duckdb":     {},
+	"dameng":     {},
+	"kingbase":   {},
+	"highgo":     {},
+	"vastbase":   {},
+	"mongodb":    {},
+	"tdengine":   {},
+	"clickhouse": {},
 }
 
 var (
@@ -83,6 +84,8 @@ func driverDisplayName(driverType string) string {
 		return "MongoDB"
 	case "tdengine":
 		return "TDengine"
+	case "clickhouse":
+		return "ClickHouse"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

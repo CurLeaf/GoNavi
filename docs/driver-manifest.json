@@ -73,6 +73,12 @@
       "checksumPolicy": "off",
       "downloadUrl": "builtin://activate/tdengine"
     },
+    "clickhouse": {
+      "engine": "go",
+      "version": "2.43.0",
+      "checksumPolicy": "off",
+      "downloadUrl": "builtin://activate/clickhouse"
+    },
     "postgres": {
       "engine": "go",
       "version": "1.11.1",

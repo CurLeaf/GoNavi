@@ -16,6 +16,7 @@ const getDefaultPortByType = (type: string) => {
     case 'mysql': return 3306;
     case 'diros': return 9030;
     case 'sphinx': return 9306;
+    case 'clickhouse': return 9000;
     case 'postgres': return 5432;
     case 'redis': return 6379;
     case 'tdengine': return 6041;
@@ -407,6 +408,31 @@ const ConnectionModal: React.FC<{
           };
       }
 
+      if (type === 'clickhouse') {
+          const parsed = parseMultiHostUri(trimmedUri, 'clickhouse');
+          if (!parsed) {
+              return null;
+          }
+          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+              return null;
+          }
+          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+              return null;
+          }
+          const hostList = normalizeAddressList(parsed.hosts, 9000);
+          if (!hostList.length) {
+              return null;
+          }
+          const primary = parseHostPort(hostList[0] || 'localhost:9000', 9000);
+          return {
+              host: primary?.host || 'localhost',
+              port: primary?.port || 9000,
+              user: parsed.username,
+              password: parsed.password,
+              database: parsed.database || '',
+          };
+      }
+
       return null;
   };
 
@@ -440,6 +466,9 @@ const ConnectionModal: React.FC<{
       }
       if (dbType === 'mongodb') {
           return 'mongodb+srv://user:pass@cluster0.example.com/db_name?authSource=admin&authMechanism=SCRAM-SHA-256';
+      }
+      if (dbType === 'clickhouse') {
+          return 'clickhouse://default:pass@127.0.0.1:9000/default';
       }
       return '例如: postgres://user:pass@127.0.0.1:5432/db_name';
   };
@@ -1060,7 +1089,9 @@ const ConnectionModal: React.FC<{
               mongoReplicaPassword: '',
           });
       } else if (type !== 'custom') {
+          const defaultUser = type === 'clickhouse' ? 'default' : 'root';
           form.setFieldsValue({
+              user: defaultUser,
               database: '',
               port: defaultPort,
               mysqlTopology: 'single',
@@ -1102,6 +1133,7 @@ const ConnectionModal: React.FC<{
           { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
           { key: 'diros', name: 'Diros', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
           { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
+          { key: 'clickhouse', name: 'ClickHouse', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#FFCC01' }} /> },
           { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
           { key: 'sqlserver', name: 'SQL Server', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#CC2927' }} /> },
           { key: 'sqlite', name: 'SQLite', icon: <FileTextOutlined style={{ fontSize: 24, color: '#003B57' }} /> },

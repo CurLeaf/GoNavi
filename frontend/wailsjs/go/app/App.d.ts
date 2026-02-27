@@ -12,6 +12,8 @@ export function CheckForUpdates():Promise<connection.QueryResult>;
 
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
 
+export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):Promise<connection.QueryResult>;
+
 export function CreateDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -71,6 +73,8 @@ export function GetDriverStatusList(arg1:string,arg2:string):Promise<connection.
 export function GetDriverVersionList(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function GetDriverVersionPackageSize(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 

@@ -18,6 +18,10 @@ export function ConfigureDriverRuntimeDirectory(arg1) {
   return window['go']['app']['App']['ConfigureDriverRuntimeDirectory'](arg1);
 }
 
+export function ConfigureGlobalProxy(arg1, arg2) {
+  return window['go']['app']['App']['ConfigureGlobalProxy'](arg1, arg2);
+}
+
 export function CreateDatabase(arg1, arg2) {
   return window['go']['app']['App']['CreateDatabase'](arg1, arg2);
 }
@@ -136,6 +140,10 @@ export function GetDriverVersionList(arg1, arg2) {
 
 export function GetDriverVersionPackageSize(arg1, arg2) {
   return window['go']['app']['App']['GetDriverVersionPackageSize'](arg1, arg2);
+}
+
+export function GetGlobalProxyConfig() {
+  return window['go']['app']['App']['GetGlobalProxyConfig']();
 }
 
 export function ImportConfigFile() {

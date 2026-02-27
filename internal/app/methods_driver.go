@@ -222,7 +222,8 @@ const builtinDriverManifestJSON = `{
     "highgo":    { "engine": "go", "version": "0.0.0-local", "checksumPolicy": "off", "downloadUrl": "builtin://activate/highgo" },
     "vastbase":  { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/vastbase" },
     "mongodb":   { "engine": "go", "version": "2.5.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
-    "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" }
+    "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
+    "clickhouse": { "engine": "go", "version": "2.43.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" }
   }
 }`
 
@@ -261,37 +262,39 @@ var pinnedDriverPackageMap = map[string]pinnedDriverPackage{
 }
 
 var latestDriverVersionMap = map[string]string{
-	"mysql":     "1.9.3",
-	"mariadb":   "1.9.3",
-	"diros":     "1.9.3",
-	"sphinx":    "1.9.3",
-	"sqlserver": "1.9.6",
-	"sqlite":    "1.46.1",
-	"duckdb":    "2.5.5",
-	"dameng":    "1.8.22",
-	"kingbase":  "0.0.0-20201021123113-29bd62a876c3",
-	"highgo":    "0.0.0-local",
-	"vastbase":  "1.11.2",
-	"mongodb":   "2.5.0",
-	"tdengine":  "3.7.8",
-	"oracle":    "2.9.0",
-	"postgres":  "1.11.2",
-	"redis":     "9.17.3",
+	"mysql":      "1.9.3",
+	"mariadb":    "1.9.3",
+	"diros":      "1.9.3",
+	"sphinx":     "1.9.3",
+	"sqlserver":  "1.9.6",
+	"sqlite":     "1.46.1",
+	"duckdb":     "2.5.5",
+	"dameng":     "1.8.22",
+	"kingbase":   "0.0.0-20201021123113-29bd62a876c3",
+	"highgo":     "0.0.0-local",
+	"vastbase":   "1.11.2",
+	"mongodb":    "2.5.0",
+	"tdengine":   "3.7.8",
+	"clickhouse": "2.43.0",
+	"oracle":     "2.9.0",
+	"postgres":   "1.11.2",
+	"redis":      "9.17.3",
 }
 
 var driverGoModulePathMap = map[string]string{
-	"mariadb":   "github.com/go-sql-driver/mysql",
-	"diros":     "github.com/go-sql-driver/mysql",
-	"sphinx":    "github.com/go-sql-driver/mysql",
-	"sqlserver": "github.com/microsoft/go-mssqldb",
-	"sqlite":    "modernc.org/sqlite",
-	"duckdb":    "github.com/duckdb/duckdb-go/v2",
-	"dameng":    "gitee.com/chunanyong/dm",
-	"kingbase":  "gitea.com/kingbase/gokb",
-	"highgo":    "github.com/highgo/pq-sm3",
-	"vastbase":  "github.com/lib/pq",
-	"mongodb":   "go.mongodb.org/mongo-driver/v2",
-	"tdengine":  "github.com/taosdata/driver-go/v3",
+	"mariadb":    "github.com/go-sql-driver/mysql",
+	"diros":      "github.com/go-sql-driver/mysql",
+	"sphinx":     "github.com/go-sql-driver/mysql",
+	"sqlserver":  "github.com/microsoft/go-mssqldb",
+	"sqlite":     "modernc.org/sqlite",
+	"duckdb":     "github.com/duckdb/duckdb-go/v2",
+	"dameng":     "gitee.com/chunanyong/dm",
+	"kingbase":   "gitea.com/kingbase/gokb",
+	"highgo":     "github.com/highgo/pq-sm3",
+	"vastbase":   "github.com/lib/pq",
+	"mongodb":    "go.mongodb.org/mongo-driver/v2",
+	"tdengine":   "github.com/taosdata/driver-go/v3",
+	"clickhouse": "github.com/ClickHouse/clickhouse-go/v2",
 }
 
 var fallbackRecentDriverVersionsMap = map[string][]goModuleVersionMeta{
@@ -870,7 +873,7 @@ func probeDriverNetworkEndpoint(item driverNetworkProbeItem) driverNetworkProbeI
 		return probed
 	}
 
-	client := &http.Client{Timeout: driverNetworkProbeTimeout}
+	client := newHTTPClientWithGlobalProxy(driverNetworkProbeTimeout)
 	start := time.Now()
 	req, err := http.NewRequest(http.MethodHead, urlText, nil)
 	if err != nil {
@@ -1046,6 +1049,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("vastbase", "Vastbase", packages),
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
+		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
 	}
 }
 
@@ -1548,7 +1552,7 @@ func fetchGoModuleVersionMetas(modulePath string) ([]goModuleVersionMeta, error)
 	}
 
 	endpoint := fmt.Sprintf("https://proxy.golang.org/%s/@v/list", escapeGoModulePathForProxy(trimmed))
-	client := &http.Client{Timeout: driverModuleLatestProbeTimeout}
+	client := newHTTPClientWithGlobalProxy(driverModuleLatestProbeTimeout)
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -1689,7 +1693,7 @@ func loadDriverReleaseListCached() ([]githubRelease, error) {
 
 func fetchDriverReleaseList() ([]githubRelease, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=30", updateRepo)
-	client := &http.Client{Timeout: driverReleaseListProbeTimeout}
+	client := newHTTPClientWithGlobalProxy(driverReleaseListProbeTimeout)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -2019,7 +2023,7 @@ func loadManifestContent(resolvedURL string) ([]byte, error) {
 		scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
 		switch scheme {
 		case "http", "https":
-			client := &http.Client{Timeout: 12 * time.Second}
+			client := newHTTPClientWithGlobalProxy(12 * time.Second)
 			req, reqErr := http.NewRequest(http.MethodGet, parsed.String(), nil)
 			if reqErr != nil {
 				return nil, reqErr
@@ -2605,6 +2609,8 @@ func optionalDriverBuildTag(driverType string) (string, error) {
 		return "gonavi_mongodb_driver", nil
 	case "tdengine":
 		return "gonavi_tdengine_driver", nil
+	case "clickhouse":
+		return "gonavi_clickhouse_driver", nil
 	default:
 		return "", fmt.Errorf("未配置驱动构建标签：%s", driverType)
 	}
@@ -3026,7 +3032,7 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 		return nil, fmt.Errorf("未找到驱动总包索引资产")
 	}
 
-	client := &http.Client{Timeout: driverReleaseAssetSizeProbeTimeout}
+	client := newHTTPClientWithGlobalProxy(driverReleaseAssetSizeProbeTimeout)
 	req, err := http.NewRequest(http.MethodGet, indexURL, nil)
 	if err != nil {
 		return nil, err
@@ -3074,7 +3080,7 @@ func fetchDriverReleaseByURL(apiURL string) (*githubRelease, error) {
 		return nil, fmt.Errorf("API 地址为空")
 	}
 
-	client := &http.Client{Timeout: driverReleaseAssetSizeProbeTimeout}
+	client := newHTTPClientWithGlobalProxy(driverReleaseAssetSizeProbeTimeout)
 	req, err := http.NewRequest(http.MethodGet, urlText, nil)
 	if err != nil {
 		return nil, err

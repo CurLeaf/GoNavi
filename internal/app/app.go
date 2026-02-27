@@ -208,15 +208,17 @@ func (a *App) getDatabase(config connection.ConnectionConfig) (db.Database, erro
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
-	key := getCacheKey(config)
+	effectiveConfig := applyGlobalProxyToConnection(config)
+
+	key := getCacheKey(effectiveConfig)
 	shortKey := key
 	if len(shortKey) > 12 {
 		shortKey = shortKey[:12]
 	}
 
-	if supported, reason := db.DriverRuntimeSupportStatus(config.Type); !supported {
+	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(config.Type))
+			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
 		}
 		// Best-effort cleanup: if cached instance exists for this exact config, close it.
 		a.mu.Lock()
@@ -254,7 +256,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			a.mu.Unlock()
 			return entry.inst, nil
 		} else {
-			logger.Error(err, "缓存连接不可用，准备重建：%s 缓存Key=%s", formatConnSummary(config), shortKey)
+			logger.Error(err, "缓存连接不可用，准备重建：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 		}
 
 		// Ping failed: remove cached instance (best effort)
@@ -268,24 +270,24 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		a.mu.Unlock()
 	}
 
-	logger.Infof("获取数据库连接：%s 缓存Key=%s", formatConnSummary(config), shortKey)
-	logger.Infof("创建数据库驱动实例：类型=%s 缓存Key=%s", config.Type, shortKey)
-	dbInst, err := db.NewDatabase(config.Type)
+	logger.Infof("获取数据库连接：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
+	logger.Infof("创建数据库驱动实例：类型=%s 缓存Key=%s", effectiveConfig.Type, shortKey)
+	dbInst, err := db.NewDatabase(effectiveConfig.Type)
 	if err != nil {
-		logger.Error(err, "创建数据库驱动实例失败：类型=%s 缓存Key=%s", config.Type, shortKey)
+		logger.Error(err, "创建数据库驱动实例失败：类型=%s 缓存Key=%s", effectiveConfig.Type, shortKey)
 		return nil, err
 	}
 
-	connectConfig, proxyErr := resolveDialConfigWithProxy(config)
+	connectConfig, proxyErr := resolveDialConfigWithProxy(effectiveConfig)
 	if proxyErr != nil {
-		wrapped := wrapConnectError(config, proxyErr)
-		logger.Error(wrapped, "连接代理准备失败：%s 缓存Key=%s", formatConnSummary(config), shortKey)
+		wrapped := wrapConnectError(effectiveConfig, proxyErr)
+		logger.Error(wrapped, "连接代理准备失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 		return nil, wrapped
 	}
 
 	if err := dbInst.Connect(connectConfig); err != nil {
-		wrapped := wrapConnectError(config, err)
-		logger.Error(wrapped, "建立数据库连接失败：%s 缓存Key=%s", formatConnSummary(config), shortKey)
+		wrapped := wrapConnectError(effectiveConfig, err)
+		logger.Error(wrapped, "建立数据库连接失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 		return nil, wrapped
 	}
 
@@ -301,6 +303,6 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.dbCache[key] = cachedDatabase{inst: dbInst, lastPing: now}
 	a.mu.Unlock()
 
-	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(config), shortKey)
+	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 	return dbInst, nil
 }
