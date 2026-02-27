@@ -206,10 +206,27 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   return safeConfig;
 };
 
+const resolveConnectionConfigPayload = (raw: Record<string, unknown>): unknown => {
+  if (raw.config && typeof raw.config === 'object') {
+    return raw.config;
+  }
+  // 兼容历史/导入场景：连接对象可能是扁平结构（无 config 包装）。
+  const hasLegacyFlatConfig =
+    raw.type !== undefined ||
+    raw.host !== undefined ||
+    raw.port !== undefined ||
+    raw.user !== undefined ||
+    raw.database !== undefined;
+  if (hasLegacyFlatConfig) {
+    return raw;
+  }
+  return undefined;
+};
+
 const sanitizeSavedConnection = (value: unknown, index: number): SavedConnection | null => {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
-  const config = sanitizeConnectionConfig(raw.config);
+  const config = sanitizeConnectionConfig(resolveConnectionConfigPayload(raw));
   const id = toTrimmedString(raw.id, `conn-${index + 1}`) || `conn-${index + 1}`;
   const fallbackName = config.host ? `${config.type}-${config.host}` : `连接-${index + 1}`;
   const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
@@ -392,6 +409,17 @@ const sanitizeAppearance = (
   return nextAppearance;
 };
 
+const unwrapPersistedAppState = (persistedState: unknown): Record<string, unknown> => {
+  if (!persistedState || typeof persistedState !== 'object') {
+    return {};
+  }
+  const raw = persistedState as Record<string, unknown>;
+  if (raw.state && typeof raw.state === 'object') {
+    return raw.state as Record<string, unknown>;
+  }
+  return raw;
+};
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
@@ -544,10 +572,7 @@ export const useStore = create<AppState>()(
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
       version: 3,
       migrate: (persistedState: unknown, version: number) => {
-        if (!persistedState || typeof persistedState !== 'object') {
-          return persistedState as AppState;
-        }
-        const state = persistedState as Partial<AppState>;
+        const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
         nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
@@ -560,9 +585,7 @@ export const useStore = create<AppState>()(
         return nextState as AppState;
       },
       merge: (persistedState, currentState) => {
-        const state = (persistedState && typeof persistedState === 'object')
-          ? persistedState as Partial<AppState>
-          : {};
+        const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         return {
           ...currentState,
           ...state,
