@@ -218,18 +218,17 @@ const ResizableDivider: React.FC<{
         <div
             onMouseDown={handleMouseDown}
             style={{
-                width: 6,
+                width: 5,
                 cursor: 'col-resize',
-                background: '#f0f0f0',
+                background: 'transparent',
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                zIndex: 10,
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = '#d9d9d9')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = '#f0f0f0')}
+            title="拖动调整宽度"
         >
-            <div style={{ width: 2, height: 30, background: '#bfbfbf', borderRadius: 1 }} />
         </div>
     );
 };
@@ -279,6 +278,23 @@ const getRedisScanLoadCount = (pattern: string, append: boolean): number => {
         return append ? REDIS_KEY_LOAD_MORE_COUNT : REDIS_KEY_INITIAL_LOAD_COUNT;
     }
     return append ? REDIS_KEY_SEARCH_LOAD_MORE_COUNT : REDIS_KEY_SEARCH_INITIAL_LOAD_COUNT;
+};
+
+const normalizeRedisCursor = (value: unknown): string => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed === '' ? '0' : trimmed;
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return '0';
+        }
+        return Math.trunc(value).toString();
+    }
+    if (typeof value === 'bigint') {
+        return value.toString();
+    }
+    return '0';
 };
 
 const normalizeKeySegment = (segment: string): string => {
@@ -384,7 +400,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchPattern, setSearchPattern] = useState('*');
-    const [cursor, setCursor] = useState<number>(0);
+    const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [keyValue, setKeyValue] = useState<RedisValue | null>(null);
@@ -433,7 +449,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     const loadKeys = useCallback(async (
         pattern: string = '*',
-        fromCursor: number = 0,
+        fromCursor: string = '0',
         append: boolean = false,
         targetCount?: number
     ) => {
@@ -454,7 +470,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             if (res.success) {
                 const result = res.data;
                 const scannedKeys = Array.isArray(result?.keys) ? result.keys : [];
-                const nextCursor = Number(result?.cursor || 0);
+                const nextCursor = normalizeRedisCursor(result?.cursor);
                 if (append) {
                     setKeys(prev => {
                         const keyMap = new Map<string, RedisKeyInfo>();
@@ -466,7 +482,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     setKeys(scannedKeys);
                 }
                 setCursor(nextCursor);
-                setHasMore(nextCursor !== 0);
+                setHasMore(nextCursor !== '0');
             } else {
                 message.error('加载 Key 失败: ' + res.message);
             }
@@ -483,14 +499,14 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     }, [getConfig]);
 
     useEffect(() => {
-        loadKeys(searchPattern, 0, false, getRedisScanLoadCount(searchPattern, false));
+        loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
     }, [redisDB]);
 
     const handleSearch = (value: string) => {
         const pattern = value.trim() || '*';
         setSearchPattern(pattern);
-        setCursor(0);
-        loadKeys(pattern, 0, false, getRedisScanLoadCount(pattern, false));
+        setCursor('0');
+        loadKeys(pattern, '0', false, getRedisScanLoadCount(pattern, false));
     };
 
     const handleLoadMore = () => {
@@ -501,8 +517,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     };
 
     const handleRefresh = () => {
-        setCursor(0);
-        loadKeys(searchPattern, 0, false, getRedisScanLoadCount(searchPattern, false));
+        setCursor('0');
+        loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
     };
 
     const loadKeyValue = async (key: string) => {

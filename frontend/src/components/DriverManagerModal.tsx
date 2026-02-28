@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Collapse, Modal, Progress, Select, Space, Table, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Collapse, Modal, Progress, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { useStore } from '../store';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 import {
   CheckDriverNetworkStatus,
   DownloadDriverPackage,
@@ -10,6 +12,7 @@ import {
   GetDriverStatusList,
   InstallLocalDriverPackage,
   RemoveDriverPackage,
+  SelectDriverPackageDirectory,
   SelectDriverPackageFile,
 } from '../../wailsjs/go/app/App';
 
@@ -45,6 +48,8 @@ type ProgressState = {
   message: string;
   percent: number;
 };
+
+type DriverActionKind = '' | 'install' | 'remove' | 'local';
 
 type DriverLogEntry = {
   time: string;
@@ -84,6 +89,7 @@ type DriverVersionOption = {
 
 const buildVersionOptionKey = (option: DriverVersionOption) => `${option.version}@@${option.downloadUrl}`;
 const buildVersionSizeLoadingKey = (driverType: string, optionKey: string) => `${driverType}@@${optionKey}`;
+const DRIVER_TABLE_SCROLL_X = 1450;
 
 const buildVersionSelectOptions = (options: DriverVersionOption[]) => {
   type SelectOption = { value: string; label: string };
@@ -132,20 +138,32 @@ const buildVersionSelectOptions = (options: DriverVersionOption[]) => {
 };
 
 const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+  const theme = useStore((state) => state.theme);
+  const appearance = useStore((state) => state.appearance);
+  const darkMode = theme === 'dark';
+  const opacity = normalizeOpacityForPlatform(appearance.opacity);
+  const modalContentRef = useRef<HTMLDivElement | null>(null);
+  const tableContainerRef = useRef<HTMLDivElement | null>(null);
+  const tableScrollTargetsRef = useRef<HTMLElement[]>([]);
+  const externalHScrollRef = useRef<HTMLDivElement | null>(null);
+  const horizontalSyncSourceRef = useRef<'table' | 'external' | ''>('');
   const [loading, setLoading] = useState(false);
   const [downloadDir, setDownloadDir] = useState('');
   const [networkChecking, setNetworkChecking] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<DriverNetworkStatus | null>(null);
   const [rows, setRows] = useState<DriverStatusRow[]>([]);
-  const [actionDriver, setActionDriver] = useState('');
+  const [actionState, setActionState] = useState<{ driverType: string; kind: DriverActionKind }>({ driverType: '', kind: '' });
   const [progressMap, setProgressMap] = useState<Record<string, ProgressState>>({});
   const [operationLogMap, setOperationLogMap] = useState<Record<string, DriverLogEntry[]>>({});
   const [logDriverType, setLogDriverType] = useState('');
   const [logModalOpen, setLogModalOpen] = useState(false);
+  const [batchDirectoryImporting, setBatchDirectoryImporting] = useState(false);
+  const [forceOverwriteInstalled, setForceOverwriteInstalled] = useState(false);
   const [versionMap, setVersionMap] = useState<Record<string, DriverVersionOption[]>>({});
   const [selectedVersionMap, setSelectedVersionMap] = useState<Record<string, string>>({});
   const [versionLoadingMap, setVersionLoadingMap] = useState<Record<string, boolean>>({});
   const [versionSizeLoadingMap, setVersionSizeLoadingMap] = useState<Record<string, boolean>>({});
+  const [horizontalScrollWidth, setHorizontalScrollWidth] = useState(DRIVER_TABLE_SCROLL_X);
 
   const appendOperationLog = useCallback((
     driverType: string,
@@ -191,6 +209,76 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
       const sliced = nextHistory.length > 200 ? nextHistory.slice(nextHistory.length - 200) : nextHistory;
       return { ...prev, [normalized]: sliced };
     });
+  }, []);
+
+  const refreshHorizontalScrollState = useCallback(() => {
+    const tableContainer = tableContainerRef.current;
+    const targets = tableContainer
+      ? [
+          ...new Set(
+            [
+              ...Array.from(tableContainer.querySelectorAll('.ant-table-content')),
+              ...Array.from(tableContainer.querySelectorAll('.ant-table-body')),
+            ].filter((node): node is HTMLElement => node instanceof HTMLElement),
+          ),
+        ]
+      : tableScrollTargetsRef.current;
+    if (!targets || targets.length === 0) {
+      setHorizontalScrollWidth(DRIVER_TABLE_SCROLL_X);
+      return;
+    }
+
+    const nextWidth = Math.max(
+      DRIVER_TABLE_SCROLL_X,
+      ...targets.map((target) => Math.max(0, target.scrollWidth)),
+    );
+    setHorizontalScrollWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+
+    const externalScroll = externalHScrollRef.current;
+    if (!externalScroll || horizontalSyncSourceRef.current === 'external') {
+      return;
+    }
+    const preferredTarget =
+      targets.find((target) => target.scrollWidth > target.clientWidth + 1) ||
+      targets[0];
+    const targetScrollLeft = preferredTarget?.scrollLeft || 0;
+    if (Math.abs(externalScroll.scrollLeft - targetScrollLeft) > 1) {
+      externalScroll.scrollLeft = targetScrollLeft;
+    }
+  }, []);
+
+  const applyExternalScrollToTableTargets = useCallback(() => {
+    const tableContainer = tableContainerRef.current;
+    const externalScroll = externalHScrollRef.current;
+    if (!(tableContainer instanceof HTMLElement) || !(externalScroll instanceof HTMLDivElement)) {
+      return;
+    }
+    if (horizontalSyncSourceRef.current === 'table') {
+      return;
+    }
+
+    const liveTargets = [
+      ...new Set(
+        [
+          ...Array.from(tableContainer.querySelectorAll('.ant-table-content')),
+          ...Array.from(tableContainer.querySelectorAll('.ant-table-body')),
+        ].filter((node): node is HTMLElement => node instanceof HTMLElement),
+      ),
+    ];
+    if (liveTargets.length === 0) {
+      return;
+    }
+
+    horizontalSyncSourceRef.current = 'external';
+    liveTargets.forEach((target) => {
+      if (target.scrollWidth <= target.clientWidth + 1) {
+        return;
+      }
+      if (Math.abs(target.scrollLeft - externalScroll.scrollLeft) > 1) {
+        target.scrollLeft = externalScroll.scrollLeft;
+      }
+    });
+    horizontalSyncSourceRef.current = '';
   }, []);
 
   const refreshStatus = useCallback(async (toastOnError = true) => {
@@ -429,11 +517,124 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
 
   useEffect(() => {
     if (!open) {
+      setHorizontalScrollWidth(DRIVER_TABLE_SCROLL_X);
+      tableScrollTargetsRef.current = [];
       return;
     }
     refreshStatus(false);
     checkNetworkStatus(false);
   }, [checkNetworkStatus, open, refreshStatus]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const tableContainer = tableContainerRef.current;
+    const externalScroll = externalHScrollRef.current;
+    if (!(tableContainer instanceof HTMLElement) || !(externalScroll instanceof HTMLDivElement)) {
+      return;
+    }
+
+    let currentTargets: HTMLElement[] = [];
+    let rafId: number | null = null;
+    let bodyResizeObserver: ResizeObserver | null = null;
+    let containerResizeObserver: ResizeObserver | null = null;
+
+    const pickSyncTarget = () => {
+      if (currentTargets.length === 0) {
+        return null;
+      }
+      return currentTargets.find((target) => target.scrollWidth > target.clientWidth + 1) || currentTargets[0];
+    };
+
+    const syncFromTableTarget = (event?: Event) => {
+      const source = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+      const activeTarget = source || pickSyncTarget();
+      if (!activeTarget) {
+        return;
+      }
+      if (horizontalSyncSourceRef.current === 'external') {
+        return;
+      }
+      horizontalSyncSourceRef.current = 'table';
+      if (Math.abs(externalScroll.scrollLeft - activeTarget.scrollLeft) > 1) {
+        externalScroll.scrollLeft = activeTarget.scrollLeft;
+      }
+      horizontalSyncSourceRef.current = '';
+    };
+
+    const bindCurrentTableTargets = () => {
+      const nextTargets = [
+        ...new Set(
+          [
+            ...Array.from(tableContainer.querySelectorAll('.ant-table-content')),
+            ...Array.from(tableContainer.querySelectorAll('.ant-table-body')),
+          ].filter((node): node is HTMLElement => node instanceof HTMLElement),
+        ),
+      ];
+
+      const sameTargets =
+        nextTargets.length === currentTargets.length &&
+        nextTargets.every((target, index) => target === currentTargets[index]);
+      if (sameTargets) {
+        return;
+      }
+
+      currentTargets.forEach((target) => {
+        target.removeEventListener('scroll', syncFromTableTarget);
+        bodyResizeObserver?.unobserve(target);
+      });
+
+      currentTargets = nextTargets;
+      tableScrollTargetsRef.current = nextTargets;
+      currentTargets.forEach((target) => {
+        target.addEventListener('scroll', syncFromTableTarget, { passive: true });
+        bodyResizeObserver?.observe(target);
+      });
+
+      refreshHorizontalScrollState();
+      syncFromTableTarget();
+    };
+
+    const scheduleRefresh = () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = requestAnimationFrame(() => {
+        bindCurrentTableTargets();
+        refreshHorizontalScrollState();
+      });
+    };
+
+    const mutationObserver = new MutationObserver(scheduleRefresh);
+    mutationObserver.observe(tableContainer, { childList: true, subtree: true });
+
+    bodyResizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleRefresh) : null;
+    containerResizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleRefresh) : null;
+    containerResizeObserver?.observe(tableContainer);
+    if (typeof ResizeObserver !== 'undefined') {
+      modalContentRef.current && containerResizeObserver?.observe(modalContentRef.current);
+    }
+    window.addEventListener('resize', scheduleRefresh);
+
+    scheduleRefresh();
+    return () => {
+      mutationObserver.disconnect();
+      window.removeEventListener('resize', scheduleRefresh);
+      currentTargets.forEach((target) => {
+        target.removeEventListener('scroll', syncFromTableTarget);
+      });
+      if (bodyResizeObserver) {
+        bodyResizeObserver.disconnect();
+      }
+      if (containerResizeObserver) {
+        containerResizeObserver.disconnect();
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [open, refreshHorizontalScrollState]);
 
   useEffect(() => {
     if (!open) {
@@ -470,7 +671,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   }, [appendOperationLog, open]);
 
   const installDriver = useCallback(async (row: DriverStatusRow) => {
-    setActionDriver(row.type);
+    setActionState({ driverType: row.type, kind: 'install' });
     setProgressMap((prev) => ({
       ...prev,
       [row.type]: {
@@ -505,25 +706,25 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
       message.success(`${row.name}${versionTip} 已安装启用`);
       refreshStatus(false);
     } finally {
-      setActionDriver('');
+      setActionState({ driverType: '', kind: '' });
     }
   }, [appendOperationLog, downloadDir, loadVersionOptions, refreshStatus, selectedVersionMap, versionMap]);
 
-  const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
-    const fileRes = await SelectDriverPackageFile(downloadDir);
-    if (!fileRes?.success) {
-      if (String(fileRes?.message || '') !== 'Cancelled') {
-        message.error(fileRes?.message || '选择本地驱动包失败');
+  const installDriverFromLocalPath = useCallback(async (
+    row: DriverStatusRow,
+    sourcePath: string,
+    sourceLabel: '文件' | '目录',
+    options?: { silentToast?: boolean; skipRefresh?: boolean },
+  ) => {
+    const pathText = String(sourcePath || '').trim();
+    if (!pathText) {
+      if (!options?.silentToast) {
+        message.error(`未选择有效的本地导入${sourceLabel}`);
       }
-      return;
-    }
-    const filePath = String((fileRes?.data as any)?.path || '').trim();
-    if (!filePath) {
-      message.error('未选择有效的驱动包文件');
-      return;
+      return false;
     }
 
-    setActionDriver(row.type);
+    setActionState({ driverType: row.type, kind: 'local' });
     setProgressMap((prev) => ({
       ...prev,
       [row.type]: {
@@ -532,22 +733,121 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         percent: 0,
       },
     }));
-    appendOperationLog(row.type, `[START] 开始本地导入：${filePath}`);
+    appendOperationLog(row.type, `[START] 开始本地导入（${sourceLabel}）：${pathText}`);
     try {
-      const result = await InstallLocalDriverPackage(row.type, filePath, downloadDir);
+      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir);
       if (!result?.success) {
         const errText = result?.message || `导入 ${row.name} 本地驱动包失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
-        message.error(errText);
-        return;
+        if (!options?.silentToast) {
+          message.error(errText);
+        }
+        return false;
       }
       appendOperationLog(row.type, '[DONE] 本地导入安装完成');
-      message.success(`${row.name} 本地驱动包已安装启用`);
-      refreshStatus(false);
+      if (!options?.silentToast) {
+        message.success(`${row.name} 本地驱动包已安装启用`);
+      }
+      if (!options?.skipRefresh) {
+        await refreshStatus(false);
+      }
+      return true;
     } finally {
-      setActionDriver('');
+      setActionState({ driverType: '', kind: '' });
     }
   }, [appendOperationLog, downloadDir, refreshStatus]);
+
+  const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
+    const fileRes = await SelectDriverPackageFile(downloadDir);
+    if (!fileRes?.success) {
+      if (String(fileRes?.message || '') !== 'Cancelled') {
+        message.error(fileRes?.message || '选择本地驱动包文件失败');
+      }
+      return;
+    }
+    const filePath = String((fileRes?.data as any)?.path || '').trim();
+    if (!filePath) {
+      message.error('未选择有效的驱动包文件');
+      return;
+    }
+    await installDriverFromLocalPath(row, filePath, '文件');
+  }, [downloadDir, installDriverFromLocalPath]);
+
+  const installDriversFromDirectory = useCallback(async () => {
+    const directoryRes = await SelectDriverPackageDirectory(downloadDir);
+    if (!directoryRes?.success) {
+      if (String(directoryRes?.message || '') !== 'Cancelled') {
+        message.error(directoryRes?.message || '选择本地驱动包目录失败');
+      }
+      return;
+    }
+
+    const directoryPath = String((directoryRes?.data as any)?.path || '').trim();
+    if (!directoryPath) {
+      message.error('未选择有效的驱动包目录');
+      return;
+    }
+    const optionalRows = rows.filter((item) => !item.builtIn);
+    if (optionalRows.length === 0) {
+      message.info('当前没有可导入的外置驱动');
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+    let dedupeSkipCount = 0;
+    let slimSkipCount = 0;
+
+    setBatchDirectoryImporting(true);
+    try {
+      for (const row of optionalRows) {
+        const alreadyInstalled = row.packageInstalled || row.connectable;
+        if (alreadyInstalled && !forceOverwriteInstalled) {
+          dedupeSkipCount += 1;
+          appendOperationLog(row.type, '[SKIP] 已检测到驱动已安装，目录导入去重跳过');
+          continue;
+        }
+        if (alreadyInstalled && forceOverwriteInstalled) {
+          appendOperationLog(row.type, '[INFO] 已启用覆盖已安装模式，执行重装导入');
+        }
+        const isSlimBuildUnavailable = (row.message || '').includes('精简构建') && !row.packageInstalled;
+        if (isSlimBuildUnavailable) {
+          slimSkipCount += 1;
+          appendOperationLog(row.type, '[WARN] 当前发行包为精简构建，已跳过目录导入');
+          continue;
+        }
+        const ok = await installDriverFromLocalPath(row, directoryPath, '目录', { silentToast: true, skipRefresh: true });
+        if (ok) {
+          successCount += 1;
+        } else {
+          failCount += 1;
+        }
+      }
+      await refreshStatus(false);
+    } finally {
+      setBatchDirectoryImporting(false);
+    }
+
+    const skipParts: string[] = [];
+    if (dedupeSkipCount > 0) {
+      skipParts.push(`去重跳过 ${dedupeSkipCount}`);
+    }
+    if (slimSkipCount > 0) {
+      skipParts.push(`精简版跳过 ${slimSkipCount}`);
+    }
+    const skipTip = skipParts.length > 0 ? `，${skipParts.join('，')}` : '';
+
+    const forceTip = forceOverwriteInstalled ? '（覆盖已安装）' : '';
+    if (failCount === 0) {
+      message.success(`目录导入完成${forceTip}：成功 ${successCount}${skipTip}`);
+      return;
+    }
+    if (successCount > 0) {
+      message.warning(`目录导入完成${forceTip}：成功 ${successCount}，失败 ${failCount}${skipTip}`);
+      return;
+    }
+    message.error(`目录导入失败${forceTip}：失败 ${failCount}${skipTip}`);
+  }, [appendOperationLog, downloadDir, forceOverwriteInstalled, installDriverFromLocalPath, refreshStatus, rows]);
 
   const openDriverLog = useCallback((driverType: string) => {
     const normalized = String(driverType || '').trim().toLowerCase();
@@ -559,7 +859,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   }, []);
 
   const removeDriver = useCallback(async (row: DriverStatusRow) => {
-    setActionDriver(row.type);
+    setActionState({ driverType: row.type, kind: 'remove' });
     appendOperationLog(row.type, '[START] 开始移除驱动');
     try {
       const result = await RemoveDriverPackage(row.type, downloadDir);
@@ -578,7 +878,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
       });
       refreshStatus(false);
     } finally {
-      setActionDriver('');
+      setActionState({ driverType: '', kind: '' });
     }
   }, [appendOperationLog, downloadDir, refreshStatus]);
 
@@ -589,25 +889,6 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         dataIndex: 'name',
         key: 'name',
         width: 150,
-      },
-      {
-        title: '安装位置',
-        key: 'installPath',
-        width: 260,
-        render: (_: string, row: DriverStatusRow) => {
-          if (row.builtIn) {
-            return <Text type="secondary">内置</Text>;
-          }
-          const installPath = row.executablePath || row.installDir || '-';
-          if (installPath === '-') {
-            return <Text type="secondary">-</Text>;
-          }
-          return (
-            <Text copyable={{ text: installPath }} style={{ fontSize: 12 }}>
-              {installPath}
-            </Text>
-          );
-        },
       },
       {
         title: '安装包大小',
@@ -688,6 +969,14 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
           if (row.builtIn) {
             return <Text type="secondary">-</Text>;
           }
+          const versionLocked = row.packageInstalled || row.connectable;
+          if (versionLocked) {
+            const installedVersion = String(row.installedVersion || '').trim();
+            if (installedVersion) {
+              return <Text type="secondary">{installedVersion}（已安装，移除后可更换）</Text>;
+            }
+            return <Text type="secondary">已安装（移除后可更换）</Text>;
+          }
           const options = versionMap[row.type] || [];
           const selectedKey = selectedVersionMap[row.type];
           const selectOptions = buildVersionSelectOptions(options);
@@ -696,7 +985,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
               size="small"
               style={{ width: '100%' }}
               loading={!!versionLoadingMap[row.type]}
-              disabled={actionDriver === row.type}
+              disabled={actionState.driverType === row.type}
               placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
               value={selectedKey}
               options={selectOptions as any}
@@ -726,7 +1015,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             return <Text type="secondary">-</Text>;
           }
           const isSlimBuildUnavailable = (row.message || '').includes('精简构建');
-          const loadingAction = actionDriver === row.type;
+          const loadingInstallOrRemove =
+            actionState.driverType === row.type && (actionState.kind === 'install' || actionState.kind === 'remove');
+          const loadingLocal = actionState.driverType === row.type && actionState.kind === 'local';
           if (isSlimBuildUnavailable && !row.packageInstalled) {
             return <Text type="secondary">需 Full 版</Text>;
           }
@@ -738,7 +1029,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             <Button
               danger
               icon={<DeleteOutlined />}
-              loading={loadingAction}
+              loading={loadingInstallOrRemove}
               onClick={() => removeDriver(row)}
             >
               移除
@@ -747,7 +1038,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              loading={loadingAction}
+              loading={loadingInstallOrRemove}
               onClick={() => installDriver(row)}
             >
               安装启用
@@ -759,7 +1050,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
               {mainAction}
               <Button
                 icon={<FileSearchOutlined />}
-                loading={loadingAction}
+                loading={loadingLocal}
                 onClick={() => installDriverFromLocalFile(row)}
               >
                 本地导入
@@ -776,7 +1067,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         },
       },
     ];
-  }, [actionDriver, installDriver, installDriverFromLocalFile, loadVersionOptions, loadVersionPackageSize, openDriverLog, operationLogMap, progressMap, removeDriver, selectedVersionMap, versionLoadingMap, versionMap, versionSizeLoadingMap]);
+  }, [actionState, installDriver, installDriverFromLocalFile, loadVersionOptions, loadVersionPackageSize, openDriverLog, operationLogMap, progressMap, removeDriver, selectedVersionMap, versionLoadingMap, versionMap, versionSizeLoadingMap]);
 
   const activeLogRow = useMemo(() => {
     if (!logDriverType) {
@@ -788,6 +1079,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const activeDriverLogs = operationLogMap[logDriverType] || [];
   const activeDriverLogLines = activeDriverLogs.map((item) => `[${item.time}] ${item.text}`);
   const proxyEnvEntries = Object.entries(networkStatus?.proxyEnv || {});
+  const logBlockBackground = darkMode
+    ? `rgba(28, 28, 28, ${Math.max(opacity, 0.82)})`
+    : `rgba(255, 255, 255, ${Math.max(opacity, 0.92)})`;
+  const logBlockBorderColor = darkMode ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.12)';
+  const logBlockTextColor = darkMode ? 'rgba(255, 255, 255, 0.88)' : 'rgba(0, 0, 0, 0.88)';
 
   return (
     <Modal
@@ -805,18 +1101,31 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         },
       }}
       destroyOnClose
-      footer={[
-        <Button key="refresh" icon={<ReloadOutlined />} onClick={() => refreshStatus(true)} loading={loading}>
-          刷新
-        </Button>,
-        <Button key="network" onClick={() => checkNetworkStatus(true)} loading={networkChecking}>
-          网络检测
-        </Button>,
-        <Button key="close" type="primary" onClick={onClose}>
-          关闭
-        </Button>,
-      ]}
+      footer={(
+        <div className="driver-manager-footer">
+          <div
+            ref={externalHScrollRef}
+            className="driver-manager-hscroll"
+            aria-hidden={false}
+            onScroll={applyExternalScrollToTableTargets}
+          >
+            <div className="driver-manager-hscroll-inner" style={{ width: `${Math.max(horizontalScrollWidth, 1)}px` }} />
+          </div>
+          <Space className="driver-manager-footer-actions" size={8}>
+            <Button key="refresh" icon={<ReloadOutlined />} onClick={() => refreshStatus(true)} loading={loading}>
+              刷新
+            </Button>
+            <Button key="network" onClick={() => checkNetworkStatus(true)} loading={networkChecking}>
+              网络检测
+            </Button>
+            <Button key="close" type="primary" onClick={onClose}>
+              关闭
+            </Button>
+          </Space>
+        </div>
+      )}
     >
+      <div ref={modalContentRef}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         <Text type="secondary">除 MySQL / Redis / Oracle / PostgreSQL 外，其他数据源需先安装启用后再连接。</Text>
         {networkStatus ? (
@@ -868,7 +1177,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
           description={(
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Text type="secondary">自动下载和手动导入的驱动都会落盘到以下目录；后续版本升级可重复复用已下载驱动。</Text>
-              <Text type="secondary">手动导入支持单个驱动代理文件（如 `mariadb-driver-agent` / `mariadb-driver-agent.exe`）或驱动总包 `GoNavi-DriverAgents.zip`。</Text>
+              <Text type="secondary">行内“本地导入”仅用于单个驱动文件/总包（如 `mariadb-driver-agent`、`mariadb-driver-agent.exe`、`GoNavi-DriverAgents.zip`）；批量导入请使用上方“导入驱动目录”。</Text>
               <Paragraph copyable={{ text: downloadDir || '-' }} style={{ marginBottom: 0 }}>
                 驱动根目录：{downloadDir || '-'}
               </Paragraph>
@@ -881,16 +1190,42 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
           )}
         />
 
-        <Table
-          rowKey="type"
-          loading={loading}
-          columns={columns as any}
-          dataSource={rows}
-          pagination={false}
-          size="middle"
-          scroll={{ x: 1450 }}
-        />
+        <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+          <Space size={8}>
+            <Text type="secondary">覆盖已安装</Text>
+            <Switch
+              checked={forceOverwriteInstalled}
+              onChange={(checked) => setForceOverwriteInstalled(checked)}
+              disabled={batchDirectoryImporting}
+            />
+          </Space>
+          <Button
+            icon={<FolderOpenOutlined />}
+            loading={batchDirectoryImporting}
+            onClick={() => void installDriversFromDirectory()}
+          >
+            导入驱动目录
+          </Button>
+        </Space>
+
+        <div
+          ref={tableContainerRef}
+          className="driver-manager-table-wrap driver-manager-table-wrap-external-active"
+        >
+          <Table
+            className="driver-manager-table"
+            rowKey="type"
+            loading={loading}
+            columns={columns as any}
+            dataSource={rows}
+            pagination={false}
+            size="middle"
+            sticky={false}
+            scroll={{ x: DRIVER_TABLE_SCROLL_X }}
+          />
+        </div>
       </Space>
+      </div>
       <Modal
         title={`驱动日志 - ${activeLogRow?.name || logDriverType}`}
         open={logModalOpen}
@@ -914,7 +1249,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             </Paragraph>
           ) : null}
           {activeDriverLogLines.length > 0 ? (
-            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: logBlockBackground, color: logBlockTextColor, borderRadius: 8, border: `1px solid ${logBlockBorderColor}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {activeDriverLogLines.join('\n')}
             </pre>
           ) : (

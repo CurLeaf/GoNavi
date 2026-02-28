@@ -34,6 +34,8 @@ export function DBGetTriggers(arg1:connection.ConnectionConfig,arg2:string,arg3:
 
 export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function DBQueryIsolated(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DataSync(arg1:sync.SyncConfig):Promise<sync.SyncResult>;
@@ -124,7 +126,7 @@ export function RedisListSet(arg1:connection.ConnectionConfig,arg2:string,arg3:n
 
 export function RedisRenameKey(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
-export function RedisScanKeys(arg1:connection.ConnectionConfig,arg2:string,arg3:number,arg4:number):Promise<connection.QueryResult>;
+export function RedisScanKeys(arg1:connection.ConnectionConfig,arg2:string,arg3:any,arg4:number):Promise<connection.QueryResult>;
 
 export function RedisSelectDB(arg1:connection.ConnectionConfig,arg2:number):Promise<connection.QueryResult>;
 
@@ -163,6 +165,8 @@ export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
+
+export function SelectDriverPackageDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryResult>;
 

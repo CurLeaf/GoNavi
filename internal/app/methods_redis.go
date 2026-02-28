@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -107,20 +110,102 @@ func (a *App) RedisTestConnection(config connection.ConnectionConfig) connection
 }
 
 // RedisScanKeys scans keys matching a pattern
-func (a *App) RedisScanKeys(config connection.ConnectionConfig, pattern string, cursor uint64, count int64) connection.QueryResult {
+func (a *App) RedisScanKeys(config connection.ConnectionConfig, pattern string, cursor any, count int64) connection.QueryResult {
 	config.Type = "redis"
 	client, err := a.getRedisClient(config)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	result, err := client.ScanKeys(pattern, cursor, count)
+	parsedCursor, err := parseRedisScanCursor(cursor)
+	if err != nil {
+		logger.Warnf("RedisScanKeys 游标解析失败，已回退到起始游标：cursor=%v err=%v", cursor, err)
+		parsedCursor = 0
+	}
+
+	result, err := client.ScanKeys(pattern, parsedCursor, count)
 	if err != nil {
 		logger.Error(err, "RedisScanKeys 扫描失败：pattern=%s", pattern)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	return connection.QueryResult{Success: true, Data: result}
+}
+
+func parseRedisScanCursor(cursor any) (uint64, error) {
+	switch v := cursor.(type) {
+	case nil:
+		return 0, nil
+	case uint64:
+		return v, nil
+	case uint32:
+		return uint64(v), nil
+	case uint16:
+		return uint64(v), nil
+	case uint8:
+		return uint64(v), nil
+	case uint:
+		return uint64(v), nil
+	case int64:
+		if v < 0 {
+			return 0, fmt.Errorf("游标不能为负数: %d", v)
+		}
+		return uint64(v), nil
+	case int32:
+		if v < 0 {
+			return 0, fmt.Errorf("游标不能为负数: %d", v)
+		}
+		return uint64(v), nil
+	case int16:
+		if v < 0 {
+			return 0, fmt.Errorf("游标不能为负数: %d", v)
+		}
+		return uint64(v), nil
+	case int8:
+		if v < 0 {
+			return 0, fmt.Errorf("游标不能为负数: %d", v)
+		}
+		return uint64(v), nil
+	case int:
+		if v < 0 {
+			return 0, fmt.Errorf("游标不能为负数: %d", v)
+		}
+		return uint64(v), nil
+	case float64:
+		return parseRedisScanCursorFromFloat(v)
+	case float32:
+		return parseRedisScanCursorFromFloat(float64(v))
+	case json.Number:
+		return parseRedisScanCursor(strings.TrimSpace(v.String()))
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.ParseUint(trimmed, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("无效游标: %q", v)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("不支持的游标类型: %T", cursor)
+	}
+}
+
+func parseRedisScanCursorFromFloat(value float64) (uint64, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("无效浮点游标: %v", value)
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("游标不能为负数: %v", value)
+	}
+	if math.Trunc(value) != value {
+		return 0, fmt.Errorf("游标必须为整数: %v", value)
+	}
+	if value > float64(math.MaxUint64) {
+		return 0, fmt.Errorf("游标超出范围: %v", value)
+	}
+	return uint64(value), nil
 }
 
 // RedisGetValue gets the value of a key

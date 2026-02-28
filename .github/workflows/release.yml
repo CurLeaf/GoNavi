@@ -149,12 +149,16 @@ jobs:
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          DRIVERS=(mariadb diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase mongodb tdengine clickhouse)
+          DRIVERS=(mariadb doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase mongodb tdengine clickhouse)
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
 
           for DRIVER in "${DRIVERS[@]}"; do
-            TAG="gonavi_${DRIVER}_driver"
+            BUILD_DRIVER="$DRIVER"
+            if [ "$DRIVER" = "doris" ]; then
+              BUILD_DRIVER="diros"
+            fi
+            TAG="gonavi_${BUILD_DRIVER}_driver"
             OUTPUT="${DRIVER}-driver-agent-${GOOS}-${GOARCH}"
             if [ "$GOOS" = "windows" ]; then
               OUTPUT="${OUTPUT}.exe"

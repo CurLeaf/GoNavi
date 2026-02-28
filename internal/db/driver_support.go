@@ -61,7 +61,7 @@ func driverDisplayName(driverType string) string {
 	case "mariadb":
 		return "MariaDB"
 	case "diros":
-		return "Diros"
+		return "Doris"
 	case "sphinx":
 		return "Sphinx"
 	case "postgres":

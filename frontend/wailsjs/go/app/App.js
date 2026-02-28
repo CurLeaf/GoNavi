@@ -62,6 +62,10 @@ export function DBQuery(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQuery'](arg1, arg2, arg3);
 }
 
+export function DBQueryIsolated(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DBQueryIsolated'](arg1, arg2, arg3);
+}
+
 export function DBShowCreateTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBShowCreateTable'](arg1, arg2, arg3);
 }
@@ -320,6 +324,10 @@ export function ResolveDriverRepositoryURL(arg1) {
 
 export function SelectDriverDownloadDirectory(arg1) {
   return window['go']['app']['App']['SelectDriverDownloadDirectory'](arg1);
+}
+
+export function SelectDriverPackageDirectory(arg1) {
+  return window['go']['app']['App']['SelectDriverPackageDirectory'](arg1);
 }
 
 export function SelectDriverPackageFile(arg1) {

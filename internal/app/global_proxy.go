@@ -1,6 +1,9 @@
 package app
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,6 +28,12 @@ var globalProxyRuntime = struct {
 	enabled bool
 	proxy   connection.ProxyConfig
 }{}
+
+type localProxyTLSFallbackTransport struct {
+	primary       *http.Transport
+	fallback      *http.Transport
+	proxyEndpoint string
+}
 
 func currentGlobalProxyConfig() globalProxySnapshot {
 	globalProxyRuntime.mu.RLock()
@@ -139,7 +148,7 @@ func newHTTPClientWithGlobalProxy(timeout time.Duration) *http.Client {
 	return client
 }
 
-func buildHTTPTransportWithGlobalProxy() *http.Transport {
+func buildHTTPTransportWithGlobalProxy() http.RoundTripper {
 	baseTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok || baseTransport == nil {
 		return nil
@@ -160,7 +169,98 @@ func buildHTTPTransportWithGlobalProxy() *http.Transport {
 	}
 
 	transport.Proxy = http.ProxyURL(proxyURL)
-	return transport
+	if !isLoopbackProxyHost(snapshot.Proxy.Host) {
+		return transport
+	}
+
+	fallbackTransport := transport.Clone()
+	fallbackTransport.TLSClientConfig = cloneTLSConfigWithInsecureSkipVerify(fallbackTransport.TLSClientConfig)
+	return &localProxyTLSFallbackTransport{
+		primary:       transport,
+		fallback:      fallbackTransport,
+		proxyEndpoint: proxyURL.Redacted(),
+	}
+}
+
+func (t *localProxyTLSFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.primary.RoundTrip(req)
+	if err == nil {
+		return resp, nil
+	}
+	if !isTLSFallbackCandidate(req.Method, err) {
+		return nil, err
+	}
+
+	retryReq, cloneErr := cloneRequestForRetry(req)
+	if cloneErr != nil {
+		return nil, err
+	}
+	logger.Warnf("检测到本地代理 TLS 证书不受信任，启用兼容回退：代理=%s 目标=%s 错误=%v", t.proxyEndpoint, req.URL.String(), err)
+	return t.fallback.RoundTrip(retryReq)
+}
+
+func isTLSFallbackCandidate(method string, err error) bool {
+	if !isIdempotentRequestMethod(method) {
+		return false
+	}
+	return isUnknownAuthorityError(err)
+}
+
+func isIdempotentRequestMethod(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case http.MethodGet, http.MethodHead:
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneRequestForRetry(req *http.Request) (*http.Request, error) {
+	cloned := req.Clone(req.Context())
+	if req.Body == nil || req.Body == http.NoBody {
+		return cloned, nil
+	}
+	if req.GetBody == nil {
+		return nil, fmt.Errorf("request body not replayable")
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	cloned.Body = body
+	return cloned, nil
+}
+
+func isUnknownAuthorityError(err error) bool {
+	var unknownErr x509.UnknownAuthorityError
+	if errors.As(err, &unknownErr) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "x509: certificate signed by unknown authority")
+}
+
+func cloneTLSConfigWithInsecureSkipVerify(base *tls.Config) *tls.Config {
+	if base == nil {
+		return &tls.Config{InsecureSkipVerify: true}
+	}
+	cloned := base.Clone()
+	cloned.InsecureSkipVerify = true
+	return cloned
+}
+
+func isLoopbackProxyHost(host string) bool {
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "" {
+		return false
+	}
+	if strings.EqualFold(trimmed, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(trimmed)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }
 
 func buildProxyURLFromConfig(proxyConfig connection.ProxyConfig) (*url.URL, error) {

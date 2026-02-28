@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
 import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -10,10 +11,16 @@ const { Text } = Typography;
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
+const STEP1_MODAL_WIDTH = 760;
+const STEP2_MODAL_WIDTH = 680;
+const STEP1_MODAL_MIN_BODY_HEIGHT = 460;
+const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
+const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
     case 'mysql': return 3306;
+    case 'doris':
     case 'diros': return 9030;
     case 'sphinx': return 9306;
     case 'clickhouse': return 9000;
@@ -78,9 +85,34 @@ const ConnectionModal: React.FC<{
   const testTimerRef = useRef<number | null>(null);
   const addConnection = useStore((state) => state.addConnection);
   const updateConnection = useStore((state) => state.updateConnection);
+  const theme = useStore((state) => state.theme);
+  const appearance = useStore((state) => state.appearance);
+  const darkMode = theme === 'dark';
+  const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
   const mysqlTopology = Form.useWatch('mysqlTopology', form) || 'single';
   const mongoTopology = Form.useWatch('mongoTopology', form) || 'single';
   const mongoSrv = Form.useWatch('mongoSrv', form) || false;
+
+  const getSectionBg = (darkHex: string) => {
+      if (!darkMode) {
+          return `rgba(245, 245, 245, ${Math.max(effectiveOpacity, 0.92)})`;
+      }
+      const hex = darkHex.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${Math.max(effectiveOpacity, 0.82)})`;
+  };
+
+  const step1SidebarDividerColor = darkMode ? STEP1_SIDEBAR_DIVIDER_DARK : STEP1_SIDEBAR_DIVIDER_LIGHT;
+
+  const tunnelSectionStyle: React.CSSProperties = {
+      padding: '12px',
+      background: getSectionBg('#2a2a2a'),
+      borderRadius: 6,
+      marginTop: 12,
+      border: darkMode ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(0, 0, 0, 0.06)',
+  };
 
   const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
       const result: Record<string, DriverStatusSnapshot> = {};
@@ -456,7 +488,7 @@ const ConnectionModal: React.FC<{
   const getUriPlaceholder = () => {
       if (dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx') {
           const defaultPort = getDefaultPortByType(dbType);
-          const scheme = dbType === 'diros' ? 'diros' : 'mysql';
+          const scheme = dbType === 'diros' ? 'doris' : 'mysql';
           return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
       }
       if (isFileDatabaseType(dbType)) {
@@ -501,7 +533,7 @@ const ConnectionModal: React.FC<{
           }
           const dbPath = database ? `/${encodeURIComponent(database)}` : '/';
           const query = params.toString();
-          const scheme = type === 'diros' ? 'diros' : 'mysql';
+          const scheme = type === 'diros' ? 'doris' : 'mysql';
           return `${scheme}://${encodedAuth}${hosts.join(',')}${dbPath}${query ? `?${query}` : ''}`;
       }
 
@@ -1131,7 +1163,7 @@ const ConnectionModal: React.FC<{
       { label: '关系型数据库', items: [
           { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
           { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
-          { key: 'diros', name: 'Diros', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
+          { key: 'diros', name: 'Doris', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
           { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
           { key: 'clickhouse', name: 'ClickHouse', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#FFCC01' }} /> },
           { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
@@ -1181,7 +1213,7 @@ const ConnectionModal: React.FC<{
           )}
       <div style={{ display: 'flex', height: 360 }}>
           {/* 左侧分类导航 */}
-          <div style={{ width: 120, borderRight: '1px solid #f0f0f0', paddingRight: 8, flexShrink: 0 }}>
+          <div style={{ width: 120, borderRight: `1px solid ${step1SidebarDividerColor}`, paddingRight: 8, flexShrink: 0 }}>
               {dbTypeGroups.map((group, idx) => (
                   <div
                       key={group.label}
@@ -1598,7 +1630,7 @@ const ConnectionModal: React.FC<{
             </Form.Item>
 
             {useSSH && (
-                <div style={{ padding: '12px', background: '#f5f5f5', borderRadius: 6, marginTop: 12 }}>
+                <div style={tunnelSectionStyle}>
                     <div style={{ display: 'flex', gap: 16 }}>
                         <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
                             <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
@@ -1634,7 +1666,7 @@ const ConnectionModal: React.FC<{
             </Form.Item>
 
             {useProxy && (
-                <div style={{ padding: '12px', background: '#f5f5f5', borderRadius: 6, marginTop: 12 }}>
+                <div style={tunnelSectionStyle}>
                     <div style={{ display: 'flex', gap: 16 }}>
                         <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ width: 180 }}>
                             <Select options={[
@@ -1756,7 +1788,7 @@ const ConnectionModal: React.FC<{
   };
 
   const modalBodyStyle = step === 1
-      ? { padding: '16px 24px', overflow: 'hidden' as const }
+      ? { padding: '16px 24px', overflow: 'hidden' as const, minHeight: STEP1_MODAL_MIN_BODY_HEIGHT }
       : {
           padding: '16px 24px',
           overflowY: 'auto' as const,
@@ -1772,7 +1804,7 @@ const ConnectionModal: React.FC<{
           footer={getFooter()}
           centered
           wrapClassName="connection-modal-wrap"
-          width={step === 1 ? 650 : 600}
+          width={step === 1 ? STEP1_MODAL_WIDTH : STEP2_MODAL_WIDTH}
           zIndex={10001}
           destroyOnHidden
           maskClosable={false}

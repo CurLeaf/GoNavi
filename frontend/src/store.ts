@@ -24,6 +24,7 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
 const SUPPORTED_CONNECTION_TYPES = new Set([
   'mysql',
   'mariadb',
+  'doris',
   'diros',
   'sphinx',
   'clickhouse',
@@ -47,6 +48,7 @@ const getDefaultPortByType = (type: string): number => {
     case 'mysql':
     case 'mariadb':
       return 3306;
+    case 'doris':
     case 'diros':
       return 9030;
     case 'duckdb':
@@ -150,6 +152,9 @@ const sanitizeAddressList = (value: unknown): string[] => {
 
 const normalizeConnectionType = (value: unknown): string => {
   const type = toTrimmedString(value).toLowerCase();
+  if (type === 'doris') {
+    return 'diros';
+  }
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };
 
@@ -241,7 +246,8 @@ const sanitizeSavedConnection = (value: unknown, index: number): SavedConnection
   const raw = value as Record<string, unknown>;
   const config = sanitizeConnectionConfig(resolveConnectionConfigPayload(raw));
   const id = toTrimmedString(raw.id, `conn-${index + 1}`) || `conn-${index + 1}`;
-  const fallbackName = config.host ? `${config.type}-${config.host}` : `连接-${index + 1}`;
+  const displayType = config.type === 'diros' ? 'doris' : config.type;
+  const fallbackName = config.host ? `${displayType}-${config.host}` : `连接-${index + 1}`;
   const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
   const includeDatabases = sanitizeStringArray(raw.includeDatabases, 256);
   const includeRedisDatabases = sanitizeNumberArray(raw.includeRedisDatabases, 0, 15);
