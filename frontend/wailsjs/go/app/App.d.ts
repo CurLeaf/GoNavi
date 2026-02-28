@@ -164,6 +164,8 @@ export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.Query
 
 export function SelectDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
+export function SelectDriverPackageDirectory(arg1:string):Promise<connection.QueryResult>;
+
 export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;

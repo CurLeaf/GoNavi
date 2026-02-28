@@ -322,6 +322,10 @@ export function SelectDriverDownloadDirectory(arg1) {
   return window['go']['app']['App']['SelectDriverDownloadDirectory'](arg1);
 }
 
+export function SelectDriverPackageDirectory(arg1) {
+  return window['go']['app']['App']['SelectDriverPackageDirectory'](arg1);
+}
+
 export function SelectDriverPackageFile(arg1) {
   return window['go']['app']['App']['SelectDriverPackageFile'](arg1);
 }

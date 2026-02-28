@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -200,6 +201,7 @@ const (
 	driverBundleIndexMaxSize            = 1 << 20
 	driverManifestMaxSize               = 2 << 20
 	driverNetworkProbeTimeout           = 4 * time.Second
+	localDriverDirectoryScanMaxEntries  = 20000
 	driverChecksumPolicyStrict          = "strict"
 	driverChecksumPolicyWarn            = "warn"
 	driverChecksumPolicyOff             = "off"
@@ -228,18 +230,19 @@ const builtinDriverManifestJSON = `{
 }`
 
 var (
-	driverManifestCacheMu  sync.RWMutex
-	driverManifestCache    = make(map[string]driverManifestCacheEntry)
-	driverReleaseSizeMu    sync.RWMutex
-	driverReleaseSizeMap   = make(map[string]driverReleaseAssetSizeCacheEntry)
-	driverReleaseListMu    sync.RWMutex
-	driverReleaseList      = driverManifestReleaseListCache{}
-	driverModuleLatestMu   sync.RWMutex
-	driverModuleLatestMap  = make(map[string]goModuleLatestVersionCacheEntry)
-	driverModuleVersionMu  sync.RWMutex
-	driverModuleVersionMap = make(map[string]goModuleVersionListCacheEntry)
-	driverVersionWarmupMu  sync.Mutex
-	driverVersionWarmup    = driverVersionWarmupState{}
+	driverManifestCacheMu      sync.RWMutex
+	driverManifestCache        = make(map[string]driverManifestCacheEntry)
+	driverReleaseSizeMu        sync.RWMutex
+	driverReleaseSizeMap       = make(map[string]driverReleaseAssetSizeCacheEntry)
+	driverReleaseListMu        sync.RWMutex
+	driverReleaseList          = driverManifestReleaseListCache{}
+	driverModuleLatestMu       sync.RWMutex
+	driverModuleLatestMap      = make(map[string]goModuleLatestVersionCacheEntry)
+	driverModuleVersionMu      sync.RWMutex
+	driverModuleVersionMap     = make(map[string]goModuleVersionListCacheEntry)
+	driverVersionWarmupMu      sync.Mutex
+	driverVersionWarmup        = driverVersionWarmupState{}
+	errLocalDriverDirScanLimit = errors.New("local_driver_directory_scan_limit_exceeded")
 )
 
 type driverVersionWarmupState struct {
@@ -360,9 +363,6 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title:            "选择驱动包文件",
 		DefaultDirectory: defaultDir,
-		Filters: []runtime.FileFilter{
-			{DisplayName: "所有文件", Pattern: "*"},
-		},
 	})
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
@@ -371,6 +371,36 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 		return connection.QueryResult{Success: false, Message: "Cancelled"}
 	}
 
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
+}
+
+func (a *App) SelectDriverPackageDirectory(currentPath string) connection.QueryResult {
+	defaultDir := strings.TrimSpace(currentPath)
+	if defaultDir == "" {
+		defaultDir = defaultDriverDownloadDirectory()
+	}
+	if filepath.Ext(defaultDir) != "" {
+		defaultDir = filepath.Dir(defaultDir)
+	}
+	if !filepath.IsAbs(defaultDir) {
+		if abs, err := filepath.Abs(defaultDir); err == nil {
+			defaultDir = abs
+		}
+	}
+
+	selection, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "选择驱动包目录",
+		DefaultDirectory: defaultDir,
+	})
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if strings.TrimSpace(selection) == "" {
+		return connection.QueryResult{Success: false, Message: "Cancelled"}
+	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
 	}
@@ -684,7 +714,7 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 
 	a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, "开始安装本地驱动包")
 	selectedVersion := resolveDriverInstallVersion(definition.PinnedVersion, "local://manual", definition)
-	meta, installErr := installOptionalDriverAgentFromLocalFile(definition, filePath, resolvedDir, selectedVersion)
+	meta, installErr := installOptionalDriverAgentFromLocalPath(definition, filePath, resolvedDir, selectedVersion)
 	if installErr != nil {
 		errText := normalizeErrorMessage(installErr)
 		a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
@@ -2194,7 +2224,7 @@ func installOptionalDriverAgentPackage(a *App, definition driverDefinition, sele
 	}, nil
 }
 
-func installOptionalDriverAgentFromLocalFile(definition driverDefinition, filePath string, resolvedDir string, selectedVersion string) (installedDriverPackage, error) {
+func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePath string, resolvedDir string, selectedVersion string) (installedDriverPackage, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
 	pathText := strings.TrimSpace(filePath)
@@ -2208,9 +2238,6 @@ func installOptionalDriverAgentFromLocalFile(definition driverDefinition, filePa
 	if statErr != nil {
 		return installedDriverPackage{}, fmt.Errorf("读取本地驱动包失败：%w", statErr)
 	}
-	if info.IsDir() {
-		return installedDriverPackage{}, fmt.Errorf("本地驱动包路径为目录：%s", pathText)
-	}
 
 	executablePath, err := db.ResolveOptionalDriverAgentExecutablePath(resolvedDir, driverType)
 	if err != nil {
@@ -2220,8 +2247,23 @@ func installOptionalDriverAgentFromLocalFile(definition driverDefinition, filePa
 		return installedDriverPackage{}, fmt.Errorf("创建 %s 驱动目录失败：%w", displayName, mkErr)
 	}
 
+	sourcePath := pathText
+	sourceName := filepath.Base(pathText)
 	downloadSource := fmt.Sprintf("local://manual/%s", filepath.Base(pathText))
-	if strings.EqualFold(filepath.Ext(pathText), ".zip") {
+	if info.IsDir() {
+		matchedPath, matchedEntry, resolveErr := resolveLocalDriverAgentFromDirectory(pathText, driverType)
+		if resolveErr != nil {
+			return installedDriverPackage{}, resolveErr
+		}
+		sourcePath = matchedPath
+		sourceName = filepath.Base(matchedPath)
+		downloadSource = fmt.Sprintf("local://manual-dir/%s", filepath.Base(pathText))
+		if strings.TrimSpace(matchedEntry) != "" {
+			downloadSource = downloadSource + "#" + matchedEntry
+		}
+	}
+
+	if !info.IsDir() && strings.EqualFold(filepath.Ext(pathText), ".zip") {
 		entryName, extractErr := installOptionalDriverAgentFromLocalZip(pathText, definition, executablePath)
 		if extractErr != nil {
 			return installedDriverPackage{}, extractErr
@@ -2230,7 +2272,7 @@ func installOptionalDriverAgentFromLocalFile(definition driverDefinition, filePa
 			downloadSource = downloadSource + "#" + entryName
 		}
 	} else {
-		if copyErr := copyAgentBinary(pathText, executablePath); copyErr != nil {
+		if copyErr := copyAgentBinary(sourcePath, executablePath); copyErr != nil {
 			return installedDriverPackage{}, fmt.Errorf("导入本地驱动代理失败：%w", copyErr)
 		}
 	}
@@ -2242,13 +2284,150 @@ func installOptionalDriverAgentFromLocalFile(definition driverDefinition, filePa
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
-		FilePath:       pathText,
-		FileName:       filepath.Base(pathText),
+		FilePath:       sourcePath,
+		FileName:       sourceName,
 		ExecutablePath: executablePath,
 		DownloadURL:    downloadSource,
 		SHA256:         hash,
 		DownloadedAt:   time.Now().Format(time.RFC3339),
 	}, nil
+}
+
+type localDriverCandidate struct {
+	absPath       string
+	relativePath  string
+	depth         int
+	inPlatformDir bool
+}
+
+func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType string) (string, string, error) {
+	root := strings.TrimSpace(directoryPath)
+	if root == "" {
+		return "", "", fmt.Errorf("本地驱动目录路径为空")
+	}
+	if absPath, absErr := filepath.Abs(root); absErr == nil {
+		root = absPath
+	}
+	info, statErr := os.Stat(root)
+	if statErr != nil {
+		return "", "", fmt.Errorf("读取本地驱动目录失败：%w", statErr)
+	}
+	if !info.IsDir() {
+		return "", "", fmt.Errorf("本地驱动目录路径不是目录：%s", root)
+	}
+
+	normalizedType := normalizeDriverType(driverType)
+	displayDefinition, found := resolveDriverDefinition(normalizedType)
+	if !found {
+		displayDefinition = driverDefinition{Type: normalizedType, Name: normalizedType}
+	}
+	displayName := resolveDriverDisplayName(displayDefinition)
+	platformDir := optionalDriverBundlePlatformDir(stdRuntime.GOOS)
+	assetName := optionalDriverReleaseAssetName(normalizedType)
+	baseName := optionalDriverExecutableBaseName(normalizedType)
+
+	exactRelativePath := filepath.ToSlash(filepath.Join(platformDir, assetName))
+	exactPath := filepath.Join(root, platformDir, assetName)
+	if exactInfo, err := os.Stat(exactPath); err == nil && !exactInfo.IsDir() {
+		return exactPath, exactRelativePath, nil
+	}
+
+	rootAssetPath := filepath.Join(root, assetName)
+	if rootAssetInfo, err := os.Stat(rootAssetPath); err == nil && !rootAssetInfo.IsDir() {
+		return rootAssetPath, filepath.ToSlash(assetName), nil
+	}
+
+	assetCandidates := make([]localDriverCandidate, 0, 8)
+	baseCandidates := make([]localDriverCandidate, 0, 8)
+	visited := 0
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		visited++
+		if visited > localDriverDirectoryScanMaxEntries {
+			return errLocalDriverDirScanLimit
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := strings.TrimSpace(d.Name())
+		if name == "" {
+			return nil
+		}
+
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			relative = name
+		}
+		normalizedRelative := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(relative), "./"))
+		if normalizedRelative == "" {
+			normalizedRelative = name
+		}
+		normalizedLower := strings.ToLower(normalizedRelative)
+		platformPrefix := strings.ToLower(platformDir) + "/"
+		inPlatformDir := normalizedLower == strings.ToLower(platformDir) || strings.HasPrefix(normalizedLower, platformPrefix)
+		depth := strings.Count(normalizedRelative, "/")
+		candidate := localDriverCandidate{
+			absPath:       path,
+			relativePath:  normalizedRelative,
+			depth:         depth,
+			inPlatformDir: inPlatformDir,
+		}
+
+		if strings.EqualFold(name, assetName) {
+			assetCandidates = append(assetCandidates, candidate)
+			return nil
+		}
+		if strings.EqualFold(name, baseName) {
+			baseCandidates = append(baseCandidates, candidate)
+		}
+		return nil
+	})
+	if errors.Is(walkErr, errLocalDriverDirScanLimit) {
+		return "", "", fmt.Errorf("本地驱动目录条目过多（超过 %d），请缩小目录范围或直接选择 zip/单文件", localDriverDirectoryScanMaxEntries)
+	}
+	if walkErr != nil {
+		return "", "", fmt.Errorf("扫描本地驱动目录失败：%w", walkErr)
+	}
+
+	selectBest := func(candidates []localDriverCandidate) (localDriverCandidate, bool) {
+		if len(candidates) == 0 {
+			return localDriverCandidate{}, false
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			left := candidates[i]
+			right := candidates[j]
+			if left.inPlatformDir != right.inPlatformDir {
+				return left.inPlatformDir
+			}
+			if left.depth != right.depth {
+				return left.depth < right.depth
+			}
+			leftRelative := strings.ToLower(left.relativePath)
+			rightRelative := strings.ToLower(right.relativePath)
+			if leftRelative != rightRelative {
+				return leftRelative < rightRelative
+			}
+			return strings.ToLower(left.absPath) < strings.ToLower(right.absPath)
+		})
+		return candidates[0], true
+	}
+
+	if candidate, ok := selectBest(assetCandidates); ok {
+		return candidate.absPath, candidate.relativePath, nil
+	}
+	if candidate, ok := selectBest(baseCandidates); ok {
+		return candidate.absPath, candidate.relativePath, nil
+	}
+
+	return "", "", fmt.Errorf(
+		"目录中未找到 %s 代理文件（优先路径 %s，候选文件名 %s / %s）",
+		displayName,
+		exactRelativePath,
+		assetName,
+		baseName,
+	)
 }
 
 func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDefinition, executablePath string) (string, error) {
