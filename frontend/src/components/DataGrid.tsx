@@ -549,6 +549,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const showColumnComment = queryOptions?.showColumnComment !== false;
   const showColumnType = queryOptions?.showColumnType !== false;
   const selectionColumnWidth = 46;
+  const connTypeLower = String(connections.find(c => c.id === connectionId)?.config?.type || '').trim().toLowerCase();
+  const isDuckDBConnection = connTypeLower === 'duckdb';
 
   // Background Helper
   const getBg = (darkHex: string) => {
@@ -3089,6 +3091,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                    pageSize={pagination.pageSize}
                    total={pagination.total}
                    showTotal={(total, range) => {
+                       if (isDuckDBConnection && (!Number.isFinite(total) || total <= 0)) {
+                           if (pagination.totalKnown === false) return '当前 0 条 / 正在统计总数...';
+                           return '当前 0 条 / 共 0 条';
+                       }
                        const currentCount = Math.max(0, range[1] - range[0] + 1);
                        if (pagination.totalKnown === false) return `当前 ${currentCount} 条 / 正在统计总数...`;
                        return `当前 ${currentCount} 条 / 共 ${total} 条`;

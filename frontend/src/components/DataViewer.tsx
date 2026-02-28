@@ -6,6 +6,43 @@ import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { buildOrderBySQL, buildWhereSQL, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 
+const toNonNegativeFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+  if (typeof value === 'bigint') {
+    return value >= 0n ? Number(value) : null;
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+};
+
+const parseTotalFromCountRow = (row: any): number | null => {
+  if (!row || typeof row !== 'object') return null;
+  const entries = Object.entries(row as Record<string, unknown>);
+  if (entries.length === 0) return null;
+
+  for (const [key, raw] of entries) {
+    const normalized = String(key || '').trim().toLowerCase();
+    if (normalized === 'total' || normalized === 'count' || normalized.includes('count')) {
+      const parsed = toNonNegativeFiniteNumber(raw);
+      if (parsed !== null) return parsed;
+    }
+  }
+
+  for (const [, raw] of entries) {
+    const parsed = toNonNegativeFiniteNumber(raw);
+    if (parsed !== null) return parsed;
+  }
+
+  return null;
+};
+
 const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [data, setData] = useState<any[]>([]);
   const [columnNames, setColumnNames] = useState<string[]>([]);
@@ -157,6 +194,8 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             const countKey = `${tab.connectionId}|${dbName}|${tableName}|${whereSQL}`;
             const derivedTotalKnown = !hasMore;
             const derivedTotal = derivedTotalKnown ? offset + resultData.length : page * size + 1;
+            const isDuckDB = dbTypeLower === 'duckdb';
+            const minExpectedTotal = hasMore ? offset + resultData.length + 1 : offset + resultData.length;
             if (derivedTotalKnown) countKeyRef.current = countKey;
 
             setPagination(prev => {
@@ -164,7 +203,14 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
                     return { ...prev, current: page, pageSize: size, total: derivedTotal, totalKnown: true };
                 }
                 if (prev.totalKnown && countKeyRef.current === countKey) {
-                    return { ...prev, current: page, pageSize: size };
+                    if (!isDuckDB) {
+                        return { ...prev, current: page, pageSize: size };
+                    }
+                    // 当当前页存在“下一页”信号时，已知总数至少应大于当前页末尾。
+                    // 若旧总数不满足该条件（例如历史统计值为 0），降级为未知总数并回退到 derivedTotal。
+                    if (Number.isFinite(prev.total) && prev.total >= minExpectedTotal) {
+                        return { ...prev, current: page, pageSize: size };
+                    }
                 }
                 return { ...prev, current: page, pageSize: size, total: derivedTotal, totalKnown: false };
             });
@@ -198,8 +244,16 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
                             if (!resCount.success) return;
                             if (!Array.isArray(resCount.data) || resCount.data.length === 0) return;
 
-                            const total = Number(resCount.data[0]?.['total']);
-                            if (!Number.isFinite(total) || total < 0) return;
+                            let total: number | null = null;
+                            if (dbTypeLower === 'duckdb') {
+                                total = parseTotalFromCountRow(resCount.data[0]);
+                            } else {
+                                const parsed = Number(resCount.data[0]?.['total']);
+                                if (Number.isFinite(parsed) && parsed >= 0) {
+                                    total = parsed;
+                                }
+                            }
+                            if (total === null) return;
 
                             setPagination(prev => ({ ...prev, total, totalKnown: true }));
                         })
