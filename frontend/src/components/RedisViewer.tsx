@@ -218,18 +218,17 @@ const ResizableDivider: React.FC<{
         <div
             onMouseDown={handleMouseDown}
             style={{
-                width: 6,
+                width: 5,
                 cursor: 'col-resize',
-                background: '#f0f0f0',
+                background: 'transparent',
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                zIndex: 10,
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = '#d9d9d9')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = '#f0f0f0')}
+            title="拖动调整宽度"
         >
-            <div style={{ width: 2, height: 30, background: '#bfbfbf', borderRadius: 1 }} />
         </div>
     );
 };
