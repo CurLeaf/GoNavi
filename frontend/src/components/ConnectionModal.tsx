@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
 import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -78,9 +79,32 @@ const ConnectionModal: React.FC<{
   const testTimerRef = useRef<number | null>(null);
   const addConnection = useStore((state) => state.addConnection);
   const updateConnection = useStore((state) => state.updateConnection);
+  const theme = useStore((state) => state.theme);
+  const appearance = useStore((state) => state.appearance);
+  const darkMode = theme === 'dark';
+  const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
   const mysqlTopology = Form.useWatch('mysqlTopology', form) || 'single';
   const mongoTopology = Form.useWatch('mongoTopology', form) || 'single';
   const mongoSrv = Form.useWatch('mongoSrv', form) || false;
+
+  const getSectionBg = (darkHex: string) => {
+      if (!darkMode) {
+          return `rgba(245, 245, 245, ${Math.max(effectiveOpacity, 0.92)})`;
+      }
+      const hex = darkHex.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${Math.max(effectiveOpacity, 0.82)})`;
+  };
+
+  const tunnelSectionStyle: React.CSSProperties = {
+      padding: '12px',
+      background: getSectionBg('#2a2a2a'),
+      borderRadius: 6,
+      marginTop: 12,
+      border: darkMode ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(0, 0, 0, 0.06)',
+  };
 
   const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
       const result: Record<string, DriverStatusSnapshot> = {};
@@ -1598,7 +1622,7 @@ const ConnectionModal: React.FC<{
             </Form.Item>
 
             {useSSH && (
-                <div style={{ padding: '12px', background: '#f5f5f5', borderRadius: 6, marginTop: 12 }}>
+                <div style={tunnelSectionStyle}>
                     <div style={{ display: 'flex', gap: 16 }}>
                         <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
                             <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
@@ -1634,7 +1658,7 @@ const ConnectionModal: React.FC<{
             </Form.Item>
 
             {useProxy && (
-                <div style={{ padding: '12px', background: '#f5f5f5', borderRadius: 6, marginTop: 12 }}>
+                <div style={tunnelSectionStyle}>
                     <div style={{ display: 'flex', gap: 16 }}>
                         <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ width: 180 }}>
                             <Select options={[
