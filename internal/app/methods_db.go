@@ -210,7 +210,7 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	dbType := resolveDDLDBType(config)
 	switch dbType {
 	case "mysql", "mariadb", "diros", "sphinx":
-		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/Diros/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
+		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/Doris/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
 	case "postgres", "kingbase", "highgo", "vastbase":
 		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
 			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}

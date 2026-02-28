@@ -7,11 +7,11 @@
       "checksumPolicy": "off",
       "downloadUrl": "builtin://activate/mariadb"
     },
-    "diros": {
+    "doris": {
       "engine": "go",
       "version": "1.9.3",
       "checksumPolicy": "off",
-      "downloadUrl": "builtin://activate/diros"
+      "downloadUrl": "builtin://activate/doris"
     },
     "sphinx": {
       "engine": "go",

@@ -21,7 +21,7 @@ const (
 	defaultDirosPort = 9030
 )
 
-// DirosDB 使用独立 driver 名称（diros）接入，底层协议兼容 MySQL。
+// DirosDB 使用独立 driver 名称（diros）接入，底层协议兼容 MySQL（对外显示为 Doris）。
 type DirosDB struct {
 	MySQLDB
 }
@@ -146,7 +146,7 @@ func (d *DirosDB) getDSN(config connection.ConnectionConfig) string {
 			protocol = netName
 			address = normalizeMySQLAddress(config.Host, config.Port)
 		} else {
-			logger.Warnf("注册 Diros SSH 网络失败，将尝试直连：地址=%s:%d 用户=%s，原因：%v", config.Host, config.Port, config.User, err)
+			logger.Warnf("注册 Doris SSH 网络失败，将尝试直连：地址=%s:%d 用户=%s，原因：%v", config.Host, config.Port, config.User, err)
 		}
 	}
 
@@ -177,7 +177,7 @@ func (d *DirosDB) Connect(config connection.ConnectionConfig) error {
 	runConfig := applyDirosURI(config)
 	addresses := collectDirosAddresses(runConfig)
 	if len(addresses) == 0 {
-		return fmt.Errorf("连接建立后验证失败：未找到可用的 Diros 地址")
+		return fmt.Errorf("连接建立后验证失败：未找到可用的 Doris 地址")
 	}
 
 	var errorDetails []string
@@ -214,7 +214,7 @@ func (d *DirosDB) Connect(config connection.ConnectionConfig) error {
 	}
 
 	if len(errorDetails) == 0 {
-		return fmt.Errorf("连接建立后验证失败：未找到可用的 Diros 地址")
+		return fmt.Errorf("连接建立后验证失败：未找到可用的 Doris 地址")
 	}
 	return fmt.Errorf("连接建立后验证失败：%s", strings.Join(errorDetails, "；"))
 }

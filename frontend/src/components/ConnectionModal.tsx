@@ -15,6 +15,7 @@ const MAX_TIMEOUT_SECONDS = 3600;
 const getDefaultPortByType = (type: string) => {
   switch (type) {
     case 'mysql': return 3306;
+    case 'doris':
     case 'diros': return 9030;
     case 'sphinx': return 9306;
     case 'clickhouse': return 9000;
@@ -480,7 +481,7 @@ const ConnectionModal: React.FC<{
   const getUriPlaceholder = () => {
       if (dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx') {
           const defaultPort = getDefaultPortByType(dbType);
-          const scheme = dbType === 'diros' ? 'diros' : 'mysql';
+          const scheme = dbType === 'diros' ? 'doris' : 'mysql';
           return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
       }
       if (isFileDatabaseType(dbType)) {
@@ -525,7 +526,7 @@ const ConnectionModal: React.FC<{
           }
           const dbPath = database ? `/${encodeURIComponent(database)}` : '/';
           const query = params.toString();
-          const scheme = type === 'diros' ? 'diros' : 'mysql';
+          const scheme = type === 'diros' ? 'doris' : 'mysql';
           return `${scheme}://${encodedAuth}${hosts.join(',')}${dbPath}${query ? `?${query}` : ''}`;
       }
 
@@ -1155,7 +1156,7 @@ const ConnectionModal: React.FC<{
       { label: '关系型数据库', items: [
           { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
           { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
-          { key: 'diros', name: 'Diros', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
+          { key: 'diros', name: 'Doris', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
           { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
           { key: 'clickhouse', name: 'ClickHouse', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#FFCC01' }} /> },
           { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
