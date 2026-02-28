@@ -26,7 +26,7 @@ type RedisKeyInfo struct {
 // RedisScanResult represents the result of a SCAN operation
 type RedisScanResult struct {
 	Keys   []RedisKeyInfo `json:"keys"`
-	Cursor uint64         `json:"cursor"`
+	Cursor string         `json:"cursor"`
 }
 
 // RedisClient defines the interface for Redis operations

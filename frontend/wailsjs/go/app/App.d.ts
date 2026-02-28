@@ -124,7 +124,7 @@ export function RedisListSet(arg1:connection.ConnectionConfig,arg2:string,arg3:n
 
 export function RedisRenameKey(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
-export function RedisScanKeys(arg1:connection.ConnectionConfig,arg2:string,arg3:number,arg4:number):Promise<connection.QueryResult>;
+export function RedisScanKeys(arg1:connection.ConnectionConfig,arg2:string,arg3:string|number,arg4:number):Promise<connection.QueryResult>;
 
 export function RedisSelectDB(arg1:connection.ConnectionConfig,arg2:number):Promise<connection.QueryResult>;
 

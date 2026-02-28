@@ -175,7 +175,7 @@ func (r *RedisClientImpl) ScanKeys(pattern string, cursor uint64, count int64) (
 
 	return &RedisScanResult{
 		Keys:   r.loadRedisKeyInfos(ctx, keys),
-		Cursor: currentCursor,
+		Cursor: strconv.FormatUint(currentCursor, 10),
 	}, nil
 }
 

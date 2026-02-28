@@ -137,7 +137,7 @@ export interface RedisKeyInfo {
 
 export interface RedisScanResult {
   keys: RedisKeyInfo[];
-  cursor: number;
+  cursor: string;
 }
 
 export interface RedisValue {
