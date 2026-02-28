@@ -11,6 +11,11 @@ const { Text } = Typography;
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
+const STEP1_MODAL_WIDTH = 760;
+const STEP2_MODAL_WIDTH = 680;
+const STEP1_MODAL_MIN_BODY_HEIGHT = 460;
+const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
+const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
@@ -98,6 +103,8 @@ const ConnectionModal: React.FC<{
       const b = parseInt(hex.substring(4, 6), 16);
       return `rgba(${r}, ${g}, ${b}, ${Math.max(effectiveOpacity, 0.82)})`;
   };
+
+  const step1SidebarDividerColor = darkMode ? STEP1_SIDEBAR_DIVIDER_DARK : STEP1_SIDEBAR_DIVIDER_LIGHT;
 
   const tunnelSectionStyle: React.CSSProperties = {
       padding: '12px',
@@ -1206,7 +1213,7 @@ const ConnectionModal: React.FC<{
           )}
       <div style={{ display: 'flex', height: 360 }}>
           {/* 左侧分类导航 */}
-          <div style={{ width: 120, borderRight: '1px solid #f0f0f0', paddingRight: 8, flexShrink: 0 }}>
+          <div style={{ width: 120, borderRight: `1px solid ${step1SidebarDividerColor}`, paddingRight: 8, flexShrink: 0 }}>
               {dbTypeGroups.map((group, idx) => (
                   <div
                       key={group.label}
@@ -1781,7 +1788,7 @@ const ConnectionModal: React.FC<{
   };
 
   const modalBodyStyle = step === 1
-      ? { padding: '16px 24px', overflow: 'hidden' as const }
+      ? { padding: '16px 24px', overflow: 'hidden' as const, minHeight: STEP1_MODAL_MIN_BODY_HEIGHT }
       : {
           padding: '16px 24px',
           overflowY: 'auto' as const,
@@ -1797,7 +1804,7 @@ const ConnectionModal: React.FC<{
           footer={getFooter()}
           centered
           wrapClassName="connection-modal-wrap"
-          width={step === 1 ? 650 : 600}
+          width={step === 1 ? STEP1_MODAL_WIDTH : STEP2_MODAL_WIDTH}
           zIndex={10001}
           destroyOnHidden
           maskClosable={false}
