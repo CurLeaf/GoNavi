@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Collapse, Modal, Progress, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { useStore } from '../store';
+import { normalizeOpacityForPlatform } from '../utils/appearance';
 import {
   CheckDriverNetworkStatus,
   DownloadDriverPackage,
@@ -136,6 +138,10 @@ const buildVersionSelectOptions = (options: DriverVersionOption[]) => {
 };
 
 const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+  const theme = useStore((state) => state.theme);
+  const appearance = useStore((state) => state.appearance);
+  const darkMode = theme === 'dark';
+  const opacity = normalizeOpacityForPlatform(appearance.opacity);
   const modalContentRef = useRef<HTMLDivElement | null>(null);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const tableScrollTargetsRef = useRef<HTMLElement[]>([]);
@@ -1073,6 +1079,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const activeDriverLogs = operationLogMap[logDriverType] || [];
   const activeDriverLogLines = activeDriverLogs.map((item) => `[${item.time}] ${item.text}`);
   const proxyEnvEntries = Object.entries(networkStatus?.proxyEnv || {});
+  const logBlockBackground = darkMode
+    ? `rgba(28, 28, 28, ${Math.max(opacity, 0.82)})`
+    : `rgba(255, 255, 255, ${Math.max(opacity, 0.92)})`;
+  const logBlockBorderColor = darkMode ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.12)';
+  const logBlockTextColor = darkMode ? 'rgba(255, 255, 255, 0.88)' : 'rgba(0, 0, 0, 0.88)';
 
   return (
     <Modal
@@ -1238,7 +1249,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             </Paragraph>
           ) : null}
           {activeDriverLogLines.length > 0 ? (
-            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: '#fafafa', borderRadius: 8, border: '1px solid #f0f0f0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: logBlockBackground, color: logBlockTextColor, borderRadius: 8, border: `1px solid ${logBlockBorderColor}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
               {activeDriverLogLines.join('\n')}
             </pre>
           ) : (
