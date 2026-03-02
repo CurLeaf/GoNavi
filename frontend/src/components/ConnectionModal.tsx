@@ -41,6 +41,19 @@ const getDefaultPortByType = (type: string) => {
   }
 };
 
+const singleHostUriSchemesByType: Record<string, string[]> = {
+  postgres: ['postgresql', 'postgres'],
+  clickhouse: ['clickhouse'],
+  oracle: ['oracle'],
+  sqlserver: ['sqlserver'],
+  redis: ['redis'],
+  tdengine: ['tdengine'],
+  dameng: ['dameng', 'dm'],
+  kingbase: ['kingbase'],
+  highgo: ['highgo'],
+  vastbase: ['vastbase'],
+};
+
 const isFileDatabaseType = (type: string) => type === 'sqlite' || type === 'duckdb';
 
 type DriverStatusSnapshot = {
@@ -344,6 +357,41 @@ const ConnectionModal: React.FC<{
       };
   };
 
+  const parseSingleHostUri = (
+      uriText: string,
+      expectedSchemes: string[],
+      defaultPort: number,
+  ): { host: string; port: number; username: string; password: string; database: string } | null => {
+      let parsed: ReturnType<typeof parseMultiHostUri> | null = null;
+      for (const scheme of expectedSchemes) {
+          parsed = parseMultiHostUri(uriText, scheme);
+          if (parsed) {
+              break;
+          }
+      }
+      if (!parsed) {
+          return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+          return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+          return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+          return null;
+      }
+      const primary = parseHostPort(hostList[0] || `localhost:${defaultPort}`, defaultPort);
+      return {
+          host: primary?.host || 'localhost',
+          port: primary?.port || defaultPort,
+          username: parsed.username,
+          password: parsed.password,
+          database: parsed.database || '',
+      };
+  };
+
   const parseUriToValues = (uriText: string, type: string): Record<string, any> | null => {
       const trimmedUri = String(uriText || '').trim();
       if (!trimmedUri) {
@@ -441,28 +489,22 @@ const ConnectionModal: React.FC<{
           };
       }
 
-      if (type === 'clickhouse') {
-          const parsed = parseMultiHostUri(trimmedUri, 'clickhouse');
+      const singleHostSchemes = singleHostUriSchemesByType[type];
+      if (singleHostSchemes && singleHostSchemes.length > 0) {
+          const parsed = parseSingleHostUri(trimmedUri, singleHostSchemes, getDefaultPortByType(type));
           if (!parsed) {
               return null;
           }
-          if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+          if (type === 'oracle' && !String(parsed.database || '').trim()) {
+              // Oracle 需要显式 service name，避免 URI 解析后放过必填校验。
               return null;
           }
-          if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-              return null;
-          }
-          const hostList = normalizeAddressList(parsed.hosts, 9000);
-          if (!hostList.length) {
-              return null;
-          }
-          const primary = parseHostPort(hostList[0] || 'localhost:9000', 9000);
           return {
-              host: primary?.host || 'localhost',
-              port: primary?.port || 9000,
+              host: parsed.host,
+              port: parsed.port,
               user: parsed.username,
               password: parsed.password,
-              database: parsed.database || '',
+              database: parsed.database,
           };
       }
 
@@ -502,6 +544,9 @@ const ConnectionModal: React.FC<{
       }
       if (dbType === 'clickhouse') {
           return 'clickhouse://default:pass@127.0.0.1:9000/default';
+      }
+      if (dbType === 'oracle') {
+          return 'oracle://user:pass@127.0.0.1:1521/ORCLPDB1';
       }
       return '例如: postgres://user:pass@127.0.0.1:5432/db_name';
   };
@@ -1443,6 +1488,17 @@ const ConnectionModal: React.FC<{
             help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
         >
             <Input placeholder="例如：appdb" />
+        </Form.Item>
+        )}
+
+        {dbType === 'oracle' && (
+        <Form.Item
+            name="database"
+            label="服务名 (Service Name)"
+            rules={[createUriAwareRequiredRule('请输入 Oracle 服务名（例如 ORCLPDB1）')]}
+            help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+        >
+            <Input placeholder="例如：ORCLPDB1" />
         </Form.Item>
         )}
 
