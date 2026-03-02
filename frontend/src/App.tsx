@@ -979,6 +979,7 @@ function App() {
           <DriverManagerModal
             open={isDriverModalOpen}
             onClose={() => setIsDriverModalOpen(false)}
+            onOpenGlobalProxySettings={() => setIsProxyModalOpen(true)}
           />
           <Modal
             title="关于 GoNavi"
