@@ -591,6 +591,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const rowModBg = darkMode ? getRowBg(22, 34, 56) : getRowBg(230, 247, 255);
   const rowAddedHover = darkMode ? getRowBg(31, 61, 31) : getRowBg(217, 247, 190);
   const rowModHover = darkMode ? getRowBg(29, 53, 94) : getRowBg(186, 231, 255);
+  const selectionAccentHex = darkMode ? '#f6c453' : '#1890ff';
+  const selectionAccentRgb = darkMode ? '246, 196, 83' : '24, 144, 255';
   
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
@@ -3224,16 +3226,16 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter,
                 .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter * { cursor: pointer !important; }
                 .${gridId} .ant-table-tbody > tr:hover > td { background-color: ${darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)'} !important; }
-                .${gridId} .ant-table-tbody > tr.ant-table-row-selected > td { background-color: ${darkMode ? 'rgba(24, 144, 255, 0.15)' : 'rgba(24, 144, 255, 0.08)'} !important; }
-                .${gridId} .ant-table-tbody > tr.ant-table-row-selected:hover > td { background-color: ${darkMode ? 'rgba(24, 144, 255, 0.25)' : 'rgba(24, 144, 255, 0.12)'} !important; }
+                .${gridId} .ant-table-tbody > tr.ant-table-row-selected > td { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.18)` : `rgba(${selectionAccentRgb}, 0.08)`} !important; }
+                .${gridId} .ant-table-tbody > tr.ant-table-row-selected:hover > td { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.28)` : `rgba(${selectionAccentRgb}, 0.12)`} !important; }
 	            .${gridId} .row-added td { background-color: ${rowAddedBg} !important; color: ${darkMode ? '#e6fffb' : 'inherit'}; }
 	            .${gridId} .row-modified td { background-color: ${rowModBg} !important; color: ${darkMode ? '#e6f7ff' : 'inherit'}; }
                 .${gridId} .ant-table-tbody > tr.row-added:hover > td { background-color: ${rowAddedHover} !important; }
                 .${gridId} .ant-table-tbody > tr.row-modified:hover > td { background-color: ${rowModHover} !important; }
                 .${gridId}.cell-edit-mode .ant-table-tbody > tr > td[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
                 .${gridId}.cell-edit-mode .ant-table-tbody > tr > td[data-cell-selected="true"] {
-                    box-shadow: inset 0 0 0 2px #1890ff;
-                    background-image: linear-gradient(${darkMode ? 'rgba(24, 144, 255, 0.18)' : 'rgba(24, 144, 255, 0.08)'}, ${darkMode ? 'rgba(24, 144, 255, 0.18)' : 'rgba(24, 144, 255, 0.08)'});
+                    box-shadow: inset 0 0 0 2px ${selectionAccentHex};
+                    background-image: linear-gradient(${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}, ${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`});
                 }
                 .${gridId} .ant-table-content,
                 .${gridId} .ant-table-body {
@@ -3263,7 +3265,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                bottom: 0, // Fits container height
                left: 0,
                width: '2px',
-               background: '#1890ff',
+               background: selectionAccentHex,
                zIndex: 9999,
                display: 'none',
                pointerEvents: 'none',

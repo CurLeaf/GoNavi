@@ -782,6 +782,7 @@ function App() {
   } as any;
 
   const showLinuxResizeHandles = isLinuxRuntime;
+  const resizeGuideColor = darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)';
 
   return (
     <ConfigProvider
@@ -799,6 +800,20 @@ function App() {
                 colorFillAlter: darkMode
                     ? `rgba(38, 38, 38, ${effectiveOpacity})`
                     : `rgba(250, 250, 250, ${effectiveOpacity})`,
+                colorPrimary: darkMode ? '#f6c453' : '#1677ff',
+                colorPrimaryHover: darkMode ? '#ffd666' : '#4096ff',
+                colorPrimaryActive: darkMode ? '#d8a93b' : '#0958d9',
+                colorInfo: darkMode ? '#f6c453' : '#1677ff',
+                colorLink: darkMode ? '#ffd666' : '#1677ff',
+                colorLinkHover: darkMode ? '#ffe58f' : '#4096ff',
+                colorLinkActive: darkMode ? '#d8a93b' : '#0958d9',
+                colorPrimaryBg: darkMode ? 'rgba(246, 196, 83, 0.22)' : '#e6f4ff',
+                colorPrimaryBgHover: darkMode ? 'rgba(246, 196, 83, 0.30)' : '#bae0ff',
+                colorPrimaryBorder: darkMode ? 'rgba(246, 196, 83, 0.45)' : '#91caff',
+                colorPrimaryBorderHover: darkMode ? 'rgba(246, 196, 83, 0.60)' : '#69b1ff',
+                controlItemBgActive: darkMode ? 'rgba(246, 196, 83, 0.20)' : 'rgba(22, 119, 255, 0.12)',
+                controlItemBgActiveHover: darkMode ? 'rgba(246, 196, 83, 0.28)' : 'rgba(22, 119, 255, 0.18)',
+                controlOutline: darkMode ? 'rgba(246, 196, 83, 0.50)' : 'rgba(5, 145, 255, 0.24)',
             },
             components: {
                 Layout: {
@@ -815,7 +830,10 @@ function App() {
                 },
                 Tabs: {
                     cardBg: 'transparent',
-                    itemActiveColor: darkMode ? '#177ddc' : '#1890ff',
+                    itemActiveColor: darkMode ? '#ffd666' : '#1890ff',
+                    itemHoverColor: darkMode ? '#ffe58f' : '#40a9ff',
+                    itemSelectedColor: darkMode ? '#ffd666' : '#1677ff',
+                    inkBarColor: darkMode ? '#ffd666' : '#1677ff',
                 }
             }
         }}
@@ -1241,7 +1259,7 @@ function App() {
                   bottom: 0,
                   left: 0,
                   width: '4px',
-                  background: 'rgba(24, 144, 255, 0.5)',
+                  background: resizeGuideColor,
                   zIndex: 9999,
                   pointerEvents: 'none',
                   display: 'none'
@@ -1256,7 +1274,7 @@ function App() {
                   left: sidebarWidth, // Start from sidebar edge
                   right: 0,
                   height: '4px',
-                  background: 'rgba(24, 144, 255, 0.5)',
+                  background: resizeGuideColor,
                   zIndex: 9999,
                   pointerEvents: 'none',
                   display: 'none',

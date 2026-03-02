@@ -337,6 +337,7 @@ interface AppState {
   closeTabsToRight: (id: string) => void;
   closeTabsByConnection: (connectionId: string) => void;
   closeTabsByDatabase: (connectionId: string, dbName: string) => void;
+  moveTab: (sourceId: string, targetId: string) => void;
   closeAllTabs: () => void;
   setActiveTab: (id: string) => void;
   setActiveContext: (context: { connectionId: string; dbName: string } | null) => void;
@@ -569,6 +570,23 @@ export const useStore = create<AppState>()(
           activeTabId: nextActiveTabId,
           activeContext: sameActiveContext ? null : state.activeContext,
         };
+      }),
+
+      moveTab: (sourceId, targetId) => set((state) => {
+        const fromId = String(sourceId || '').trim();
+        const toId = String(targetId || '').trim();
+        if (!fromId || !toId || fromId === toId) {
+          return state;
+        }
+        const fromIndex = state.tabs.findIndex((tab) => tab.id === fromId);
+        const toIndex = state.tabs.findIndex((tab) => tab.id === toId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+          return state;
+        }
+        const nextTabs = [...state.tabs];
+        const [movingTab] = nextTabs.splice(fromIndex, 1);
+        nextTabs.splice(toIndex, 0, movingTab);
+        return { tabs: nextTabs };
       }),
 
       closeAllTabs: () => set(() => ({ tabs: [], activeTabId: null })),

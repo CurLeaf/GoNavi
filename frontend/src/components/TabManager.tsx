@@ -1,6 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Tabs, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, useSortable, horizontalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToHorizontalAxis } from '@dnd-kit/modifiers';
 import { useStore } from '../store';
 import DataViewer from './DataViewer';
 import QueryEditor from './QueryEditor';
@@ -29,6 +34,54 @@ const buildTabDisplayTitle = (tab: TabData, connectionName: string | undefined):
   return `[${prefix}] ${tab.title}`;
 };
 
+type SortableTabLabelProps = {
+  tabId: string;
+  displayTitle: string;
+  menuItems: MenuProps['items'];
+  draggingTabId: string | null;
+  onSelect: (tabId: string) => void;
+};
+
+const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
+  tabId,
+  displayTitle,
+  menuItems,
+  draggingTabId,
+  onSelect,
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tabId });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition || 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+    opacity: isDragging ? 0.88 : 1,
+    cursor: isDragging ? 'grabbing' : 'grab',
+    display: 'inline-flex',
+    alignItems: 'center',
+    maxWidth: '100%',
+    touchAction: 'none',
+  };
+  const isDragBlocked = !!draggingTabId && draggingTabId !== tabId;
+
+  return (
+    <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
+      <span
+        ref={setNodeRef}
+        style={style}
+        className={`tab-dnd-label ${isDragging ? 'is-dragging' : ''}`}
+        {...attributes}
+        {...listeners}
+        onClick={() => {
+          if (!isDragBlocked) onSelect(tabId);
+        }}
+        onContextMenu={(e) => e.preventDefault()}
+        title="拖拽调整标签顺序"
+      >
+        {displayTitle}
+      </span>
+    </Dropdown>
+  );
+};
+
 const TabManager: React.FC = () => {
   const tabs = useStore(state => state.tabs);
   const connections = useStore(state => state.connections);
@@ -39,6 +92,14 @@ const TabManager: React.FC = () => {
   const closeTabsToLeft = useStore(state => state.closeTabsToLeft);
   const closeTabsToRight = useStore(state => state.closeTabsToRight);
   const closeAllTabs = useStore(state => state.closeAllTabs);
+  const moveTab = useStore(state => state.moveTab);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const suppressClickUntilRef = useRef<number>(0);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
 
   const onChange = (newActiveKey: string) => {
     setActiveTab(newActiveKey);
@@ -49,6 +110,33 @@ const TabManager: React.FC = () => {
       closeTab(targetKey as string);
     }
   };
+
+  const handleTabSelect = (tabId: string) => {
+    if (Date.now() < suppressClickUntilRef.current) return;
+    setActiveTab(tabId);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const sourceId = String(event.active.id || '').trim();
+    setDraggingTabId(sourceId || null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const sourceId = String(event.active.id || '').trim();
+    const targetId = String(event.over?.id || '').trim();
+    setDraggingTabId(null);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+    suppressClickUntilRef.current = Date.now() + 120;
+    moveTab(sourceId, targetId);
+  };
+
+  const handleDragCancel = () => {
+    setDraggingTabId(null);
+  };
+
+  const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
 
   const items = useMemo(() => tabs.map((tab, index) => {
     const connectionName = connections.find((conn) => conn.id === tab.connectionId)?.name;
@@ -100,14 +188,18 @@ const TabManager: React.FC = () => {
     
     return {
       label: (
-        <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
-          <span onContextMenu={(e) => e.preventDefault()}>{displayTitle}</span>
-        </Dropdown>
+        <SortableTabLabel
+          tabId={tab.id}
+          displayTitle={displayTitle}
+          menuItems={menuItems}
+          draggingTabId={draggingTabId}
+          onSelect={handleTabSelect}
+        />
       ),
       key: tab.id,
       children: content,
     };
-  }), [tabs, connections, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs]);
+  }), [tabs, connections, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, draggingTabId]);
 
   return (
     <>
@@ -158,16 +250,53 @@ const TabManager: React.FC = () => {
             .main-tabs .ant-tabs-nav::before {
                 border-bottom: none !important;
             }
+            .main-tabs .ant-tabs-tab {
+              transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 120ms ease;
+            }
+            .main-tabs .tab-dnd-label {
+              user-select: none;
+              -webkit-user-select: none;
+            }
+            .main-tabs .tab-dnd-label.is-dragging {
+              cursor: grabbing !important;
+            }
+            body[data-theme='dark'] .main-tabs .ant-tabs-tab-btn:focus-visible {
+              outline: none !important;
+              border-radius: 6px;
+              box-shadow: 0 0 0 2px rgba(255, 214, 102, 0.72);
+              background: rgba(255, 214, 102, 0.16);
+            }
+            body[data-theme='light'] .main-tabs .ant-tabs-tab-btn:focus-visible {
+              outline: none !important;
+              border-radius: 6px;
+              box-shadow: 0 0 0 2px rgba(9, 109, 217, 0.32);
+              background: rgba(9, 109, 217, 0.08);
+            }
+            body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
+              background: rgba(255, 214, 102, 0.12) !important;
+              border-color: rgba(255, 214, 102, 0.4) !important;
+            }
         `}</style>
-        <Tabs
-            className="main-tabs"
-            type="editable-card"
-            onChange={onChange}
-            activeKey={activeTabId || undefined}
-            onEdit={onEdit}
-            items={items}
-            hideAdd
-        />
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToHorizontalAxis]}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
+            <Tabs
+                className="main-tabs"
+                type="editable-card"
+                onChange={onChange}
+                activeKey={activeTabId || undefined}
+                onEdit={onEdit}
+                items={items}
+                hideAdd
+            />
+          </SortableContext>
+        </DndContext>
     </>
   );
 };

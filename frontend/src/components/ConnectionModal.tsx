@@ -119,6 +119,8 @@ const ConnectionModal: React.FC<{
   };
 
   const step1SidebarDividerColor = darkMode ? STEP1_SIDEBAR_DIVIDER_DARK : STEP1_SIDEBAR_DIVIDER_LIGHT;
+  const step1SidebarActiveBg = darkMode ? 'rgba(246, 196, 83, 0.20)' : '#e6f4ff';
+  const step1SidebarActiveColor = darkMode ? '#ffd666' : '#1677ff';
 
   const tunnelSectionStyle: React.CSSProperties = {
       padding: '12px',
@@ -1293,8 +1295,8 @@ const ConnectionModal: React.FC<{
                           cursor: 'pointer',
                           borderRadius: 6,
                           marginBottom: 4,
-                          background: activeGroup === idx ? '#e6f4ff' : 'transparent',
-                          color: activeGroup === idx ? '#1677ff' : undefined,
+                          background: activeGroup === idx ? step1SidebarActiveBg : 'transparent',
+                          color: activeGroup === idx ? step1SidebarActiveColor : undefined,
                           fontWeight: activeGroup === idx ? 500 : 400,
                           transition: 'all 0.2s',
                           fontSize: 13,
