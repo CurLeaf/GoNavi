@@ -593,6 +593,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   const rowModHover = darkMode ? getRowBg(29, 53, 94) : getRowBg(186, 231, 255);
   const selectionAccentHex = darkMode ? '#f6c453' : '#1890ff';
   const selectionAccentRgb = darkMode ? '246, 196, 83' : '24, 144, 255';
+  const darkHighlightTextColor = 'rgba(255, 236, 179, 0.98)';
+  const lightMetaHintColor = '#595959';
+  const lightMetaTooltipColor = '#262626';
+  const columnMetaHintColor = darkMode ? darkHighlightTextColor : lightMetaHintColor;
+  const columnMetaTooltipColor = darkMode ? darkHighlightTextColor : lightMetaTooltipColor;
   
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
@@ -849,7 +854,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                       style={{
                           marginTop: 2,
                           fontSize: 11,
-                          color: '#8c8c8c',
+                          color: columnMetaHintColor,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -864,7 +869,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                       style={{
                           marginTop: 2,
                           fontSize: 11,
-                          color: '#8c8c8c',
+                          color: columnMetaHintColor,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -880,13 +885,13 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (hoverLines.length === 0) return titleNode;
       return (
           <Tooltip
-              title={<pre style={{ maxHeight: 260, overflow: 'auto', margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>{hoverLines.join('\n')}</pre>}
+              title={<pre style={{ maxHeight: 260, overflow: 'auto', margin: 0, fontSize: 12, whiteSpace: 'pre-wrap', color: columnMetaTooltipColor }}>{hoverLines.join('\n')}</pre>}
               styles={{ root: { maxWidth: 640 } }}
           >
               <span style={{ display: 'inline-flex', maxWidth: '100%' }}>{titleNode}</span>
           </Tooltip>
       );
-  }, [columnMetaMap, columnMetaMapByLowerName, showColumnComment, showColumnType]);
+  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, showColumnComment, showColumnType]);
 
   const closeCellEditor = useCallback(() => {
       setCellEditorOpen(false);

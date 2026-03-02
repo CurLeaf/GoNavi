@@ -238,6 +238,14 @@ function App() {
   // Specific colors
   const bgMain = getBg('#141414', '#ffffff');
   const bgContent = getBg('#1d1d1d', '#ffffff');
+  const floatingLogButtonBorderColor = darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.16)';
+  const floatingLogButtonTextColor = darkMode ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.82)';
+  const floatingLogButtonBgColor = darkMode
+      ? `rgba(34, 34, 34, ${Math.max(effectiveOpacity, 0.82)})`
+      : `rgba(255, 255, 255, ${Math.max(effectiveOpacity, 0.9)})`;
+  const floatingLogButtonShadow = darkMode
+      ? '0 8px 22px rgba(0,0,0,0.38)'
+      : '0 8px 20px rgba(0,0,0,0.16)';
   
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
@@ -1059,17 +1067,42 @@ function App() {
                 </div>
             </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58 }}>
                     <Sidebar onEditConnection={handleEditConnection} />
                 </div>
 
-                {/* Sidebar Footer for Log Toggle */}
-                <div style={{ padding: '8px', borderTop: 'none', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                    <Button 
-                        type={isLogPanelOpen ? "primary" : "text"}  
-                        icon={<BugOutlined />} 
+                {/* Floating SQL Log Toggle */}
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: 10,
+                        right: 14,
+                        bottom: 10,
+                        zIndex: 20,
+                        pointerEvents: 'none'
+                    }}
+                >
+                    <Button
+                        type={isLogPanelOpen ? "primary" : "text"}
+                        icon={<BugOutlined />}
                         onClick={() => setIsLogPanelOpen(!isLogPanelOpen)}
-                        block
+                        style={isLogPanelOpen ? {
+                            width: '100%',
+                            height: 34,
+                            borderRadius: 999,
+                            boxShadow: floatingLogButtonShadow,
+                            pointerEvents: 'auto'
+                        } : {
+                            width: '100%',
+                            height: 34,
+                            borderRadius: 999,
+                            border: `1px solid ${floatingLogButtonBorderColor}`,
+                            color: floatingLogButtonTextColor,
+                            background: floatingLogButtonBgColor,
+                            boxShadow: floatingLogButtonShadow,
+                            backdropFilter: blurFilter,
+                            pointerEvents: 'auto'
+                        }}
                     >
                         SQL 执行日志
                     </Button>
