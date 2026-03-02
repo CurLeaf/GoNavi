@@ -3,7 +3,7 @@ import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Se
 import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
 import { useStore } from '../store';
 import { normalizeOpacityForPlatform } from '../utils/appearance';
-import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
+import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
 const { Meta } = Card;
@@ -80,6 +80,7 @@ const ConnectionModal: React.FC<{
   const [typeSelectWarning, setTypeSelectWarning] = useState<{ driverName: string; reason: string } | null>(null);
   const [driverStatusMap, setDriverStatusMap] = useState<Record<string, DriverStatusSnapshot>>({});
   const [driverStatusLoaded, setDriverStatusLoaded] = useState(false);
+  const [selectingDbFile, setSelectingDbFile] = useState(false);
   const [selectingSSHKey, setSelectingSSHKey] = useState(false);
   const testInFlightRef = useRef(false);
   const testTimerRef = useRef<number | null>(null);
@@ -662,6 +663,30 @@ const ConnectionModal: React.FC<{
           message.error(`选择私钥文件失败: ${e?.message || String(e)}`);
       } finally {
           setSelectingSSHKey(false);
+      }
+  };
+
+  const handleSelectDatabaseFile = async () => {
+      if (selectingDbFile) {
+          return;
+      }
+      try {
+          setSelectingDbFile(true);
+          const currentPath = String(form.getFieldValue('host') || '').trim();
+          const res = await SelectDatabaseFile(currentPath, dbType);
+          if (res?.success) {
+              const data = res.data || {};
+              const selectedPath = typeof data === 'string' ? data : String(data.path || '').trim();
+              if (selectedPath) {
+                  form.setFieldValue('host', normalizeFileDbPath(selectedPath));
+              }
+          } else if (res?.message !== 'Cancelled') {
+              message.error(`选择数据库文件失败: ${res?.message || '未知错误'}`);
+          }
+      } catch (e: any) {
+          message.error(`选择数据库文件失败: ${e?.message || String(e)}`);
+      } finally {
+          setSelectingDbFile(false);
       }
   };
 
@@ -1392,6 +1417,13 @@ const ConnectionModal: React.FC<{
                 onDoubleClick={requestTest}
               />
             </Form.Item>
+            {isFileDb && (
+            <Form.Item label=" " style={{ width: 120 }}>
+              <Button style={{ width: '100%' }} onClick={handleSelectDatabaseFile} loading={selectingDbFile}>
+                浏览...
+              </Button>
+            </Form.Item>
+            )}
             {!isFileDb && (
             <Form.Item
                 name="port"

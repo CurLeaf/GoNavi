@@ -164,6 +164,8 @@ export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise
 
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
 
+export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
 export function SelectDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectDriverPackageDirectory(arg1:string):Promise<connection.QueryResult>;

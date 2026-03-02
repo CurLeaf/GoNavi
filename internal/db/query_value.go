@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -18,7 +19,70 @@ func normalizeQueryValueWithDBType(v interface{}, databaseTypeName string) inter
 	if b, ok := v.([]byte); ok {
 		return bytesToDisplayValue(b, databaseTypeName)
 	}
-	return v
+	return normalizeCompositeQueryValue(v)
+}
+
+func normalizeCompositeQueryValue(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+
+	switch typed := v.(type) {
+	case []interface{}:
+		items := make([]interface{}, len(typed))
+		for i, item := range typed {
+			items[i] = normalizeQueryValue(item)
+		}
+		return items
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, value := range typed {
+			out[key] = normalizeQueryValue(value)
+		}
+		return out
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return nil
+		}
+		return normalizeQueryValue(rv.Elem().Interface())
+	case reflect.Map:
+		if rv.IsNil() {
+			return nil
+		}
+		out := make(map[string]interface{}, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[mapKeyToString(iter.Key().Interface())] = normalizeQueryValue(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice, reflect.Array:
+		// []byte 在上层已单独处理，这里保留对其它切片/数组的递归规整。
+		if rv.Kind() == reflect.Slice && rv.IsNil() {
+			return nil
+		}
+		size := rv.Len()
+		items := make([]interface{}, size)
+		for i := 0; i < size; i++ {
+			items[i] = normalizeQueryValue(rv.Index(i).Interface())
+		}
+		return items
+	default:
+		return v
+	}
+}
+
+func mapKeyToString(key interface{}) string {
+	if key == nil {
+		return "null"
+	}
+	if s, ok := key.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", key)
 }
 
 func bytesToDisplayValue(b []byte, databaseTypeName string) interface{} {

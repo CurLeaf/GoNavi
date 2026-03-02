@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
@@ -218,7 +219,11 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 }
 
 func writeResponse(writer *bufio.Writer, resp agentResponse) error {
-	payload, err := json.Marshal(resp)
+	// 对响应数据做统一 JSON 安全归一化：
+	// 将 map[any]any（如 duckdb.Map）递归转换为 map[string]any，避免序列化失败导致代理进程退出。
+	safeResp := resp
+	safeResp.Data = normalizeAgentResponseData(resp.Data)
+	payload, err := json.Marshal(safeResp)
 	if err != nil {
 		return err
 	}
@@ -233,4 +238,52 @@ func fail(resp agentResponse, errText string) agentResponse {
 	resp.Success = false
 	resp.Error = strings.TrimSpace(errText)
 	return resp
+}
+
+func normalizeAgentResponseData(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+		return normalizeAgentResponseData(rv.Elem().Interface())
+	case reflect.Map:
+		if rv.IsNil() {
+			return nil
+		}
+		out := make(map[string]interface{}, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[fmt.Sprint(iter.Key().Interface())] = normalizeAgentResponseData(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice:
+		if rv.IsNil() {
+			return nil
+		}
+		// 保持 []byte 原样，避免改变现有二进制列的 JSON 编码行为（base64）。
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return v
+		}
+		size := rv.Len()
+		items := make([]interface{}, size)
+		for i := 0; i < size; i++ {
+			items[i] = normalizeAgentResponseData(rv.Index(i).Interface())
+		}
+		return items
+	case reflect.Array:
+		size := rv.Len()
+		items := make([]interface{}, size)
+		for i := 0; i < size; i++ {
+			items[i] = normalizeAgentResponseData(rv.Index(i).Interface())
+		}
+		return items
+	default:
+		return v
+	}
 }

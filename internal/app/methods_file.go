@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,6 +108,78 @@ func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {
 				Pattern:     "*",
 			},
 		},
+	})
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if strings.TrimSpace(selection) == "" {
+		return connection.QueryResult{Success: false, Message: "Cancelled"}
+	}
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
+}
+
+func (a *App) SelectDatabaseFile(currentPath string, driverType string) connection.QueryResult {
+	defaultDir := strings.TrimSpace(currentPath)
+	if defaultDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			defaultDir = home
+		}
+	}
+	if filepath.Ext(defaultDir) != "" {
+		defaultDir = filepath.Dir(defaultDir)
+	}
+	if defaultDir != "" && !filepath.IsAbs(defaultDir) {
+		if abs, err := filepath.Abs(defaultDir); err == nil {
+			defaultDir = abs
+		}
+	}
+
+	normalizedType := strings.ToLower(strings.TrimSpace(driverType))
+	filters := []runtime.FileFilter{
+		{
+			DisplayName: "数据库文件",
+			Pattern:     "*.db;*.sqlite;*.sqlite3;*.db3;*.duckdb;*.ddb",
+		},
+		{
+			DisplayName: "所有文件",
+			Pattern:     "*",
+		},
+	}
+	title := "选择数据库文件"
+	switch normalizedType {
+	case "sqlite":
+		title = "选择 SQLite 数据文件"
+		filters = []runtime.FileFilter{
+			{
+				DisplayName: "SQLite 文件",
+				Pattern:     "*.db;*.sqlite;*.sqlite3;*.db3",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*",
+			},
+		}
+	case "duckdb":
+		title = "选择 DuckDB 数据文件"
+		filters = []runtime.FileFilter{
+			{
+				DisplayName: "DuckDB 文件",
+				Pattern:     "*.duckdb;*.ddb;*.db",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*",
+			},
+		}
+	}
+
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            title,
+		DefaultDirectory: defaultDir,
+		Filters:          filters,
 	})
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
@@ -1527,7 +1600,11 @@ func writeRowsToFile(f *os.File, data []map[string]interface{}, columns []string
 					return err
 				}
 			}
-			if err := jsonEncoder.Encode(rowMap); err != nil {
+			exportedRow := make(map[string]interface{}, len(columns))
+			for _, col := range columns {
+				exportedRow[col] = normalizeExportJSONValue(rowMap[col])
+			}
+			if err := jsonEncoder.Encode(exportedRow); err != nil {
 				return err
 			}
 			isJsonFirstRow = false
@@ -1567,8 +1644,99 @@ func formatExportCellText(val interface{}) string {
 			return "NULL"
 		}
 		return v.Format("2006-01-02 15:04:05")
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return "NULL"
+		}
+		return strconv.FormatFloat(f, 'f', -1, 32)
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return "NULL"
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case json.Number:
+		text := strings.TrimSpace(v.String())
+		if text == "" {
+			return "NULL"
+		}
+		return text
 	default:
 		return fmt.Sprintf("%v", val)
+	}
+}
+
+func normalizeExportJSONValue(val interface{}) interface{} {
+	if val == nil {
+		return nil
+	}
+
+	switch v := val.(type) {
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return nil
+		}
+		return json.Number(strconv.FormatFloat(f, 'f', -1, 32))
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil
+		}
+		return json.Number(strconv.FormatFloat(v, 'f', -1, 64))
+	case json.Number:
+		text := strings.TrimSpace(v.String())
+		if text == "" {
+			return nil
+		}
+		return json.Number(text)
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(v))
+		for key, item := range v {
+			out[key] = normalizeExportJSONValue(item)
+		}
+		return out
+	case []interface{}:
+		items := make([]interface{}, len(v))
+		for i, item := range v {
+			items[i] = normalizeExportJSONValue(item)
+		}
+		return items
+	}
+
+	rv := reflect.ValueOf(val)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+		return normalizeExportJSONValue(rv.Elem().Interface())
+	case reflect.Map:
+		if rv.IsNil() {
+			return nil
+		}
+		out := make(map[string]interface{}, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			out[fmt.Sprint(iter.Key().Interface())] = normalizeExportJSONValue(iter.Value().Interface())
+		}
+		return out
+	case reflect.Slice:
+		if rv.IsNil() {
+			return nil
+		}
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return val
+		}
+		fallthrough
+	case reflect.Array:
+		size := rv.Len()
+		items := make([]interface{}, size)
+		for i := 0; i < size; i++ {
+			items[i] = normalizeExportJSONValue(rv.Index(i).Interface())
+		}
+		return items
+	default:
+		return val
 	}
 }
 

@@ -322,6 +322,10 @@ export function ResolveDriverRepositoryURL(arg1) {
   return window['go']['app']['App']['ResolveDriverRepositoryURL'](arg1);
 }
 
+export function SelectDatabaseFile(arg1, arg2) {
+  return window['go']['app']['App']['SelectDatabaseFile'](arg1, arg2);
+}
+
 export function SelectDriverDownloadDirectory(arg1) {
   return window['go']['app']['App']['SelectDriverDownloadDirectory'](arg1);
 }
