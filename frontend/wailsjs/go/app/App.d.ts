@@ -100,6 +100,8 @@ export function MySQLQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:str
 
 export function MySQLShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
+
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;

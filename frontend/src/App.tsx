@@ -35,6 +35,7 @@ function App() {
   const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const windowCornerRadius = 14;
+  const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const globalProxyInvalidHintShownRef = React.useRef(false);
@@ -50,12 +51,18 @@ function App() {
       Environment()
           .then((env) => {
               if (cancelled) return;
-              setIsLinuxRuntime((env?.platform || '').toLowerCase() === 'linux');
+              const platform = String(env?.platform || '').toLowerCase();
+              setRuntimePlatform(platform);
+              setIsLinuxRuntime(platform === 'linux');
           })
           .catch(() => {
               if (cancelled) return;
               const platform = typeof navigator !== 'undefined' ? navigator.platform : '';
-              setIsLinuxRuntime(/linux/i.test(platform));
+              const normalized = /linux/i.test(platform)
+                  ? 'linux'
+                  : (/mac/i.test(platform) ? 'darwin' : (/win/i.test(platform) ? 'windows' : ''));
+              setRuntimePlatform(normalized);
+              setIsLinuxRuntime(normalized === 'linux');
           });
       return () => {
           cancelled = true;
@@ -241,11 +248,12 @@ function App() {
   const updateCheckInFlightRef = React.useRef(false);
   const updateDownloadInFlightRef = React.useRef(false);
   const updateDownloadedVersionRef = React.useRef<string | null>(null);
+  const updateInstallTriggeredVersionRef = React.useRef<string | null>(null);
   const updateDownloadMetaRef = React.useRef<UpdateDownloadResultData | null>(null);
-  const updateDeferredVersionRef = React.useRef<string | null>(null);
   const updateNotifiedVersionRef = React.useRef<string | null>(null);
   const updateMutedVersionRef = React.useRef<string | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const isAboutOpenRef = React.useRef(false);
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string } | null>(null);
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
@@ -299,6 +307,9 @@ function App() {
       autoRelaunch?: boolean;
   };
 
+  const isMacRuntime = runtimePlatform === 'darwin'
+      || (runtimePlatform === '' && typeof navigator !== 'undefined' && /mac/i.test(navigator.platform));
+
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
       const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -311,52 +322,18 @@ function App() {
       return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
   };
 
-  const promptRestartForUpdate = (info: UpdateInfo, resultData?: UpdateDownloadResultData) => {
-      const downloadPathHint = resultData?.downloadPath
-          ? `更新包路径：${resultData.downloadPath}`
-          : '';
-      const installLogHint = resultData?.installLogPath
-          ? `安装日志：${resultData.installLogPath}`
-          : '';
-      Modal.confirm({
-          title: '更新已下载',
-          content: (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, userSelect: 'text' }}>
-                  <div>{`版本 ${info.latestVersion} 已下载完成，是否现在重启完成更新？`}</div>
-                  {downloadPathHint ? <div style={{ fontSize: 12, color: '#8c8c8c' }}>{downloadPathHint}</div> : null}
-                  {installLogHint ? <div style={{ fontSize: 12, color: '#8c8c8c' }}>{installLogHint}</div> : null}
-              </div>
-          ),
-          okText: '立即重启',
-          cancelText: '稍后',
-          onOk: async () => {
-              updateDeferredVersionRef.current = null;
-              const res = await (window as any).go.app.App.InstallUpdateAndRestart();
-              if (!res?.success) {
-                  message.error('更新安装失败: ' + (res?.message || '未知错误'));
-              }
-          },
-          onCancel: () => {
-              updateDeferredVersionRef.current = info.latestVersion;
-          }
-      });
-  };
-
   const downloadUpdate = React.useCallback(async (info: UpdateInfo, silent: boolean) => {
       if (updateDownloadInFlightRef.current) return;
       if (updateDownloadedVersionRef.current === info.latestVersion) {
           if (!silent) {
               const cachedDownloadPath = updateDownloadMetaRef.current?.downloadPath;
               message.info(cachedDownloadPath ? `更新包已就绪（${info.latestVersion}），路径：${cachedDownloadPath}` : `更新包已就绪（${info.latestVersion}）`);
-          }
-          if (!silent || updateDeferredVersionRef.current !== info.latestVersion) {
-              promptRestartForUpdate(info, updateDownloadMetaRef.current || undefined);
+              showUpdateDownloadProgress();
           }
           return;
       }
       updateDownloadInFlightRef.current = true;
       updateDownloadMetaRef.current = null;
-      const key = 'update-download';
       setUpdateDownloadProgress({
           open: true,
           version: info.latestVersion,
@@ -366,32 +343,97 @@ function App() {
           total: info.assetSize || 0,
           message: ''
       });
-      message.loading({ content: `正在下载更新 ${info.latestVersion}...`, key, duration: 0 });
       const res = await (window as any).go.app.App.DownloadUpdate();
       updateDownloadInFlightRef.current = false;
       if (res?.success) {
           const resultData = (res?.data || {}) as UpdateDownloadResultData;
           updateDownloadMetaRef.current = resultData;
           updateDownloadedVersionRef.current = info.latestVersion;
-          setUpdateDownloadProgress(prev => ({ ...prev, status: 'done', percent: 100, open: false }));
+          setUpdateDownloadProgress(prev => {
+              const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
+              return { ...prev, status: 'done', percent: 100, downloaded: total, total, message: '', open: false };
+          });
+          setLastUpdateInfo((prev) => {
+              if (!prev || prev.latestVersion !== info.latestVersion) {
+                  return {
+                      ...info,
+                      downloaded: true,
+                      downloadPath: resultData?.downloadPath || info.downloadPath,
+                  };
+              }
+              return {
+                  ...prev,
+                  downloaded: true,
+                  downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
+              };
+          });
           if (resultData?.downloadPath) {
-              message.success({ content: `更新下载完成，更新包路径：${resultData.downloadPath}`, key, duration: 5 });
+              message.success({ content: `更新下载完成，更新包路径：${resultData.downloadPath}`, duration: 5 });
           } else {
-              message.success({ content: '更新下载完成', key, duration: 2 });
+              message.success({ content: '更新下载完成', duration: 2 });
           }
-          setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（已下载，待重启安装）`);
-          if (!silent || updateDeferredVersionRef.current !== info.latestVersion) {
-              promptRestartForUpdate(info, resultData);
-          }
+          setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（已下载，请点击“下载进度”后安装）`);
       } else {
           setUpdateDownloadProgress(prev => ({
               ...prev,
               status: 'error',
               message: res?.message || '未知错误'
           }));
-          message.error({ content: '更新下载失败: ' + (res?.message || '未知错误'), key, duration: 4 });
+          message.error({ content: '更新下载失败: ' + (res?.message || '未知错误'), duration: 4 });
       }
   }, []);
+
+  const showUpdateDownloadProgress = React.useCallback(() => {
+      setUpdateDownloadProgress((prev) => {
+          if (prev.status === 'idle') return prev;
+          return { ...prev, open: true };
+      });
+  }, []);
+
+  const hideUpdateDownloadProgress = React.useCallback(() => {
+      setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const hasUpdateDownloadProgress = updateDownloadProgress.status === 'start'
+      || updateDownloadProgress.status === 'downloading'
+      || updateDownloadProgress.status === 'done'
+      || updateDownloadProgress.status === 'error';
+  const isLatestUpdateDownloaded = Boolean(lastUpdateInfo?.hasUpdate) && (
+      Boolean(lastUpdateInfo?.downloaded)
+      || (Boolean(lastUpdateInfo?.latestVersion) && updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion)
+  );
+  const isBackgroundProgressForLatestUpdate = Boolean(lastUpdateInfo?.hasUpdate)
+      && Boolean(lastUpdateInfo?.latestVersion)
+      && updateDownloadProgress.version === lastUpdateInfo?.latestVersion
+      && (updateDownloadProgress.status === 'start'
+          || updateDownloadProgress.status === 'downloading'
+          || updateDownloadProgress.status === 'error');
+  const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
+      && updateInstallTriggeredVersionRef.current !== (lastUpdateInfo?.latestVersion || null);
+
+  const handleInstallFromProgress = React.useCallback(async () => {
+      if (updateDownloadProgress.status !== 'done') {
+          return;
+      }
+      if (isMacRuntime) {
+          const res = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
+          if (!res?.success) {
+              message.error('打开安装目录失败: ' + (res?.message || '未知错误'));
+              return;
+          }
+          updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
+          hideUpdateDownloadProgress();
+          message.success(res?.message || '已打开安装目录，请手动完成替换');
+          return;
+      }
+      const res = await (window as any).go.app.App.InstallUpdateAndRestart();
+      if (!res?.success) {
+          message.error('更新安装失败: ' + (res?.message || '未知错误'));
+          return;
+      }
+      updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
+      hideUpdateDownloadProgress();
+  }, [hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo?.latestVersion, updateDownloadProgress.status, updateDownloadProgress.version]);
 
   const checkForUpdates = React.useCallback(async (silent: boolean) => {
       if (updateCheckInFlightRef.current) return;
@@ -410,7 +452,7 @@ function App() {
       }
       const info: UpdateInfo = res.data;
       if (!info) return;
-      setLastUpdateInfo(info);
+      const aboutOpen = isAboutOpenRef.current;
       if (info.hasUpdate) {
           const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
           const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
@@ -422,34 +464,103 @@ function App() {
                   info,
                   downloadPath: downloadPath || undefined,
               };
+              setUpdateDownloadProgress((prev) => {
+                  if (prev.status === 'start' || prev.status === 'downloading') {
+                      return prev;
+                  }
+                  const total = info.assetSize || prev.total || 0;
+                  return {
+                      ...prev,
+                      open: prev.open && prev.version === info.latestVersion,
+                      version: info.latestVersion,
+                      status: 'done',
+                      percent: 100,
+                      downloaded: total,
+                      total,
+                      message: '',
+                  };
+              });
+              setLastUpdateInfo({
+                  ...info,
+                  downloaded: true,
+                  downloadPath: downloadPath || undefined,
+              });
           } else {
               if (updateDownloadedVersionRef.current !== info.latestVersion) {
                   updateDownloadMetaRef.current = null;
               }
+              setUpdateDownloadProgress((prev) => {
+                  if (prev.status === 'start' || prev.status === 'downloading') {
+                      return prev;
+                  }
+                  return {
+                      ...prev,
+                      open: false,
+                      version: info.latestVersion,
+                      status: 'idle',
+                      percent: 0,
+                      downloaded: 0,
+                      total: info.assetSize || 0,
+                      message: '',
+                  };
+              });
+              setLastUpdateInfo(info);
           }
           const statusText = hasDownloaded
-              ? `发现新版本 ${info.latestVersion}（已下载，待重启安装）`
+              ? `发现新版本 ${info.latestVersion}（已下载，请点击“下载进度”后安装）`
               : `发现新版本 ${info.latestVersion}（未下载）`;
           if (!silent) {
               message.info(`发现新版本 ${info.latestVersion}`);
               setAboutUpdateStatus(statusText);
           }
-          if (silent && isAboutOpen) {
+          if (silent && aboutOpen) {
               setAboutUpdateStatus(statusText);
           }
-          if (silent && !isAboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
+          if (silent && !aboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
               updateNotifiedVersionRef.current = info.latestVersion;
               setIsAboutOpen(true);
           }
       } else if (!silent) {
+          setUpdateDownloadProgress((prev) => {
+              if (prev.status === 'start' || prev.status === 'downloading') {
+                  return prev;
+              }
+              return {
+                  open: false,
+                  version: '',
+                  status: 'idle',
+                  percent: 0,
+                  downloaded: 0,
+                  total: 0,
+                  message: '',
+              };
+          });
+          setLastUpdateInfo(info);
           const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
           message.success(text);
           setAboutUpdateStatus(text);
-      } else if (silent && isAboutOpen) {
+      } else if (silent && aboutOpen) {
+          setUpdateDownloadProgress((prev) => {
+              if (prev.status === 'start' || prev.status === 'downloading') {
+                  return prev;
+              }
+              return {
+                  open: false,
+                  version: '',
+                  status: 'idle',
+                  percent: 0,
+                  downloaded: 0,
+                  total: 0,
+                  message: '',
+              };
+          });
+          setLastUpdateInfo(info);
           const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
           setAboutUpdateStatus(text);
+      } else {
+          setLastUpdateInfo(info);
       }
-  }, [downloadUpdate]);
+  }, []);
 
   const loadAboutInfo = React.useCallback(async () => {
       setAboutLoading(true);
@@ -718,9 +829,19 @@ function App() {
   }, [darkMode]);
 
   useEffect(() => {
+      isAboutOpenRef.current = isAboutOpen;
+  }, [isAboutOpen]);
+
+  useEffect(() => {
       if (isAboutOpen) {
           if (lastUpdateInfo?.hasUpdate) {
-              setAboutUpdateStatus(`发现新版本 ${lastUpdateInfo.latestVersion}（未下载）`);
+              const localDownloaded = updateDownloadedVersionRef.current === lastUpdateInfo.latestVersion;
+              const hasDownloaded = Boolean(lastUpdateInfo.downloaded) || localDownloaded;
+              setAboutUpdateStatus(
+                  hasDownloaded
+                      ? `发现新版本 ${lastUpdateInfo.latestVersion}（已下载，请点击“下载进度”后安装）`
+                      : `发现新版本 ${lastUpdateInfo.latestVersion}（未下载）`
+              );
           } else if (lastUpdateInfo) {
               setAboutUpdateStatus(`当前已是最新版本（${lastUpdateInfo.currentVersion || '未知'}）`);
           } else {
@@ -758,7 +879,7 @@ function App() {
               : (total > 0 ? (downloaded / total) * 100 : 0);
           const percent = Math.max(0, Math.min(100, percentRaw));
           setUpdateDownloadProgress(prev => ({
-              open: nextStatus === 'start' || nextStatus === 'downloading' || nextStatus === 'error',
+              open: prev.open,
               version: prev.version,
               status: nextStatus,
               percent,
@@ -1004,7 +1125,10 @@ function App() {
             open={isAboutOpen}
             onCancel={() => setIsAboutOpen(false)}
             footer={[
-                lastUpdateInfo?.hasUpdate ? (
+                canShowProgressEntry ? (
+                    <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>下载进度</Button>
+                ) : null,
+                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded ? (
                     <Button key="download" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>下载更新</Button>
                 ) : null,
                 lastUpdateInfo?.hasUpdate ? (
@@ -1188,38 +1312,25 @@ function App() {
           <Modal
               title={updateDownloadProgress.version ? `下载更新 ${updateDownloadProgress.version}` : '下载更新'}
               open={updateDownloadProgress.open}
-              closable={updateDownloadProgress.status === 'error'}
-              maskClosable={false}
-              keyboard={updateDownloadProgress.status === 'error'}
-              onCancel={() => {
-                  if (updateDownloadProgress.status === 'error') {
-                      setUpdateDownloadProgress({
-                          open: false,
-                          version: '',
-                          status: 'idle',
-                          percent: 0,
-                          downloaded: 0,
-                          total: 0,
-                          message: ''
-                      });
-                  }
-              }}
-              footer={updateDownloadProgress.status === 'error' ? [
+              closable
+              maskClosable
+              keyboard
+              onCancel={hideUpdateDownloadProgress}
+              footer={updateDownloadProgress.status === 'start' || updateDownloadProgress.status === 'downloading' ? [
                   <Button
-                      key="close"
-                      onClick={() => setUpdateDownloadProgress({
-                          open: false,
-                          version: '',
-                          status: 'idle',
-                          percent: 0,
-                          downloaded: 0,
-                          total: 0,
-                          message: ''
-                      })}
+                      key="background"
+                      onClick={hideUpdateDownloadProgress}
                   >
-                      关闭
+                      隐藏到后台
                   </Button>
-              ] : null}
+              ] : (updateDownloadProgress.status === 'done' ? [
+                  <Button key="close" onClick={hideUpdateDownloadProgress}>关闭</Button>,
+                  <Button key="install" type="primary" onClick={handleInstallFromProgress}>
+                      {isMacRuntime ? '打开安装目录' : '安装更新'}
+                  </Button>
+              ] : (updateDownloadProgress.status === 'error' ? [
+                  <Button key="close" onClick={hideUpdateDownloadProgress}>关闭</Button>
+              ] : null))}
           >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <Progress

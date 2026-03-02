@@ -194,6 +194,10 @@ export function MySQLShowCreateTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['MySQLShowCreateTable'](arg1, arg2, arg3);
 }
 
+export function OpenDownloadedUpdateDirectory() {
+  return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
+}
+
 export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
 }
