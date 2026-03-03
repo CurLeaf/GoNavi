@@ -16,6 +16,12 @@ import { ConfigureGlobalProxy, SetWindowTranslucency } from '../wailsjs/go/app/A
 import './App.css';
 
 const { Sider, Content } = Layout;
+const MIN_UI_SCALE = 0.8;
+const MAX_UI_SCALE = 1.25;
+const MIN_FONT_SIZE = 12;
+const MAX_FONT_SIZE = 20;
+const DEFAULT_UI_SCALE = 1.0;
+const DEFAULT_FONT_SIZE = 14;
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,11 +32,28 @@ function App() {
   const setTheme = useStore(state => state.setTheme);
   const appearance = useStore(state => state.appearance);
   const setAppearance = useStore(state => state.setAppearance);
+  const uiScale = useStore(state => state.uiScale);
+  const setUiScale = useStore(state => state.setUiScale);
+  const fontSize = useStore(state => state.fontSize);
+  const setFontSize = useStore(state => state.setFontSize);
   const startupFullscreen = useStore(state => state.startupFullscreen);
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const darkMode = themeMode === 'dark';
+  const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
+  const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
+  const tokenFontSize = Math.round(effectiveFontSize * effectiveUiScale);
+  const tokenFontSizeSM = Math.max(10, Math.round(tokenFontSize * 0.86));
+  const tokenFontSizeLG = Math.max(tokenFontSize + 1, Math.round(tokenFontSize * 1.14));
+  const tokenControlHeight = Math.max(24, Math.round(32 * effectiveUiScale));
+  const tokenControlHeightSM = Math.max(20, Math.round(24 * effectiveUiScale));
+  const tokenControlHeightLG = Math.max(30, Math.round(40 * effectiveUiScale));
+  const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
+  const titleBarHeight = Math.max(28, Math.round(32 * effectiveUiScale));
+  const toolbarHeight = Math.max(32, Math.round(36 * effectiveUiScale));
+  const titleBarButtonWidth = Math.max(40, Math.round(46 * effectiveUiScale));
+  const floatingLogButtonHeight = Math.max(30, Math.round(34 * effectiveUiScale));
   const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
   const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
@@ -834,7 +857,9 @@ function App() {
     document.body.style.backgroundColor = 'transparent';
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+    document.body.style.fontSize = `${effectiveFontSize}px`;
+    document.documentElement.style.setProperty('--gonavi-font-size', `${effectiveFontSize}px`);
+  }, [darkMode, effectiveFontSize]);
 
   useEffect(() => {
       isAboutOpenRef.current = isAboutOpen;
@@ -916,9 +941,16 @@ function App() {
   return (
     <ConfigProvider
         locale={zhCN}
+        componentSize={appComponentSize}
         theme={{
             algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
             token: {
+                fontSize: tokenFontSize,
+                fontSizeSM: tokenFontSizeSM,
+                fontSizeLG: tokenFontSizeLG,
+                controlHeight: tokenControlHeight,
+                controlHeightSM: tokenControlHeightSM,
+                controlHeightLG: tokenControlHeightLG,
                 colorBgLayout: 'transparent',
                 colorBgContainer: darkMode 
                     ? `rgba(29, 29, 29, ${effectiveOpacity})` 
@@ -982,7 +1014,7 @@ function App() {
           <div
             onDoubleClick={handleTitleBarDoubleClick}
             style={{
-                height: 32,
+                height: titleBarHeight,
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
@@ -992,10 +1024,11 @@ function App() {
                 userSelect: 'none',
                 WebkitAppRegion: 'drag', // Wails drag region
                 '--wails-draggable': 'drag',
-                paddingLeft: 16
+                paddingLeft: Math.max(12, Math.round(16 * effectiveUiScale)),
+                fontSize: tokenFontSize
             } as any}
           >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600 }}>
                   {/* Logo can be added here if available */}
                   GoNavi
               </div>
@@ -1007,13 +1040,13 @@ function App() {
                   <Button 
                     type="text" 
                     icon={<MinusOutlined />} 
-                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
                     onClick={() => (window as any).runtime.WindowMinimise()} 
                   />
                   <Button 
                     type="text" 
                     icon={<BorderOutlined />} 
-                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
                     onClick={() => (window as any).runtime.WindowToggleMaximise()} 
                   />
                   <Button 
@@ -1021,7 +1054,7 @@ function App() {
                     icon={<CloseOutlined />} 
                     danger
                     className="titlebar-close-btn"
-                    style={{ height: '100%', borderRadius: 0, width: 46 }} 
+                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
                     onClick={() => (window as any).runtime.Quit()} 
                   />
               </div>
@@ -1029,13 +1062,13 @@ function App() {
 
           <div
             style={{
-                height: 36,
+                height: toolbarHeight,
                 flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'flex-start',
-                gap: 4,
-                padding: '0 8px',
+                gap: Math.max(2, Math.round(4 * effectiveUiScale)),
+                padding: `0 ${Math.max(6, Math.round(8 * effectiveUiScale))}px`,
                 borderBottom: 'none',
                 background: bgMain,
             }}
@@ -1088,13 +1121,13 @@ function App() {
                         onClick={() => setIsLogPanelOpen(!isLogPanelOpen)}
                         style={isLogPanelOpen ? {
                             width: '100%',
-                            height: 34,
+                            height: floatingLogButtonHeight,
                             borderRadius: 999,
                             boxShadow: floatingLogButtonShadow,
                             pointerEvents: 'auto'
                         } : {
                             width: '100%',
-                            height: 34,
+                            height: floatingLogButtonHeight,
                             borderRadius: 999,
                             border: `1px solid ${floatingLogButtonBorderColor}`,
                             color: floatingLogButtonTextColor,
@@ -1217,6 +1250,37 @@ function App() {
           >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '12px 0' }}>
                   <div>
+                      <div style={{ marginBottom: 8, fontWeight: 500 }}>界面缩放 (UI Scale)</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <Slider
+                            min={MIN_UI_SCALE}
+                            max={MAX_UI_SCALE}
+                            step={0.05}
+                            value={effectiveUiScale}
+                            onChange={(v) => setUiScale(Number(v))}
+                            style={{ flex: 1 }}
+                          />
+                          <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+                          * 建议小屏设备设置为 85%-95%
+                      </div>
+                  </div>
+                  <div>
+                      <div style={{ marginBottom: 8, fontWeight: 500 }}>基础字体大小 (Font Size)</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                          <Slider
+                            min={MIN_FONT_SIZE}
+                            max={MAX_FONT_SIZE}
+                            step={1}
+                            value={effectiveFontSize}
+                            onChange={(v) => setFontSize(Number(v))}
+                            style={{ flex: 1 }}
+                          />
+                          <span style={{ width: 56 }}>{effectiveFontSize}px</span>
+                      </div>
+                  </div>
+                  <div>
                       <div style={{ marginBottom: 8, fontWeight: 500 }}>背景不透明度 (Opacity)</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                           <Slider 
@@ -1263,6 +1327,17 @@ function App() {
                       <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
                           * 修改后下次启动生效
                       </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button
+                          onClick={() => {
+                              setUiScale(DEFAULT_UI_SCALE);
+                              setFontSize(DEFAULT_FONT_SIZE);
+                              setAppearance({ opacity: 1.0, blur: 0 });
+                          }}
+                      >
+                          恢复默认
+                      </Button>
                   </div>
               </div>
           </Modal>

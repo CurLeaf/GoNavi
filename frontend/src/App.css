@@ -57,6 +57,29 @@ body[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
     background: #666;
 }
 
+/* Scrollbar styling for light mode (transparent-friendly) */
+body[data-theme='light'] ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+body[data-theme='light'] ::-webkit-scrollbar-track {
+    background: transparent;
+}
+body[data-theme='light'] ::-webkit-scrollbar-corner {
+    background: transparent;
+}
+body[data-theme='light'] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+body[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.30);
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
 /* Ensure body background matches theme to avoid white flashes, but kept transparent for window composition */
 body {
     transition: color 0.3s;
@@ -102,11 +125,13 @@ body[data-theme='dark'] .ant-switch.ant-switch-checked {
     background: #d8a93b !important;
 }
 
-body[data-theme='dark'] .ant-table-tbody > tr.ant-table-row-selected > td {
+body[data-theme='dark'] .ant-table-tbody > tr.ant-table-row-selected > td,
+body[data-theme='dark'] .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell {
     background: rgba(246, 196, 83, 0.18) !important;
 }
 
-body[data-theme='dark'] .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+body[data-theme='dark'] .ant-table-tbody > tr.ant-table-row-selected:hover > td,
+body[data-theme='dark'] .ant-table-tbody .ant-table-row.ant-table-row-selected:hover > .ant-table-cell {
     background: rgba(246, 196, 83, 0.26) !important;
 }
 
