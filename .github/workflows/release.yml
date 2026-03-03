@@ -131,23 +131,83 @@ jobs:
       - name: Install Wails
         run: go install -v github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      - name: Prepare MinGW For DuckDB (Windows)
-        if: ${{ matrix.build_optional_agents && contains(matrix.platform, 'windows') }}
+      - name: Setup MSYS2 Toolchain For DuckDB (Windows AMD64)
+        id: msys2_duckdb
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
+        continue-on-error: true
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc  
+
+      - name: Configure DuckDB CGO Toolchain (Windows AMD64)
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
         shell: pwsh
         run: |
-          $mingwBin = "C:\msys64\mingw64\bin"
-          if (!(Test-Path $mingwBin)) {
-            choco install mingw --yes --no-progress
-            $mingwBin = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          function Find-MingwBin([string[]]$candidates) {
+            foreach ($bin in $candidates) {
+              if ([string]::IsNullOrWhiteSpace($bin)) {
+                continue
+              }
+              $gcc = Join-Path $bin 'gcc.exe'
+              $gxx = Join-Path $bin 'g++.exe'
+              if ((Test-Path $gcc) -and (Test-Path $gxx)) {
+                return $bin
+              }
+            }
+            return $null
           }
-          if (!(Test-Path $mingwBin)) {
-            Write-Error "❌ 未找到 MinGW GCC 路径：$mingwBin"
+
+          $msys2Outcome = "${{ steps.msys2_duckdb.outcome }}"
+          $msys2Location = "${{ steps.msys2_duckdb.outputs['msys2-location'] }}"
+          $candidateBins = @()
+          if (-not [string]::IsNullOrWhiteSpace($msys2Location)) {
+            $candidateBins += Join-Path $msys2Location 'mingw64\bin'
+          }
+          $candidateBins += @(
+            'C:\msys64\mingw64\bin',
+            'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+          )
+          $candidateBins = @($candidateBins | Select-Object -Unique)
+
+          $mingwBin = Find-MingwBin $candidateBins
+          if (-not $mingwBin) {
+            if ($msys2Outcome -ne 'success') {
+              Write-Warning "⚠️ MSYS2 安装步骤结果为 $msys2Outcome，回退到本机探测/Chocolatey 安装 MinGW"
+            } else {
+              Write-Warning "⚠️ MSYS2 已执行，但未找到 gcc/g++，回退到本机探测/Chocolatey 安装 MinGW"
+            }
+
+            choco install mingw --yes --no-progress
+            $mingwBin = Find-MingwBin $candidateBins
+          }
+
+          if (-not $mingwBin) {
+            Write-Error "❌ 未找到可用的 DuckDB 编译器。已检查：$($candidateBins -join ', ')"
             exit 1
           }
+
+          $gcc = (Join-Path $mingwBin 'gcc.exe')
+          $gxx = (Join-Path $mingwBin 'g++.exe')
+
+          if (!(Test-Path $gcc) -or !(Test-Path $gxx)) {
+            Write-Error "❌ DuckDB 编译器缺失：gcc=$gcc g++=$gxx"
+            exit 1
+          }
+
           "$mingwBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          "CC=$mingwBin\gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "CXX=$mingwBin\g++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "✅ 已配置 DuckDB cgo 编译器: $mingwBin"
+          "CC=$gcc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CXX=$gxx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "✅ 已配置 DuckDB cgo 编译器: gcc=$gcc g++=$gxx"
+
+      - name: Verify DuckDB CGO Toolchain (Windows AMD64)
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
+        shell: pwsh
+        run: |
+          & "$env:CC" --version
+          & "$env:CXX" --version
 
       - name: Build
         shell: bash
@@ -175,6 +235,10 @@ jobs:
             BUILD_DRIVER="$DRIVER"
             if [ "$DRIVER" = "doris" ]; then
               BUILD_DRIVER="diros"
+            fi
+            if [ "$DRIVER" = "duckdb" ] && [ "$GOOS" = "windows" ] && [ "$GOARCH" != "amd64" ]; then
+              echo "⚠️ 跳过 DuckDB driver（当前平台 ${GOOS}/${GOARCH} 不受支持，仅支持 windows/amd64）"
+              continue
             fi
             TAG="gonavi_${BUILD_DRIVER}_driver"
             OUTPUT="${DRIVER}-driver-agent-${GOOS}-${GOARCH}"
