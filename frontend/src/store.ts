@@ -199,7 +199,7 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     proxy,
     uri: toTrimmedString(raw.uri).slice(0, MAX_URI_LENGTH),
     hosts: sanitizeAddressList(raw.hosts),
-    topology: raw.topology === 'replica' ? 'replica' : 'single',
+    topology: raw.topology === 'replica' ? 'replica' : (raw.topology === 'cluster' ? 'cluster' : 'single'),
     mysqlReplicaUser: toTrimmedString(raw.mysqlReplicaUser),
     mysqlReplicaPassword: savePassword ? toTrimmedString(raw.mysqlReplicaPassword) : '',
     replicaSet: toTrimmedString(raw.replicaSet),
