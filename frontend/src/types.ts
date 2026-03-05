@@ -22,6 +22,10 @@ export interface ConnectionConfig {
   password?: string;
   savePassword?: boolean;
   database?: string;
+  useSSL?: boolean;
+  sslMode?: 'preferred' | 'required' | 'skip-verify' | 'disable';
+  sslCertPath?: string;
+  sslKeyPath?: string;
   useSSH?: boolean;
   ssh?: SSHConfig;
   useProxy?: boolean;
@@ -59,6 +63,12 @@ export interface SavedConnection {
   config: ConnectionConfig;
   includeDatabases?: string[];
   includeRedisDatabases?: number[]; // Redis databases to show (0-15)
+}
+
+export interface ConnectionTag {
+  id: string;
+  name: string;
+  connectionIds: string[];
 }
 
 export interface ColumnDefinition {

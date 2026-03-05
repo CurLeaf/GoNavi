@@ -376,12 +376,21 @@ func (a *App) MySQLShowCreateTable(config connection.ConnectionConfig, dbName st
 }
 
 func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
+	return a.DBQueryWithCancel(config, dbName, query, "")
+}
+
+func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
+
+	// Generate query ID if not provided
+	if queryID == "" {
+		queryID = generateQueryID()
+	}
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		logger.Error(err, "DBQuery 获取连接失败：%s", formatConnSummary(runConfig))
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
@@ -392,41 +401,80 @@ func (a *App) DBQuery(config connection.ConnectionConfig, dbName string, query s
 	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
 	defer cancel()
 
+	// Store cancel function for potential manual cancellation
+	a.queryMu.Lock()
+	a.runningQueries[queryID] = queryContext{
+		cancel:  cancel,
+		started: time.Now(),
+	}
+	a.queryMu.Unlock()
+
+	// Ensure query is removed from tracking when done
+	defer func() {
+		a.queryMu.Lock()
+		delete(a.runningQueries, queryID)
+		a.queryMu.Unlock()
+	}()
+
 	lowerQuery := strings.TrimSpace(strings.ToLower(query))
 	isReadQuery := strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "show") || strings.HasPrefix(lowerQuery, "describe") || strings.HasPrefix(lowerQuery, "explain")
 	// MongoDB JSON 命令中的 find/count/aggregate 也属于读查询
 	if !isReadQuery && strings.ToLower(strings.TrimSpace(runConfig.Type)) == "mongodb" && strings.HasPrefix(strings.TrimSpace(query), "{") {
 		isReadQuery = true
 	}
-	if isReadQuery {
-		var data []map[string]interface{}
-		var columns []string
-		if q, ok := dbInst.(interface {
+
+	runReadQuery := func(inst db.Database) ([]map[string]interface{}, []string, error) {
+		if q, ok := inst.(interface {
 			QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 		}); ok {
-			data, columns, err = q.QueryContext(ctx, query)
-		} else {
-			data, columns, err = dbInst.Query(query)
+			return q.QueryContext(ctx, query)
+		}
+		return inst.Query(query)
+	}
+
+	runExecQuery := func(inst db.Database) (int64, error) {
+		if e, ok := inst.(interface {
+			ExecContext(context.Context, string) (int64, error)
+		}); ok {
+			return e.ExecContext(ctx, query)
+		}
+		return inst.Exec(query)
+	}
+
+	if isReadQuery {
+		data, columns, err := runReadQuery(dbInst)
+		if err != nil && shouldRefreshCachedConnection(err) {
+			if a.invalidateCachedDatabase(runConfig, err) {
+				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+				if retryErr != nil {
+					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+					return connection.QueryResult{Success: false, Message: retryErr.Error()}
+				}
+				data, columns, err = runReadQuery(retryInst)
+			}
 		}
 		if err != nil {
 			logger.Error(err, "DBQuery 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			return connection.QueryResult{Success: false, Message: err.Error()}
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
-		return connection.QueryResult{Success: true, Data: data, Fields: columns}
+		return connection.QueryResult{Success: true, Data: data, Fields: columns, QueryID: queryID}
 	} else {
-		var affected int64
-		if e, ok := dbInst.(interface {
-			ExecContext(context.Context, string) (int64, error)
-		}); ok {
-			affected, err = e.ExecContext(ctx, query)
-		} else {
-			affected, err = dbInst.Exec(query)
+		affected, err := runExecQuery(dbInst)
+		if err != nil && shouldRefreshCachedConnection(err) {
+			if a.invalidateCachedDatabase(runConfig, err) {
+				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+				if retryErr != nil {
+					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+					return connection.QueryResult{Success: false, Message: retryErr.Error()}
+				}
+				affected, err = runExecQuery(retryInst)
+			}
 		}
 		if err != nil {
 			logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			return connection.QueryResult{Success: false, Message: err.Error()}
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
-		return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}}
+		return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
 	}
 }
 
@@ -500,15 +548,26 @@ func sqlSnippet(query string) string {
 }
 
 func (a *App) DBGetDatabases(config connection.ConnectionConfig) connection.QueryResult {
-	dbInst, err := a.getDatabase(config)
+	runConfig := normalizeRunConfig(config, "")
+	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
-		logger.Error(err, "DBGetDatabases 获取连接失败：%s", formatConnSummary(config))
+		logger.Error(err, "DBGetDatabases 获取连接失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	dbs, err := dbInst.GetDatabases()
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetDatabases 重建连接失败：%s", formatConnSummary(runConfig))
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			dbs, err = retryInst.GetDatabases()
+		}
+	}
 	if err != nil {
-		logger.Error(err, "DBGetDatabases 获取数据库列表失败：%s", formatConnSummary(config))
+		logger.Error(err, "DBGetDatabases 获取数据库列表失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -530,6 +589,16 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 	}
 
 	tables, err := dbInst.GetTables(dbName)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetTables 重建连接失败：%s", formatConnSummary(runConfig))
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			tables, err = retryInst.GetTables(dbName)
+		}
+	}
 	if err != nil {
 		logger.Error(err, "DBGetTables 获取表列表失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error()}

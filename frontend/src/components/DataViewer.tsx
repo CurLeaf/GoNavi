@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { message } from 'antd';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { buildOrderBySQL, buildWhereSQL, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 
 type ViewerPaginationState = {
@@ -151,6 +152,37 @@ const reverseOrderBySQL = (orderBySQL: string): string => {
   return ` ORDER BY ${parts.join(', ')}`;
 };
 
+type ViewerFilterSnapshot = {
+  showFilter: boolean;
+  conditions: FilterCondition[];
+};
+
+const viewerFilterSnapshotsByTab = new Map<string, ViewerFilterSnapshot>();
+
+const normalizeViewerFilterConditions = (conditions: FilterCondition[] | undefined): FilterCondition[] => {
+  if (!Array.isArray(conditions)) return [];
+  return conditions.map((cond) => ({
+    id: Number.isFinite(Number(cond?.id)) ? Number(cond?.id) : undefined,
+    enabled: cond?.enabled !== false,
+    logic: String(cond?.logic || '').trim().toUpperCase() === 'OR' ? 'OR' : 'AND',
+    column: String(cond?.column || ''),
+    op: String(cond?.op || '='),
+    value: String(cond?.value ?? ''),
+    value2: String(cond?.value2 ?? ''),
+  }));
+};
+
+const getViewerFilterSnapshot = (tabId: string): ViewerFilterSnapshot => {
+  const cached = viewerFilterSnapshotsByTab.get(String(tabId || '').trim());
+  if (!cached) {
+    return { showFilter: false, conditions: [] };
+  }
+  return {
+    showFilter: cached.showFilter === true,
+    conditions: normalizeViewerFilterConditions(cached.conditions),
+  };
+};
+
 const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [data, setData] = useState<any[]>([]);
   const [columnNames, setColumnNames] = useState<string[]>([]);
@@ -185,13 +217,26 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(null);
   
-  const [showFilter, setShowFilter] = useState(false);
-  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>([]);
+  const [showFilter, setShowFilter] = useState<boolean>(() => getViewerFilterSnapshot(tab.id).showFilter);
+  const [filterConditions, setFilterConditions] = useState<FilterCondition[]>(() => getViewerFilterSnapshot(tab.id).conditions);
   const duckdbSafeSelectCacheRef = useRef<Record<string, string>>({});
   const currentConnConfig = connections.find(c => c.id === tab.connectionId)?.config;
   const currentConnCaps = getDataSourceCapabilities(currentConnConfig);
   const currentConnType = currentConnCaps.type;
   const forceReadOnly = currentConnCaps.forceReadOnlyQueryResult;
+
+  useEffect(() => {
+    const snapshot = getViewerFilterSnapshot(tab.id);
+    setShowFilter(snapshot.showFilter);
+    setFilterConditions(snapshot.conditions);
+  }, [tab.id]);
+
+  useEffect(() => {
+    viewerFilterSnapshotsByTab.set(tab.id, {
+      showFilter,
+      conditions: normalizeViewerFilterConditions(filterConditions),
+    });
+  }, [tab.id, showFilter, filterConditions]);
 
   useEffect(() => {
     setPkColumns([]);
@@ -315,42 +360,67 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
 
     const dbName = tab.dbName || '';
     const tableName = tab.tableName || '';
+    const isMongoDB = dbTypeLower === 'mongodb';
+    let mongoFilter: Record<string, unknown> | undefined;
+    if (isMongoDB) {
+        try {
+            mongoFilter = buildMongoFilter(filterConditions);
+        } catch (e: any) {
+            message.error(`Mongo 筛选条件无效：${String(e?.message || e || '解析失败')}`);
+            if (fetchSeqRef.current === seq) setLoading(false);
+            return;
+        }
+    }
 
-    const whereSQL = buildWhereSQL(dbType, filterConditions);
-
-    const countSql = `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-    
-    const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-    const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
-    let sql = `${baseSql}${orderBySQL}`;
+    const whereSQL = isMongoDB
+      ? JSON.stringify(mongoFilter || {})
+      : buildWhereSQL(dbType, filterConditions);
+    const countSql = isMongoDB
+      ? buildMongoCountCommand(tableName, mongoFilter || {})
+      : `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+    const orderBySQL = isMongoDB ? '' : buildOrderBySQL(dbType, sortInfo, pkColumns);
     const totalRows = Number(pagination.total);
     const hasFiniteTotal = Number.isFinite(totalRows) && totalRows >= 0;
     const totalKnown = pagination.totalKnown && hasFiniteTotal;
     const totalPages = hasFiniteTotal ? Math.max(1, Math.ceil(totalRows / size)) : 0;
     const currentPage = totalPages > 0 ? Math.min(Math.max(1, page), totalPages) : Math.max(1, page);
     const offset = (currentPage - 1) * size;
-    const isClickHouse = dbTypeLower === 'clickhouse';
+    const isClickHouse = !isMongoDB && dbTypeLower === 'clickhouse';
     const reverseOrderSQL = isClickHouse ? reverseOrderBySQL(orderBySQL) : '';
     let useClickHouseReversePagination = false;
     let clickHouseReverseLimit = 0;
     let clickHouseReverseHasMore = false;
-    // ClickHouse 深分页在超大 OFFSET 下容易超时。对于总数已知且存在 ORDER BY 的场景，
-    // 当“尾部偏移”小于“头部偏移”时，改为反向 ORDER BY + 小 OFFSET，并在前端翻转结果。
-    if (isClickHouse && totalKnown && offset > 0 && reverseOrderSQL) {
-        const pageRowCount = Math.max(0, Math.min(size, totalRows - offset));
-        if (pageRowCount > 0) {
-            const tailOffset = Math.max(0, totalRows - (offset + pageRowCount));
-            if (tailOffset < offset) {
-                sql = `${baseSql}${reverseOrderSQL} LIMIT ${pageRowCount} OFFSET ${tailOffset}`;
-                useClickHouseReversePagination = true;
-                clickHouseReverseLimit = pageRowCount;
-                clickHouseReverseHasMore = currentPage < totalPages;
+    let sql = '';
+    if (isMongoDB) {
+        const mongoSort = buildMongoSort(sortInfo, pkColumns);
+        sql = buildMongoFindCommand({
+            collection: tableName,
+            filter: mongoFilter || {},
+            sort: mongoSort,
+            limit: size + 1,
+            skip: offset,
+        });
+    } else {
+        const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+        sql = `${baseSql}${orderBySQL}`;
+        // ClickHouse 深分页在超大 OFFSET 下容易超时。对于总数已知且存在 ORDER BY 的场景，
+        // 当“尾部偏移”小于“头部偏移”时，改为反向 ORDER BY + 小 OFFSET，并在前端翻转结果。
+        if (isClickHouse && totalKnown && offset > 0 && reverseOrderSQL) {
+            const pageRowCount = Math.max(0, Math.min(size, totalRows - offset));
+            if (pageRowCount > 0) {
+                const tailOffset = Math.max(0, totalRows - (offset + pageRowCount));
+                if (tailOffset < offset) {
+                    sql = `${baseSql}${reverseOrderSQL} LIMIT ${pageRowCount} OFFSET ${tailOffset}`;
+                    useClickHouseReversePagination = true;
+                    clickHouseReverseLimit = pageRowCount;
+                    clickHouseReverseHasMore = currentPage < totalPages;
+                }
             }
         }
-    }
-    if (!useClickHouseReversePagination) {
-        // 大表性能：打开表不阻塞在 COUNT(*)，先通过多取 1 条判断是否还有下一页；总数在后台统计并异步回填。
-        sql += ` LIMIT ${size + 1} OFFSET ${offset}`;
+        if (!useClickHouseReversePagination) {
+            // 大表性能：打开表不阻塞在 COUNT(*)，先通过多取 1 条判断是否还有下一页；总数在后台统计并异步回填。
+            sql += ` LIMIT ${size + 1} OFFSET ${offset}`;
+        }
     }
 
     const requestStartTime = Date.now();
@@ -676,6 +746,24 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const handleToggleFilter = useCallback(() => setShowFilter(prev => !prev), []);
   const handleApplyFilter = useCallback((conditions: FilterCondition[]) => setFilterConditions(conditions), []);
 
+  const exportSqlWithFilter = useMemo(() => {
+    const tableName = String(tab.tableName || '').trim();
+    const dbType = String(currentConnConfig?.type || '').trim();
+    if (!tableName || !dbType) return '';
+
+    const whereSQL = buildWhereSQL(dbType, filterConditions);
+    if (!whereSQL) return '';
+
+    let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+    sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
+    const normalizedType = dbType.toLowerCase();
+    const hasExplicitSort = !!sortInfo?.columnKey && (sortInfo?.order === 'ascend' || sortInfo?.order === 'descend');
+    if (hasExplicitSort && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+      sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
+    }
+    return sql;
+  }, [tab.tableName, currentConnConfig?.type, filterConditions, sortInfo, pkColumns]);
+
   useEffect(() => {
     fetchData(1, pagination.pageSize); 
   }, [tab, sortInfo, filterConditions]); // Initial load and re-load on sort/filter
@@ -700,8 +788,10 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
           showFilter={showFilter}
           onToggleFilter={handleToggleFilter}
           onApplyFilter={handleApplyFilter}
+          appliedFilterConditions={filterConditions}
           readOnly={forceReadOnly}
           sortInfoExternal={sortInfo}
+          exportSqlWithFilter={exportSqlWithFilter || undefined}
       />
     </div>
   );

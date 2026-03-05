@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag } from './types';
+import {
+  ShortcutAction,
+  ShortcutBinding,
+  ShortcutOptions,
+  DEFAULT_SHORTCUT_OPTIONS,
+  cloneShortcutOptions,
+  sanitizeShortcutOptions,
+} from './utils/shortcuts';
 
 const DEFAULT_APPEARANCE = { opacity: 1.0, blur: 0 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -17,7 +25,7 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
-const PERSIST_VERSION = 4;
+const PERSIST_VERSION = 5;
 const DEFAULT_CONNECTION_TYPE = 'mysql';
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
@@ -47,6 +55,23 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   'sqlite',
   'duckdb',
   'custom',
+]);
+const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
+  'mysql',
+  'mariadb',
+  'diros',
+  'sphinx',
+  'dameng',
+  'clickhouse',
+  'postgres',
+  'sqlserver',
+  'oracle',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'mongodb',
+  'redis',
+  'tdengine',
 ]);
 
 const getDefaultPortByType = (type: string): number => {
@@ -177,6 +202,16 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   const defaultPort = getDefaultPortByType(type);
   const savePassword = typeof raw.savePassword === 'boolean' ? raw.savePassword : true;
   const mongoSrv = !!raw.mongoSrv;
+  const sslCapable = SSL_SUPPORTED_CONNECTION_TYPES.has(type);
+  const sslModeRaw = toTrimmedString(raw.sslMode, 'preferred').toLowerCase();
+  const sslMode: 'preferred' | 'required' | 'skip-verify' | 'disable' =
+    sslModeRaw === 'required'
+      ? 'required'
+      : sslModeRaw === 'skip-verify'
+        ? 'skip-verify'
+        : sslModeRaw === 'disable'
+          ? 'disable'
+          : 'preferred';
 
   const sshRaw = (raw.ssh && typeof raw.ssh === 'object') ? raw.ssh as Record<string, unknown> : {};
   const ssh = {
@@ -206,6 +241,10 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     password: savePassword ? toTrimmedString(raw.password) : '',
     savePassword,
     database: toTrimmedString(raw.database),
+    useSSL: sslCapable ? !!raw.useSSL : false,
+    sslMode: sslCapable ? sslMode : 'disable',
+    sslCertPath: sslCapable ? toTrimmedString(raw.sslCertPath) : '',
+    sslKeyPath: sslCapable ? toTrimmedString(raw.sslKeyPath) : '',
     useSSH: !!raw.useSSH,
     ssh,
     useProxy: !!raw.useProxy,
@@ -293,6 +332,27 @@ const sanitizeConnections = (value: unknown): SavedConnection[] => {
   return result;
 };
 
+const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
+  if (!Array.isArray(value)) return [];
+  const result: ConnectionTag[] = [];
+  const idSet = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const raw = entry as Record<string, unknown>;
+    const id = toTrimmedString(raw.id, `tag-${index + 1}`) || `tag-${index + 1}`;
+    if (idSet.has(id)) return;
+    idSet.add(id);
+    
+    const name = toTrimmedString(raw.name, `标签-${index + 1}`) || `标签-${index + 1}`;
+    const connectionIds = sanitizeStringArray(raw.connectionIds, 256);
+    
+    result.push({ id, name, connectionIds });
+  });
+
+  return result;
+};
+
 const isLegacyDefaultAppearance = (appearance: Partial<{ opacity: number; blur: number }> | undefined): boolean => {
   if (!appearance) {
     return true;
@@ -325,6 +385,7 @@ export interface GlobalProxyConfig extends ProxyConfig {
 
 interface AppState {
   connections: SavedConnection[];
+  connectionTags: ConnectionTag[];
   tabs: TabData[];
   activeTabId: string | null;
   activeContext: { connectionId: string; dbName: string } | null;
@@ -337,6 +398,7 @@ interface AppState {
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: 'upper' | 'lower' };
   queryOptions: QueryOptions;
+  shortcutOptions: ShortcutOptions;
   sqlLogs: SqlLog[];
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, 'name' | 'frequency'>;
@@ -344,6 +406,12 @@ interface AppState {
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
   removeConnection: (id: string) => void;
+
+  addConnectionTag: (tag: ConnectionTag) => void;
+  updateConnectionTag: (tag: ConnectionTag) => void;
+  removeConnectionTag: (id: string) => void;
+  moveConnectionToTag: (connectionId: string, targetTagId: string | null) => void;
+  reorderTags: (tagIds: string[]) => void;
 
   addTab: (tab: TabData) => void;
   closeTab: (id: string) => void;
@@ -368,6 +436,8 @@ interface AppState {
   setGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
+  updateShortcut: (action: ShortcutAction, binding: Partial<ShortcutBinding>) => void;
+  resetShortcutOptions: () => void;
 
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
@@ -496,6 +566,7 @@ export const useStore = create<AppState>()(
   persist(
     (set) => ({
       connections: [],
+      connectionTags: [],
       tabs: [],
       activeTabId: null,
       activeContext: null,
@@ -508,6 +579,7 @@ export const useStore = create<AppState>()(
       globalProxy: { ...DEFAULT_GLOBAL_PROXY },
       sqlFormatOptions: { keywordCase: 'upper' },
       queryOptions: { maxRows: 5000, showColumnComment: true, showColumnType: true },
+      shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlLogs: [],
       tableAccessCount: {},
       tableSortPreference: {},
@@ -516,7 +588,46 @@ export const useStore = create<AppState>()(
       updateConnection: (conn) => set((state) => ({
           connections: state.connections.map(c => c.id === conn.id ? conn : c)
       })),
-      removeConnection: (id) => set((state) => ({ connections: state.connections.filter(c => c.id !== id) })),
+      removeConnection: (id) => set((state) => ({ 
+          connections: state.connections.filter(c => c.id !== id),
+          connectionTags: state.connectionTags.map(tag => ({
+            ...tag,
+            connectionIds: tag.connectionIds.filter(cid => cid !== id)
+          }))
+      })),
+
+      addConnectionTag: (tag) => set((state) => ({ connectionTags: [...state.connectionTags, tag] })),
+      updateConnectionTag: (tag) => set((state) => ({
+          connectionTags: state.connectionTags.map(t => t.id === tag.id ? tag : t)
+      })),
+      removeConnectionTag: (id) => set((state) => ({ 
+          connectionTags: state.connectionTags.filter(t => t.id !== id) 
+      })),
+      moveConnectionToTag: (connectionId, targetTagId) => set((state) => {
+          const newTags = state.connectionTags.map(tag => {
+              //先从所有tag中移除该connection
+              const filteredIds = tag.connectionIds.filter(id => id !== connectionId);
+              if (tag.id === targetTagId) {
+                  return { ...tag, connectionIds: [...filteredIds, connectionId] };
+              }
+              return { ...tag, connectionIds: filteredIds };
+          });
+          return { connectionTags: newTags };
+      }),
+      reorderTags: (tagIds) => set((state) => {
+          const tagMap = new Map(state.connectionTags.map(t => [t.id, t]));
+          const newTags: ConnectionTag[] = [];
+          tagIds.forEach(id => {
+              const tag = tagMap.get(id);
+              if (tag) {
+                  newTags.push(tag);
+                  tagMap.delete(id);
+              }
+          });
+          // 追加未指定的tag（如果有的话）
+          newTags.push(...Array.from(tagMap.values()));
+          return { connectionTags: newTags };
+      }),
 
       addTab: (tab) => set((state) => {
         const index = state.tabs.findIndex(t => t.id === tab.id);
@@ -640,6 +751,16 @@ export const useStore = create<AppState>()(
       setGlobalProxy: (proxy) => set((state) => ({ globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }) })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
+      updateShortcut: (action, binding) => set((state) => ({
+        shortcutOptions: {
+          ...state.shortcutOptions,
+          [action]: {
+            ...state.shortcutOptions[action],
+            ...binding,
+          },
+        },
+      })),
+      resetShortcutOptions: () => set({ shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS) }),
 
       addSqlLog: (log) => set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
       clearSqlLogs: () => set({ sqlLogs: [] }),
@@ -672,6 +793,11 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
+        if (version < 5) {
+          nextState.connectionTags = sanitizeConnectionTags(state.connectionTags);
+        } else {
+          nextState.connectionTags = sanitizeConnectionTags(state.connectionTags);
+        }
         nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
         nextState.theme = sanitizeTheme(state.theme);
         nextState.appearance = sanitizeAppearance(state.appearance, version);
@@ -681,6 +807,7 @@ export const useStore = create<AppState>()(
         nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.shortcutOptions = sanitizeShortcutOptions(state.shortcutOptions);
         nextState.tableAccessCount = sanitizeTableAccessCount(state.tableAccessCount);
         nextState.tableSortPreference = sanitizeTableSortPreference(state.tableSortPreference);
         return nextState as AppState;
@@ -691,6 +818,7 @@ export const useStore = create<AppState>()(
           ...currentState,
           ...state,
           connections: sanitizeConnections(state.connections),
+          connectionTags: sanitizeConnectionTags(state.connectionTags),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           theme: sanitizeTheme(state.theme),
           appearance: sanitizeAppearance(state.appearance, PERSIST_VERSION),
@@ -700,12 +828,14 @@ export const useStore = create<AppState>()(
           globalProxy: sanitizeGlobalProxy(state.globalProxy),
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
+          shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
           tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
         };
       },
       partialize: (state) => ({
         connections: state.connections,
+        connectionTags: state.connectionTags,
         savedQueries: state.savedQueries,
         theme: state.theme,
         appearance: state.appearance,
@@ -715,6 +845,7 @@ export const useStore = create<AppState>()(
         globalProxy: state.globalProxy,
         sqlFormatOptions: state.sqlFormatOptions,
         queryOptions: state.queryOptions,
+        shortcutOptions: state.shortcutOptions,
         tableAccessCount: state.tableAccessCount,
         tableSortPreference: state.tableSortPreference
       }), // Don't persist logs

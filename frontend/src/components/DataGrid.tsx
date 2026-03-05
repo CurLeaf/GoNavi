@@ -537,6 +537,7 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
                 { key: 'exp-xlsx', label: 'Excel', onClick: () => handleExportSelected('xlsx', record) },
                 { key: 'exp-json', label: 'JSON', onClick: () => handleExportSelected('json', record) },
                 { key: 'exp-md', label: 'Markdown', onClick: () => handleExportSelected('md', record) },
+                { key: 'exp-html', label: 'HTML', onClick: () => handleExportSelected('html', record) },
             ]
         }
     ];
@@ -577,7 +578,9 @@ interface DataGridProps {
     // Filtering
     showFilter?: boolean;
     onToggleFilter?: () => void;
+    exportSqlWithFilter?: string;
     onApplyFilter?: (conditions: GridFilterCondition[]) => void;
+    appliedFilterConditions?: FilterCondition[];
 }
 
 type GridFilterCondition = FilterCondition & {
@@ -595,9 +598,9 @@ type ColumnMeta = {
     comment: string;
 };
 
-const DataGrid: React.FC<DataGridProps> = ({ 
+const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], readOnly = false,
-    onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, onApplyFilter
+    onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions
 }) => {
   const connections = useStore(state => state.connections);
   const addSqlLog = useStore(state => state.addSqlLog);
@@ -620,6 +623,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const isQueryResultExport = exportScope === 'queryResult';
   const canImport = exportScope === 'table' && !!tableName;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
+  const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
+  const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
   // Background Helper
   const getBg = (darkHex: string) => {
@@ -1060,9 +1065,39 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [modifiedRows, setModifiedRows] = useState<Record<string, any>>({});
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
 
+  const normalizeFilterLogic = useCallback((logic: unknown): 'AND' | 'OR' => {
+      return String(logic || '').trim().toUpperCase() === 'OR' ? 'OR' : 'AND';
+  }, []);
+
+  const normalizeGridFilterConditions = useCallback((conditions?: FilterCondition[]): GridFilterCondition[] => {
+      if (!Array.isArray(conditions)) return [];
+      return conditions.map((cond, index) => {
+          const fallbackId = index + 1;
+          const nextId = Number.isFinite(Number(cond?.id)) ? Number(cond?.id) : fallbackId;
+          const op = String(cond?.op || '=');
+          const rawColumn = String(cond?.column || '');
+          return {
+              id: nextId,
+              enabled: cond?.enabled !== false,
+              logic: normalizeFilterLogic(cond?.logic),
+              column: rawColumn || (op === 'CUSTOM' ? '' : String(columnNames[0] || '')),
+              op,
+              value: String(cond?.value ?? ''),
+              value2: String(cond?.value2 ?? ''),
+          };
+      });
+  }, [columnNames, normalizeFilterLogic]);
+
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
+
+  useEffect(() => {
+      const nextConditions = normalizeGridFilterConditions(appliedFilterConditions);
+      setFilterConditions(nextConditions);
+      const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
+      setNextFilterId(Math.max(1, maxId + 1));
+  }, [appliedFilterConditions, normalizeGridFilterConditions]);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
@@ -2481,6 +2516,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   };
 
+  const handleExportFilteredAll = async (format: string) => {
+      if (!connectionId || !tableName) return;
+      if (!filteredExportSql) {
+          message.warning('当前未应用筛选条件');
+          return;
+      }
+      if (!supportsSqlQueryExport) {
+          message.error('当前数据源不支持按筛选结果导出');
+          return;
+      }
+      if (hasChanges) {
+          message.warning("当前存在未提交修改，筛选结果导出基于数据库已提交数据。");
+      }
+
+      await exportByQuery(filteredExportSql, format, `${tableName || 'export'}_filtered`);
+  };
+
   const handleImport = async () => {
       if (!connectionId || !tableName) return;
       const config = buildConnConfig();
@@ -2526,6 +2578,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       { value: 'NOT_IN', label: '不在列表' },
       { value: 'CUSTOM', label: '[自定义]' },
   ]), []);
+  const filterLogicOptions = useMemo(() => ([
+      { value: 'AND', label: '且 (AND)' },
+      { value: 'OR', label: '或 (OR)' },
+  ]), []);
 
   const isNoValueOp = useCallback((op: string) => (
       op === 'IS_NULL' || op === 'IS_NOT_NULL' || op === 'IS_EMPTY' || op === 'IS_NOT_EMPTY'
@@ -2534,7 +2590,18 @@ const DataGrid: React.FC<DataGridProps> = ({
   const isListOp = useCallback((op: string) => op === 'IN' || op === 'NOT_IN', []);
 
   const addFilter = () => {
-      setFilterConditions([...filterConditions, { id: nextFilterId, enabled: true, column: columnNames[0] || '', op: '=', value: '', value2: '' }]);
+      setFilterConditions([
+          ...filterConditions,
+          {
+              id: nextFilterId,
+              enabled: true,
+              logic: 'AND',
+              column: columnNames[0] || '',
+              op: '=',
+              value: '',
+              value2: '',
+          }
+      ]);
       setNextFilterId(nextFilterId + 1);
   };
   const updateFilter = (id: number, field: keyof GridFilterCondition, val: string | boolean) => {
@@ -2562,11 +2629,28 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (onApplyFilter) onApplyFilter(filterConditions);
   };
 
-  const exportMenu: MenuProps['items'] = [
+  const exportMenu: MenuProps['items'] = hasFilteredExportSql ? [
+      { type: 'group', label: '筛选结果', children: [
+          { key: 'filtered-csv', label: 'CSV', onClick: () => handleExportFilteredAll('csv') },
+          { key: 'filtered-xlsx', label: 'Excel (XLSX)', onClick: () => handleExportFilteredAll('xlsx') },
+          { key: 'filtered-json', label: 'JSON', onClick: () => handleExportFilteredAll('json') },
+          { key: 'filtered-md', label: 'Markdown', onClick: () => handleExportFilteredAll('md') },
+          { key: 'filtered-html', label: 'HTML', onClick: () => handleExportFilteredAll('html') },
+      ]},
+      { type: 'divider' },
+      { type: 'group', label: '全表', children: [
+          { key: 'table-csv', label: 'CSV', onClick: () => handleExport('csv') },
+          { key: 'table-xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
+          { key: 'table-json', label: 'JSON', onClick: () => handleExport('json') },
+          { key: 'table-md', label: 'Markdown', onClick: () => handleExport('md') },
+          { key: 'table-html', label: 'HTML', onClick: () => handleExport('html') },
+      ]},
+  ] : [
       { key: 'csv', label: 'CSV', onClick: () => handleExport('csv') },
       { key: 'xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
       { key: 'json', label: 'JSON', onClick: () => handleExport('json') },
       { key: 'md', label: 'Markdown', onClick: () => handleExport('md') },
+      { key: 'html', label: 'HTML', onClick: () => handleExport('html') },
   ];
 
   const columnInfoSettingContent = (
@@ -2705,29 +2789,31 @@ const DataGrid: React.FC<DataGridProps> = ({
       horizontalSyncSourceRef.current = '';
   }, []);
 
-  const handleExternalHorizontalWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+  // 非虚拟模式：外部水平滚动条的 wheel 处理（通过原生事件绑定，确保 preventDefault 生效）
+  useEffect(() => {
       const externalScroll = externalHScrollRef.current;
-      if (!(externalScroll instanceof HTMLDivElement)) {
-          return;
-      }
-      const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      if (!Number.isFinite(dominantDelta) || Math.abs(dominantDelta) < 0.5) {
-          return;
-      }
+      if (!externalScroll || !horizontalScrollVisible) return;
 
-      const maxScrollLeft = Math.max(0, externalScroll.scrollWidth - externalScroll.clientWidth);
-      if (maxScrollLeft <= 0) {
-          return;
-      }
+      const handleExternalWheel = (e: WheelEvent) => {
+          // 鼠标在水平滚动条区域时，始终阻止垂直滚动冒泡
+          e.preventDefault();
+          e.stopPropagation();
 
-      const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, externalScroll.scrollLeft + dominantDelta));
-      if (Math.abs(nextScrollLeft - externalScroll.scrollLeft) < 0.5) {
-          return;
-      }
+          const dominantDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+          if (!Number.isFinite(dominantDelta) || Math.abs(dominantDelta) < 0.5) return;
 
-      event.preventDefault();
-      externalScroll.scrollLeft = nextScrollLeft;
-  }, []);
+          const maxScrollLeft = Math.max(0, externalScroll.scrollWidth - externalScroll.clientWidth);
+          if (maxScrollLeft <= 0) return;
+
+          const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, externalScroll.scrollLeft + dominantDelta));
+          externalScroll.scrollLeft = nextScrollLeft;
+      };
+
+      externalScroll.addEventListener('wheel', handleExternalWheel, { passive: false, capture: true });
+      return () => {
+          externalScroll.removeEventListener('wheel', handleExternalWheel, { capture: true } as EventListenerOptions);
+      };
+  }, [horizontalScrollVisible]);
 
   useEffect(() => {
       if (viewMode !== 'table') return;
@@ -2735,19 +2821,24 @@ const DataGrid: React.FC<DataGridProps> = ({
       return () => cancelAnimationFrame(rafId);
   }, [viewMode, totalWidth, mergedDisplayData.length, recalculateTableMetrics]);
 
-  // 虚拟模式下，为 rc-virtual-list 的内置水平滚动条添加鼠标滚轮支持
-  // rc-virtual-list 的 ScrollBar 组件原生只支持拖拽，不支持 wheel 事件
-  // 方案：使用 MutationObserver 发现滚动条元素后直接绑定 wheel 事件
+  // 虚拟模式下，在容器级别监听 wheel 事件，当鼠标在底部水平滚动条区域时拦截并转为水平滚动
   useEffect(() => {
       if (viewMode !== 'table' || !enableVirtual) return;
       const container = tableContainerRef.current;
       if (!container) return;
 
-      let currentScrollbarEl: HTMLElement | null = null;
+      // 滚动条区域高度：滚动条高度 + 间距 + 容错
+      const scrollbarZoneHeight = floatingScrollbarHeight + floatingScrollbarGap + 8;
 
-      const handleScrollbarWheel = (e: WheelEvent) => {
-          const innerEl = container.querySelector('.rc-virtual-list-holder-inner') as HTMLElement | null;
-          const holderEl = container.querySelector('.rc-virtual-list-holder') as HTMLElement | null;
+      const handleContainerWheel = (e: WheelEvent) => {
+          // 判断鼠标是否在底部滚动条区域
+          const containerRect = container.getBoundingClientRect();
+          if (e.clientY < containerRect.bottom - scrollbarZoneHeight) return;
+
+          // 适配 antd 的虚拟列表类名
+          const holderEl = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLElement | null;
+          const innerEl = holderEl?.querySelector('.ant-table-tbody-virtual-holder-inner') as HTMLElement | null;
+          
           if (!innerEl || !holderEl) return;
 
           const dominantDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
@@ -2769,12 +2860,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           innerEl.style.marginLeft = `${-newOffset}px`;
 
           // 同步 scrollbar thumb 位置
-          if (currentScrollbarEl && maxScroll > 0) {
-              const thumbEl = currentScrollbarEl.querySelector('[class*="scrollbar-thumb"]') as HTMLElement | null;
+          const scrollbarEl = container.querySelector('.ant-table-tbody-virtual-scrollbar-horizontal') as HTMLElement | null;
+          if (scrollbarEl && maxScroll > 0) {
+              const thumbEl = scrollbarEl.querySelector('[class*="scrollbar-thumb"]') as HTMLElement | null;
               if (thumbEl) {
                   const ratio = newOffset / maxScroll;
                   const thumbWidth = parseFloat(thumbEl.style.width) || thumbEl.offsetWidth;
-                  const trackWidth = currentScrollbarEl.clientWidth;
+                  const trackWidth = scrollbarEl.clientWidth;
                   const thumbMaxOffset = trackWidth - thumbWidth;
                   thumbEl.style.left = `${ratio * thumbMaxOffset}px`;
               }
@@ -2787,33 +2879,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
       };
 
-      const bindScrollbar = () => {
-          const el = container.querySelector('.ant-table-tbody-virtual-scrollbar-horizontal') as HTMLElement | null;
-          if (el && el !== currentScrollbarEl) {
-              if (currentScrollbarEl) {
-                  currentScrollbarEl.removeEventListener('wheel', handleScrollbarWheel);
-              }
-              currentScrollbarEl = el;
-              el.addEventListener('wheel', handleScrollbarWheel, { passive: false });
-          }
-      };
-
-      // 初次尝试绑定
-      bindScrollbar();
-
-      // 使用 MutationObserver 监听 DOM 变化，确保即使元素延迟渲染也能绑定
-      const observer = new MutationObserver(() => {
-          bindScrollbar();
-      });
-      observer.observe(container, { childList: true, subtree: true });
+      container.addEventListener('wheel', handleContainerWheel, { passive: false, capture: true });
 
       return () => {
-          observer.disconnect();
-          if (currentScrollbarEl) {
-              currentScrollbarEl.removeEventListener('wheel', handleScrollbarWheel);
-          }
+          container.removeEventListener('wheel', handleContainerWheel, { capture: true } as EventListenerOptions);
       };
-  }, [viewMode, enableVirtual, tableScrollX, mergedDisplayData.length]);
+  }, [viewMode, enableVirtual, tableScrollX, floatingScrollbarHeight, floatingScrollbarGap]);
 
   useEffect(() => {
       if (viewMode !== 'table') return;
@@ -3041,7 +3112,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                background: 'transparent',
                boxSizing: 'border-box',
            }}>
-               {filterConditions.map(cond => (
+               {filterConditions.map((cond, condIndex) => (
                    <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start', opacity: cond.enabled === false ? 0.58 : 1 }}>
                        <Checkbox
                            checked={cond.enabled !== false}
@@ -3050,13 +3121,33 @@ const DataGrid: React.FC<DataGridProps> = ({
                        >
                            启用
                        </Checkbox>
-                       <Select
-                           style={{ width: 180 }}
-                           value={cond.column}
-                           onChange={v => updateFilter(cond.id, 'column', v)}
-                           options={columnNames.map(c => ({ value: c, label: c }))}
-                           disabled={cond.op === 'CUSTOM'}
-                       />
+                       {condIndex === 0 ? (
+                           <div style={{ width: 96, marginTop: 7, textAlign: 'center', fontSize: 12, color: '#8c8c8c' }}>
+                               首条
+                           </div>
+                       ) : (
+                           <Select
+                               style={{ width: 96 }}
+                               value={cond.logic === 'OR' ? 'OR' : 'AND'}
+                               onChange={v => updateFilter(cond.id, 'logic', v)}
+                               options={filterLogicOptions as any}
+                           />
+                       )}
+                        <Select
+                            style={{ width: 180 }}
+                            value={cond.column}
+                            onChange={v => updateFilter(cond.id, 'column', v)}
+                            options={columnNames.map(c => ({ value: c, label: c }))}
+                            showSearch
+                            optionFilterProp="label"
+                            filterOption={(input, option) =>
+                                String(option?.label ?? '')
+                                    .toLowerCase()
+                                    .includes(String(input || '').trim().toLowerCase())
+                            }
+                            placeholder="搜索字段名"
+                            disabled={cond.op === 'CUSTOM'}
+                        />
                        <Select
                            style={{ width: 140 }}
                            value={cond.op}
@@ -3307,7 +3398,6 @@ const DataGrid: React.FC<DataGridProps> = ({
                     className="data-grid-external-hscroll"
                     aria-hidden={!horizontalScrollVisible}
                     onScroll={applyExternalScrollToTableTargets}
-                    onWheel={handleExternalHorizontalWheel}
                     style={{
                         opacity: horizontalScrollVisible ? 1 : 0,
                         pointerEvents: horizontalScrollVisible ? 'auto' : 'none',
@@ -3551,6 +3641,21 @@ const DataGrid: React.FC<DataGridProps> = ({
                     }}
                 >
                     导出为 JSON
+                </div>
+                <div
+                    style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    onClick={() => {
+                        if (cellContextMenu.record) handleExportSelected('html', cellContextMenu.record);
+                        setCellContextMenu(prev => ({ ...prev, visible: false }));
+                    }}
+                >
+                    导出为 HTML
                 </div>
             </div>,
             document.body

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined } from '@ant-design/icons';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetSize, WindowToggleMaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -12,6 +12,17 @@ import LogPanel from './components/LogPanel';
 import { useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform } from './utils/appearance';
+import {
+  SHORTCUT_ACTION_META,
+  SHORTCUT_ACTION_ORDER,
+  ShortcutAction,
+  eventToShortcut,
+  getShortcutDisplay,
+  hasModifierKey,
+  isEditableElement,
+  isShortcutMatch,
+  normalizeShortcutCombo,
+} from './utils/shortcuts';
 import { ConfigureGlobalProxy, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
@@ -53,6 +64,9 @@ function App() {
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
+  const shortcutOptions = useStore(state => state.shortcutOptions);
+  const updateShortcut = useStore(state => state.updateShortcut);
+  const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
   const darkMode = themeMode === 'dark';
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
@@ -260,6 +274,80 @@ function App() {
       };
   }, []);
 
+  useEffect(() => {
+      if (!isWindowsPlatform()) {
+          return;
+      }
+
+      let cancelled = false;
+      let inFlight = false;
+      let lastRatio = Number(window.devicePixelRatio) || 1;
+      let lastFixAt = 0;
+
+      const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+      const fixWindowScaleIfNeeded = async () => {
+          if (cancelled || inFlight) return;
+          const now = Date.now();
+          if (now - lastFixAt < 700) return;
+          inFlight = true;
+          try {
+              const [isFullscreen, isMaximised] = await Promise.all([
+                  WindowIsFullscreen().catch(() => false),
+                  WindowIsMaximised().catch(() => false),
+              ]);
+
+              // 避免在全屏/最大化状态下强制改尺寸；这两种状态通常能自行保持 DPI 同步。
+              if (isFullscreen || isMaximised) {
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
+              const size = await WindowGetSize().catch(() => null);
+              const width = Math.trunc(Number(size?.w || 0));
+              const height = Math.trunc(Number(size?.h || 0));
+              if (width <= 0 || height <= 0) {
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
+              const nudgedWidth = width > 480 ? width - 1 : width + 1;
+              WindowSetSize(nudgedWidth, height);
+              await wait(28);
+              WindowSetSize(width, height);
+              window.dispatchEvent(new Event('resize'));
+              lastFixAt = Date.now();
+          } finally {
+              inFlight = false;
+          }
+      };
+
+      const checkDevicePixelRatio = () => {
+          if (cancelled) return;
+          const currentRatio = Number(window.devicePixelRatio) || 1;
+          if (Math.abs(currentRatio - lastRatio) < 0.02) {
+              return;
+          }
+          lastRatio = currentRatio;
+          void fixWindowScaleIfNeeded();
+      };
+
+      const pollTimer = window.setInterval(checkDevicePixelRatio, 900);
+      window.addEventListener('resize', checkDevicePixelRatio);
+      window.addEventListener('focus', checkDevicePixelRatio);
+      document.addEventListener('visibilitychange', checkDevicePixelRatio);
+
+      return () => {
+          cancelled = true;
+          window.clearInterval(pollTimer);
+          window.removeEventListener('resize', checkDevicePixelRatio);
+          window.removeEventListener('focus', checkDevicePixelRatio);
+          document.removeEventListener('visibilitychange', checkDevicePixelRatio);
+      };
+  }, []);
+
   // Background Helper
   const getBg = (darkHex: string) => {
       if (!darkMode) return `rgba(255, 255, 255, ${effectiveOpacity})`; // Light mode usually white
@@ -299,7 +387,7 @@ function App() {
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const isAboutOpenRef = React.useRef(false);
   const [aboutLoading, setAboutLoading] = useState(false);
-  const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string } | null>(null);
+  const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string; communityUrl?: string } | null>(null);
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
   const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<{
@@ -666,7 +754,7 @@ function App() {
           void message.warning("没有连接可导出");
           return;
       }
-      const res = await (window as any).go.app.App.ExportData(connections, [], "connections", "json");
+      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
       } else if (res.message !== "Cancelled") {
@@ -720,10 +808,18 @@ function App() {
           label: '外观设置...',
           icon: <SettingOutlined />,
           onClick: () => setIsAppearanceModalOpen(true)
+      },
+      {
+          key: 'shortcut-settings',
+          label: '快捷键管理...',
+          icon: <LinkOutlined />,
+          onClick: () => setIsShortcutModalOpen(true)
       }
   ];
 
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
+  const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
+  const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
 
 
@@ -803,7 +899,7 @@ function App() {
   };
   
   // Sidebar Resizing
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(330);
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
@@ -934,6 +1030,113 @@ function App() {
           offDownloadProgress();
       };
   }, []);
+
+  useEffect(() => {
+      const handleOpenShortcutSettingsEvent = () => {
+          setIsShortcutModalOpen(true);
+      };
+      window.addEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
+      };
+  }, []);
+
+  useEffect(() => {
+      const handleGlobalShortcut = (event: KeyboardEvent) => {
+          const matchedAction = SHORTCUT_ACTION_ORDER.find((action) => {
+              const binding = shortcutOptions[action];
+              if (!binding?.enabled) {
+                  return false;
+              }
+              if (isEditableElement(event.target) && !SHORTCUT_ACTION_META[action].allowInEditable) {
+                  return false;
+              }
+              return isShortcutMatch(event, binding.combo);
+          });
+
+          if (!matchedAction) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          switch (matchedAction) {
+              case 'runQuery':
+                  window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+                  break;
+              case 'focusSidebarSearch':
+                  window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+                  break;
+              case 'newQueryTab':
+                  handleNewQuery();
+                  break;
+              case 'toggleLogPanel':
+                  setIsLogPanelOpen((prev) => !prev);
+                  break;
+              case 'toggleTheme':
+                  setTheme(themeMode === 'dark' ? 'light' : 'dark');
+                  break;
+              case 'openShortcutManager':
+                  setIsShortcutModalOpen(true);
+                  break;
+          }
+      };
+
+      window.addEventListener('keydown', handleGlobalShortcut);
+      return () => {
+          window.removeEventListener('keydown', handleGlobalShortcut);
+      };
+  }, [handleNewQuery, shortcutOptions, themeMode, setTheme]);
+
+  useEffect(() => {
+      if (!capturingShortcutAction) {
+          return;
+      }
+
+      const handleShortcutCapture = (event: KeyboardEvent) => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (event.key === 'Escape') {
+              setCapturingShortcutAction(null);
+              return;
+          }
+
+          const combo = eventToShortcut(event);
+          if (!combo) {
+              return;
+          }
+          if (!hasModifierKey(combo)) {
+              void message.warning('快捷键至少包含 Ctrl / Alt / Shift / Meta 之一');
+              return;
+          }
+
+          const normalizedCombo = normalizeShortcutCombo(combo);
+          const conflictAction = SHORTCUT_ACTION_ORDER.find((action) => {
+              if (action === capturingShortcutAction) {
+                  return false;
+              }
+              const binding = shortcutOptions[action];
+              if (!binding?.enabled) {
+                  return false;
+              }
+              return normalizeShortcutCombo(binding.combo) === normalizedCombo;
+          });
+          if (conflictAction) {
+              void message.warning(`与「${SHORTCUT_ACTION_META[conflictAction].label}」冲突，请换一个快捷键`);
+              return;
+          }
+
+          updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true });
+          setCapturingShortcutAction(null);
+      };
+
+      window.addEventListener('keydown', handleShortcutCapture, true);
+      return () => {
+          window.removeEventListener('keydown', handleShortcutCapture, true);
+      };
+  }, [capturingShortcutAction, shortcutOptions, updateShortcut]);
 
   const linuxResizeHandleStyleBase = {
       position: 'fixed',
@@ -1221,6 +1424,9 @@ function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div>版本：{aboutInfo?.version || '未知'}</div>
                     <div>作者：{aboutInfo?.author || '未知'}</div>
+                    {aboutInfo?.communityUrl ? (
+                        <div>技术圈：<a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>AI全书</a></div>
+                    ) : null}
                     <div>更新状态：{aboutUpdateStatus || '未检查'}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <GithubOutlined />
@@ -1351,6 +1557,84 @@ function App() {
               </div>
           </Modal>
 
+          <Modal
+              title="快捷键管理"
+              open={isShortcutModalOpen}
+              onCancel={() => {
+                  setIsShortcutModalOpen(false);
+                  setCapturingShortcutAction(null);
+              }}
+              width={720}
+              footer={[
+                  <Button
+                      key="reset"
+                      onClick={() => {
+                          resetShortcutOptions();
+                          setCapturingShortcutAction(null);
+                          void message.success('已恢复默认快捷键');
+                      }}
+                  >
+                      恢复默认
+                  </Button>,
+                  <Button
+                      key="close"
+                      type="primary"
+                      onClick={() => {
+                          setIsShortcutModalOpen(false);
+                          setCapturingShortcutAction(null);
+                      }}
+                  >
+                      关闭
+                  </Button>,
+              ]}
+          >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
+                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                      点击“录制”后按下快捷键。按 Esc 可取消录制。建议至少包含一个修饰键（Ctrl/Alt/Shift/Meta）。
+                  </div>
+                  {SHORTCUT_ACTION_ORDER.map((action) => {
+                      const meta = SHORTCUT_ACTION_META[action];
+                      const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
+                      const isCapturing = capturingShortcutAction === action;
+                      return (
+                          <div
+                              key={action}
+                              style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '1fr auto',
+                                  gap: 12,
+                                  alignItems: 'center',
+                                  padding: '10px 12px',
+                                  border: '1px solid rgba(128, 128, 128, 0.2)',
+                                  borderRadius: 8,
+                              }}
+                          >
+                              <div>
+                                  <div style={{ fontWeight: 500 }}>{meta.label}</div>
+                                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>{meta.description}</div>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <Input
+                                      readOnly
+                                      value={isCapturing ? '请按下快捷键...' : getShortcutDisplay(binding.combo)}
+                                      style={{ width: 180, fontFamily: 'Consolas, Menlo, Monaco, monospace' }}
+                                  />
+                                  <Button
+                                      size="small"
+                                      onClick={() => setCapturingShortcutAction((prev) => (prev === action ? null : action))}
+                                  >
+                                      {isCapturing ? '取消' : '录制'}
+                                  </Button>
+                                  <Switch
+                                      checked={binding.enabled}
+                                      onChange={(checked) => updateShortcut(action, { enabled: checked })}
+                                  />
+                              </div>
+                          </div>
+                      );
+                  })}
+              </div>
+          </Modal>
           <Modal
               title="全局代理设置"
               open={isProxyModalOpen}
