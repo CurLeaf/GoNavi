@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
@@ -50,6 +50,7 @@ type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
+type SearchScope = 'smart' | 'object' | 'database' | 'host' | 'tag';
 
 interface BatchObjectItem {
   title: string;
@@ -59,9 +60,23 @@ interface BatchObjectItem {
   dataRef: any;
 }
 
+const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
+  { value: 'smart', label: '智能' },
+  { value: 'object', label: '表对象' },
+  { value: 'database', label: '库' },
+  { value: 'host', label: 'Host' },
+  { value: 'tag', label: '标签' },
+];
+
+const SEARCH_SCOPE_LABEL_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {} as Record<SearchScope, string>);
+
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
   const removeConnection = useStore(state => state.removeConnection);
@@ -94,6 +109,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
   const bgMain = getBg('#141414');
   const [searchValue, setSearchValue] = useState('');
+  const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
+  const [isSearchScopePopoverOpen, setIsSearchScopePopoverOpen] = useState(false);
+  const searchInputRef = useRef<any>(null);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [autoExpandParent, setAutoExpandParent] = useState(true);
   const [loadedKeys, setLoadedKeys] = useState<React.Key[]>([]);
@@ -115,6 +133,21 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       });
       resizeObserver.observe(treeContainerRef.current);
       return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+      const handleFocusSidebarSearch = () => {
+          const inputEl = searchInputRef.current?.input as HTMLInputElement | undefined;
+          if (!inputEl) {
+              return;
+          }
+          inputEl.focus();
+          inputEl.select();
+      };
+      window.addEventListener('gonavi:focus-sidebar-search', handleFocusSidebarSearch as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:focus-sidebar-search', handleFocusSidebarSearch as EventListener);
+      };
   }, []);
   
   // Connection Status State: key -> 'success' | 'error'
@@ -219,7 +252,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   useEffect(() => {
     setTreeData((prev) => {
       const prevMap = new Map<string, TreeNode>();
-      
+
       // We need to recursively extract connections from old tag structures
       // so if a user expands a connection that was tagged, the state remains
       const recurseCollect = (nodes: TreeNode[]) => {
@@ -271,6 +304,118 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     });
   }, [connections, connectionTags]);
 
+  const buildDuplicateConnectionName = (rawName: string): string => {
+    const baseName = String(rawName || '').trim() || '连接';
+    const suffix = ' - 副本';
+    const usedNames = new Set(connections.map(conn => String(conn.name || '').trim()));
+    let candidate = `${baseName}${suffix}`;
+    let counter = 2;
+    while (usedNames.has(candidate)) {
+      candidate = `${baseName}${suffix} ${counter}`;
+      counter += 1;
+    }
+    return candidate;
+  };
+
+  const cloneConnectionConfig = (config: SavedConnection['config']): SavedConnection['config'] => {
+    const raw: any = config || {};
+    let cloned: any = {};
+    try {
+      cloned = typeof structuredClone === 'function'
+        ? structuredClone(raw)
+        : JSON.parse(JSON.stringify(raw));
+    } catch {
+      cloned = { ...raw };
+    }
+
+    const readString = (...values: unknown[]): string => {
+      for (const value of values) {
+        if (typeof value === 'string') {
+          return value;
+        }
+      }
+      return '';
+    };
+
+    const readBool = (fallback: boolean, ...values: unknown[]): boolean => {
+      for (const value of values) {
+        if (typeof value === 'boolean') {
+          return value;
+        }
+      }
+      return fallback;
+    };
+
+    const readNumber = (fallback: number, ...values: unknown[]): number => {
+      for (const value of values) {
+        const num = Number(value);
+        if (Number.isFinite(num)) {
+          return num;
+        }
+      }
+      return fallback;
+    };
+
+    const rawSSH = (cloned.ssh ?? cloned.SSH ?? {}) as Record<string, unknown>;
+    const normalizedSSH = {
+      host: readString(rawSSH.host, rawSSH.Host, cloned.sshHost, cloned.SSHHost),
+      port: readNumber(22, rawSSH.port, rawSSH.Port, cloned.sshPort, cloned.SSHPort),
+      user: readString(rawSSH.user, rawSSH.User, cloned.sshUser, cloned.SSHUser),
+      password: readString(rawSSH.password, rawSSH.Password, cloned.sshPassword, cloned.SSHPassword),
+      keyPath: readString(rawSSH.keyPath, rawSSH.KeyPath, cloned.sshKeyPath, cloned.SSHKeyPath),
+    };
+    const hasSSHDetail = Boolean(
+      normalizedSSH.host
+      || normalizedSSH.user
+      || normalizedSSH.password
+      || normalizedSSH.keyPath
+    );
+
+    const rawProxy = (cloned.proxy ?? cloned.Proxy ?? {}) as Record<string, unknown>;
+    const proxyTypeRaw = readString(rawProxy.type, rawProxy.Type, cloned.proxyType, cloned.ProxyType).toLowerCase();
+    const proxyType: 'socks5' | 'http' = proxyTypeRaw === 'http' ? 'http' : 'socks5';
+    const normalizedProxy = {
+      type: proxyType,
+      host: readString(rawProxy.host, rawProxy.Host, cloned.proxyHost, cloned.ProxyHost),
+      port: readNumber(proxyType === 'http' ? 8080 : 1080, rawProxy.port, rawProxy.Port, cloned.proxyPort, cloned.ProxyPort),
+      user: readString(rawProxy.user, rawProxy.User, cloned.proxyUser, cloned.ProxyUser),
+      password: readString(rawProxy.password, rawProxy.Password, cloned.proxyPassword, cloned.ProxyPassword),
+    };
+    const hasProxyDetail = Boolean(normalizedProxy.host || normalizedProxy.user || normalizedProxy.password);
+
+    const rawHosts = Array.isArray(cloned.hosts)
+      ? cloned.hosts
+      : (Array.isArray(cloned.Hosts) ? cloned.Hosts : []);
+    const normalizedHosts = rawHosts
+      .map((entry: unknown) => String(entry || '').trim())
+      .filter((entry: string) => !!entry);
+
+    return {
+      ...(cloned as SavedConnection['config']),
+      useSSH: readBool(hasSSHDetail, cloned.useSSH, cloned.UseSSH),
+      ssh: normalizedSSH,
+      useProxy: readBool(hasProxyDetail, cloned.useProxy, cloned.UseProxy),
+      proxy: normalizedProxy,
+      hosts: normalizedHosts,
+      timeout: readNumber(30, cloned.timeout, cloned.Timeout),
+    };
+  };
+
+  const handleDuplicateConnection = (conn: SavedConnection) => {
+    if (!conn) return;
+
+    const duplicatedConnection: SavedConnection = {
+      ...conn,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: buildDuplicateConnectionName(conn.name),
+      config: cloneConnectionConfig(conn.config),
+      includeDatabases: conn.includeDatabases ? [...conn.includeDatabases] : undefined,
+      includeRedisDatabases: conn.includeRedisDatabases ? [...conn.includeRedisDatabases] : undefined,
+    };
+
+    addConnection(duplicatedConnection);
+    message.success(`已复制连接: ${duplicatedConnection.name}`);
+  };
   const updateTreeData = (list: TreeNode[], key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
     return list.map(node => {
       if (node.key === key) {
@@ -749,7 +894,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   const res = await (window as any).go.app.App.RedisGetDatabases(config);
                   if (res.success) {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-                      let dbs = (res.data as any[]).map((db: any) => ({
+                      const redisRows: any[] = Array.isArray(res.data) ? res.data : [];
+                      let dbs = redisRows.map((db: any) => ({
                           title: `db${db.index}${db.keys > 0 ? ` (${db.keys})` : ''}`,
                           key: `${conn.id}-db${db.index}`,
                           icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
@@ -780,7 +926,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	          const res = await DBGetDatabases(config as any);
 	          if (res.success) {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-	            let dbs = (res.data as any[]).map((row: any) => ({
+                const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
+	            let dbs = dbRows.map((row: any) => ({
 	              title: row.Database || row.database,
               key: `${conn.id}-${row.Database || row.database}`,
               icon: <DatabaseOutlined />,
@@ -795,10 +942,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
 
             setTreeData(origin => updateTreeData(origin, node.key, dbs));
-          } else {
-            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
-          }
+	          } else {
+	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
+	          }
+	      } catch (e: any) {
+	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	          message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
 	      }
@@ -843,7 +993,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	          if (res.success) {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
 
-	            const tableEntries = (res.data as any[]).map((row: any) => {
+                const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
+	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
 	                return {
@@ -859,7 +1010,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 loadFunctions(conn, conn.dbName),
             ]);
 
-            const viewEntries = viewsResult.views.map((viewName) => {
+            const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
+            const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
+            const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
+
+            const viewEntries = viewRows.map((viewName: string) => {
                 const parsed = splitQualifiedName(viewName);
                 return {
                     viewName,
@@ -873,7 +1028,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 const triggerSeen = new Set<string>();
                 const metadataDialect = getMetadataDialect(conn as SavedConnection);
 
-                triggersResult.triggers.forEach((trigger) => {
+                triggerRows.forEach((trigger: any) => {
                     const triggerParsed = splitQualifiedName(trigger.triggerName);
                     const tableParsed = splitQualifiedName(trigger.tableName);
                     const schemaName = tableParsed.schemaName || triggerParsed.schemaName || String(conn.dbName || '').trim();
@@ -898,7 +1053,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 return deduped;
             })();
 
-            const routineEntries = routinesResult.routines.map((routine) => {
+            const routineEntries = routineRows.map((routine: any) => {
                 const parsed = splitQualifiedName(routine.routineName);
                 const typeLabel = routine.routineType === 'PROCEDURE' ? 'P' : 'F';
                 return {
@@ -1080,6 +1235,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
 	            message.error({ content: res.message, key: `db-${key}-tables` });
           }
+	      } catch (e: any) {
+	          setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
+	          message.error({ content: '加载表失败: ' + (e?.message || String(e)), key: `db-${key}-tables` });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
 	      }
@@ -1425,7 +1583,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
       const res = await DBGetDatabases(config as any);
       if (res.success) {
-          let dbs = (res.data as any[]).map((row: any) => {
+          const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
+          let dbs = dbRows.map((row: any) => {
               const dbName = row.Database || row.database;
               return {
                   title: dbName,
@@ -1466,9 +1625,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           return;
       }
 
-      const viewSet = new Set(viewResult.views.map(view => view.toLowerCase()));
+      const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
+      const viewRows: string[] = Array.isArray(viewResult.views) ? viewResult.views : [];
+      const viewSet = new Set(viewRows.map((view: string) => view.toLowerCase()));
 
-      const tableObjects: BatchObjectItem[] = (res.data as any[])
+      const tableObjects: BatchObjectItem[] = tableRows
           .map((row: any) => Object.values(row)[0] as string)
           .filter((tableName: string) => !viewSet.has(tableName.toLowerCase()))
           .map((tableName: string) => ({
@@ -1479,7 +1640,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               dataRef: { ...conn, tableName, dbName, objectType: 'table' },
           }));
 
-      const viewObjects: BatchObjectItem[] = viewResult.views.map((viewName: string) => ({
+      const viewObjects: BatchObjectItem[] = viewRows.map((viewName: string) => ({
           title: getSidebarTableDisplayName(conn, viewName),
           key: `${conn.id}-${dbName}-view-${viewName}`,
           objectName: viewName,
@@ -1645,7 +1806,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
       const res = await DBGetDatabases(config as any);
       if (res.success) {
-          let dbs = (res.data as any[]).map((row: any) => {
+          const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
+          let dbs = dbRows.map((row: any) => {
               const dbName = row.Database || row.database;
               return {
                   title: dbName,
@@ -2232,28 +2394,205 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     setSearchValue(value);
   };
 
-  const loop = (data: TreeNode[]): TreeNode[] => {
-      const result: TreeNode[] = [];
-      data.forEach(item => {
-          const match = item.title.toLowerCase().indexOf(searchValue.toLowerCase()) > -1;
-          if (item.children) {
-              const filteredChildren = loop(item.children);
-              if (filteredChildren.length > 0 || match) {
-                  result.push({ ...item, children: filteredChildren });
-              }
+  const toggleSearchScope = (scope: SearchScope) => {
+      setSearchScopes((prev) => {
+          if (scope === 'smart') {
+              return ['smart'];
+          }
+          const withoutSmart = prev.filter((item) => item !== 'smart');
+          if (withoutSmart.includes(scope)) {
+              const next = withoutSmart.filter((item) => item !== scope);
+              return next.length > 0 ? next : ['smart'];
+          }
+          return [...withoutSmart, scope];
+      });
+  };
+
+  const setSearchScopeChecked = (scope: SearchScope, checked: boolean) => {
+      if (scope === 'smart') {
+          if (checked) {
+              setSearchScopes(['smart']);
+          } else if (searchScopes.length === 1 && searchScopes[0] === 'smart') {
+              setSearchScopes(['smart']);
           } else {
-              if (match) {
+              setSearchScopes((prev) => {
+                  const next = prev.filter((item) => item !== 'smart');
+                  return next.length > 0 ? next : ['smart'];
+              });
+          }
+          return;
+      }
+
+      if (checked) {
+          setSearchScopes((prev) => {
+              const withoutSmart = prev.filter((item) => item !== 'smart');
+              if (withoutSmart.includes(scope)) {
+                  return withoutSmart;
+              }
+              return [...withoutSmart, scope];
+          });
+      } else {
+          setSearchScopes((prev) => {
+              const next = prev.filter((item) => item !== scope && item !== 'smart');
+              return next.length > 0 ? next : ['smart'];
+          });
+      }
+  };
+
+  const searchScopeSummary = useMemo(() => {
+      if (searchScopes.includes('smart')) {
+          return '智能';
+      }
+      return searchScopes.map((scope) => SEARCH_SCOPE_LABEL_MAP[scope]).join(' + ');
+  }, [searchScopes]);
+
+  const searchScopePopoverContent = useMemo(() => {
+      const smartSelected = searchScopes.includes('smart');
+      const scopedOptions = SEARCH_SCOPE_OPTIONS.filter((option) => option.value !== 'smart');
+      return (
+          <div style={{ minWidth: 220, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 12, color: '#8c8c8c' }}>搜索范围</div>
+              <Checkbox
+                  checked={smartSelected}
+                  onChange={(e) => setSearchScopeChecked('smart', e.target.checked)}
+              >
+                  智能（推荐）
+              </Checkbox>
+              <div style={{ paddingLeft: 12, display: 'grid', gap: 6 }}>
+                  {scopedOptions.map((option) => (
+                      <Checkbox
+                          key={option.value}
+                          checked={searchScopes.includes(option.value)}
+                          onChange={(e) => setSearchScopeChecked(option.value, e.target.checked)}
+                      >
+                          {option.label}
+                      </Checkbox>
+                  ))}
+              </div>
+              <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  智能与其他项互斥；其他项支持多选。
+              </div>
+          </div>
+      );
+  }, [searchScopes]);
+
+  const parseHostOnlyToken = (value: unknown): string[] => {
+      const raw = String(value || '').trim();
+      if (!raw) {
+          return [];
+      }
+      let text = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+      if (text.includes('/')) {
+          text = text.split('/')[0];
+      }
+      if (text.includes('?')) {
+          text = text.split('?')[0];
+      }
+      if (text.includes('@')) {
+          text = text.split('@').pop() || '';
+      }
+      return text
+          .split(',')
+          .map((entry) => {
+              const token = entry.trim();
+              if (!token) return '';
+              if (token.startsWith('[')) {
+                  const rightBracketIndex = token.indexOf(']');
+                  if (rightBracketIndex > 0) {
+                      return token.slice(0, rightBracketIndex + 1).toLowerCase();
+                  }
+              }
+              const colonIndex = token.lastIndexOf(':');
+              if (colonIndex > 0) {
+                  return token.slice(0, colonIndex).toLowerCase();
+              }
+              return token.toLowerCase();
+          })
+          .filter(Boolean);
+  };
+
+  const getConnectionHostSearchText = (node: TreeNode): string => {
+      if (node.type !== 'connection') return '';
+      const config = node.dataRef?.config || {};
+      const hostTokens = [
+          ...parseHostOnlyToken(config.host),
+          ...(Array.isArray(config.hosts) ? config.hosts.flatMap((entry: string) => parseHostOnlyToken(entry)) : []),
+          ...parseHostOnlyToken(config.uri),
+      ];
+      const uniqueHosts = Array.from(new Set(hostTokens));
+      return uniqueHosts.join(' ');
+  };
+
+  const getConnectionNameSearchText = (node: TreeNode): string => {
+      if (node.type !== 'connection') return '';
+      const name = node.dataRef?.name ?? node.title;
+      return String(name || '').toLowerCase();
+  };
+
+  const isObjectNode = (node: TreeNode): boolean => {
+      return node.type === 'table'
+          || node.type === 'view'
+          || node.type === 'db-trigger'
+          || node.type === 'routine'
+          || node.type === 'object-group';
+  };
+
+  const matchByScopes = (node: TreeNode, keyword: string, scopes: SearchScope[]): boolean => {
+      const title = String(node.title || '').toLowerCase();
+      if (scopes.includes('database') && node.type === 'database' && title.includes(keyword)) {
+          return true;
+      }
+      if (scopes.includes('tag') && node.type === 'tag' && title.includes(keyword)) {
+          return true;
+      }
+      if (scopes.includes('host') && node.type === 'connection' && getConnectionHostSearchText(node).includes(keyword)) {
+          return true;
+      }
+      if (scopes.includes('object') && isObjectNode(node) && title.includes(keyword)) {
+          return true;
+      }
+      return false;
+  };
+
+  const loop = (data: TreeNode[], keyword: string): TreeNode[] => {
+      const isSmartMode = searchScopes.includes('smart');
+      const result: TreeNode[] = [];
+      data.forEach((item) => {
+          const titleMatch = String(item.title || '').toLowerCase().includes(keyword);
+          const smartMatch = item.type === 'connection'
+              ? getConnectionNameSearchText(item).includes(keyword) || getConnectionHostSearchText(item).includes(keyword)
+              : titleMatch;
+          const scopedMatch = matchByScopes(item, keyword, searchScopes);
+          const selfMatch = isSmartMode ? smartMatch : scopedMatch;
+          const filteredChildren = item.children ? loop(item.children, keyword) : [];
+
+          if (selfMatch) {
+              const shouldKeepFullSubtree = isSmartMode
+                  || item.type === 'connection'
+                  || item.type === 'database'
+                  || item.type === 'tag';
+              if (item.children && shouldKeepFullSubtree) {
+                  result.push(item);
+              } else if (item.children && filteredChildren.length > 0) {
+                  result.push({ ...item, children: filteredChildren });
+              } else {
                   result.push(item);
               }
+              return;
+          }
+
+          if (filteredChildren.length > 0) {
+              result.push({ ...item, children: filteredChildren });
           }
       });
       return result;
   };
 
   const displayTreeData = useMemo(() => {
-      if (!searchValue) return treeData;
-      return loop(treeData);
-  }, [searchValue, treeData]);
+      const keyword = searchValue.trim().toLowerCase();
+      if (!keyword) return treeData;
+      return loop(treeData, keyword);
+  }, [searchValue, searchScopes, treeData]);
 
   const getNodeMenuItems = (node: any): MenuProps['items'] => {
     const conn = node.dataRef as SavedConnection;
@@ -2396,6 +2735,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     }
                 },
                 {
+                    key: 'copy-connection',
+                    label: '复制连接',
+                    icon: <CopyOutlined />,
+                    onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
+                },
+                {
                     key: 'disconnect',
                     label: '断开连接',
                     icon: <DisconnectOutlined />,
@@ -2494,6 +2839,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                  }
              },
              {
+                 key: 'copy-connection',
+                 label: '复制连接',
+                 icon: <CopyOutlined />,
+                 onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
+             },
+             {
                  key: 'move-to-tag',
                  label: '移至标签',
                  icon: <FolderOpenOutlined />,
@@ -2504,6 +2855,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                  label: '断开连接',
                  icon: <DisconnectOutlined />,
                  onClick: () => {
+                     const connId = String(node.key || '');
+                     // 强制清理该连接相关的 loading 标记，避免网络卡住后重连仍被短路。
+                     Array.from(loadingNodesRef.current).forEach((loadingKey) => {
+                         if (loadingKey === `dbs-${connId}` || loadingKey.startsWith(`tables-${connId}-`)) {
+                             loadingNodesRef.current.delete(loadingKey);
+                         }
+                     });
                      // Reset status recursively
                      setConnectionStates(prev => {
                          const next = { ...prev };
@@ -2625,6 +2983,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                onClick: () => {
                    const dbConnId = String(node.dataRef?.id || '');
                    const dbName = String(node.dataRef?.dbName || node.title || '').trim();
+                   loadingNodesRef.current.delete(`tables-${dbConnId}-${dbName}`);
                    setConnectionStates(prev => {
                        const next = { ...prev };
                        delete next[node.key];
@@ -2857,15 +3216,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               // Get current order
               const currentTagOrder = connectionTags.map(t => t.id);
               const dragTagId = dragNode.dataRef.id;
-              
+
               // Filter out the dragging tag
               const newOrder = currentTagOrder.filter(id => id !== dragTagId);
-              
+
               let insertIndex = newOrder.length;
               if (dropNode.type === 'tag') {
                   const dropTagId = dropNode.dataRef.id;
                   const dropIndex = newOrder.indexOf(dropTagId);
-                  
+
                   if (dropPosition === -1) {
                       insertIndex = dropIndex;
                   } else {
@@ -2876,7 +3235,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   // Since tags are always displayed before ungrouped connections, just put it at the end
                   insertIndex = newOrder.length;
               }
-              
+
               newOrder.splice(insertIndex, 0, dragTagId);
               reorderTags(newOrder);
           }
@@ -2897,7 +3256,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               moveConnectionToTag(dragNode.key, targetTag.id);
               return;
           }
-          
+
           // Drop target is NOT under a tag (ungrouped) -> move OUT of tag
           const sourceTag = connectionTags.find(t => t.connectionIds.includes(dragNode.key));
           if (sourceTag) {
@@ -2921,7 +3280,28 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ padding: '4px 8px' }}>
-            <Search placeholder="搜索..." onChange={onSearch} size="small" />
+            <Space.Compact block size="small">
+                <Search
+                    ref={searchInputRef}
+                    placeholder="搜索..."
+                    onChange={onSearch}
+                    size="small"
+                    style={{ width: '100%' }}
+                />
+                <Popover
+                    content={searchScopePopoverContent}
+                    trigger="click"
+                    placement="bottomRight"
+                    open={isSearchScopePopoverOpen}
+                    onOpenChange={setIsSearchScopePopoverOpen}
+                >
+                    <Tooltip title={`搜索范围：${searchScopeSummary}`}>
+                        <Button size="small" icon={<DownOutlined />} style={{ width: 86 }}>
+                            范围{searchScopes.includes('smart') ? '(智)' : `(${searchScopes.length})`}
+                        </Button>
+                    </Tooltip>
+                </Popover>
+            </Space.Compact>
         </div>
 
         {/* Toolbar */}

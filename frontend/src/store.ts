@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag } from './types';
+import {
+  ShortcutAction,
+  ShortcutBinding,
+  ShortcutOptions,
+  DEFAULT_SHORTCUT_OPTIONS,
+  cloneShortcutOptions,
+  sanitizeShortcutOptions,
+} from './utils/shortcuts';
 
 const DEFAULT_APPEARANCE = { opacity: 1.0, blur: 0 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -47,6 +55,23 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   'sqlite',
   'duckdb',
   'custom',
+]);
+const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
+  'mysql',
+  'mariadb',
+  'diros',
+  'sphinx',
+  'dameng',
+  'clickhouse',
+  'postgres',
+  'sqlserver',
+  'oracle',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'mongodb',
+  'redis',
+  'tdengine',
 ]);
 
 const getDefaultPortByType = (type: string): number => {
@@ -177,6 +202,16 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   const defaultPort = getDefaultPortByType(type);
   const savePassword = typeof raw.savePassword === 'boolean' ? raw.savePassword : true;
   const mongoSrv = !!raw.mongoSrv;
+  const sslCapable = SSL_SUPPORTED_CONNECTION_TYPES.has(type);
+  const sslModeRaw = toTrimmedString(raw.sslMode, 'preferred').toLowerCase();
+  const sslMode: 'preferred' | 'required' | 'skip-verify' | 'disable' =
+    sslModeRaw === 'required'
+      ? 'required'
+      : sslModeRaw === 'skip-verify'
+        ? 'skip-verify'
+        : sslModeRaw === 'disable'
+          ? 'disable'
+          : 'preferred';
 
   const sshRaw = (raw.ssh && typeof raw.ssh === 'object') ? raw.ssh as Record<string, unknown> : {};
   const ssh = {
@@ -206,6 +241,10 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     password: savePassword ? toTrimmedString(raw.password) : '',
     savePassword,
     database: toTrimmedString(raw.database),
+    useSSL: sslCapable ? !!raw.useSSL : false,
+    sslMode: sslCapable ? sslMode : 'disable',
+    sslCertPath: sslCapable ? toTrimmedString(raw.sslCertPath) : '',
+    sslKeyPath: sslCapable ? toTrimmedString(raw.sslKeyPath) : '',
     useSSH: !!raw.useSSH,
     ssh,
     useProxy: !!raw.useProxy,
@@ -359,6 +398,7 @@ interface AppState {
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: 'upper' | 'lower' };
   queryOptions: QueryOptions;
+  shortcutOptions: ShortcutOptions;
   sqlLogs: SqlLog[];
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, 'name' | 'frequency'>;
@@ -396,6 +436,8 @@ interface AppState {
   setGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
+  updateShortcut: (action: ShortcutAction, binding: Partial<ShortcutBinding>) => void;
+  resetShortcutOptions: () => void;
 
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
@@ -537,6 +579,7 @@ export const useStore = create<AppState>()(
       globalProxy: { ...DEFAULT_GLOBAL_PROXY },
       sqlFormatOptions: { keywordCase: 'upper' },
       queryOptions: { maxRows: 5000, showColumnComment: true, showColumnType: true },
+      shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlLogs: [],
       tableAccessCount: {},
       tableSortPreference: {},
@@ -708,6 +751,16 @@ export const useStore = create<AppState>()(
       setGlobalProxy: (proxy) => set((state) => ({ globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }) })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
+      updateShortcut: (action, binding) => set((state) => ({
+        shortcutOptions: {
+          ...state.shortcutOptions,
+          [action]: {
+            ...state.shortcutOptions[action],
+            ...binding,
+          },
+        },
+      })),
+      resetShortcutOptions: () => set({ shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS) }),
 
       addSqlLog: (log) => set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
       clearSqlLogs: () => set({ sqlLogs: [] }),
@@ -754,6 +807,7 @@ export const useStore = create<AppState>()(
         nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.shortcutOptions = sanitizeShortcutOptions(state.shortcutOptions);
         nextState.tableAccessCount = sanitizeTableAccessCount(state.tableAccessCount);
         nextState.tableSortPreference = sanitizeTableSortPreference(state.tableSortPreference);
         return nextState as AppState;
@@ -774,6 +828,7 @@ export const useStore = create<AppState>()(
           globalProxy: sanitizeGlobalProxy(state.globalProxy),
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
+          shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
           tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
         };
@@ -790,6 +845,7 @@ export const useStore = create<AppState>()(
         globalProxy: state.globalProxy,
         sqlFormatOptions: state.sqlFormatOptions,
         queryOptions: state.queryOptions,
+        shortcutOptions: state.shortcutOptions,
         tableAccessCount: state.tableAccessCount,
         tableSortPreference: state.tableSortPreference
       }), // Don't persist logs

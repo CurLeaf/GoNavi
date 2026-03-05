@@ -9,6 +9,8 @@ import { useStore } from '../store';
 import { DBQuery, DBQueryWithCancel, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { convertMongoShellToJsonCommand } from '../utils/mongodb';
+import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
 
 const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
@@ -68,6 +70,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const shortcutOptions = useStore(state => state.shortcutOptions);
+  const activeTabId = useStore(state => state.activeTabId);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -268,6 +272,19 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   return parts[parts.length - 1] || raw;
               };
 
+              const splitSchemaAndTable = (qualified: string): { schema: string; table: string } => {
+                  const raw = normalizeQualifiedName(qualified);
+                  if (!raw) return { schema: '', table: '' };
+                  const parts = raw.split('.').filter(Boolean);
+                  if (parts.length >= 2) {
+                      return {
+                          schema: parts[parts.length - 2] || '',
+                          table: parts[parts.length - 1] || '',
+                      };
+                  }
+                  return { schema: '', table: parts[0] || '' };
+              };
+
               const buildConnConfig = () => {
                   const connId = currentConnectionIdRef.current;
                   const conn = connectionsRef.current.find(c => c.id === connId);
@@ -340,13 +357,14 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               if (qualifierMatch) {
                   const qualifier = stripQuotes(qualifierMatch[1]);
                   const prefix = (qualifierMatch[2] || '').toLowerCase();
+                  const qualifierLower = qualifier.toLowerCase();
 
                   // 首先检查 qualifier 是否是数据库名（跨库表提示）
                   const visibleDbs = visibleDbsRef.current;
-                  if (visibleDbs.some(db => db.toLowerCase() === qualifier.toLowerCase())) {
+                  if (visibleDbs.some(db => db.toLowerCase() === qualifierLower)) {
                       // qualifier 是数据库名，提示该库的表
                       const tables = tablesRef.current.filter(t =>
-                          (t.dbName || '').toLowerCase() === qualifier.toLowerCase()
+                          (t.dbName || '').toLowerCase() === qualifierLower
                       );
                       const filtered = prefix
                           ? tables.filter(t => (t.tableName || '').toLowerCase().startsWith(prefix))
@@ -359,6 +377,34 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                           detail: `Table (${t.dbName})`,
                           range,
                           sortText: '0' + t.tableName
+                      }));
+                      return { suggestions };
+                  }
+
+                  // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
+                  const schemaTables = tablesRef.current
+                      .map(t => {
+                          const parsed = splitSchemaAndTable(t.tableName || '');
+                          return {
+                              dbName: t.dbName || '',
+                              schema: parsed.schema,
+                              table: parsed.table,
+                          };
+                      })
+                      .filter(t => t.schema.toLowerCase() === qualifierLower && !!t.table);
+
+                  if (schemaTables.length > 0) {
+                      const filtered = prefix
+                          ? schemaTables.filter(t => t.table.toLowerCase().startsWith(prefix))
+                          : schemaTables;
+
+                      const suggestions = filtered.map(t => ({
+                          label: t.table,
+                          kind: monaco.languages.CompletionItemKind.Class,
+                          insertText: t.table,
+                          detail: `Table (${t.dbName}${t.schema ? '.' + t.schema : ''})`,
+                          range,
+                          sortText: '0' + t.table
                       }));
                       return { suggestions };
                   }
@@ -530,6 +576,12 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           label: '关键字小写', 
           icon: sqlFormatOptions.keywordCase === 'lower' ? '✓' : undefined,
           onClick: () => setSqlFormatOptions({ keywordCase: 'lower' }) 
+      },
+      { type: 'divider' },
+      {
+          key: 'shortcut-settings',
+          label: '快捷键管理...',
+          onClick: () => window.dispatchEvent(new CustomEvent('gonavi:open-shortcut-settings')),
       },
   ];
 
@@ -1035,7 +1087,15 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
     try {
         const rawSQL = getSelectedSQL() || query;
-        const statements = splitSQLStatements(rawSQL);
+        const dbType = String((config as any).type || 'mysql');
+        const normalizedDbType = dbType.trim().toLowerCase();
+        const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
+        const splitInput = normalizedDbType === 'mongodb'
+            ? normalizedRawSQL
+                .replace(/^\s*\/\/.*$/gm, '')
+                .replace(/^\s*#.*$/gm, '')
+            : normalizedRawSQL;
+        const statements = splitSQLStatements(splitInput);
         if (statements.length === 0) {
             message.info('没有可执行的 SQL。');
             setResultSets([]);
@@ -1045,7 +1105,6 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
         const nextResultSets: ResultSet[] = [];
         const maxRows = Number(queryOptions?.maxRows) || 0;
-        const dbType = String((config as any).type || 'mysql');
         const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
         const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
         const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
@@ -1059,9 +1118,24 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
             const limitApplied = shouldAutoLimit && wantsLimitProbe;
             const limited = limitApplied ? applyAutoLimit(rawStatement, dbType, probeLimit) : { sql: rawStatement, applied: false, maxRows: probeLimit };
-            const executedSql = limited.sql;
+            let executedSql = limited.sql;
+            if (String(dbType || '').trim().toLowerCase() === 'mongodb') {
+                const shellConvert = convertMongoShellToJsonCommand(executedSql);
+                if (shellConvert.recognized) {
+                    if (shellConvert.error) {
+                        const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                        message.error(prefix + shellConvert.error);
+                        setResultSets([]);
+                        setActiveResultKey('');
+                        return;
+                    }
+                    if (shellConvert.command) {
+                        executedSql = shellConvert.command;
+                    }
+                }
+            }
             const startTime = Date.now();
-            
+
             // Generate query ID for cancellation using backend UUID with fallback
             let queryId: string;
             try {
@@ -1071,7 +1145,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 queryId = 'query-' + uuidv4();
             }
             setQueryId(queryId);
-            
+
             const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
             const duration = Date.now() - startTime;
 
@@ -1089,19 +1163,19 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             if (!res.success) {
                 // 检查是否为查询取消错误
                 const errorMsg = res.message.toLowerCase();
-                const isCancelledError = errorMsg.includes('context canceled') || 
+                const isCancelledError = errorMsg.includes('context canceled') ||
                                          errorMsg.includes('查询已取消') ||
                                          errorMsg.includes('canceled') ||
                                          errorMsg.includes('cancelled') ||
                                          errorMsg.includes('statement canceled') ||
                                          errorMsg.includes('sql: statement canceled');
-                
+
                 // 确保不是超时错误
                 const isTimeoutError = errorMsg.includes('context deadline exceeded') ||
                                        errorMsg.includes('timeout') ||
                                        errorMsg.includes('超时') ||
                                        errorMsg.includes('deadline exceeded');
-                
+
                 if (isCancelledError && !isTimeoutError) {
                     // 查询已被用户取消，不显示错误消息，清理状态
                     setResultSets([]);
@@ -1112,7 +1186,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                     }
                     return;
                 }
-                
+
                 const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
                 message.error(prefix + res.message);
                 setResultSets([]);
@@ -1245,6 +1319,48 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     }
   };
 
+  useEffect(() => {
+      const binding = shortcutOptions.runQuery;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleRunShortcut = (event: KeyboardEvent) => {
+          if (activeTabId !== tab.id) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+          const editorHasFocus = !!editorRef.current?.hasTextFocus?.();
+          if (!editorHasFocus && !isEditableElement(event.target)) {
+              return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          void handleRun();
+      };
+
+      window.addEventListener('keydown', handleRunShortcut);
+      return () => {
+          window.removeEventListener('keydown', handleRunShortcut);
+      };
+  }, [activeTabId, tab.id, shortcutOptions.runQuery, handleRun]);
+
+  useEffect(() => {
+      const handleRunActiveQuery = () => {
+          if (activeTabId !== tab.id) {
+              return;
+          }
+          void handleRun();
+      };
+
+      window.addEventListener('gonavi:run-active-query', handleRunActiveQuery as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:run-active-query', handleRunActiveQuery as EventListener);
+      };
+  }, [activeTabId, tab.id, handleRun]);
+
   const handleSave = async () => {
       try {
           const values = await saveForm.validateFields();
@@ -1357,9 +1473,17 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             />
         </Tooltip>
         <Button.Group>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}>
-            运行
-          </Button>
+          <Tooltip
+              title={
+                  shortcutOptions.runQuery?.enabled && shortcutOptions.runQuery?.combo
+                      ? `运行（${getShortcutDisplay(shortcutOptions.runQuery.combo)}）`
+                      : '运行'
+              }
+          >
+              <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}>
+                运行
+              </Button>
+          </Tooltip>
           {loading && (
             <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
               停止

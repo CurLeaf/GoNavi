@@ -1,4 +1,4 @@
-//go:build gonavi_full_drivers || gonavi_mongodb_driver
+//go:build gonavi_mongodb_driver_v1
 
 package db
 
@@ -18,13 +18,14 @@ import (
 	proxytunnel "GoNavi-Wails/internal/proxy"
 	"GoNavi-Wails/internal/ssh"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
-	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-type MongoDB struct {
+type MongoDBV1 struct {
 	client      *mongo.Client
 	database    string
 	pingTimeout time.Duration
@@ -186,7 +187,7 @@ func applyMongoURI(config connection.ConnectionConfig) connection.ConnectionConf
 	return config
 }
 
-func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
+func (m *MongoDBV1) getURI(config connection.ConnectionConfig) string {
 	if strings.TrimSpace(config.URI) != "" {
 		return strings.TrimSpace(config.URI)
 	}
@@ -276,7 +277,7 @@ func buildMongoAuthAttempts(config connection.ConnectionConfig) []connection.Con
 	return attempts
 }
 
-func (m *MongoDB) Connect(config connection.ConnectionConfig) error {
+func (m *MongoDBV1) Connect(config connection.ConnectionConfig) error {
 	runConfig := applyMongoURI(config)
 	connectConfig := runConfig
 
@@ -362,7 +363,9 @@ func (m *MongoDB) Connect(config connection.ConnectionConfig) error {
 			if attemptConfig.UseProxy {
 				clientOpts.SetDialer(&mongoProxyDialer{proxyConfig: attemptConfig.Proxy})
 			}
-			client, err := mongo.Connect(clientOpts)
+			connectCtx, connectCancel := context.WithTimeout(context.Background(), m.pingTimeout)
+			client, err := mongo.Connect(connectCtx, clientOpts)
+			connectCancel()
 			if err != nil {
 				errorDetails = append(errorDetails, fmt.Sprintf("%s %s连接失败: %v", sslLabel, authLabel, err))
 				continue
@@ -378,7 +381,7 @@ func (m *MongoDB) Connect(config connection.ConnectionConfig) error {
 				continue
 			}
 			if sslIndex > 0 {
-				logger.Warnf("MongoDB SSL 优先连接失败，已回退至明文连接")
+				logger.Warnf("MongoDB(v1) SSL 优先连接失败，已回退至明文连接")
 			}
 			return nil
 		}
@@ -391,7 +394,7 @@ func (m *MongoDB) Connect(config connection.ConnectionConfig) error {
 	return fmt.Errorf("MongoDB 连接失败：无可用连接方案")
 }
 
-func (m *MongoDB) Close() error {
+func (m *MongoDBV1) Close() error {
 	if m.forwarder != nil {
 		if err := m.forwarder.Close(); err != nil {
 			logger.Warnf("关闭 MongoDB SSH 端口转发失败：%v", err)
@@ -407,7 +410,7 @@ func (m *MongoDB) Close() error {
 	return nil
 }
 
-func (m *MongoDB) Ping() error {
+func (m *MongoDBV1) Ping() error {
 	if m.client == nil {
 		return fmt.Errorf("connection not open")
 	}
@@ -611,7 +614,7 @@ func buildMembersFromHello(raw bson.M) []connection.MongoMemberInfo {
 	return members
 }
 
-func (m *MongoDB) DiscoverMembers() (string, []connection.MongoMemberInfo, error) {
+func (m *MongoDBV1) DiscoverMembers() (string, []connection.MongoMemberInfo, error) {
 	if m.client == nil {
 		return "", nil, fmt.Errorf("connection not open")
 	}
@@ -659,14 +662,14 @@ func (m *MongoDB) DiscoverMembers() (string, []connection.MongoMemberInfo, error
 
 // Query executes a MongoDB command and returns results
 // Supports JSON format commands like: {"find": "collection", "filter": {}}
-func (m *MongoDB) Query(query string) ([]map[string]interface{}, []string, error) {
+func (m *MongoDBV1) Query(query string) ([]map[string]interface{}, []string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	return m.queryWithContext(ctx, query)
 }
 
 // QueryContext executes a MongoDB command with the given context for timeout control
-func (m *MongoDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+func (m *MongoDBV1) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	return m.queryWithContext(ctx, query)
 }
 
@@ -762,7 +765,7 @@ func extractCollectionFromSQL(sql string) string {
 	return strings.TrimSpace(coll)
 }
 
-func (m *MongoDB) queryWithContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+func (m *MongoDBV1) queryWithContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if m.client == nil {
 		return nil, nil, fmt.Errorf("connection not open")
 	}
@@ -840,7 +843,7 @@ func (m *MongoDB) queryWithContext(ctx context.Context, query string) ([]map[str
 }
 
 // execFind 使用原生 Collection.Find() 执行查询，正确处理游标迭代
-func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interface{}, []string, error) {
+func (m *MongoDBV1) execFind(ctx context.Context, cmd bson.D) ([]map[string]interface{}, []string, error) {
 	var collName string
 	var filter interface{}
 	var limit int64
@@ -932,7 +935,7 @@ func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interf
 }
 
 // execCount 使用原生 Collection.CountDocuments() 执行计数
-func (m *MongoDB) execCount(ctx context.Context, cmd bson.D) ([]map[string]interface{}, []string, error) {
+func (m *MongoDBV1) execCount(ctx context.Context, cmd bson.D) ([]map[string]interface{}, []string, error) {
 	var collName string
 	var filter interface{}
 
@@ -964,7 +967,7 @@ func (m *MongoDB) execCount(ctx context.Context, cmd bson.D) ([]map[string]inter
 // convertBsonValue 将 BSON 特殊类型转换为前端可读的 JSON 友好值
 func convertBsonValue(v interface{}) interface{} {
 	switch val := v.(type) {
-	case bson.ObjectID:
+	case primitive.ObjectID:
 		return val.Hex()
 	case bson.M:
 		result := make(map[string]interface{}, len(val))
@@ -989,7 +992,7 @@ func convertBsonValue(v interface{}) interface{} {
 	}
 }
 
-func (m *MongoDB) Exec(query string) (int64, error) {
+func (m *MongoDBV1) Exec(query string) (int64, error) {
 	_, _, err := m.Query(query)
 	if err != nil {
 		return 0, err
@@ -998,7 +1001,7 @@ func (m *MongoDB) Exec(query string) (int64, error) {
 }
 
 // ExecContext executes a MongoDB command with the given context for timeout control
-func (m *MongoDB) ExecContext(ctx context.Context, query string) (int64, error) {
+func (m *MongoDBV1) ExecContext(ctx context.Context, query string) (int64, error) {
 	_, _, err := m.QueryContext(ctx, query)
 	if err != nil {
 		return 0, err
@@ -1006,7 +1009,7 @@ func (m *MongoDB) ExecContext(ctx context.Context, query string) (int64, error) 
 	return 1, nil
 }
 
-func (m *MongoDB) GetDatabases() ([]string, error) {
+func (m *MongoDBV1) GetDatabases() ([]string, error) {
 	if m.client == nil {
 		return nil, fmt.Errorf("connection not open")
 	}
@@ -1021,7 +1024,7 @@ func (m *MongoDB) GetDatabases() ([]string, error) {
 	return dbs, nil
 }
 
-func (m *MongoDB) GetTables(dbName string) ([]string, error) {
+func (m *MongoDBV1) GetTables(dbName string) ([]string, error) {
 	if m.client == nil {
 		return nil, fmt.Errorf("connection not open")
 	}
@@ -1041,23 +1044,23 @@ func (m *MongoDB) GetTables(dbName string) ([]string, error) {
 	return collections, nil
 }
 
-func (m *MongoDB) GetCreateStatement(dbName, tableName string) (string, error) {
+func (m *MongoDBV1) GetCreateStatement(dbName, tableName string) (string, error) {
 	return fmt.Sprintf("// MongoDB collection: %s.%s\n// MongoDB is schemaless - no CREATE statement available", dbName, tableName), nil
 }
 
 // GetColumns returns empty for MongoDB (schemaless)
-func (m *MongoDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+func (m *MongoDBV1) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	// MongoDB is schemaless, return empty
 	return []connection.ColumnDefinition{}, nil
 }
 
 // GetAllColumns returns empty for MongoDB (schemaless)
-func (m *MongoDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
+func (m *MongoDBV1) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	return []connection.ColumnDefinitionWithTable{}, nil
 }
 
 // GetIndexes returns indexes for a MongoDB collection
-func (m *MongoDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
+func (m *MongoDBV1) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	if m.client == nil {
 		return nil, fmt.Errorf("connection not open")
 	}
@@ -1113,18 +1116,18 @@ func (m *MongoDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefini
 	return indexes, nil
 }
 
-func (m *MongoDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
+func (m *MongoDBV1) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
 	// MongoDB doesn't have foreign keys
 	return []connection.ForeignKeyDefinition{}, nil
 }
 
-func (m *MongoDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
+func (m *MongoDBV1) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	// MongoDB doesn't have triggers in the traditional sense
 	return []connection.TriggerDefinition{}, nil
 }
 
 // ApplyChanges implements batch changes for MongoDB
-func (m *MongoDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if m.client == nil {
 		return fmt.Errorf("connection not open")
 	}
