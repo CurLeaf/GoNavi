@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } 
 import { createPortal } from 'react-dom';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover } from 'antd';
 import type { SortOrder } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
@@ -11,7 +11,7 @@ import type { ColumnDefinition } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
-import { isMacLikePlatform, normalizeOpacityForPlatform } from '../utils/appearance';
+import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 
 // --- Error Boundary ---
@@ -642,7 +642,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const isMacLike = useMemo(() => isMacLikePlatform(), []);
   const darkMode = theme === 'dark';
-  const opacity = normalizeOpacityForPlatform(appearance.opacity);
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const canModifyData = !readOnly && !!tableName;
   const showColumnComment = queryOptions?.showColumnComment !== false;
   const showColumnType = queryOptions?.showColumnType !== false;
@@ -709,6 +710,33 @@ const DataGrid: React.FC<DataGridProps> = ({
   const toolbarDividerColor = darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
   const columnMetaHintColor = darkMode ? darkHighlightTextColor : lightMetaHintColor;
   const columnMetaTooltipColor = darkMode ? darkHighlightTextColor : lightMetaTooltipColor;
+  const paginationPageSizeOptions = ['100', '200', '500', '1000'];
+  const paginationGlassMode = opacity < 0.999 || resolvedAppearance.blur > 0;
+  const paginationShellBg = darkMode
+      ? `linear-gradient(135deg, rgba(17,22,34,${paginationGlassMode ? Math.max(0.22, opacity * 0.38) : 0.82}) 0%, rgba(10,14,24,${paginationGlassMode ? Math.max(0.28, opacity * 0.46) : 0.9}) 100%)`
+      : `linear-gradient(135deg, rgba(255,255,255,${paginationGlassMode ? Math.max(0.24, opacity * 0.36) : 0.96}) 0%, rgba(246,248,252,${paginationGlassMode ? Math.max(0.32, opacity * 0.44) : 0.99}) 100%)`;
+  const paginationShellBorderColor = darkMode
+      ? `rgba(255,255,255,${paginationGlassMode ? 0.10 : 0.08})`
+      : `rgba(16,24,40,${paginationGlassMode ? 0.08 : 0.08})`;
+  const paginationShellShadow = darkMode
+      ? `0 16px 34px rgba(0,0,0,${paginationGlassMode ? 0.10 : 0.22})`
+      : `0 14px 30px rgba(15,23,42,${paginationGlassMode ? 0.03 : 0.08})`;
+  const paginationChipBg = darkMode
+      ? `rgba(255,255,255,${paginationGlassMode ? Math.max(0.02, opacity * 0.035) : 0.04})`
+      : `rgba(255,255,255,${paginationGlassMode ? Math.max(0.18, opacity * 0.26) : 0.86})`;
+  const paginationChipBorderColor = darkMode
+      ? `rgba(255,255,255,${paginationGlassMode ? 0.10 : 0.08})`
+      : `rgba(16,24,40,${paginationGlassMode ? 0.10 : 0.08})`;
+  const paginationHoverBg = darkMode
+      ? `rgba(255,255,255,${paginationGlassMode ? Math.max(0.04, opacity * 0.06) : 0.07})`
+      : `rgba(255,255,255,${paginationGlassMode ? Math.max(0.24, opacity * 0.34) : 0.96})`;
+  const paginationPrimaryTextColor = darkMode ? '#f5f7ff' : '#162033';
+  const paginationSecondaryTextColor = darkMode ? 'rgba(255,255,255,0.54)' : 'rgba(16,24,40,0.56)';
+  const paginationAccentBg = darkMode ? 'rgba(255,214,102,0.14)' : 'rgba(24,144,255,0.10)';
+  const paginationAccentBorderColor = darkMode ? 'rgba(255,214,102,0.38)' : 'rgba(24,144,255,0.22)';
+  const paginationActiveItemBg = darkMode ? 'rgba(255,214,102,0.18)' : 'rgba(24,144,255,0.12)';
+  const paginationActiveItemBorderColor = darkMode ? 'rgba(255,214,102,0.46)' : 'rgba(24,144,255,0.28)';
+  const paginationActiveItemTextColor = darkMode ? '#fff7d6' : '#0958d9';
   
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
@@ -3132,6 +3160,49 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
   }, [viewMode, tableScrollX, mergedDisplayData.length, syncExternalScrollFromTargets, pickHorizontalScrollTargets]);
 
+  const paginationSummaryText = useMemo(() => {
+      if (!pagination) return '';
+      const total = Number.isFinite(pagination.total) ? pagination.total : 0;
+      const rangeStart = Math.max(0, (pagination.current - 1) * pagination.pageSize + (total > 0 ? 1 : 0));
+      const hasValidRange = total > 0 && rangeStart > 0;
+      const rangeEnd = hasValidRange ? Math.min(total, rangeStart + pagination.pageSize - 1) : 0;
+      const currentCount = hasValidRange ? Math.max(0, rangeEnd - rangeStart + 1) : 0;
+
+      if (pagination.totalKnown === false) {
+          if (isDuckDBConnection) {
+              if (pagination.totalCountLoading) return `当前 ${currentCount} 条 / 正在统计精确总数…`;
+              if (pagination.totalApprox && Number.isFinite(total) && total > 0) return `当前 ${currentCount} 条 / 约 ${total} 条`;
+              if (pagination.totalCountCancelled) return `当前 ${currentCount} 条 / 已取消统计`;
+              return `当前 ${currentCount} 条 / 总数未统计`;
+          }
+          return `当前 ${currentCount} 条 / 正在统计总数…`;
+      }
+
+      if (isDuckDBConnection && (!Number.isFinite(total) || total <= 0)) {
+          return '当前 0 条 / 共 0 条';
+      }
+
+      return `当前 ${currentCount} 条 / 共 ${total} 条`;
+  }, [pagination, isDuckDBConnection]);
+
+  const paginationPageText = useMemo(() => {
+      if (!pagination) return '';
+      const total = Number.isFinite(pagination.total) ? pagination.total : 0;
+      const canShowTotalPages = pagination.totalKnown !== false || (isDuckDBConnection && pagination.totalApprox && total > 0);
+      if (!canShowTotalPages || total <= 0) return `第 ${pagination.current} 页`;
+      const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pagination.pageSize)));
+      return `第 ${pagination.current} / ${totalPages} 页`;
+  }, [pagination, isDuckDBConnection]);
+
+  const handlePageSizeChange = useCallback((value: string) => {
+      if (!pagination || !onPageChange) return;
+      const nextSize = Number(value);
+      if (!Number.isFinite(nextSize) || nextSize <= 0) return;
+      const firstRowIndex = Math.max(0, (pagination.current - 1) * pagination.pageSize);
+      const nextPage = Math.floor(firstRowIndex / nextSize) + 1;
+      onPageChange(nextPage, nextSize);
+  }, [pagination, onPageChange]);
+
   return (
     <div className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root`} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' }}>
 		       {/* Toolbar + Filter Panel */}
@@ -3859,33 +3930,41 @@ const DataGrid: React.FC<DataGridProps> = ({
        </div>
        
        {pagination && (
-           <div style={{ padding: '8px', borderTop: 'none', display: 'flex', justifyContent: 'flex-end' }}>
-                   <Pagination 
-                   current={pagination.current}
-                   pageSize={pagination.pageSize}
-                   total={pagination.total}
-                   showTotal={(total, range) => {
-                       const hasValidRange = Array.isArray(range) && range[0] > 0 && range[1] >= range[0];
-                       const currentCount = hasValidRange ? Math.max(0, range[1] - range[0] + 1) : 0;
-                       if (pagination.totalKnown === false) {
-                           if (isDuckDBConnection) {
-                               if (pagination.totalCountLoading) return `当前 ${currentCount} 条 / 正在统计精确总数...`;
-                               if (pagination.totalApprox && Number.isFinite(total) && total > 0) return `当前 ${currentCount} 条 / 约 ${total} 条`;
-                               if (pagination.totalCountCancelled) return `当前 ${currentCount} 条 / 已取消统计`;
-                               return `当前 ${currentCount} 条 / 总数未统计`;
+           <div style={{ padding: '12px 0 0', borderTop: 'none', display: 'flex', justifyContent: 'flex-end' }}>
+               <div className="data-grid-pagination-shell">
+                   <div className="data-grid-pagination-summary" aria-live="polite">
+                       <span className="data-grid-pagination-kicker">结果集</span>
+                       <span className="data-grid-pagination-summary-value">{paginationSummaryText}</span>
+                   </div>
+                   <div className="data-grid-pagination-page-chip">{paginationPageText}</div>
+                   <Pagination
+                       current={pagination.current}
+                       pageSize={pagination.pageSize}
+                       total={pagination.total}
+                       showSizeChanger={false}
+                       onChange={onPageChange}
+                       showTitle={false}
+                       size="small"
+                       itemRender={(_page, type, originalElement) => {
+                           if (type === 'prev') {
+                               return <span className="data-grid-pagination-nav-icon" aria-hidden="true"><LeftOutlined /></span>;
                            }
-                           return `当前 ${currentCount} 条 / 正在统计总数...`;
-                       }
-                       if (isDuckDBConnection && (!Number.isFinite(total) || total <= 0)) {
-                           return '当前 0 条 / 共 0 条';
-                       }
-                       return `当前 ${currentCount} 条 / 共 ${total} 条`;
-                   }}
-                   showSizeChanger
-                   pageSizeOptions={['100', '200', '500', '1000']}
-                   onChange={onPageChange}
-                   size="small"
-               />
+                           if (type === 'next') {
+                               return <span className="data-grid-pagination-nav-icon" aria-hidden="true"><RightOutlined /></span>;
+                           }
+                           return originalElement;
+                       }}
+                   />
+                   <Select
+                       size="small"
+                       popupMatchSelectWidth={false}
+                       value={String(pagination.pageSize)}
+                       onChange={handlePageSizeChange}
+                       options={paginationPageSizeOptions.map((value) => ({ value, label: `${value} 条 / 页` }))}
+                       className="data-grid-pagination-size-select"
+                       aria-label="每页条数"
+                   />
+               </div>
            </div>
        )}
 
@@ -4060,6 +4139,266 @@ const DataGrid: React.FC<DataGridProps> = ({
                 }
                 .${gridId} .data-grid-external-hscroll-inner {
                     height: 1px;
+                }
+                .${gridId} .data-grid-pagination-shell {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                    max-width: 100%;
+                    padding: 8px 10px;
+                    border-radius: 16px;
+                    border: 1px solid ${paginationShellBorderColor};
+                    background: ${paginationShellBg};
+                    box-shadow: ${paginationShellShadow};
+                    backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
+                    -webkit-backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
+                }
+                .${gridId} .data-grid-pagination-summary,
+                .${gridId} .data-grid-pagination-page-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-height: 34px;
+                    padding: 0 12px;
+                    border-radius: 999px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    color: ${paginationPrimaryTextColor};
+                    font-size: 12px;
+                    line-height: 1;
+                    font-variant-numeric: tabular-nums;
+                    white-space: nowrap;
+                }
+                .${gridId} .data-grid-pagination-kicker {
+                    display: inline-flex;
+                    align-items: center;
+                    height: 20px;
+                    padding: 0 8px;
+                    border-radius: 999px;
+                    background: ${paginationAccentBg};
+                    border: 1px solid ${paginationAccentBorderColor};
+                    color: ${paginationActiveItemTextColor};
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.02em;
+                }
+                .${gridId} .data-grid-pagination-summary-value {
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-page-chip {
+                    color: ${paginationSecondaryTextColor};
+                    font-weight: 600;
+                }
+                .${gridId} .ant-pagination {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    margin: 0;
+                    color: ${paginationPrimaryTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-item,
+                .${gridId} .ant-pagination .ant-pagination-prev,
+                .${gridId} .ant-pagination .ant-pagination-next,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev,
+                .${gridId} .ant-pagination .ant-pagination-jump-next {
+                    min-width: 34px;
+                    height: 34px;
+                    margin-inline-end: 0;
+                    border-radius: 12px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    box-shadow: none;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    overflow: hidden;
+                    transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+                }
+                .${gridId} .ant-pagination .ant-pagination-item a,
+                .${gridId} .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-next .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-prev > *,
+                .${gridId} .ant-pagination .ant-pagination-next > * {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    border: none;
+                    background: transparent;
+                    border-radius: inherit;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-item:hover,
+                .${gridId} .ant-pagination .ant-pagination-prev:hover,
+                .${gridId} .ant-pagination .ant-pagination-next:hover {
+                    background: ${paginationHoverBg};
+                    border-color: ${paginationActiveItemBorderColor};
+                    transform: translateY(-1px);
+                }
+                .${gridId} .ant-pagination .ant-pagination-item-active {
+                    border-color: ${paginationActiveItemBorderColor};
+                    background: ${paginationActiveItemBg};
+                    box-shadow: inset 0 0 0 1px ${paginationAccentBorderColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-item-active a {
+                    color: ${paginationActiveItemTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-disabled,
+                .${gridId} .ant-pagination .ant-pagination-disabled:hover {
+                    background: transparent;
+                    border-color: ${paginationChipBorderColor};
+                    transform: none;
+                    opacity: 0.42;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev,
+                .${gridId} .ant-pagination .ant-pagination-jump-next {
+                    padding: 0;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    padding: 0;
+                    margin: 0;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-container,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    position: relative;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon {
+                    position: absolute !important;
+                    top: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    left: 0 !important;
+                    inset: 0 !important;
+                    width: fit-content !important;
+                    height: fit-content !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
+                    margin: auto !important;
+                    padding: 0 !important;
+                    transform: none !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    line-height: 1 !important;
+                    color: ${paginationSecondaryTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis {
+                    letter-spacing: 0.18em;
+                    text-indent: 0.18em;
+                    text-align: center;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon .anticon,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon .anticon,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon svg,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon svg {
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    width: 1em;
+                    height: 1em;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-nav-icon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    font-size: 12px;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-nav-icon .anticon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-size-select {
+                    min-width: 112px;
+                    height: 34px;
+                    display: inline-flex;
+                    align-items: stretch;
+                }
+                .${gridId} .data-grid-pagination-size-select.ant-select-single,
+                .${gridId} .data-grid-pagination-size-select.ant-select-single.ant-select-sm {
+                    height: 34px;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selector {
+                    height: 34px !important;
+                    border-radius: 12px !important;
+                    border: 1px solid ${paginationChipBorderColor} !important;
+                    background: ${paginationChipBg} !important;
+                    box-shadow: none !important;
+                    padding: 0 12px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-wrap {
+                    display: flex !important;
+                    align-items: center !important;
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search,
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search-input {
+                    height: 100% !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-item,
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-placeholder {
+                    display: flex;
+                    align-items: center;
+                    height: 100%;
+                    line-height: 34px !important;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search {
+                    inset-inline-start: 12px !important;
+                    inset-inline-end: 32px !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-arrow {
+                    color: ${paginationSecondaryTextColor};
+                    inset-inline-end: 12px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    margin-top: 0;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    height: 16px;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-arrow .anticon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    line-height: 1;
                 }
 	        `}</style>
        

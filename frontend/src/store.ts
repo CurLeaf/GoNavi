@@ -10,7 +10,7 @@ import {
   sanitizeShortcutOptions,
 } from './utils/shortcuts';
 
-const DEFAULT_APPEARANCE = { opacity: 1.0, blur: 0 };
+const DEFAULT_APPEARANCE = { enabled: true, opacity: 1.0, blur: 0 };
 const DEFAULT_UI_SCALE = 1.0;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
@@ -25,7 +25,7 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
-const PERSIST_VERSION = 5;
+const PERSIST_VERSION = 6;
 const DEFAULT_CONNECTION_TYPE = 'mysql';
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
@@ -405,7 +405,7 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   theme: 'light' | 'dark';
-  appearance: { opacity: number; blur: number };
+  appearance: { enabled: boolean; opacity: number; blur: number };
   uiScale: number;
   fontSize: number;
   startupFullscreen: boolean;
@@ -443,7 +443,7 @@ interface AppState {
   deleteQuery: (id: string) => void;
 
   setTheme: (theme: 'light' | 'dark') => void;
-  setAppearance: (appearance: Partial<{ opacity: number; blur: number }>) => void;
+  setAppearance: (appearance: Partial<{ enabled: boolean; opacity: number; blur: number }>) => void;
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
@@ -522,13 +522,14 @@ const sanitizeTableSortPreference = (value: unknown): Record<string, 'name' | 'f
 };
 
 const sanitizeAppearance = (
-  appearance: Partial<{ opacity: number; blur: number }> | undefined,
+  appearance: Partial<{ enabled: boolean; opacity: number; blur: number }> | undefined,
   version: number
-): { opacity: number; blur: number } => {
+): { enabled: boolean; opacity: number; blur: number } => {
   if (!appearance || typeof appearance !== 'object') {
     return { ...DEFAULT_APPEARANCE };
   }
   const nextAppearance = {
+    enabled: typeof appearance.enabled === 'boolean' ? appearance.enabled : DEFAULT_APPEARANCE.enabled,
     opacity: typeof appearance.opacity === 'number' ? appearance.opacity : DEFAULT_APPEARANCE.opacity,
     blur: typeof appearance.blur === 'number' ? appearance.blur : DEFAULT_APPEARANCE.blur,
   };

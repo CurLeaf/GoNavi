@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from '@monaco-editor/react';
 import type { DataNode } from 'antd/es/tree';
-import { normalizeOpacityForPlatform } from '../utils/appearance';
+import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 
 const { Search } = Input;
 
@@ -399,7 +399,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const theme = useStore(state => state.theme);
     const appearance = useStore(state => state.appearance);
     const darkMode = theme === 'dark';
-    const opacity = normalizeOpacityForPlatform(appearance.opacity);
+    const resolvedAppearance = resolveAppearanceValues(appearance);
+    const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
     const connection = connections.find(c => c.id === connectionId);
     const keyAccentColor = darkMode ? '#ffd666' : '#1677ff';
     const jsonAccentColor = darkMode ? '#f6c453' : '#1890ff';

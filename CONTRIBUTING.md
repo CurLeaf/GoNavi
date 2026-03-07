@@ -79,14 +79,8 @@ Because external pull requests are merged directly into `main`, maintainers must
 
 ### 1. Sync `main` -> `dev` (required)
 
-This repository provides automatic sync via GitHub Actions workflow:
-
-- `.github/workflows/sync-main-to-dev.yml`
-- Trigger: every push to `main`
-- Behavior: create/reuse a PR from `main` to `dev`; if mergeable, it tries to enable auto-merge
-- Prerequisite: in `Settings -> Actions -> General -> Workflow permissions`, enable `Allow GitHub Actions to create and approve pull requests`; otherwise the workflow will skip PR creation and only emit a warning summary
-
-Manual fallback (when conflicts or automation is unavailable):
+The automatic GitHub Actions sync workflow has been removed.
+Maintainers should sync `main` back to `dev` manually when needed:
 
 ```bash
 git checkout dev

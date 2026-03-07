@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons';
+import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
-import { normalizeOpacityForPlatform } from '../utils/appearance';
+import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -11,9 +11,8 @@ const { Text } = Typography;
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
-const STEP1_MODAL_WIDTH = 760;
-const STEP2_MODAL_WIDTH = 680;
-const STEP1_MODAL_MIN_BODY_HEIGHT = 460;
+const CONNECTION_MODAL_WIDTH = 960;
+const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
 
@@ -105,6 +104,8 @@ const ConnectionModal: React.FC<{
   const [dbType, setDbType] = useState('mysql');
   const [step, setStep] = useState(1); // 1: Select Type, 2: Configure
   const [activeGroup, setActiveGroup] = useState(0); // Active category index in step 1
+  const [activeConfigSection, setActiveConfigSection] = useState<'basic' | 'network'>('basic');
+  const [activeNetworkConfig, setActiveNetworkConfig] = useState<'ssl' | 'ssh' | 'proxy' | 'httpTunnel'>('ssl');
   const [testResult, setTestResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
@@ -124,7 +125,8 @@ const ConnectionModal: React.FC<{
   const theme = useStore((state) => state.theme);
   const appearance = useStore((state) => state.appearance);
   const darkMode = theme === 'dark';
-  const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const mysqlTopology = Form.useWatch('mysqlTopology', form) || 'single';
   const mongoTopology = Form.useWatch('mongoTopology', form) || 'single';
   const mongoSrv = Form.useWatch('mongoSrv', form) || false;
@@ -163,6 +165,53 @@ const ConnectionModal: React.FC<{
       marginTop: 12,
       border: darkMode ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(0, 0, 0, 0.06)',
   };
+
+
+  const modalShellStyle = useMemo(() => ({
+      background: darkMode
+          ? 'linear-gradient(180deg, rgba(20,26,38,0.96) 0%, rgba(13,17,26,0.98) 100%)'
+          : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      boxShadow: darkMode ? '0 24px 56px rgba(0,0,0,0.38)' : '0 18px 42px rgba(15,23,42,0.12)',
+      backdropFilter: darkMode ? 'blur(18px)' : 'none',
+  }), [darkMode]);
+
+  const modalInnerSectionStyle = useMemo(() => ({
+      padding: 14,
+      borderRadius: 14,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.84)',
+  }), [darkMode]);
+
+  const modalMutedTextStyle = useMemo(() => ({
+      color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)',
+      fontSize: 12,
+      lineHeight: 1.6,
+  }), [darkMode]);
+
+  const renderConnectionModalTitle = (icon: React.ReactNode, title: string, description: string) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,214,102,0.12)' : 'rgba(24,144,255,0.1)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
+              {icon}
+          </div>
+          <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>{title}</div>
+              <div style={{ marginTop: 4, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', fontSize: 12, lineHeight: 1.6 }}>{description}</div>
+          </div>
+      </div>
+  );
+
+
+  const getConnectionOptionCardStyle = (_enabled: boolean): React.CSSProperties => ({
+      padding: '12px 14px',
+      borderRadius: 14,
+      border: '1px solid transparent',
+      background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)',
+      boxShadow: darkMode
+          ? 'inset 0 0 0 1px rgba(255,255,255,0.028)'
+          : 'inset 0 0 0 1px rgba(16,24,40,0.03)',
+      transition: 'all 120ms ease',
+  });
 
   const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
       const result: Record<string, DriverStatusSnapshot> = {};
@@ -1087,12 +1136,24 @@ const ConnectionModal: React.FC<{
               setUseProxy(hasProxy);
               setUseHttpTunnel(hasHttpTunnel);
               setDbType(configType);
+              if (config.useSSL && supportsSSLForType(configType)) {
+                  setActiveNetworkConfig('ssl');
+              } else if (config.useSSH) {
+                  setActiveNetworkConfig('ssh');
+              } else if (hasProxy) {
+                  setActiveNetworkConfig('proxy');
+              } else if (hasHttpTunnel) {
+                  setActiveNetworkConfig('httpTunnel');
+              } else {
+                  setActiveNetworkConfig('ssl');
+              }
               // 如果是 Redis 编辑模式，设置已保存的 Redis 数据库列表
               if (configType === 'redis') {
                   setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
               }
           } else {
               // Create mode: Start at step 1
+              setActiveConfigSection('basic');
               setStep(1);
               form.resetFields();
               setUseSSL(false);
@@ -1101,6 +1162,8 @@ const ConnectionModal: React.FC<{
               setUseHttpTunnel(false);
               setDbType('mysql');
               setActiveGroup(0);
+              setActiveConfigSection('basic');
+              setActiveNetworkConfig('ssl');
           }
       }
   }, [open, initialValues]);
@@ -1633,7 +1696,11 @@ const ConnectionModal: React.FC<{
   const dbTypes = dbTypeGroups.flatMap(g => g.items);
 
   const renderStep1 = () => (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%' }}>
+          <div style={{ ...modalInnerSectionStyle, paddingBottom: 12 }}>
+              <div style={{ marginBottom: 12, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>选择数据源</div>
+              <div style={modalMutedTextStyle}>先选择目标数据库或中间件类型，再进入详细连接参数配置。</div>
+          </div>
           {typeSelectWarning && (
               <Alert
                   type="warning"
@@ -1651,9 +1718,9 @@ const ConnectionModal: React.FC<{
                   onClose={() => setTypeSelectWarning(null)}
               />
           )}
-      <div style={{ display: 'flex', height: 360 }}>
+      <div style={{ ...modalInnerSectionStyle, display: 'flex', flex: 1, minHeight: 0, padding: 12 }}>
           {/* 左侧分类导航 */}
-          <div style={{ width: 120, borderRight: `1px solid ${step1SidebarDividerColor}`, paddingRight: 8, flexShrink: 0 }}>
+          <div style={{ width: 120, borderRight: `1px solid ${step1SidebarDividerColor}`, paddingRight: 8, flexShrink: 0, overflowY: 'auto' }}>
               {dbTypeGroups.map((group, idx) => (
                   <div
                       key={group.label}
@@ -1675,7 +1742,7 @@ const ConnectionModal: React.FC<{
               ))}
           </div>
           {/* 右侧数据源卡片 */}
-          <div style={{ flex: 1, paddingLeft: 16, overflowY: 'auto', overflowX: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 0, paddingLeft: 16, overflowY: 'auto', overflowX: 'hidden' }}>
               <Row gutter={[12, 12]}>
                   {dbTypeGroups[activeGroup]?.items.map(item => (
                       <Col span={8} key={item.key}>
@@ -1696,632 +1763,766 @@ const ConnectionModal: React.FC<{
       </div>
   );
 
-  const renderStep2 = () => (
-      <Form 
-        form={form} 
-        layout="vertical" 
-        initialValues={{
-            type: 'mysql',
-            host: 'localhost',
-            port: 3306,
-            database: '',
-            user: 'root',
-            useSSL: false,
-            sslMode: 'preferred',
-            sslCertPath: '',
-            sslKeyPath: '',
-            useSSH: false,
-            sshPort: 22,
-            useProxy: false,
-            proxyType: 'socks5',
-            proxyPort: 1080,
-            useHttpTunnel: false,
-            httpTunnelPort: 8080,
-            timeout: 30,
-            uri: '',
-            mysqlTopology: 'single',
-            redisTopology: 'single',
-            mongoTopology: 'single',
-            mongoSrv: false,
-            mongoReadPreference: 'primary',
-            mongoAuthMechanism: '',
-            savePassword: true,
-            mysqlReplicaHosts: [],
-            redisHosts: [],
-            mongoHosts: [],
-            mysqlReplicaUser: '',
-            mysqlReplicaPassword: '',
-            mongoReplicaUser: '',
-            mongoReplicaPassword: '',
-            redisDB: 0,
-        }}
-        onValuesChange={(changed) => {
-            if (testResult) {
-                setTestResult(null); // Clear result on change
-                setTestErrorLogOpen(false);
-            }
-            if (changed.uri !== undefined || changed.type !== undefined) {
-                setUriFeedback(null);
-            }
-            if (changed.useSSL !== undefined) setUseSSL(changed.useSSL);
-            if (changed.useSSH !== undefined) setUseSSH(changed.useSSH);
-            if (changed.useProxy !== undefined) {
-                const enabledProxy = !!changed.useProxy;
-                setUseProxy(enabledProxy);
-                if (enabledProxy && form.getFieldValue('useHttpTunnel')) {
-                    form.setFieldValue('useHttpTunnel', false);
-                    setUseHttpTunnel(false);
-                }
-            }
-            if (changed.proxyType !== undefined) {
-                const nextType = String(changed.proxyType || 'socks5').toLowerCase();
-                if (nextType === 'http') {
-                    const currentPort = Number(form.getFieldValue('proxyPort') || 0);
-                    if (!currentPort || currentPort === 1080) {
-                        form.setFieldValue('proxyPort', 8080);
-                    }
-                } else {
-                    const currentPort = Number(form.getFieldValue('proxyPort') || 0);
-                    if (!currentPort || currentPort === 8080) {
-                        form.setFieldValue('proxyPort', 1080);
-                    }
-                }
-            }
-            if (changed.useHttpTunnel !== undefined) {
-                const enabledHttpTunnel = !!changed.useHttpTunnel;
-                setUseHttpTunnel(enabledHttpTunnel);
-                if (enabledHttpTunnel && form.getFieldValue('useProxy')) {
-                    form.setFieldValue('useProxy', false);
-                    setUseProxy(false);
-                }
-                if (enabledHttpTunnel) {
-                    const currentPort = Number(form.getFieldValue('httpTunnelPort') || 0);
-                    if (!currentPort || currentPort <= 0) {
-                        form.setFieldValue('httpTunnelPort', 8080);
-                    }
-                }
-            }
-            // Type change handled by step 1, but keep sync if select changes (hidden now)
-            if (changed.type !== undefined) setDbType(changed.type);
-            if (changed.redisTopology !== undefined) {
-                const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
-                setRedisDbList(supportedDbs);
-                const selectedDbsRaw = form.getFieldValue('includeRedisDatabases');
-                const selectedDbs = Array.isArray(selectedDbsRaw) ? selectedDbsRaw.map((entry: any) => Number(entry)) : [];
-                const validDbs = selectedDbs
-                    .filter((entry: number) => Number.isFinite(entry))
-                    .map((entry: number) => Math.trunc(entry))
-                    .filter((entry: number) => supportedDbs.includes(entry));
-                form.setFieldValue('includeRedisDatabases', validDbs.length > 0 ? validDbs : undefined);
-            }
-            if (
-                changed.type !== undefined
-                || changed.host !== undefined
-                || changed.port !== undefined
-                || changed.mongoHosts !== undefined
-                || changed.mongoTopology !== undefined
-                || changed.mongoSrv !== undefined
-            ) {
-                setMongoMembers([]);
-            }
-        }}
-      >
-        {/* Hidden Type Field to keep form value synced */}
-        <Form.Item name="type" hidden><Input /></Form.Item>
+  const renderStep2 = () => {
+      const baseInfoSection = (
+          <div style={modalInnerSectionStyle}>
+              <div style={{ marginBottom: 12, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>基础信息</div>
+              <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>常用参数集中在左侧，优先完成连接建立所需的最小输入。</div>
 
-        <Form.Item name="name" label="连接名称">
-            <Input placeholder="例如：本地测试库" />
-        </Form.Item>
-        <Form.Item
-            name="uri"
-            label="连接 URI（可复制粘贴）"
-            help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
-        >
-            <Input.TextArea rows={2} placeholder={getUriPlaceholder()} />
-        </Form.Item>
-        <Space size={8} style={{ marginBottom: 12 }}>
-            <Button onClick={handleGenerateURI}>生成 URI</Button>
-            <Button onClick={handleParseURI}>从 URI 解析</Button>
-            <Button onClick={handleCopyURI}>复制 URI</Button>
-        </Space>
-        {uriFeedback && (
-            <Alert
-                showIcon
-                closable
-                type={uriFeedback.type}
-                message={uriFeedback.message}
-                onClose={() => setUriFeedback(null)}
-                style={{ marginBottom: 12 }}
-            />
-        )}
-        {currentDriverUnavailableReason && (
-            <Alert
-                showIcon
-                type="warning"
-                style={{ marginBottom: 12 }}
-                message="当前数据源驱动未启用"
-                description={(
-                    <Space size={8}>
-                        <span>{currentDriverUnavailableReason}</span>
-                        <Button type="link" size="small" onClick={() => onOpenDriverManager?.()}>
-                            去驱动管理安装
-                        </Button>
-                    </Space>
-                )}
-            />
-        )}
-        
-        {isCustom ? (
-            <>
-                <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
-                    <Input placeholder="例如: mysql, postgres" />
-                </Form.Item>
-                <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[{ required: true, message: '请输入连接字符串' }]}>
-                    <Input.TextArea rows={3} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
-                </Form.Item>
-            </>
-        ) : (
-        <>
-        <div style={{ display: 'flex', gap: 16 }}>
-            <Form.Item
-                name="host"
-                label={isFileDb ? "文件路径 (绝对路径)" : "主机地址 (Host)"}
-                rules={[createUriAwareRequiredRule('请输入地址/路径')]}
-                style={{ flex: 1 }}
-            >
-              <Input
-                placeholder={isFileDb ? (dbType === 'duckdb' ? "/path/to/db.duckdb" : "/path/to/db.sqlite") : "localhost"}
-                onDoubleClick={requestTest}
-              />
-            </Form.Item>
-            {isFileDb && (
-            <Form.Item label=" " style={{ width: 120 }}>
-              <Button style={{ width: '100%' }} onClick={handleSelectDatabaseFile} loading={selectingDbFile}>
-                浏览...
-              </Button>
-            </Form.Item>
-            )}
-            {!isFileDb && (
-            <Form.Item
-                name="port"
-                label="端口 (Port)"
-                rules={[createUriAwareRequiredRule('请输入端口号', (value) => Number(value) > 0)]}
-                style={{ width: 100 }}
-            >
-              <InputNumber style={{ width: '100%' }} />
-            </Form.Item>
-            )}
-        </div>
+              <Form.Item name="name" label="连接名称">
+                  <Input placeholder="例如：本地测试库" />
+              </Form.Item>
 
-        {(dbType === 'postgres' || dbType === 'kingbase' || dbType === 'highgo' || dbType === 'vastbase') && (
-        <Form.Item
-            name="database"
-            label="默认连接数据库（可选）"
-            help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
-        >
-            <Input placeholder="例如：appdb" />
-        </Form.Item>
-        )}
+              {!isCustom && (
+                  <>
+                      <Form.Item
+                          name="uri"
+                          label="连接 URI（可复制粘贴）"
+                          help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
+                      >
+                          <Input.TextArea rows={3} placeholder={getUriPlaceholder()} />
+                      </Form.Item>
+                      <Space size={8} style={{ marginBottom: uriFeedback ? 12 : 16 }} wrap>
+                          <Button onClick={handleGenerateURI}>生成 URI</Button>
+                          <Button onClick={handleParseURI}>从 URI 解析</Button>
+                          <Button onClick={handleCopyURI}>复制 URI</Button>
+                      </Space>
+                      {uriFeedback && (
+                          <Alert
+                              showIcon
+                              closable
+                              type={uriFeedback.type}
+                              message={uriFeedback.message}
+                              onClose={() => setUriFeedback(null)}
+                              style={{ marginBottom: 16 }}
+                          />
+                      )}
+                  </>
+              )}
 
-        {dbType === 'oracle' && (
-        <Form.Item
-            name="database"
-            label="服务名 (Service Name)"
-            rules={[createUriAwareRequiredRule('请输入 Oracle 服务名（例如 ORCLPDB1）')]}
-            help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
-        >
-            <Input placeholder="例如：ORCLPDB1" />
-        </Form.Item>
-        )}
+              {isCustom ? (
+                  <>
+                      <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
+                          <Input placeholder="例如: mysql, postgres" />
+                      </Form.Item>
+                      <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[{ required: true, message: '请输入连接字符串' }]}> 
+                          <Input.TextArea rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
+                      </Form.Item>
+                  </>
+              ) : (
+                  <>
+                      <div style={{ display: 'grid', gridTemplateColumns: isFileDb ? 'minmax(0, 1fr) 120px' : 'minmax(0, 1fr) 120px', gap: 16, alignItems: 'start' }}>
+                          <Form.Item
+                              name="host"
+                              label={isFileDb ? '文件路径 (绝对路径)' : '主机地址 (Host)'}
+                              rules={[createUriAwareRequiredRule('请输入地址/路径')]}
+                              style={{ marginBottom: 0 }}
+                          >
+                              <Input
+                                  placeholder={isFileDb ? (dbType === 'duckdb' ? '/path/to/db.duckdb' : '/path/to/db.sqlite') : 'localhost'}
+                                  onDoubleClick={requestTest}
+                              />
+                          </Form.Item>
+                          {isFileDb ? (
+                              <Form.Item label=" " style={{ marginBottom: 0 }}>
+                                  <Button style={{ width: '100%' }} onClick={handleSelectDatabaseFile} loading={selectingDbFile}>
+                                      浏览...
+                                  </Button>
+                              </Form.Item>
+                          ) : (
+                              <Form.Item
+                                  name="port"
+                                  label="端口 (Port)"
+                                  rules={[createUriAwareRequiredRule('请输入端口号', (value) => Number(value) > 0)]}
+                                  style={{ marginBottom: 0 }}
+                              >
+                                  <InputNumber style={{ width: '100%' }} />
+                              </Form.Item>
+                          )}
+                      </div>
 
-        {(dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx') && (
-        <>
-            <Form.Item name="mysqlTopology" label="连接模式">
-                <Select
-                    options={[
-                        { value: 'single', label: '单机模式' },
-                        { value: 'replica', label: '主从模式（优先主库，可切换从库）' },
-                    ]}
-                />
-            </Form.Item>
-            {mysqlTopology === 'replica' && (
-            <>
-                <Form.Item
-                    name="mysqlReplicaHosts"
-                    label="从库地址列表"
-                    help="可输入多个从库地址，格式：host:port（回车确认）"
-                >
-                    <Select mode="tags" placeholder="例如：10.10.0.12:3306、10.10.0.13:3306" tokenSeparators={[',', ';', ' ']} />
-                </Form.Item>
-                <div style={{ display: 'flex', gap: 16 }}>
-                    <Form.Item name="mysqlReplicaUser" label="从库用户名（可选）" style={{ flex: 1 }}>
-                        <Input placeholder="留空沿用主库用户名" />
-                    </Form.Item>
-                    <Form.Item name="mysqlReplicaPassword" label="从库密码（可选）" style={{ flex: 1 }}>
-                        <Input.Password placeholder="留空沿用主库密码" />
-                    </Form.Item>
-                </div>
-            </>
-            )}
-        </>
-        )}
+                      {(dbType === 'postgres' || dbType === 'kingbase' || dbType === 'highgo' || dbType === 'vastbase') && (
+                          <Form.Item
+                              name="database"
+                              label="默认连接数据库（可选）"
+                              help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
+                          >
+                              <Input placeholder="例如：appdb" />
+                          </Form.Item>
+                      )}
 
-        {dbType === 'mongodb' && (
-        <>
-            <Form.Item name="mongoSrv" valuePropName="checked" style={{ marginBottom: 12 }}>
-                <Checkbox>使用 SRV 记录（mongodb+srv）</Checkbox>
-            </Form.Item>
-            <Form.Item name="mongoTopology" label="连接模式">
-                <Select
-                    options={[
-                        { value: 'single', label: '单机模式' },
-                        { value: 'replica', label: '主从/副本集模式' },
-                    ]}
-                />
-            </Form.Item>
-            {mongoSrv && useSSH && (
-                <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="SRV 记录模式暂不支持 SSH 隧道，请关闭其中一项后再测试连接"
-                />
-            )}
-            {mongoTopology === 'replica' && (
-            <>
-                {!mongoSrv && (
-                <Form.Item
-                    name="mongoHosts"
-                    label="附加节点地址"
-                    help="主节点使用上方主机地址；这里填写其余节点，格式：host:port"
-                >
-                    <Select mode="tags" placeholder="例如：10.10.0.22:27017、10.10.0.23:27017" tokenSeparators={[',', ';', ' ']} />
-                </Form.Item>
-                )}
-                {mongoSrv && (
-                <Alert
-                    type="info"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="SRV 模式将通过 DNS 自动发现成员，无需手动填写附加节点地址"
-                />
-                )}
-                <Form.Item name="mongoReplicaSet" label="Replica Set 名称">
-                    <Input placeholder="例如：rs0" />
-                </Form.Item>
-                <div style={{ display: 'flex', gap: 16 }}>
-                    <Form.Item name="mongoReplicaUser" label="从库用户名（可选）" style={{ flex: 1 }}>
-                        <Input placeholder="留空沿用主库用户名" />
-                    </Form.Item>
-                    <Form.Item name="mongoReplicaPassword" label="从库密码（可选）" style={{ flex: 1 }}>
-                        <Input.Password placeholder="留空沿用主库密码" />
-                    </Form.Item>
-                </div>
-                <Space size={8} style={{ marginBottom: 12 }}>
-                    <Button onClick={handleDiscoverMongoMembers} loading={discoveringMembers}>发现成员</Button>
-                    <Text type="secondary">发现后可校验当前副本集状态</Text>
-                </Space>
-                {mongoMembers.length > 0 && (
-                    <Table
-                        size="small"
-                        pagination={false}
-                        rowKey={(record) => `${record.host}-${record.state}`}
-                        dataSource={mongoMembers}
-                        style={{ marginBottom: 12 }}
-                        columns={[
-                            {
-                                title: '成员',
-                                dataIndex: 'host',
-                                width: '48%',
-                                render: (value: string, record: MongoMemberInfo) => (
-                                    <span>
-                                        {value}
-                                        {record.isSelf ? <Tag color="processing" style={{ marginLeft: 8 }}>当前</Tag> : null}
-                                    </span>
-                                ),
-                            },
-                            {
-                                title: '状态',
-                                dataIndex: 'state',
-                                width: '32%',
-                                render: (value: string) => {
-                                    const state = String(value || '').toUpperCase();
-                                    let color: string = 'default';
-                                    if (state === 'PRIMARY') color = 'success';
-                                    else if (state === 'SECONDARY' || state === 'PASSIVE') color = 'blue';
-                                    else if (state === 'ARBITER') color = 'purple';
-                                    else if (state === 'DOWN' || state === 'REMOVED' || state === 'UNKNOWN') color = 'error';
-                                    return <Tag color={color}>{state || 'UNKNOWN'}</Tag>;
-                                },
-                            },
-                            {
-                                title: '健康',
-                                dataIndex: 'healthy',
-                                width: '20%',
-                                render: (value: boolean) => (
-                                    <Tag color={value ? 'success' : 'error'}>{value ? '正常' : '异常'}</Tag>
-                                ),
-                            },
-                        ]}
-                    />
-                )}
-            </>
-            )}
-            <Form.Item name="mongoAuthSource" label="认证库 (authSource)">
-                <Input placeholder="默认使用 database 或 admin" />
-            </Form.Item>
-            <Form.Item name="mongoReadPreference" label="读偏好 (readPreference)">
-                <Select
-                    options={[
-                        { value: 'primary', label: 'primary' },
-                        { value: 'primaryPreferred', label: 'primaryPreferred' },
-                        { value: 'secondary', label: 'secondary' },
-                        { value: 'secondaryPreferred', label: 'secondaryPreferred' },
-                        { value: 'nearest', label: 'nearest' },
-                    ]}
-                />
-            </Form.Item>
-        </>
-        )}
+                      {dbType === 'oracle' && (
+                          <Form.Item
+                              name="database"
+                              label="服务名 (Service Name)"
+                              rules={[createUriAwareRequiredRule('请输入 Oracle 服务名（例如 ORCLPDB1）')]}
+                              help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+                          >
+                              <Input placeholder="例如：ORCLPDB1" />
+                          </Form.Item>
+                      )}
 
-        {/* Redis specific: password only, no username */}
-        {isRedis && (
-        <>
-            <Form.Item name="redisTopology" label="连接模式">
-                <Select
-                    options={[
-                        { value: 'single', label: '单机模式' },
-                        { value: 'cluster', label: '集群模式（Redis Cluster）' },
-                    ]}
-                />
-            </Form.Item>
-            {redisTopology === 'cluster' && (
-            <Form.Item
-                name="redisHosts"
-                label="集群附加节点地址"
-                help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
-            >
-                <Select mode="tags" placeholder="例如：10.10.0.12:6379、10.10.0.13:6379" tokenSeparators={[',', ';', ' ']} />
-            </Form.Item>
-            )}
-            <Form.Item name="password" label="密码 (可选)">
-              <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
-            </Form.Item>
-            <Form.Item
-                name="includeRedisDatabases"
-                label="显示数据库 (留空显示全部)"
-                help="连接测试成功后可选择"
-            >
-                <Select
-                    mode="multiple"
-                    placeholder="选择显示的数据库 (0-15)"
-                    allowClear
-                >
-                    {redisDbList.map(db => <Select.Option key={db} value={db}>db{db}</Select.Option>)}
-                </Select>
-            </Form.Item>
-        </>
-        )}
+                      {(dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx') && (
+                          <>
+                              <Form.Item name="mysqlTopology" label="连接模式">
+                                  <Select
+                                      options={[
+                                          { value: 'single', label: '单机模式' },
+                                          { value: 'replica', label: '主从模式（优先主库，可切换从库）' },
+                                      ]}
+                                  />
+                              </Form.Item>
+                              {mysqlTopology === 'replica' && (
+                                  <>
+                                      <Form.Item
+                                          name="mysqlReplicaHosts"
+                                          label="从库地址列表"
+                                          help="可输入多个从库地址，格式：host:port（回车确认）"
+                                      >
+                                          <Select mode="tags" placeholder="例如：10.10.0.12:3306、10.10.0.13:3306" tokenSeparators={[',', ';', ' ']} />
+                                      </Form.Item>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                          <Form.Item name="mysqlReplicaUser" label="从库用户名（可选）" style={{ marginBottom: 0 }}>
+                                              <Input placeholder="留空沿用主库用户名" />
+                                          </Form.Item>
+                                          <Form.Item name="mysqlReplicaPassword" label="从库密码（可选）" style={{ marginBottom: 0 }}>
+                                              <Input.Password placeholder="留空沿用主库密码" />
+                                          </Form.Item>
+                                      </div>
+                                  </>
+                              )}
+                          </>
+                      )}
 
-        {/* Non-Redis, non-SQLite: username and password */}
-        {!isFileDb && !isRedis && (
-        <div style={{ display: 'flex', gap: 16 }}>
-            <Form.Item
-                name="user"
-                label="用户名"
-                rules={[createUriAwareRequiredRule('请输入用户名')]}
-                style={{ flex: 1 }}
-            >
-              <Input />
-            </Form.Item>
-            <Form.Item name="password" label="密码" style={{ flex: 1 }}>
-              <Input.Password />
-            </Form.Item>
-            {dbType === 'mongodb' && (
-            <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ width: 160 }}>
-                <Select
-                    allowClear
-                    placeholder="自动协商"
-                    options={[
-                        { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
-                        { value: 'SCRAM-SHA-256', label: 'SCRAM-SHA-256' },
-                        { value: 'MONGODB-AWS', label: 'MONGODB-AWS' },
-                    ]}
-                />
-            </Form.Item>
-            )}
-        </div>
-        )}
+                      {dbType === 'mongodb' && (
+                          <>
+                              <Form.Item name="mongoTopology" label="连接模式">
+                                  <Select
+                                      options={[
+                                          { value: 'single', label: '单机模式' },
+                                          { value: 'replica', label: '副本集 / 多节点' },
+                                      ]}
+                                  />
+                              </Form.Item>
+                              <Form.Item name="mongoSrv" valuePropName="checked" style={{ marginTop: -6 }}>
+                                  <Checkbox>使用 SRV（mongodb+srv）</Checkbox>
+                              </Form.Item>
+                              {mongoSrv && useSSH && (
+                                  <Alert
+                                      type="warning"
+                                      showIcon
+                                      style={{ marginBottom: 12 }}
+                                      message="SRV 与 SSH 隧道同时启用时，可能依赖本地 DNS 解析能力"
+                                  />
+                              )}
+                              {mongoTopology === 'replica' && (
+                                  <>
+                                      <Form.Item name="mongoHosts" label={mongoSrv ? '附加 SRV 主机（可选）' : '附加节点地址'} help={mongoSrv ? '可输入多个候选主机名，格式：host；若留空则仅使用上方主机。' : '可输入多个节点地址，格式：host:port（回车确认）'}>
+                                          <Select mode="tags" placeholder={mongoSrv ? '例如：cluster-a.example.com、cluster-b.example.com' : '例如：10.10.0.12:27017、10.10.0.13:27017'} tokenSeparators={[',', ';', ' ']} />
+                                      </Form.Item>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                          <Form.Item name="mongoReplicaSet" label="副本集名称（可选）" style={{ marginBottom: 0 }}>
+                                              <Input placeholder="例如：rs0" />
+                                          </Form.Item>
+                                          <Form.Item name="mongoReplicaUser" label="副本集用户名（可选）" style={{ marginBottom: 0 }}>
+                                              <Input placeholder="留空沿用主用户名" />
+                                          </Form.Item>
+                                      </div>
+                                      <Form.Item name="mongoReplicaPassword" label="副本集密码（可选）" style={{ marginBottom: 0 }}>
+                                          <Input.Password placeholder="留空沿用主密码" />
+                                      </Form.Item>
+                                      <Space size={8} style={{ marginTop: 12, marginBottom: 12 }}>
+                                          <Button onClick={handleDiscoverMongoMembers} loading={discoveringMembers}>自动发现成员</Button>
+                                      </Space>
+                                      {mongoMembers.length > 0 && (
+                                          <Table
+                                              size="small"
+                                              rowKey={(record) => record.host}
+                                              pagination={false}
+                                              dataSource={mongoMembers}
+                                              style={{ marginBottom: 12 }}
+                                              columns={[
+                                                  { title: 'Host', dataIndex: 'host', width: '48%' },
+                                                  {
+                                                      title: '角色',
+                                                      dataIndex: 'role',
+                                                      width: '32%',
+                                                      render: (value: string, record: MongoMemberInfo) => (
+                                                          <Tag color={record.isSelf ? 'blue' : 'default'}>{value || 'UNKNOWN'}</Tag>
+                                                      ),
+                                                  },
+                                                  {
+                                                      title: '健康',
+                                                      dataIndex: 'healthy',
+                                                      width: '20%',
+                                                      render: (value: boolean) => (
+                                                          <Tag color={value ? 'success' : 'error'}>{value ? '正常' : '异常'}</Tag>
+                                                      ),
+                                                  },
+                                              ]}
+                                          />
+                                      )}
+                                  </>
+                              )}
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                  <Form.Item name="mongoAuthSource" label="认证库 (authSource)" style={{ marginBottom: 0 }}>
+                                      <Input placeholder="默认使用 database 或 admin" />
+                                  </Form.Item>
+                                  <Form.Item name="mongoReadPreference" label="读偏好 (readPreference)" style={{ marginBottom: 0 }}>
+                                      <Select
+                                          options={[
+                                              { value: 'primary', label: 'primary' },
+                                              { value: 'primaryPreferred', label: 'primaryPreferred' },
+                                              { value: 'secondary', label: 'secondary' },
+                                              { value: 'secondaryPreferred', label: 'secondaryPreferred' },
+                                              { value: 'nearest', label: 'nearest' },
+                                          ]}
+                                      />
+                                  </Form.Item>
+                              </div>
+                          </>
+                      )}
 
-        {dbType === 'mongodb' && (
-        <Form.Item name="savePassword" valuePropName="checked" style={{ marginTop: -6 }}>
-            <Checkbox>保存密码</Checkbox>
-        </Form.Item>
-        )}
+                      {isRedis && (
+                          <>
+                              <Form.Item name="redisTopology" label="连接模式">
+                                  <Select
+                                      options={[
+                                          { value: 'single', label: '单机模式' },
+                                          { value: 'cluster', label: '集群模式（Redis Cluster）' },
+                                      ]}
+                                  />
+                              </Form.Item>
+                              {redisTopology === 'cluster' && (
+                                  <Form.Item
+                                      name="redisHosts"
+                                      label="集群附加节点地址"
+                                      help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
+                                  >
+                                      <Select mode="tags" placeholder="例如：10.10.0.12:6379、10.10.0.13:6379" tokenSeparators={[',', ';', ' ']} />
+                                  </Form.Item>
+                              )}
+                              <Form.Item name="password" label="密码 (可选)">
+                                  <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
+                              </Form.Item>
+                              <Form.Item
+                                  name="includeRedisDatabases"
+                                  label="显示数据库 (留空显示全部)"
+                                  help="连接测试成功后可选择"
+                              >
+                                  <Select mode="multiple" placeholder="选择显示的数据库 (0-15)" allowClear>
+                                      {redisDbList.map(db => <Select.Option key={db} value={db}>db{db}</Select.Option>)}
+                                  </Select>
+                              </Form.Item>
+                          </>
+                      )}
 
-        {!isFileDb && !isRedis && (
-        <Form.Item name="includeDatabases" label="显示数据库 (留空显示全部)" help="连接测试成功后可选择">
-            <Select mode="multiple" placeholder="选择显示的数据库" allowClear>
-                {dbList.map(db => <Select.Option key={db} value={db}>{db}</Select.Option>)}
-            </Select>
-        </Form.Item>
-        )}
+                      {!isFileDb && !isRedis && (
+                          <div style={{ display: 'grid', gridTemplateColumns: dbType === 'mongodb' ? 'minmax(0, 1fr) minmax(0, 1fr) 180px' : 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                              <Form.Item
+                                  name="user"
+                                  label="用户名"
+                                  rules={[createUriAwareRequiredRule('请输入用户名')]}
+                                  style={{ marginBottom: 0 }}
+                              >
+                                  <Input />
+                              </Form.Item>
+                              <Form.Item name="password" label="密码" style={{ marginBottom: 0 }}>
+                                  <Input.Password />
+                              </Form.Item>
+                              {dbType === 'mongodb' && (
+                                  <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ marginBottom: 0 }}>
+                                      <Select
+                                          allowClear
+                                          placeholder="自动协商"
+                                          options={[
+                                              { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
+                                              { value: 'SCRAM-SHA-256', label: 'SCRAM-SHA-256' },
+                                              { value: 'MONGODB-AWS', label: 'MONGODB-AWS' },
+                                          ]}
+                                      />
+                                  </Form.Item>
+                              )}
+                          </div>
+                      )}
 
-        {!isFileDb && (
-        <>
-            {isSSLType && (
-                <>
-                    <Divider style={{ margin: '12px 0' }} />
-                    <Form.Item name="useSSL" valuePropName="checked" style={{ marginBottom: 0 }}>
-                        <Checkbox>使用 SSL/TLS</Checkbox>
-                    </Form.Item>
-                    {useSSL && (
-                        <div style={tunnelSectionStyle}>
-                            <Form.Item
-                                name="sslMode"
-                                label="SSL 模式"
-                                rules={[{ required: true, message: '请选择 SSL 模式' }]}
-                                style={{ marginBottom: 8 }}
-                            >
-                                <Select
-                                    options={[
-                                        { value: 'preferred', label: 'Preferred（优先 SSL，推荐）' },
-                                        { value: 'required', label: 'Required（必须 SSL，校验证书）' },
-                                        { value: 'skip-verify', label: 'Skip Verify（必须 SSL，跳过证书校验）' },
-                                    ]}
-                                />
-                            </Form.Item>
-                            {dbType === 'dameng' && (
-                                <>
-                                    <Form.Item
-                                        name="sslCertPath"
-                                        label="客户端证书路径 (SSL_CERT_PATH)"
-                                        rules={[{ required: true, message: '达梦 SSL 需要证书路径' }]}
-                                        style={{ marginBottom: 8 }}
-                                    >
-                                        <Input placeholder="例如: C:\\certs\\client-cert.pem" />
-                                    </Form.Item>
-                                    <Form.Item
-                                        name="sslKeyPath"
-                                        label="客户端私钥路径 (SSL_KEY_PATH)"
-                                        rules={[{ required: true, message: '达梦 SSL 需要私钥路径' }]}
-                                        style={{ marginBottom: 8 }}
-                                    >
-                                        <Input placeholder="例如: C:\\certs\\client-key.pem" />
-                                    </Form.Item>
-                                </>
-                            )}
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                                {sslHintText}
-                            </Text>
-                        </div>
-                    )}
-                </>
-            )}
+                      {dbType === 'mongodb' && (
+                          <Form.Item name="savePassword" valuePropName="checked" style={{ marginTop: 12, marginBottom: 0 }}>
+                              <Checkbox>保存密码</Checkbox>
+                          </Form.Item>
+                      )}
 
-            <Divider style={{ margin: '12px 0' }} />
-            <Form.Item name="useSSH" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Checkbox>使用 SSH 隧道 (SSH Tunnel)</Checkbox>
-            </Form.Item>
+                      {!isFileDb && !isRedis && (
+                          <Form.Item name="includeDatabases" label="显示数据库 (留空显示全部)" help="连接测试成功后可选择" style={{ marginTop: 12, marginBottom: 0 }}>
+                              <Select mode="multiple" placeholder="选择显示的数据库" allowClear>
+                                  {dbList.map(db => <Select.Option key={db} value={db}>{db}</Select.Option>)}
+                              </Select>
+                          </Form.Item>
+                      )}
+                  </>
+              )}
+          </div>
+      );
 
-            {useSSH && (
-                <div style={tunnelSectionStyle}>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
-                            <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
-                        </Form.Item>
-                        <Form.Item name="sshPort" label="端口" rules={[{ required: useSSH, message: '请输入SSH端口' }]} style={{ width: 100 }}>
-                            <InputNumber style={{ width: '100%' }} />
-                        </Form.Item>
-                    </div>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="sshUser" label="SSH 用户" rules={[{ required: useSSH, message: '请输入SSH用户' }]} style={{ flex: 1 }}>
-                            <Input placeholder="root" />
-                        </Form.Item>
-                        <Form.Item name="sshPassword" label="SSH 密码" style={{ flex: 1 }}>
-                            <Input.Password placeholder="密码" />
-                        </Form.Item>
-                    </div>
-                    <Form.Item label="私钥路径 (可选)" help="例如: /Users/name/.ssh/id_rsa">
-                        <Space.Compact style={{ width: '100%' }}>
-                            <Form.Item name="sshKeyPath" noStyle>
-                                <Input placeholder="绝对路径" />
-                            </Form.Item>
-                            <Button onClick={handleSelectSSHKeyFile} loading={selectingSSHKey}>
-                                浏览...
-                            </Button>
-                        </Space.Compact>
-                    </Form.Item>
-                </div>
-            )}
+      const networkSecuritySection = !isFileDb ? (() => {
+          const networkItems: Array<{
+              key: 'ssl' | 'ssh' | 'proxy' | 'httpTunnel';
+              title: string;
+              description: string;
+              enabled: boolean;
+          }> = [
+              ...(isSSLType ? [{ key: 'ssl' as const, title: 'SSL/TLS', description: '加密与证书校验', enabled: useSSL }] : []),
+              { key: 'ssh', title: 'SSH 隧道', description: '跳板机 / 堡垒机转发', enabled: useSSH },
+              { key: 'proxy', title: '代理', description: 'SOCKS5 / HTTP CONNECT', enabled: useProxy },
+              { key: 'httpTunnel', title: 'HTTP 隧道', description: '独立 HTTP CONNECT 路由', enabled: useHttpTunnel },
+          ];
+          const resolvedNetworkConfig = networkItems.some((item) => item.key === activeNetworkConfig)
+              ? activeNetworkConfig
+              : networkItems[0]?.key || 'ssh';
+          const renderNetworkPanel = () => {
+              if (resolvedNetworkConfig === 'ssl') {
+                  return (
+                      <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
+                          <div style={{ marginBottom: 8, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>SSL/TLS</div>
+                          <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>为连接链路增加加密与证书校验控制，适合生产或跨网络访问场景。</div>
+                          {!useSSL ? (
+                              <div style={{ ...modalMutedTextStyle, padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.04)' }}>
+                                  左侧勾选“SSL/TLS”后，可在这里配置模式、证书与校验策略。
+                              </div>
+                          ) : (
+                              <div style={tunnelSectionStyle}>
+                                  <Form.Item name="sslMode" label="SSL 模式" rules={[{ required: true, message: '请选择 SSL 模式' }]} style={{ marginBottom: 8 }}>
+                                      <Select
+                                          options={[
+                                              { value: 'preferred', label: 'Preferred（优先 SSL，推荐）' },
+                                              { value: 'required', label: 'Required（必须 SSL，校验证书）' },
+                                              { value: 'skip-verify', label: 'Skip Verify（必须 SSL，跳过证书校验）' },
+                                          ]}
+                                      />
+                                  </Form.Item>
+                                  {dbType === 'dameng' && (
+                                      <>
+                                          <Form.Item name="sslCertPath" label="客户端证书路径 (SSL_CERT_PATH)" rules={[{ required: true, message: '达梦 SSL 需要证书路径' }]} style={{ marginBottom: 8 }}>
+                                              <Input placeholder="例如: C:\certs\client-cert.pem" />
+                                          </Form.Item>
+                                          <Form.Item name="sslKeyPath" label="客户端私钥路径 (SSL_KEY_PATH)" rules={[{ required: true, message: '达梦 SSL 需要私钥路径' }]} style={{ marginBottom: 8 }}>
+                                              <Input placeholder="例如: C:\certs\client-key.pem" />
+                                          </Form.Item>
+                                      </>
+                                  )}
+                                  <Text type="secondary" style={{ fontSize: 12 }}>{sslHintText}</Text>
+                              </div>
+                          )}
+                      </div>
+                  );
+              }
+              if (resolvedNetworkConfig === 'ssh') {
+                  return (
+                      <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
+                          <div style={{ marginBottom: 8, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>SSH 隧道</div>
+                          <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>通过跳板机或堡垒机转发数据库连接，适合内网或受限网络环境。</div>
+                          {!useSSH ? (
+                              <div style={{ ...modalMutedTextStyle, padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.04)' }}>
+                                  左侧勾选“SSH 隧道”后，可在这里填写主机、端口、用户名、密码和私钥路径。
+                              </div>
+                          ) : (
+                              <div style={tunnelSectionStyle}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
+                                  <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
+                                      <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
+                                  </Form.Item>
+                                  <Form.Item name="sshPort" label="端口" rules={[{ required: useSSH, message: '请输入SSH端口' }]} style={{ width: 100 }}>
+                                      <InputNumber style={{ width: '100%' }} />
+                                  </Form.Item>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                  <Form.Item name="sshUser" label="SSH 用户" rules={[{ required: useSSH, message: '请输入SSH用户' }]} style={{ flex: 1 }}>
+                                      <Input placeholder="root" />
+                                  </Form.Item>
+                                  <Form.Item name="sshPassword" label="SSH 密码" style={{ flex: 1 }}>
+                                      <Input.Password placeholder="密码" />
+                                      </Form.Item>
+                                  </div>
+                                  <Form.Item label="私钥路径 (可选)" help="例如: /Users/name/.ssh/id_rsa">
+                                      <Space.Compact style={{ width: '100%' }}>
+                                          <Form.Item name="sshKeyPath" noStyle>
+                                              <Input placeholder="绝对路径" />
+                                          </Form.Item>
+                                          <Button onClick={handleSelectSSHKeyFile} loading={selectingSSHKey}>
+                                              浏览...
+                                          </Button>
+                                      </Space.Compact>
+                                  </Form.Item>
+                              </div>
+                          )}
+                      </div>
+                  );
+              }
+              if (resolvedNetworkConfig === 'proxy') {
+                  return (
+                      <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
+                          <div style={{ marginBottom: 8, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>代理</div>
+                          <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>适合借助本地代理软件或中间网关转发数据库流量。</div>
+                          {!useProxy ? (
+                              <div style={{ ...modalMutedTextStyle, padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.04)' }}>
+                                  左侧勾选“代理”后，可在这里选择代理类型并填写主机、端口与认证信息。
+                              </div>
+                          ) : (
+                              <div style={tunnelSectionStyle}>
+                              <Form.Item name="proxyHost" label="代理主机" rules={[{ required: useProxy, message: '请输入代理主机' }]}>
+                                  <Input placeholder="例如: 127.0.0.1 或 proxy.company.com" />
+                              </Form.Item>
+                              <div style={{ display: 'grid', gridTemplateColumns: '180px 120px', gap: 16 }}>
+                                  <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ marginBottom: 0 }}>
+                                      <Select options={[
+                                          { value: 'socks5', label: 'SOCKS5' },
+                                          { value: 'http', label: 'HTTP CONNECT' },
+                                      ]} />
+                                  </Form.Item>
+                                  <Form.Item name="proxyPort" label="端口" rules={[{ required: useProxy, message: '请输入代理端口' }]} style={{ marginBottom: 0 }}>
+                                      <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+                                  </Form.Item>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                  <Form.Item name="proxyUser" label="代理用户名（可选）" style={{ flex: 1 }}>
+                                      <Input placeholder="留空表示无认证" />
+                                  </Form.Item>
+                                  <Form.Item name="proxyPassword" label="代理密码（可选）" style={{ flex: 1 }}>
+                                      <Input.Password placeholder="留空表示无认证" />
+                                      </Form.Item>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                  );
+              }
+              return (
+                  <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
+                      <div style={{ marginBottom: 8, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>HTTP 隧道</div>
+                      <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>与代理模式互斥，适合单独指定一条 HTTP CONNECT 隧道路由。</div>
+                      {!useHttpTunnel ? (
+                          <div style={{ ...modalMutedTextStyle, padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.04)' }}>
+                              左侧勾选“HTTP 隧道”后，可在这里填写隧道目标与认证信息。
+                          </div>
+                      ) : (
+                          <div style={tunnelSectionStyle}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
+                                  <Form.Item name="httpTunnelHost" label="隧道主机" rules={[{ required: useHttpTunnel, message: '请输入隧道主机' }]} style={{ flex: 1 }}>
+                                      <Input placeholder="例如: tunnel.company.com 或 127.0.0.1" />
+                                  </Form.Item>
+                                  <Form.Item name="httpTunnelPort" label="端口" rules={[{ required: useHttpTunnel, message: '请输入隧道端口' }]} style={{ width: 120 }}>
+                                      <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+                                  </Form.Item>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
+                                  <Form.Item name="httpTunnelUser" label="隧道用户名（可选）" style={{ flex: 1 }}>
+                                      <Input placeholder="留空表示无认证" />
+                                  </Form.Item>
+                                  <Form.Item name="httpTunnelPassword" label="隧道密码（可选）" style={{ flex: 1 }}>
+                                      <Input.Password placeholder="留空表示无认证" />
+                                  </Form.Item>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: 12 }}>与“使用代理”互斥，启用后将通过 HTTP CONNECT 建立独立隧道。</Text>
+                          </div>
+                      )}
+                  </div>
+              );
+          };
 
-            <Divider style={{ margin: '12px 0' }} />
-            <Form.Item name="useProxy" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Checkbox>使用代理 (SOCKS5 / HTTP CONNECT)</Checkbox>
-            </Form.Item>
+          return (
+              <div style={modalInnerSectionStyle}>
+                  <div style={{ marginBottom: 12, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 14, fontWeight: 700 }}>网络与安全</div>
+                  <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>上方稳定列出所有连接方式，下方固定展示当前方式的配置详情，避免启用后页面重新排布，同时给详情区留出足够宽度。</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
+                      {networkItems.map((item) => {
+                          const active = item.key === resolvedNetworkConfig;
+                          const activeColor = darkMode ? '#ffd666' : '#1677ff';
+                          return (
+                              <div
+                                  key={item.key}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => setActiveNetworkConfig(item.key)}
+                                  onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                          event.preventDefault();
+                                          setActiveNetworkConfig(item.key);
+                                      }
+                                  }}
+                                  style={{
+                                      ...getConnectionOptionCardStyle(item.enabled),
+                                      borderColor: active
+                                          ? (darkMode ? 'rgba(255,214,102,0.46)' : 'rgba(24,144,255,0.36)')
+                                          : 'transparent',
+                                      background: active
+                                          ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.14) 0%, rgba(255,214,102,0.08) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.12) 0%, rgba(24,144,255,0.06) 100%)')
+                                          : getConnectionOptionCardStyle(item.enabled).background,
+                                      boxShadow: active
+                                          ? (darkMode ? '0 0 0 1px rgba(255,214,102,0.18) inset, 0 12px 26px rgba(0,0,0,0.16)' : '0 0 0 1px rgba(24,144,255,0.14) inset, 0 12px 22px rgba(24,144,255,0.10)')
+                                          : 'none',
+                                      cursor: 'pointer',
+                                      outline: 'none',
+                                  }}
+                              >
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                                      <div style={{ width: 8, height: 8, marginTop: 8, borderRadius: 999, background: active ? activeColor : 'transparent', border: active ? 'none' : (darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(16,24,40,0.12)'), flexShrink: 0 }} />
+                                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0, flex: 1 }}>
+                                          <Form.Item name={item.key === 'ssl' ? 'useSSL' : item.key === 'ssh' ? 'useSSH' : item.key === 'proxy' ? 'useProxy' : 'useHttpTunnel'} valuePropName="checked" noStyle>
+                                              <Checkbox />
+                                          </Form.Item>
+                                          <div style={{ minWidth: 0, flex: 1 }}>
+                                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                  <span style={{ fontSize: 14, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>{item.title}</span>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                      {active && (
+                                                          <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: activeColor, background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)' }}>
+                                                              当前编辑
+                                                          </span>
+                                                      )}
+                                                      <span style={{ fontSize: 11, fontWeight: 700, color: item.enabled ? activeColor : (darkMode ? 'rgba(255,255,255,0.38)' : 'rgba(16,24,40,0.36)') }}>
+                                                          {item.enabled ? '已启用' : '未启用'}
+                                                      </span>
+                                                  </div>
+                                              </div>
+                                              <div style={{ marginTop: 4, ...modalMutedTextStyle, color: active ? (darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(22,32,51,0.68)') : modalMutedTextStyle.color }}>
+                                                  {item.description}
+                                              </div>
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                      {renderNetworkPanel()}
+                  </div>
+                  <div style={{ ...modalInnerSectionStyle, padding: 12 }}>
+                      <div style={{ marginBottom: 10, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 13, fontWeight: 700 }}>高级连接</div>
+                      <Form.Item name="timeout" label="连接超时 (秒)" help="数据库连接超时时间，默认 30 秒" rules={[{ type: 'number', min: 1, max: 300, message: '超时时间范围: 1-300 秒' }]} style={{ marginBottom: 0 }}>
+                          <InputNumber style={{ width: '100%' }} min={1} max={300} placeholder="30" />
+                      </Form.Item>
+                  </div>
+              </div>
+          );
+      })() : null;
 
-            {useProxy && (
-                <div style={tunnelSectionStyle}>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ width: 180 }}>
-                            <Select options={[
-                                { value: 'socks5', label: 'SOCKS5' },
-                                { value: 'http', label: 'HTTP CONNECT' },
-                            ]} />
-                        </Form.Item>
-                        <Form.Item name="proxyHost" label="代理主机" rules={[{ required: useProxy, message: '请输入代理主机' }]} style={{ flex: 1 }}>
-                            <Input placeholder="例如: 127.0.0.1 或 proxy.company.com" />
-                        </Form.Item>
-                        <Form.Item name="proxyPort" label="端口" rules={[{ required: useProxy, message: '请输入代理端口' }]} style={{ width: 120 }}>
-                            <InputNumber style={{ width: '100%' }} min={1} max={65535} />
-                        </Form.Item>
-                    </div>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="proxyUser" label="代理用户名（可选）" style={{ flex: 1 }}>
-                            <Input placeholder="留空表示无认证" />
-                        </Form.Item>
-                        <Form.Item name="proxyPassword" label="代理密码（可选）" style={{ flex: 1 }}>
-                            <Input.Password placeholder="留空表示无认证" />
-                        </Form.Item>
-                    </div>
-                </div>
-            )}
+      return (
+          <Form
+              form={form}
+              layout="vertical"
+              initialValues={{
+                  type: 'mysql',
+                  host: 'localhost',
+                  port: 3306,
+                  database: '',
+                  user: 'root',
+                  useSSL: false,
+                  sslMode: 'preferred',
+                  sslCertPath: '',
+                  sslKeyPath: '',
+                  useSSH: false,
+                  sshPort: 22,
+                  useProxy: false,
+                  proxyType: 'socks5',
+                  proxyPort: 1080,
+                  useHttpTunnel: false,
+                  httpTunnelPort: 8080,
+                  timeout: 30,
+                  uri: '',
+                  mysqlTopology: 'single',
+                  redisTopology: 'single',
+                  mongoTopology: 'single',
+                  mongoSrv: false,
+                  mongoReadPreference: 'primary',
+                  mongoAuthMechanism: '',
+                  savePassword: true,
+                  mysqlReplicaHosts: [],
+                  redisHosts: [],
+                  mongoHosts: [],
+                  mysqlReplicaUser: '',
+                  mysqlReplicaPassword: '',
+                  mongoReplicaUser: '',
+                  mongoReplicaPassword: '',
+                  redisDB: 0,
+              }}
+              onValuesChange={(changed) => {
+                  if (testResult) {
+                      setTestResult(null);
+                      setTestErrorLogOpen(false);
+                  }
+                  if (changed.uri !== undefined || changed.type !== undefined) {
+                      setUriFeedback(null);
+                  }
+                  if (changed.useSSL !== undefined) {
+                      setUseSSL(changed.useSSL);
+                      if (changed.useSSL) setActiveNetworkConfig('ssl');
+                  }
+                  if (changed.useSSH !== undefined) {
+                      setUseSSH(changed.useSSH);
+                      if (changed.useSSH) setActiveNetworkConfig('ssh');
+                  }
+                  if (changed.useProxy !== undefined) {
+                      const enabledProxy = !!changed.useProxy;
+                      setUseProxy(enabledProxy);
+                      if (enabledProxy) setActiveNetworkConfig('proxy');
+                      if (enabledProxy && form.getFieldValue('useHttpTunnel')) {
+                          form.setFieldValue('useHttpTunnel', false);
+                          setUseHttpTunnel(false);
+                      }
+                  }
+                  if (changed.proxyType !== undefined) {
+                      const nextType = String(changed.proxyType || 'socks5').toLowerCase();
+                      if (nextType === 'http') {
+                          const currentPort = Number(form.getFieldValue('proxyPort') || 0);
+                          if (!currentPort || currentPort === 1080) {
+                              form.setFieldValue('proxyPort', 8080);
+                          }
+                      } else {
+                          const currentPort = Number(form.getFieldValue('proxyPort') || 0);
+                          if (!currentPort || currentPort === 8080) {
+                              form.setFieldValue('proxyPort', 1080);
+                          }
+                      }
+                  }
+                  if (changed.useHttpTunnel !== undefined) {
+                      const enabledHttpTunnel = !!changed.useHttpTunnel;
+                      setUseHttpTunnel(enabledHttpTunnel);
+                      if (enabledHttpTunnel) setActiveNetworkConfig('httpTunnel');
+                      if (enabledHttpTunnel && form.getFieldValue('useProxy')) {
+                          form.setFieldValue('useProxy', false);
+                          setUseProxy(false);
+                      }
+                      if (enabledHttpTunnel) {
+                          const currentPort = Number(form.getFieldValue('httpTunnelPort') || 0);
+                          if (!currentPort || currentPort <= 0) {
+                              form.setFieldValue('httpTunnelPort', 8080);
+                          }
+                      }
+                  }
+                  if (changed.type !== undefined) setDbType(changed.type);
+                  if (changed.redisTopology !== undefined) {
+                      const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+                      setRedisDbList(supportedDbs);
+                      const selectedDbsRaw = form.getFieldValue('includeRedisDatabases');
+                      const selectedDbs = Array.isArray(selectedDbsRaw) ? selectedDbsRaw.map((entry: any) => Number(entry)) : [];
+                      const validDbs = selectedDbs
+                          .filter((entry: number) => Number.isFinite(entry))
+                          .map((entry: number) => Math.trunc(entry))
+                          .filter((entry: number) => supportedDbs.includes(entry));
+                      form.setFieldValue('includeRedisDatabases', validDbs.length > 0 ? validDbs : undefined);
+                  }
+                  if (
+                      changed.type !== undefined
+                      || changed.host !== undefined
+                      || changed.port !== undefined
+                      || changed.mongoHosts !== undefined
+                      || changed.mongoTopology !== undefined
+                      || changed.mongoSrv !== undefined
+                  ) {
+                      setMongoMembers([]);
+                  }
+              }}
+          >
+              <Form.Item name="type" hidden><Input /></Form.Item>
+              {currentDriverUnavailableReason && (
+                  <Alert
+                      showIcon
+                      type="warning"
+                      style={{ marginBottom: 12 }}
+                      message="当前数据源驱动未启用"
+                      description={(
+                          <Space size={8}>
+                              <span>{currentDriverUnavailableReason}</span>
+                              <Button type="link" size="small" onClick={() => onOpenDriverManager?.()}>
+                                  去驱动管理安装
+                              </Button>
+                          </Space>
+                      )}
+                  />
+              )}
+              {(() => {
+                  const sectionItems: Array<{ key: 'basic' | 'network'; title: string; description: string; icon: React.ReactNode }> = [
+                      { key: 'basic', title: '基础信息', description: '名称、地址、认证、URI 与数据库范围', icon: <DatabaseOutlined /> },
+                      ...(!isCustom && !isFileDb ? [{ key: 'network' as const, title: '网络与安全', description: 'SSL、SSH、代理与高级连接', icon: <CloudOutlined /> }] : []),
+                  ];
+                  const resolvedSection = sectionItems.some((item) => item.key === activeConfigSection)
+                      ? activeConfigSection
+                      : sectionItems[0]?.key || 'basic';
+                  const currentSectionContent = resolvedSection === 'basic'
+                      ? baseInfoSection
+                      : networkSecuritySection;
 
-            <Divider style={{ margin: '12px 0' }} />
-            <Form.Item name="useHttpTunnel" valuePropName="checked" style={{ marginBottom: 0 }}>
-                <Checkbox>使用 HTTP 隧道（独立代理）</Checkbox>
-            </Form.Item>
+                  if (sectionItems.length <= 1) {
+                      return currentSectionContent;
+                  }
 
-            {useHttpTunnel && (
-                <div style={tunnelSectionStyle}>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="httpTunnelHost" label="隧道主机" rules={[{ required: useHttpTunnel, message: '请输入隧道主机' }]} style={{ flex: 1 }}>
-                            <Input placeholder="例如: tunnel.company.com 或 127.0.0.1" />
-                        </Form.Item>
-                        <Form.Item name="httpTunnelPort" label="端口" rules={[{ required: useHttpTunnel, message: '请输入隧道端口' }]} style={{ width: 120 }}>
-                            <InputNumber style={{ width: '100%' }} min={1} max={65535} />
-                        </Form.Item>
-                    </div>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <Form.Item name="httpTunnelUser" label="隧道用户名（可选）" style={{ flex: 1 }}>
-                            <Input placeholder="留空表示无认证" />
-                        </Form.Item>
-                        <Form.Item name="httpTunnelPassword" label="隧道密码（可选）" style={{ flex: 1 }}>
-                            <Input.Password placeholder="留空表示无认证" />
-                        </Form.Item>
-                    </div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                        与“使用代理”互斥，启用后将通过 HTTP CONNECT 建立独立隧道。
-                    </Text>
-                </div>
-            )}
-
-            <Divider style={{ margin: '12px 0' }} />
-            
-            <Collapse 
-                ghost 
-                items={[{
-                    key: 'advanced',
-                    label: '高级连接',
-                    children: (
-                        <Form.Item 
-                            name="timeout" 
-                            label="连接超时 (秒)" 
-                            help="数据库连接超时时间，默认 30 秒"
-                            rules={[{ type: 'number', min: 1, max: 300, message: '超时时间范围: 1-300 秒' }]}
-                        >
-                            <InputNumber style={{ width: '100%' }} min={1} max={300} placeholder="30" />
-                        </Form.Item>
-                    )
-                }]}
-            />
-        </>
-        )}
-        </>
-        )}
-        
-      </Form>
-  );
+                  return (
+                      <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
+                          <div style={{ ...modalInnerSectionStyle, padding: 12, position: 'sticky', top: 0 }}>
+                              <div style={{ marginBottom: 12, color: darkMode ? '#f5f7ff' : '#162033', fontSize: 13, fontWeight: 700, letterSpacing: 0.2 }}>配置分区</div>
+                              <div style={{ display: 'grid', gap: 10 }}>
+                                  {sectionItems.map((item) => {
+                                      const active = item.key === resolvedSection;
+                                      return (
+                                          <button
+                                              key={item.key}
+                                              type="button"
+                                              onClick={() => setActiveConfigSection(item.key)}
+                                              style={{
+                                                  textAlign: 'left',
+                                                  padding: '12px 12px 12px 14px',
+                                                  borderRadius: 14,
+                                                  border: `1px solid ${active
+                                                      ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
+                                                      : (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(16,24,40,0.055)')}`,
+                                                  background: active
+                                                      ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
+                                                      : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)'),
+                                                  color: active
+                                                      ? (darkMode ? '#f5f7ff' : '#162033')
+                                                      : (darkMode ? 'rgba(255,255,255,0.76)' : '#3f4b5e'),
+                                                  cursor: 'pointer',
+                                                  transition: 'all 120ms ease',
+                                                  boxShadow: active
+                                                      ? (darkMode ? '0 10px 24px rgba(0,0,0,0.18)' : '0 10px 22px rgba(24,144,255,0.08)')
+                                                      : 'none',
+                                              }}
+                                          >
+                                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                                                  <div style={{ width: 30, height: 30, borderRadius: 10, display: 'grid', placeItems: 'center', flexShrink: 0, background: active
+                                                      ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.14)')
+                                                      : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(16,24,40,0.05)'), color: active
+                                                      ? (darkMode ? '#ffd666' : '#1677ff')
+                                                      : (darkMode ? 'rgba(255,255,255,0.55)' : '#627089') }}>
+                                                      {item.icon}
+                                                  </div>
+                                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.title}</span>
+                                                          <span style={{ width: 8, height: 8, borderRadius: 999, background: active ? (darkMode ? '#ffd666' : '#1677ff') : 'transparent', border: active ? 'none' : (darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(16,24,40,0.12)') }} />
+                                                      </div>
+                                                      <div style={{ marginTop: 5, fontSize: 12, lineHeight: 1.55, color: active
+                                                          ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.42)' : 'rgba(63,75,94,0.62)') }}>
+                                                          {item.description}
+                                                      </div>
+                                                  </div>
+                                              </div>
+                                          </button>
+                                      );
+                                  })}
+                              </div>
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                              {currentSectionContent}
+                          </div>
+                      </div>
+                  );
+              })()}
+          </Form>
+      );
+  };
 
   const getFooter = () => {
       if (step === 1) {
@@ -2333,7 +2534,7 @@ const ConnectionModal: React.FC<{
       const hasTestError = !!testResult && !isTestSuccess;
       const operationBlocked = !!currentDriverUnavailableReason || driverStatusChecking;
       return (
-          <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '4px 2px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
                   {!initialValues && <Button key="back" onClick={() => setStep(1)}>上一步</Button>}
                   {testResult ? (
@@ -2386,18 +2587,21 @@ const ConnectionModal: React.FC<{
   };
 
   const getTitle = () => {
-      if (step === 1) return "选择数据源类型";
+      if (step === 1) {
+          return renderConnectionModalTitle(<AppstoreOutlined />, '选择数据源类型', '按数据库、中间件或文件类型快速进入对应的连接配置流程。');
+      }
       const typeName = dbTypes.find(t => t.key === dbType)?.name || dbType;
-      return initialValues ? "编辑连接" : `新建 ${typeName} 连接`;
+      return initialValues
+          ? renderConnectionModalTitle(<EditOutlined />, '编辑连接', `调整 ${typeName} 连接的参数、认证方式与网络选项。`)
+          : renderConnectionModalTitle(<LinkOutlined />, `新建 ${typeName} 连接`, '填写连接参数、测试连通性，并保存到连接树中。');
   };
 
-  const modalBodyStyle = step === 1
-      ? { padding: '16px 24px', overflow: 'hidden' as const, minHeight: STEP1_MODAL_MIN_BODY_HEIGHT }
-      : {
-          padding: '16px 24px',
-          overflowY: 'auto' as const,
-          overflowX: 'hidden' as const,
-      };
+  const modalBodyStyle = {
+      padding: '12px 24px 18px',
+      height: CONNECTION_MODAL_BODY_HEIGHT,
+      overflowY: 'auto' as const,
+      overflowX: 'hidden' as const,
+  };
 
   return (
     <>
@@ -2408,22 +2612,33 @@ const ConnectionModal: React.FC<{
           footer={getFooter()}
           centered
           wrapClassName="connection-modal-wrap"
-          width={step === 1 ? STEP1_MODAL_WIDTH : STEP2_MODAL_WIDTH}
+          width={CONNECTION_MODAL_WIDTH}
           zIndex={10001}
           destroyOnHidden
           maskClosable={false}
-          styles={{ body: modalBodyStyle }}
+          styles={{
+              content: modalShellStyle,
+              header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+              body: modalBodyStyle,
+              footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 }
+          }}
       >
         {step === 1 ? renderStep1() : renderStep2()}
       </Modal>
       <Modal
-          title="测试连接失败原因"
+          title={renderConnectionModalTitle(<FileTextOutlined />, '测试连接失败原因', '查看本次测试连接的完整错误上下文，便于快速定位配置问题。')}
           open={testErrorLogOpen}
           onCancel={() => setTestErrorLogOpen(false)}
           centered
           width={760}
           zIndex={10002}
           destroyOnHidden
+          styles={{
+              content: modalShellStyle,
+              header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+              body: { paddingTop: 8 },
+              footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 }
+          }}
           footer={[
               <Button key="close" onClick={() => setTestErrorLogOpen(false)}>关闭</Button>,
           ]}
