@@ -2491,7 +2491,7 @@ END;`;
             okText="应用"
             cancelText="取消"
             width={640}
-            destroyOnClose
+            destroyOnHidden
         >
             <Input.TextArea
                 value={commentEditorValue}

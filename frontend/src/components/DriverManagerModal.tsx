@@ -3,7 +3,7 @@ import { Alert, Button, Collapse, Input, Modal, Progress, Select, Space, Switch,
 import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, FolderOpenOutlined, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
-import { normalizeOpacityForPlatform } from '../utils/appearance';
+import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import {
   CheckDriverNetworkStatus,
   DownloadDriverPackage,
@@ -166,7 +166,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const theme = useStore((state) => state.theme);
   const appearance = useStore((state) => state.appearance);
   const darkMode = theme === 'dark';
-  const opacity = normalizeOpacityForPlatform(appearance.opacity);
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const modalContentRef = useRef<HTMLDivElement | null>(null);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const tableScrollTargetsRef = useRef<HTMLElement[]>([]);
@@ -1223,7 +1224,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           paddingRight: 18,
         },
       }}
-      destroyOnClose
+      destroyOnHidden
       footer={(
         <div className="driver-manager-footer">
           <div

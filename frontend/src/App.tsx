@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetSize, WindowToggleMaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -11,7 +11,7 @@ import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import { useStore } from './store';
 import { SavedConnection } from './types';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform } from './utils/appearance';
+import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -78,11 +78,11 @@ function App() {
   const tokenControlHeightLG = Math.max(30, Math.round(40 * effectiveUiScale));
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
   const titleBarHeight = Math.max(28, Math.round(32 * effectiveUiScale));
-  const toolbarHeight = Math.max(32, Math.round(36 * effectiveUiScale));
   const titleBarButtonWidth = Math.max(40, Math.round(46 * effectiveUiScale));
   const floatingLogButtonHeight = Math.max(30, Math.round(34 * effectiveUiScale));
-  const effectiveOpacity = normalizeOpacityForPlatform(appearance.opacity);
-  const effectiveBlur = normalizeBlurForPlatform(appearance.blur);
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const effectiveBlur = normalizeBlurForPlatform(resolvedAppearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const windowCornerRadius = 14;
   const [runtimePlatform, setRuntimePlatform] = useState('');
@@ -93,8 +93,8 @@ function App() {
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
   useEffect(() => {
-    void SetWindowTranslucency(appearance.opacity, appearance.blur).catch(() => undefined);
-  }, [appearance.opacity, appearance.blur]);
+    void SetWindowTranslucency(resolvedAppearance.opacity, resolvedAppearance.blur).catch(() => undefined);
+  }, [resolvedAppearance.blur, resolvedAppearance.opacity]);
 
   useEffect(() => {
       let cancelled = false;
@@ -370,6 +370,141 @@ function App() {
   const floatingLogButtonShadow = darkMode
       ? '0 8px 22px rgba(0,0,0,0.38)'
       : '0 8px 20px rgba(0,0,0,0.16)';
+
+  const isOpaqueUtilityMode = resolvedAppearance.opacity >= 0.999 && resolvedAppearance.blur <= 0;
+  const utilityButtonBgAlpha = darkMode
+      ? Math.max(0.28, Math.min(0.76, effectiveOpacity * 0.72))
+      : Math.max(0.52, Math.min(0.92, effectiveOpacity * 0.9));
+  const utilityButtonBgColor = isOpaqueUtilityMode
+      ? 'transparent'
+      : (darkMode
+          ? `rgba(20, 26, 38, ${utilityButtonBgAlpha})`
+          : `rgba(255, 255, 255, ${utilityButtonBgAlpha})`);
+  const utilityButtonBorderColor = isOpaqueUtilityMode
+      ? (darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)')
+      : (darkMode
+          ? `rgba(255,255,255,${Math.max(0.08, Math.min(0.18, effectiveOpacity * 0.16))})`
+          : `rgba(16,24,40,${Math.max(0.06, Math.min(0.14, effectiveOpacity * 0.12))})`);
+  const utilityButtonShadow = isOpaqueUtilityMode
+      ? 'none'
+      : (darkMode
+          ? `0 8px 18px rgba(0,0,0,${Math.max(0.10, Math.min(0.22, effectiveOpacity * 0.24))})`
+          : `0 8px 18px rgba(15,23,42,${Math.max(0.04, Math.min(0.12, effectiveOpacity * 0.12))})`);
+  const utilityButtonStyle = useMemo(() => ({
+      height: Math.max(30, Math.round(32 * effectiveUiScale)),
+      width: '100%',
+      paddingInline: Math.max(10, Math.round(12 * effectiveUiScale)),
+      borderRadius: 10,
+      border: `1px solid ${utilityButtonBorderColor}`,
+      background: utilityButtonBgColor,
+      color: darkMode ? 'rgba(255,255,255,0.94)' : '#162033',
+      boxShadow: utilityButtonShadow,
+      backdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
+      WebkitBackdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+  }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
+  const utilityDropdownShellStyle = useMemo(() => ({
+      borderRadius: 14,
+      padding: 6,
+      background: darkMode ? 'linear-gradient(180deg, rgba(20,26,38,0.96) 0%, rgba(13,17,26,0.98) 100%)' : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      boxShadow: darkMode ? '0 20px 48px rgba(0,0,0,0.32)' : '0 16px 36px rgba(15,23,42,0.12)',
+      backdropFilter: darkMode ? 'blur(16px)' : 'none',
+      overflow: 'hidden',
+  }), [darkMode]);
+
+  const sidebarQuickActionBaseStyle = useMemo(() => ({
+      height: Math.max(34, Math.round(36 * effectiveUiScale)),
+      borderRadius: 12,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingInline: Math.max(12, Math.round(14 * effectiveUiScale)),
+      fontWeight: 700,
+      boxShadow: darkMode ? '0 8px 18px rgba(0,0,0,0.16)' : '0 8px 16px rgba(15,23,42,0.08)',
+      backdropFilter: blurFilter,
+      WebkitBackdropFilter: blurFilter,
+      minWidth: 0,
+      whiteSpace: 'nowrap',
+    }), [blurFilter, darkMode, effectiveUiScale]);
+  const sidebarQueryActionStyle = useMemo(() => ({
+      ...sidebarQuickActionBaseStyle,
+      flex: '1 1 0',
+      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)'}`,
+      background: darkMode ? `rgba(255,255,255,0.05)` : 'rgba(255,255,255,0.88)',
+      color: darkMode ? 'rgba(255,255,255,0.92)' : '#162033',
+    }), [darkMode, sidebarQuickActionBaseStyle]);
+  const sidebarCreateConnectionActionStyle = useMemo(() => ({
+      ...sidebarQuickActionBaseStyle,
+      flex: '1 1 0',
+      border: 'none',
+      background: 'linear-gradient(135deg, rgba(255,214,102,0.96) 0%, rgba(240,183,39,0.92) 100%)',
+      color: '#2a1f00',
+    }), [sidebarQuickActionBaseStyle]);
+
+  const utilityMenuTheme = useMemo(() => ({
+      components: {
+          Menu: {
+              popupBg: 'transparent',
+              darkPopupBg: 'transparent',
+              itemBg: 'transparent',
+              darkItemBg: 'transparent',
+              subMenuItemBg: 'transparent',
+              itemColor: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+              itemHoverColor: darkMode ? '#fff7d6' : '#0f172a',
+              itemHoverBg: darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)',
+              itemSelectedColor: darkMode ? '#ffd666' : '#1677ff',
+              itemSelectedBg: darkMode ? 'rgba(255,214,102,0.14)' : 'rgba(24,144,255,0.12)',
+              itemBorderRadius: 10,
+              itemMarginBlock: 4,
+              itemMarginInline: 0,
+              itemPaddingInline: 12,
+              itemHeight: 40,
+              groupTitleColor: darkMode ? 'rgba(255,255,255,0.48)' : 'rgba(16,24,40,0.48)',
+          },
+      },
+  }), [darkMode]);
+  const renderUtilityDropdown = (menu: React.ReactNode) => (
+      <ConfigProvider theme={utilityMenuTheme}>
+          <div style={{ ...utilityDropdownShellStyle, minWidth: 220 }}>
+              {menu}
+          </div>
+      </ConfigProvider>
+  );
+  const utilityModalShellStyle = useMemo(() => ({
+      background: darkMode ? 'linear-gradient(180deg, rgba(20,26,38,0.96) 0%, rgba(13,17,26,0.98) 100%)' : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      boxShadow: darkMode ? '0 24px 56px rgba(0,0,0,0.32)' : '0 18px 42px rgba(15,23,42,0.12)',
+      backdropFilter: darkMode ? 'blur(18px)' : 'none',
+  }), [darkMode]);
+  const utilityPanelStyle = useMemo(() => ({
+      padding: 16,
+      borderRadius: 14,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.84)',
+  }), [darkMode]);
+  const utilityMutedTextStyle = useMemo(() => ({
+      color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)',
+      fontSize: 12,
+      lineHeight: 1.6,
+  }), [darkMode]);
+  const renderUtilityModalTitle = (icon: React.ReactNode, title: string, description: string) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,214,102,0.12)' : 'rgba(24,144,255,0.1)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
+              {icon}
+          </div>
+          <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>{title}</div>
+              <div style={{ marginTop: 4, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', fontSize: 12, lineHeight: 1.6 }}>{description}</div>
+          </div>
+      </div>
+  );
+
+  const sidebarHorizontalPadding = 10;
   
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
@@ -786,37 +921,18 @@ function App() {
           label: '驱动管理',
           icon: <SettingOutlined />,
           onClick: () => setIsDriverModalOpen(true)
-      }
-  ];
-
-  const themeMenu: MenuProps['items'] = [
-      {
-          key: 'light',
-          label: '亮色主题',
-          icon: themeMode === 'light' ? <CheckOutlined /> : undefined,
-          onClick: () => setTheme('light')
-      },
-      {
-          key: 'dark',
-          label: '暗色主题',
-          icon: themeMode === 'dark' ? <CheckOutlined /> : undefined,
-          onClick: () => setTheme('dark')
       },
       { type: 'divider' },
       {
-          key: 'settings',
-          label: '外观设置...',
-          icon: <SettingOutlined />,
-          onClick: () => setIsAppearanceModalOpen(true)
-      },
-      {
           key: 'shortcut-settings',
-          label: '快捷键管理...',
+          label: '快捷键管理',
           icon: <LinkOutlined />,
           onClick: () => setIsShortcutModalOpen(true)
       }
   ];
 
+  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
+  const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
@@ -1190,8 +1306,6 @@ function App() {
             },
             components: {
                 Layout: {
-                    colorBgBody: 'transparent', 
-                    colorBgHeader: 'transparent',
                     bodyBg: 'transparent',
                     headerBg: 'transparent',
                     siderBg: 'transparent',
@@ -1272,28 +1386,6 @@ function App() {
               </div>
           </div>
 
-          <div
-            style={{
-                height: toolbarHeight,
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'flex-start',
-                gap: Math.max(2, Math.round(4 * effectiveUiScale)),
-                padding: `0 ${Math.max(6, Math.round(8 * effectiveUiScale))}px`,
-                borderBottom: 'none',
-                background: bgMain,
-            }}
-          >
-            <Dropdown menu={{ items: toolsMenu }} placement="bottomLeft">
-                <Button type="text" icon={<ToolOutlined />} title="工具">工具</Button>
-            </Dropdown>
-            <Button type="text" icon={<GlobalOutlined />} title="代理" onClick={() => setIsProxyModalOpen(true)}>代理</Button>
-            <Dropdown menu={{ items: themeMenu }} placement="bottomLeft">
-                <Button type="text" icon={<SkinOutlined />} title="主题">主题</Button>
-            </Dropdown>
-            <Button type="text" icon={<InfoCircleOutlined />} title="关于" onClick={() => setIsAboutOpen(true)}>关于</Button>
-          </div>
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Sider 
             width={sidebarWidth} 
@@ -1304,13 +1396,26 @@ function App() {
             }}
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                <div style={{ padding: '10px', borderBottom: 'none', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
-                
-                <div>
-                    <Button type="text" icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" />
-                    <Button type="text" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)} title="新建连接" />
+                <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+                        <Dropdown menu={{ items: toolsMenu }} placement="bottomLeft" dropdownRender={renderUtilityDropdown}>
+                            <Button type="text" icon={<ToolOutlined />} title="工具" style={utilityButtonStyle}>工具</Button>
+                        </Dropdown>
+                        <Button type="text" icon={<GlobalOutlined />} title="代理" style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)}>代理</Button>
+                        <Button type="text" icon={<SkinOutlined />} title="主题" style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)}>主题</Button>
+                        <Button type="text" icon={<InfoCircleOutlined />} title="关于" style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)}>关于</Button>
+                    </div>
                 </div>
-            </div>
+                <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
+                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
+                            新建查询
+                        </Button>
+                        <Button icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)} title="新建连接" style={sidebarCreateConnectionActionStyle}>
+                            新建连接
+                        </Button>
+                    </div>
+                </div>
                 
                 <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58 }}>
                     <Sidebar onEditConnection={handleEditConnection} />
@@ -1370,8 +1475,8 @@ function App() {
                 title="拖动调整宽度"
             />
           </Sider>
-           <Content style={{ background: 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent }}>
+           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
                  <TabManager />
              </div>
              {isLogPanelOpen && (
@@ -1399,9 +1504,10 @@ function App() {
             onOpenGlobalProxySettings={() => setIsProxyModalOpen(true)}
           />
           <Modal
-            title="关于 GoNavi"
+            title={renderUtilityModalTitle(<InfoCircleOutlined />, '关于 GoNavi', '查看版本信息、仓库地址、更新状态与下载入口。')}
             open={isAboutOpen}
             onCancel={() => setIsAboutOpen(false)}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
             footer={[
                 canShowProgressEntry ? (
                     <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>下载进度</Button>
@@ -1421,150 +1527,274 @@ function App() {
                     <Spin />
                 </div>
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div>版本：{aboutInfo?.version || '未知'}</div>
-                    <div>作者：{aboutInfo?.author || '未知'}</div>
-                    {aboutInfo?.communityUrl ? (
-                        <div>技术圈：<a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>AI全书</a></div>
-                    ) : null}
-                    <div>更新状态：{aboutUpdateStatus || '未检查'}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <GithubOutlined />
-                        {aboutInfo?.repoUrl ? (
-                        <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.repoUrl) BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>
-                            {aboutInfo.repoUrl}
-                        </a>
-                    ) : '未知'}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    <div style={utilityPanelStyle}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                            <div>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>版本</div>
+                                <div style={utilityMutedTextStyle}>{aboutInfo?.version || '未知'}</div>
+                            </div>
+                            <div>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>作者</div>
+                                <div style={utilityMutedTextStyle}>{aboutInfo?.author || '未知'}</div>
+                            </div>
+                            <div style={{ gridColumn: '1 / -1' }}>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>更新状态</div>
+                                <div style={utilityMutedTextStyle}>{aboutUpdateStatus || '未检查'}</div>
+                            </div>
+                            {aboutInfo?.communityUrl ? (
+                                <div style={{ gridColumn: '1 / -1' }}>
+                                    <div style={{ marginBottom: 6, fontWeight: 600 }}>技术圈</div>
+                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>AI全书</a>
+                                </div>
+                            ) : null}
+                        </div>
+                    </div>
+                    <div style={utilityPanelStyle}>
+                        <div style={{ marginBottom: 10, fontWeight: 600 }}>项目入口</div>
+                        <div style={{ display: 'grid', gap: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <GithubOutlined />
+                                {aboutInfo?.repoUrl ? (
+                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.repoUrl) BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>{aboutInfo.repoUrl}</a>
+                                ) : '未知'}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <BugOutlined />
+                                {aboutInfo?.issueUrl ? (
+                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.issueUrl) BrowserOpenURL(aboutInfo.issueUrl); }} href={aboutInfo.issueUrl}>{aboutInfo.issueUrl}</a>
+                                ) : '未知'}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <CloudDownloadOutlined />
+                                {aboutInfo?.releaseUrl ? (
+                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.releaseUrl) BrowserOpenURL(aboutInfo.releaseUrl); }} href={aboutInfo.releaseUrl}>{aboutInfo.releaseUrl}</a>
+                                ) : '未知'}
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <BugOutlined />
-                    {aboutInfo?.issueUrl ? (
-                        <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.issueUrl) BrowserOpenURL(aboutInfo.issueUrl); }} href={aboutInfo.issueUrl}>
-                            {aboutInfo.issueUrl}
-                        </a>
-                    ) : '未知'}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <CloudDownloadOutlined />
-                    {aboutInfo?.releaseUrl ? (
-                        <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.releaseUrl) BrowserOpenURL(aboutInfo.releaseUrl); }} href={aboutInfo.releaseUrl}>
-                            {aboutInfo.releaseUrl}
-                        </a>
-                    ) : '未知'}
-                </div>
-            </div>
             )}
           </Modal>
 
           <Modal
-              title="外观设置"
-              open={isAppearanceModalOpen}
-              onCancel={() => setIsAppearanceModalOpen(false)}
+              title={renderUtilityModalTitle(
+                  themeModalSection === 'theme' ? <SkinOutlined /> : <BgColorsOutlined />,
+                  themeModalSection === 'theme' ? '主题设置' : '外观设置',
+                  themeModalSection === 'theme'
+                      ? '切换亮暗主题，保持整体视觉风格统一。'
+                      : '统一调整缩放、字体、透明度与模糊效果。'
+              )}
+              open={isThemeModalOpen}
+              onCancel={() => { setIsThemeModalOpen(false); setThemeModalSection('theme'); }}
               footer={null}
-              width={460}
+              width={820}
+              styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8, height: 620, overflow: 'hidden' }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '12px 0' }}>
-                  <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>界面缩放 (UI Scale)</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <Slider
-                            min={MIN_UI_SCALE}
-                            max={MAX_UI_SCALE}
-                            step={0.05}
-                            value={effectiveUiScale}
-                            onChange={(v) => setUiScale(Number(v))}
-                            style={{ flex: 1 }}
-                          />
-                          <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                          * 建议小屏设备设置为 85%-95%
-                      </div>
-                  </div>
-                  <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>基础字体大小 (Font Size)</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <Slider
-                            min={MIN_FONT_SIZE}
-                            max={MAX_FONT_SIZE}
-                            step={1}
-                            value={effectiveFontSize}
-                            onChange={(v) => setFontSize(Number(v))}
-                            style={{ flex: 1 }}
-                          />
-                          <span style={{ width: 56 }}>{effectiveFontSize}px</span>
-                      </div>
-                  </div>
-                  <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>背景不透明度 (Opacity)</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                          <Slider 
-                            min={0.1} 
-                            max={1.0} 
-                            step={0.05} 
-                            value={appearance.opacity ?? 1.0} 
-                            onChange={(v) => setAppearance({ opacity: v })} 
-                            style={{ flex: 1 }}
-                          />
-                          <span style={{ width: 40 }}>{Math.round((appearance.opacity ?? 1.0) * 100)}%</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
+                  <div style={{ ...utilityPanelStyle, padding: 12, height: 'fit-content' }}>
+                      <div style={{ marginBottom: 12, fontWeight: 600 }}>设置导航</div>
+                      <div style={{ display: 'grid', gap: 10 }}>
+                          {[
+                              { key: 'theme', title: '主题模式', description: '亮色与暗色切换', icon: <SkinOutlined /> },
+                              { key: 'appearance', title: '外观参数', description: '缩放、字体与透明度', icon: <BgColorsOutlined /> },
+                          ].map((item) => {
+                              const active = themeModalSection === item.key;
+                              return (
+                                  <button
+                                      key={item.key}
+                                      type="button"
+                                      onClick={() => setThemeModalSection(item.key as 'theme' | 'appearance')}
+                                      style={{
+                                          textAlign: 'left',
+                                          padding: '12px 12px',
+                                          borderRadius: 12,
+                                          border: `1px solid ${active
+                                              ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
+                                              : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                          background: active
+                                              ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
+                                              : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                          color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                          cursor: 'pointer',
+                                      }}
+                                  >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                          <span>{item.icon}</span>
+                                          <span style={{ fontWeight: 700 }}>{item.title}</span>
+                                      </div>
+                                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
+                                          {item.description}
+                                      </div>
+                                  </button>
+                              );
+                          })}
                       </div>
                   </div>
-                  <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>高斯模糊 (Blur)</div>
-                      {isWindowsPlatform() ? (
-                          <div style={{ fontSize: 12, color: '#888' }}>
-                              Windows 使用系统 Acrylic 效果，模糊程度由系统控制
+                  <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
+                      {themeModalSection === 'theme' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 600 }}>主题模式</div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                      {[
+                                          { key: 'light', label: '亮色主题', description: '适合明亮环境，层次更轻。' },
+                                          { key: 'dark', label: '暗色主题', description: '适合低光环境，视觉更沉稳。' },
+                                      ].map((item) => {
+                                          const active = themeMode === item.key;
+                                          return (
+                                              <button
+                                                  key={item.key}
+                                                  type="button"
+                                                  onClick={() => setTheme(item.key as 'light' | 'dark')}
+                                                  style={{
+                                                      textAlign: 'left',
+                                                      padding: '14px 14px',
+                                                      borderRadius: 14,
+                                                      border: `1px solid ${active
+                                                          ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      background: active
+                                                          ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                                      cursor: 'pointer',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                      <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
+                                                      {active ? <CheckOutlined style={{ color: darkMode ? '#ffd666' : '#1677ff' }} /> : null}
+                                                  </div>
+                                                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
+                                                      {item.description}
+                                                  </div>
+                                              </button>
+                                          );
+                                      })}
+                                  </div>
+                              </div>
                           </div>
                       ) : (
-                          <>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                  <Slider
-                                    min={0}
-                                    max={20}
-                                    value={appearance.blur ?? 0}
-                                    onChange={(v) => setAppearance({ blur: v })}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <span style={{ width: 40 }}>{appearance.blur}px</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>界面缩放 (UI Scale)</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      <Slider
+                                        min={MIN_UI_SCALE}
+                                        max={MAX_UI_SCALE}
+                                        step={0.05}
+                                        value={effectiveUiScale}
+                                        onChange={(v) => setUiScale(Number(v))}
+                                        style={{ flex: 1 }}
+                                      />
+                                      <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
+                                  </div>
+                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                      * 建议小屏设备设置为 85%-95%
+                                  </div>
                               </div>
-                              <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                                  * 仅控制应用内覆盖层的模糊效果
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>基础字体大小 (Font Size)</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                      <Slider
+                                        min={MIN_FONT_SIZE}
+                                        max={MAX_FONT_SIZE}
+                                        step={1}
+                                        value={effectiveFontSize}
+                                        onChange={(v) => setFontSize(Number(v))}
+                                        style={{ flex: 1 }}
+                                      />
+                                      <span style={{ width: 56 }}>{effectiveFontSize}px</span>
+                                  </div>
                               </div>
-                          </>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>透明与模糊效果</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                      <div>
+                                          <div style={{ fontWeight: 500 }}>启用透明与模糊</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>关闭后保留当前阈值，重新开启时直接恢复之前的设置。</div>
+                                      </div>
+                                      <Switch checked={appearance.enabled !== false} onChange={(checked) => setAppearance({ enabled: checked })} />
+                                  </div>
+                                  <div style={{ display: 'grid', gap: 14, opacity: appearance.enabled !== false ? 1 : 0.6 }}>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>背景不透明度 (Opacity)</div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider 
+                                                min={0.1} 
+                                                max={1.0} 
+                                                step={0.05} 
+                                                disabled={appearance.enabled === false}
+                                                value={appearance.opacity ?? 1.0} 
+                                                onChange={(v) => setAppearance({ opacity: v })} 
+                                                style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 40 }}>{Math.round((appearance.opacity ?? 1.0) * 100)}%</span>
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>高斯模糊 (Blur)</div>
+                                          {isWindowsPlatform() ? (
+                                              <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
+                                                  Windows 使用系统 Acrylic 效果，模糊程度由系统控制
+                                              </div>
+                                          ) : (
+                                              <>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                                      <Slider
+                                                        min={0}
+                                                        max={20}
+                                                        disabled={appearance.enabled === false}
+                                                        value={appearance.blur ?? 0}
+                                                        onChange={(v) => setAppearance({ blur: v })}
+                                                        style={{ flex: 1 }}
+                                                      />
+                                                      <span style={{ width: 40 }}>{appearance.blur}px</span>
+                                                  </div>
+                                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                                      * 仅控制应用内覆盖层的模糊效果
+                                                  </div>
+                                              </>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>启动窗口</div>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                      <span>启动时全屏</span>
+                                      <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
+                                  </div>
+                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
+                                      * 修改后下次启动生效
+                                  </div>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
+                                  <Button
+                                      onClick={() => {
+                                          setUiScale(DEFAULT_UI_SCALE);
+                                          setFontSize(DEFAULT_FONT_SIZE);
+                                          setAppearance({ enabled: true, opacity: 1.0, blur: 0 });
+                                      }}
+                                  >
+                                      恢复默认
+                                  </Button>
+                              </div>
+                          </div>
                       )}
-                  </div>
-                  <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>启动窗口</div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                          <span>启动时全屏</span>
-                          <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
-                      </div>
-                      <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                          * 修改后下次启动生效
-                      </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <Button
-                          onClick={() => {
-                              setUiScale(DEFAULT_UI_SCALE);
-                              setFontSize(DEFAULT_FONT_SIZE);
-                              setAppearance({ opacity: 1.0, blur: 0 });
-                          }}
-                      >
-                          恢复默认
-                      </Button>
                   </div>
               </div>
           </Modal>
 
           <Modal
-              title="快捷键管理"
+              title={renderUtilityModalTitle(<LinkOutlined />, '快捷键管理', '统一查看、录制与启停常用快捷键，保持操作习惯一致。')}
               open={isShortcutModalOpen}
               onCancel={() => {
                   setIsShortcutModalOpen(false);
                   setCapturingShortcutAction(null);
               }}
-              width={720}
+              width={760}
+              styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
               footer={[
                   <Button
                       key="reset"
@@ -1588,9 +1818,11 @@ function App() {
                   </Button>,
               ]}
           >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
-                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>
-                      点击“录制”后按下快捷键。按 Esc 可取消录制。建议至少包含一个修饰键（Ctrl/Alt/Shift/Meta）。
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
+                  <div style={utilityPanelStyle}>
+                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
+                          点击“录制”后按下快捷键。按 Esc 可取消录制。建议至少包含一个修饰键（Ctrl/Alt/Shift/Meta）。
+                      </div>
                   </div>
                   {SHORTCUT_ACTION_ORDER.map((action) => {
                       const meta = SHORTCUT_ACTION_META[action];
@@ -1600,18 +1832,17 @@ function App() {
                           <div
                               key={action}
                               style={{
+                                  ...utilityPanelStyle,
                                   display: 'grid',
                                   gridTemplateColumns: '1fr auto',
                                   gap: 12,
                                   alignItems: 'center',
                                   padding: '10px 12px',
-                                  border: '1px solid rgba(128, 128, 128, 0.2)',
-                                  borderRadius: 8,
                               }}
                           >
                               <div>
                                   <div style={{ fontWeight: 500 }}>{meta.label}</div>
-                                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>{meta.description}</div>
+                                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <Input
@@ -1636,14 +1867,15 @@ function App() {
               </div>
           </Modal>
           <Modal
-              title="全局代理设置"
+              title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
               open={isProxyModalOpen}
               onCancel={() => setIsProxyModalOpen(false)}
               footer={null}
-              width={460}
+              width={520}
+              styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 24, padding: '12px 0' }}>
-                  <div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                  <div style={utilityPanelStyle}>
                       <div style={{ marginBottom: 8, fontWeight: 500 }}>全局代理</div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                           <span>启用全局代理</span>
@@ -1651,7 +1883,7 @@ function App() {
                       </div>
                       <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>代理类型</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>代理类型</div>
                               <Select
                                   value={globalProxy.type}
                                   disabled={!globalProxy.enabled}
@@ -1663,7 +1895,7 @@ function App() {
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>端口</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>端口</div>
                               <InputNumber
                                   min={1}
                                   max={65535}
@@ -1676,7 +1908,7 @@ function App() {
                               />
                           </div>
                           <div style={{ gridColumn: '1 / span 2' }}>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>代理地址</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>代理地址</div>
                               <Input
                                   placeholder="例如：127.0.0.1"
                                   value={globalProxy.host}
@@ -1685,7 +1917,7 @@ function App() {
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>用户名（可选）</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>用户名（可选）</div>
                               <Input
                                   placeholder="proxy-user"
                                   value={globalProxy.user}
@@ -1694,7 +1926,7 @@ function App() {
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: '#8c8c8c' }}>密码（可选）</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>密码（可选）</div>
                               <Input.Password
                                   placeholder="proxy-password"
                                   value={globalProxy.password}
@@ -1703,7 +1935,7 @@ function App() {
                               />
                           </div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
+                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 6 }}>
                           * 作用于更新检查、驱动管理网络请求，以及未单独配置代理的数据库连接
                       </div>
                   </div>
@@ -1738,7 +1970,7 @@ function App() {
                       percent={Math.round(updateDownloadProgress.percent)}
                       status={updateDownloadProgress.status === 'error' ? 'exception' : (updateDownloadProgress.status === 'done' ? 'success' : 'active')}
                   />
-                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
                       {`${formatBytes(updateDownloadProgress.downloaded)} / ${formatBytes(updateDownloadProgress.total)}`}
                   </div>
                   {updateDownloadProgress.message ? (

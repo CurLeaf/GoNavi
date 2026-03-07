@@ -10,6 +10,22 @@ const WINDOWS_BLUR_FACTOR = 1.00;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export interface AppearanceSettingsLike {
+  enabled?: boolean;
+  opacity?: number;
+  blur?: number;
+}
+
+export const resolveAppearanceValues = (appearance: AppearanceSettingsLike | undefined): { opacity: number; blur: number } => {
+  if (!appearance || appearance.enabled !== false) {
+    return {
+      opacity: appearance?.opacity ?? DEFAULT_OPACITY,
+      blur: appearance?.blur ?? 0,
+    };
+  }
+  return { opacity: DEFAULT_OPACITY, blur: 0 };
+};
+
 export const isMacLikePlatform = (): boolean => {
   if (typeof navigator === 'undefined') {
     return false;

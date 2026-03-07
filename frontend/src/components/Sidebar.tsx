@@ -27,12 +27,15 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   DisconnectOutlined,
   CloudOutlined,
   CheckSquareOutlined,
-  CodeOutlined
+  CodeOutlined,
+  TagOutlined,
+  CheckOutlined,
+  FilterOutlined
 	} from '@ant-design/icons';
 	import { useStore } from '../store';
 	import { SavedConnection } from '../types';
 	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
-  import { normalizeOpacityForPlatform } from '../utils/appearance';
+  import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 
 const { Search } = Input;
 
@@ -73,6 +76,15 @@ const SEARCH_SCOPE_LABEL_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS
   return acc;
 }, {} as Record<SearchScope, string>);
 
+
+const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
+  smart: <ThunderboltOutlined />,
+  object: <TableOutlined />,
+  database: <DatabaseOutlined />,
+  host: <CloudOutlined />,
+  tag: <TagOutlined />,
+};
+
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
@@ -95,7 +107,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const recordTableAccess = useStore(state => state.recordTableAccess);
   const setTableSortPreference = useStore(state => state.setTableSortPreference);
   const darkMode = theme === 'dark';
-  const opacity = normalizeOpacityForPlatform(appearance.opacity);
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
 
   // Background Helper (Duplicate logic for now, ideally shared)
@@ -108,6 +121,44 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   };
   const bgMain = getBg('#141414');
+  const modalPanelStyle = useMemo(() => ({
+      background: darkMode
+          ? 'linear-gradient(180deg, rgba(20,26,38,0.96) 0%, rgba(13,17,26,0.98) 100%)'
+          : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      boxShadow: darkMode ? '0 20px 48px rgba(0,0,0,0.38)' : '0 18px 42px rgba(15,23,42,0.12)',
+      backdropFilter: darkMode ? 'blur(18px)' : 'none',
+  }), [darkMode]);
+  const modalSectionStyle = useMemo(() => ({
+      padding: 14,
+      borderRadius: 14,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.84)',
+  }), [darkMode]);
+  const modalScrollSectionStyle = useMemo(() => ({
+      maxHeight: 400,
+      overflow: 'auto' as const,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      borderRadius: 14,
+      padding: 12,
+      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.8)',
+  }), [darkMode]);
+  const modalHintTextStyle = useMemo(() => ({
+      color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)',
+      fontSize: 12,
+      lineHeight: 1.6,
+  }), [darkMode]);
+  const renderSidebarModalTitle = (icon: React.ReactNode, title: string, description: string) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 12, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,214,102,0.12)' : 'rgba(24,144,255,0.1)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
+              {icon}
+          </div>
+          <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>{title}</div>
+              <div style={{ marginTop: 4, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', fontSize: 12, lineHeight: 1.6 }}>{description}</div>
+          </div>
+      </div>
+  );
   const [searchValue, setSearchValue] = useState('');
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
   const [isSearchScopePopoverOpen, setIsSearchScopePopoverOpen] = useState(false);
@@ -2471,32 +2522,100 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const searchScopePopoverContent = useMemo(() => {
       const smartSelected = searchScopes.includes('smart');
       const scopedOptions = SEARCH_SCOPE_OPTIONS.filter((option) => option.value !== 'smart');
+      const borderColor = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)';
+      const mutedTextColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)';
+      const titleColor = darkMode ? 'rgba(255,255,255,0.92)' : '#162033';
+      const panelBg = darkMode
+          ? 'linear-gradient(180deg, rgba(17,24,39,0.96) 0%, rgba(10,15,26,0.98) 100%)'
+          : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)';
+      const smartBg = smartSelected
+          ? (darkMode ? 'linear-gradient(135deg, rgba(255,214,102,0.22) 0%, rgba(255,179,71,0.16) 100%)' : 'linear-gradient(135deg, rgba(255,214,102,0.26) 0%, rgba(255,244,204,0.92) 100%)')
+          : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)');
+      const smartBorder = smartSelected
+          ? (darkMode ? 'rgba(255,214,102,0.42)' : 'rgba(245,176,65,0.34)')
+          : borderColor;
+      const getOptionCardStyle = (checked: boolean) => ({
+          display: 'flex',
+          alignItems: 'center' as const,
+          justifyContent: 'space-between' as const,
+          gap: 12,
+          padding: '10px 12px',
+          borderRadius: 12,
+          border: `1px solid ${checked ? (darkMode ? 'rgba(118,169,250,0.44)' : 'rgba(24,144,255,0.32)') : borderColor}`,
+          background: checked
+              ? (darkMode ? 'rgba(64,124,255,0.18)' : 'rgba(24,144,255,0.08)')
+              : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)'),
+          transition: 'all 120ms ease',
+      });
       return (
-          <div style={{ minWidth: 220, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ fontSize: 12, color: '#8c8c8c' }}>搜索范围</div>
-              <Checkbox
-                  checked={smartSelected}
-                  onChange={(e) => setSearchScopeChecked('smart', e.target.checked)}
-              >
-                  智能（推荐）
-              </Checkbox>
-              <div style={{ paddingLeft: 12, display: 'grid', gap: 6 }}>
-                  {scopedOptions.map((option) => (
-                      <Checkbox
-                          key={option.value}
-                          checked={searchScopes.includes(option.value)}
-                          onChange={(e) => setSearchScopeChecked(option.value, e.target.checked)}
-                      >
-                          {option.label}
-                      </Checkbox>
-                  ))}
+          <div style={{ minWidth: 280, display: 'flex', flexDirection: 'column', background: panelBg, padding: 14, gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: mutedTextColor, textTransform: 'uppercase' }}>搜索范围</div>
+                      <div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.5, color: mutedTextColor }}>“智能”自动匹配最可能的命中项；手动模式支持按维度组合筛选。</div>
+                  </div>
+                  <div style={{ width: 32, height: 32, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
+                      <FilterOutlined />
+                  </div>
               </div>
-              <div style={{ fontSize: 12, color: '#8c8c8c' }}>
-                  智能与其他项互斥；其他项支持多选。
+
+              <label style={{ display: 'block', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 14, border: `1px solid ${smartBorder}`, background: smartBg, boxShadow: smartSelected ? (darkMode ? '0 10px 24px rgba(0,0,0,0.24)' : '0 10px 24px rgba(245,176,65,0.14)') : 'none' }}>
+                      <Checkbox
+                          checked={smartSelected}
+                          onChange={(e) => setSearchScopeChecked('smart', e.target.checked)}
+                      />
+                      <div style={{ width: 30, height: 30, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.3)', color: darkMode ? '#ffd666' : '#ad6800', flexShrink: 0 }}>
+                          {SEARCH_SCOPE_ICON_MAP.smart}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: titleColor }}>智能</span>
+                              <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: darkMode ? '#ffe58f' : '#ad6800', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.35)' }}>推荐</span>
+                          </div>
+                          <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.5, color: mutedTextColor }}>适合日常检索，自动覆盖名称、库、Host 和标签等高频维度。</div>
+                      </div>
+                  </div>
+              </label>
+
+              <div style={{ height: 1, background: borderColor, opacity: 0.9 }} />
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: mutedTextColor, textTransform: 'uppercase' }}>手动范围</div>
+                  <div style={{ fontSize: 12, color: mutedTextColor }}>支持多选组合</div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 8 }}>
+                  {scopedOptions.map((option) => {
+                      const checked = searchScopes.includes(option.value);
+                      return (
+                          <label key={option.value} style={{ display: 'block', cursor: 'pointer' }}>
+                              <div style={getOptionCardStyle(checked)}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                                      <Checkbox
+                                          checked={checked}
+                                          onChange={(e) => setSearchScopeChecked(option.value, e.target.checked)}
+                                      />
+                                      <div style={{ width: 28, height: 28, borderRadius: 9, display: 'grid', placeItems: 'center', background: checked ? (darkMode ? 'rgba(118,169,250,0.2)' : 'rgba(24,144,255,0.12)') : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)'), color: checked ? (darkMode ? '#91caff' : '#1677ff') : mutedTextColor, flexShrink: 0 }}>
+                                          {SEARCH_SCOPE_ICON_MAP[option.value]}
+                                      </div>
+                                      <span style={{ fontSize: 14, fontWeight: 600, color: titleColor, whiteSpace: 'nowrap' }}>{option.label}</span>
+                                  </div>
+                                  <div style={{ width: 18, display: 'flex', justifyContent: 'center', color: checked ? (darkMode ? '#91caff' : '#1677ff') : 'transparent', flexShrink: 0 }}>
+                                      <CheckOutlined />
+                                  </div>
+                              </div>
+                          </label>
+                      );
+                  })}
+              </div>
+
+              <div style={{ padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(17,24,39,0.04)', color: mutedTextColor, fontSize: 12, lineHeight: 1.6 }}>
+                  智能与其他项互斥。若你明确知道要搜的是对象、库、Host 或标签，建议切到手动范围以减少噪音结果。
               </div>
           </div>
       );
-  }, [searchScopes]);
+  }, [darkMode, searchScopes]);
 
   const parseHostOnlyToken = (value: unknown): string[] => {
       const raw = String(value || '').trim();
@@ -3301,14 +3420,14 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: '4px 8px' }}>
-            <Space.Compact block size="small">
+        <div style={{ padding: '4px 10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Search
                     ref={searchInputRef}
                     placeholder="搜索..."
                     onChange={onSearch}
                     size="small"
-                    style={{ width: '100%' }}
+                    style={{ flex: 1, minWidth: 0 }}
                 />
                 <Popover
                     content={searchScopePopoverContent}
@@ -3316,18 +3435,66 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     placement="bottomRight"
                     open={isSearchScopePopoverOpen}
                     onOpenChange={setIsSearchScopePopoverOpen}
+                    styles={{ body: { padding: 0, borderRadius: 18, overflow: 'hidden' } }}
                 >
                     <Tooltip title={`搜索范围：${searchScopeSummary}`}>
-                        <Button size="small" icon={<DownOutlined />} style={{ width: 86 }}>
-                            范围{searchScopes.includes('smart') ? '(智)' : `(${searchScopes.length})`}
+                        <Button
+                            size="small"
+                            style={{
+                                minWidth: 86,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 6,
+                                paddingInline: 10,
+                                borderRadius: 10,
+                                borderColor: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.12)',
+                                background: darkMode ? bgMain : 'rgba(255,255,255,0.92)',
+                                color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+                                boxShadow: isSearchScopePopoverOpen
+                                    ? (darkMode ? '0 0 0 1px rgba(255,214,102,0.22) inset' : '0 0 0 1px rgba(24,144,255,0.24) inset')
+                                    : 'none',
+                                backdropFilter: darkMode ? 'blur(10px)' : 'none',
+                                flexShrink: 0,
+                            }}
+                        >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', color: searchScopes.includes('smart') ? '#ffd666' : (darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(22,32,51,0.72)') }}>
+                                <FilterOutlined />
+                            </span>
+                            <span style={{ fontWeight: 700, color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033' }}>筛选</span>
+                            <span
+                                style={{
+                                    minWidth: 18,
+                                    height: 18,
+                                    padding: '0 5px',
+                                    borderRadius: 999,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    lineHeight: 1,
+                                    background: searchScopes.includes('smart')
+                                        ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)')
+                                        : (darkMode ? 'rgba(118,169,250,0.18)' : 'rgba(24,144,255,0.12)'),
+                                    color: searchScopes.includes('smart')
+                                        ? (darkMode ? '#ffd666' : '#1677ff')
+                                        : (darkMode ? '#91caff' : '#1677ff'),
+                                }}
+                            >
+                                {searchScopes.includes('smart') ? '智' : searchScopes.length}
+                            </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', color: darkMode ? 'rgba(255,255,255,0.48)' : 'rgba(22,32,51,0.4)', fontSize: 12 }}>
+                                <DownOutlined />
+                            </span>
                         </Button>
                     </Tooltip>
                 </Popover>
-            </Space.Compact>
+            </div>
         </div>
 
         {/* Toolbar */}
-        <div style={{ padding: '4px 8px', borderBottom: 'none', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+        <div style={{ padding: '4px 10px', borderBottom: 'none', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             <Button
                 size="small"
                 icon={<FolderOpenOutlined />}
@@ -3395,8 +3562,14 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         )}
 
         <Modal
-            title={renameViewTarget?.type === 'tag' ? "编辑标签" : "新建组"}
+            title={renderSidebarModalTitle(
+                <FolderOpenOutlined />,
+                renameViewTarget?.type === 'tag' ? "编辑标签" : "新建组",
+                renameViewTarget?.type === 'tag' ? "调整分组名称和包含的连接。" : "为连接树创建一个更清晰的分组视图。"
+            )}
             open={isCreateTagModalOpen}
+            centered
+            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
             onOk={() => {
                 createTagForm.validateFields().then(values => {
                     if (renameViewTarget?.type === 'tag') {
@@ -3431,20 +3604,24 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             onCancel={() => setIsCreateTagModalOpen(false)}
         >
             <Form form={createTagForm} layout="vertical">
-                <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
-                    <Input />
-                </Form.Item>
-                <Form.Item name="connectionIds" label="选择连接">
-                    <Checkbox.Group style={{ width: '100%' }}>
-                        <Space direction="vertical" style={{ width: '100%', maxHeight: '400px', overflowY: 'auto' }}>
-                            {connections.map(conn => (
-                                <Checkbox key={conn.id} value={conn.id}>
-                                    {conn.name} {conn.config.host ? `(${conn.config.host})` : ''}
-                                </Checkbox>
-                            ))}
-                        </Space>
-                    </Checkbox.Group>
-                </Form.Item>
+                <div style={modalSectionStyle}>
+                    <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
+                        <Input placeholder="例如：线上环境 / 核心业务 / 临时调试" />
+                    </Form.Item>
+                    <Form.Item name="connectionIds" label="选择连接" style={{ marginBottom: 0 }}>
+                        <Checkbox.Group style={{ width: '100%' }}>
+                            <div style={modalScrollSectionStyle}>
+                                <Space direction="vertical" style={{ width: '100%' }}>
+                                    {connections.map(conn => (
+                                        <Checkbox key={conn.id} value={conn.id}>
+                                            {conn.name} {conn.config.host ? `(${conn.config.host})` : ''}
+                                        </Checkbox>
+                                    ))}
+                                </Space>
+                            </div>
+                        </Checkbox.Group>
+                    </Form.Item>
+                </div>
             </Form>
         </Modal>
 
@@ -3514,10 +3691,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         </Modal>
 
         <Modal
-            title="批量操作表"
+            title={renderSidebarModalTitle(<TableOutlined />, "批量操作表", "按对象批量导出结构、数据或完整备份。")}
             open={isBatchModalOpen}
             onCancel={() => setIsBatchModalOpen(false)}
-            width={680}
+            width={720}
+            centered
+            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
             footer={
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <Button key="cancel" onClick={() => setIsBatchModalOpen(false)}>
@@ -3553,7 +3732,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 </div>
             }
         >
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
                 <div style={{ marginBottom: 8 }}>
                     <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>选择连接：</label>
                     <Select
@@ -3585,10 +3764,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         ))}
                     </Select>
                 </div>
+                <div style={modalHintTextStyle}>先选择连接与数据库，再决定导出范围和目标对象。</div>
             </div>
 
             {batchTables.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
+                <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
                     <Space wrap size={8} style={{ width: '100%' }}>
                         <Input
                             allowClear
@@ -3626,7 +3806,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
             {batchTables.length > 0 && (
                 <>
-                    <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
                         <Space>
                             <Button
                                 size="small"
@@ -3654,7 +3834,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                             </span>
                         </Space>
                     </div>
-                    <div style={{ maxHeight: 400, overflow: 'auto', border: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                    <div style={modalScrollSectionStyle}>
                         <Checkbox.Group
                             value={checkedTableKeys}
                             onChange={(values) => setCheckedTableKeys(values as string[])}
@@ -3704,10 +3884,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         </Modal>
 
         <Modal
-            title="批量操作库"
+            title={renderSidebarModalTitle(<DatabaseOutlined />, "批量操作库", "按数据库批量导出结构，或生成结构加数据的备份。")}
             open={isBatchDbModalOpen}
             onCancel={() => setIsBatchDbModalOpen(false)}
-            width={600}
+            width={640}
+            centered
+            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
             footer={[
                 <Button key="cancel" onClick={() => setIsBatchDbModalOpen(false)}>
                     取消
@@ -3731,8 +3913,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 </Button>
             ]}
         >
-            <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>选择连接：</label>
+            <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
+                <label style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>选择连接：</label>
                 <Select
                     value={selectedDbConnection}
                     onChange={handleDbConnectionChange}
@@ -3745,11 +3927,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         </Select.Option>
                     ))}
                 </Select>
+                <div style={{ ...modalHintTextStyle, marginTop: 10 }}>连接选定后会加载当前连接下可批量导出的数据库列表。</div>
             </div>
 
             {batchDatabases.length > 0 && (
                 <>
-                    <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
                         <Space>
                             <Button
                                 size="small"
@@ -3774,7 +3957,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                             </span>
                         </Space>
                     </div>
-                    <div style={{ maxHeight: 400, overflow: 'auto', border: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+                    <div style={modalScrollSectionStyle}>
                         <Checkbox.Group
                             value={checkedDbKeys}
                             onChange={(values) => setCheckedDbKeys(values as string[])}
