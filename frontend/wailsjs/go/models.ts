@@ -114,7 +114,6 @@ export namespace connection {
 	    password: string;
 	    savePassword?: boolean;
 	    database: string;
-	    duckdbMode?: string;
 	    useSSL?: boolean;
 	    sslMode?: string;
 	    sslCertPath?: string;
@@ -155,7 +154,6 @@ export namespace connection {
 	        this.password = source["password"];
 	        this.savePassword = source["savePassword"];
 	        this.database = source["database"];
-	        this.duckdbMode = source["duckdbMode"];
 	        this.useSSL = source["useSSL"];
 	        this.sslMode = source["sslMode"];
 	        this.sslCertPath = source["sslCertPath"];

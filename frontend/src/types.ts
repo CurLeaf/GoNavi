@@ -29,7 +29,6 @@ export interface ConnectionConfig {
   password?: string;
   savePassword?: boolean;
   database?: string;
-  duckdbMode?: 'database' | 'parquet';
   useSSL?: boolean;
   sslMode?: 'preferred' | 'required' | 'skip-verify' | 'disable';
   sslCertPath?: string;

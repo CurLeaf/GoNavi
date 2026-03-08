@@ -9,7 +9,6 @@ import {
   cloneShortcutOptions,
   sanitizeShortcutOptions,
 } from './utils/shortcuts';
-import { resolveDuckDBMode } from './utils/duckdb';
 
 const DEFAULT_APPEARANCE = { enabled: true, opacity: 1.0, blur: 0 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -244,9 +243,6 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   const supportsNetworkTunnel = type !== 'sqlite' && type !== 'duckdb';
   const useHttpTunnel = supportsNetworkTunnel && (raw.useHttpTunnel === true || raw.UseHTTPTunnel === true);
   const useProxy = supportsNetworkTunnel && !!raw.useProxy && !useHttpTunnel;
-  const duckdbMode = type === 'duckdb'
-    ? resolveDuckDBMode(raw.duckdbMode, toTrimmedString(raw.host) || toTrimmedString(raw.database))
-    : undefined;
 
   const safeConfig: ConnectionConfig & Record<string, unknown> = {
     ...raw,
@@ -257,7 +253,6 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     password: savePassword ? toTrimmedString(raw.password) : '',
     savePassword,
     database: toTrimmedString(raw.database),
-    duckdbMode,
     useSSL: sslCapable ? !!raw.useSSL : false,
     sslMode: sslCapable ? sslMode : 'disable',
     sslCertPath: sslCapable ? toTrimmedString(raw.sslCertPath) : '',
