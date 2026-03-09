@@ -1,7 +1,7 @@
 package sync
 
 import (
-	"GoNavi-Wails/internal/db"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -36,12 +36,18 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	if limit > 500 {
 		limit = 500
 	}
+	if isRedisToMongoKeyspacePair(config) {
+		return s.previewRedisToMongo(config, tableName, limit)
+	}
+	if isMongoToRedisKeyspacePair(config) {
+		return s.previewMongoToRedis(config, tableName, limit)
+	}
 
-	sourceDB, err := db.NewDatabase(config.SourceConfig.Type)
+	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
 		return TableDiffPreview{}, fmt.Errorf("初始化源数据库驱动失败: %w", err)
 	}
-	targetDB, err := db.NewDatabase(config.TargetConfig.Type)
+	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
 		return TableDiffPreview{}, fmt.Errorf("初始化目标数据库驱动失败: %w", err)
 	}
@@ -56,14 +62,12 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	}
 	defer targetDB.Close()
 
-	sourceSchema, sourceTable := normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)
-	targetSchema, targetTable := normalizeSchemaAndTable(config.TargetConfig.Type, config.TargetConfig.Database, tableName)
-	sourceQueryTable := qualifiedNameForQuery(config.SourceConfig.Type, sourceSchema, sourceTable, tableName)
-	targetQueryTable := qualifiedNameForQuery(config.TargetConfig.Type, targetSchema, targetTable, tableName)
-
-	cols, err := sourceDB.GetColumns(sourceSchema, sourceTable)
+	plan, cols, _, err := buildSchemaMigrationPlan(config, tableName, sourceDB, targetDB)
 	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("获取源表字段失败: %w", err)
+		return TableDiffPreview{}, err
+	}
+	if !plan.TargetTableExists && !plan.AutoCreate {
+		return TableDiffPreview{}, errors.New(firstNonEmpty(plan.PlannedAction, "目标表不存在，无法预览差异"))
 	}
 
 	pkCols := make([]string, 0, 2)
@@ -80,13 +84,17 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	}
 	pkCol := pkCols[0]
 
-	sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.SourceConfig.Type, sourceQueryTable)))
+	sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(resolveMigrationDBType(config.SourceConfig), plan.SourceQueryTable)))
 	if err != nil {
 		return TableDiffPreview{}, fmt.Errorf("读取源表失败: %w", err)
 	}
-	targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.TargetConfig.Type, targetQueryTable)))
-	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("读取目标表失败: %w", err)
+
+	targetRows := make([]map[string]interface{}, 0)
+	if plan.TargetTableExists {
+		targetRows, _, err = targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(resolveMigrationDBType(config.TargetConfig), plan.TargetQueryTable)))
+		if err != nil {
+			return TableDiffPreview{}, fmt.Errorf("读取目标表失败: %w", err)
+		}
 	}
 
 	targetMap := make(map[string]map[string]interface{}, len(targetRows))
@@ -133,12 +141,7 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 			if len(changedColumns) > 0 {
 				out.TotalUpdates++
 				if len(out.Updates) < limit {
-					out.Updates = append(out.Updates, PreviewUpdateRow{
-						PK:             pkVal,
-						ChangedColumns: changedColumns,
-						Source:         sRow,
-						Target:         tRow,
-					})
+					out.Updates = append(out.Updates, PreviewUpdateRow{PK: pkVal, ChangedColumns: changedColumns, Source: sRow, Target: tRow})
 				}
 			}
 			continue

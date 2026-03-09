@@ -22,7 +22,7 @@ func quoteIdentByType(dbType string, ident string) string {
 	}
 
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx":
+	case "mysql", "mariadb", "diros", "sphinx", "clickhouse", "tdengine":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "sqlserver":
 		escaped := strings.ReplaceAll(ident, "]", "]]")
@@ -74,8 +74,10 @@ func normalizeSchemaAndTable(dbType string, dbName string, tableName string) (st
 	}
 
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "kingbase", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase":
 		return "public", rawTable
+	case "duckdb":
+		return "main", rawTable
 	default:
 		return rawDB, rawTable
 	}
@@ -91,7 +93,7 @@ func qualifiedNameForQuery(dbType string, schema string, table string, original 
 	}
 
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "kingbase", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase":
 		s := strings.TrimSpace(schema)
 		if s == "" {
 			s = "public"
@@ -100,7 +102,16 @@ func qualifiedNameForQuery(dbType string, schema string, table string, original 
 			return raw
 		}
 		return s + "." + table
-	case "mysql", "mariadb", "diros", "sphinx":
+	case "duckdb":
+		s := strings.TrimSpace(schema)
+		if s == "" {
+			s = "main"
+		}
+		if table == "" {
+			return raw
+		}
+		return s + "." + table
+	case "mysql", "mariadb", "diros", "sphinx", "clickhouse", "tdengine":
 		s := strings.TrimSpace(schema)
 		if s == "" || table == "" {
 			return table

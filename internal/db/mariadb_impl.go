@@ -250,12 +250,22 @@ func (m *MariaDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefini
 			}
 		}
 
+		subPart := 0
+		if val, ok := row["Sub_part"]; ok && val != nil {
+			if f, ok := val.(float64); ok {
+				subPart = int(f)
+			} else if i, ok := val.(int64); ok {
+				subPart = int(i)
+			}
+		}
+
 		idx := connection.IndexDefinition{
 			Name:       fmt.Sprintf("%v", row["Key_name"]),
 			ColumnName: fmt.Sprintf("%v", row["Column_name"]),
 			NonUnique:  nonUnique,
 			SeqInIndex: seq,
 			IndexType:  fmt.Sprintf("%v", row["Index_type"]),
+			SubPart:    subPart,
 		}
 		indexes = append(indexes, idx)
 	}
@@ -323,7 +333,7 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		var args []interface{}
 		for k, v := range pk {
 			wheres = append(wheres, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
 		}
 		if len(wheres) == 0 {
 			continue
@@ -341,7 +351,7 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 
 		for k, v := range update.Values {
 			sets = append(sets, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
 		}
 
 		if len(sets) == 0 {
@@ -351,7 +361,7 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		var wheres []string
 		for k, v := range update.Keys {
 			wheres = append(wheres, fmt.Sprintf("`%s` = ?", k))
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
 		}
 
 		if len(wheres) == 0 {
@@ -373,7 +383,7 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		for k, v := range row {
 			cols = append(cols, fmt.Sprintf("`%s`", k))
 			placeholders = append(placeholders, "?")
-			args = append(args, normalizeMySQLDateTimeValue(v))
+			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
 		}
 
 		if len(cols) == 0 {

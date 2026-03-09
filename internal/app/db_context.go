@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
@@ -20,6 +21,11 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	case "dameng":
 		// 达梦使用 schema 参数，沿用现有行为：dbName 表示 schema。
 		runConfig.Database = name
+	case "redis":
+		runConfig.Database = name
+		if idx, err := strconv.Atoi(name); err == nil && idx >= 0 && idx <= 15 {
+			runConfig.RedisDB = idx
+		}
 	default:
 		// oracle: dbName 表示 schema/owner，不能覆盖 config.Database（服务名）
 		// sqlite: 无需设置 Database

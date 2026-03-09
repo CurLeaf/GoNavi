@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -360,6 +361,83 @@ func (t *TDengineDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 
 func (t *TDengineDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	return []connection.TriggerDefinition{}, nil
+}
+
+func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+	if t.conn == nil {
+		return fmt.Errorf("connection not open")
+	}
+	if strings.TrimSpace(tableName) == "" {
+		return fmt.Errorf("table name required")
+	}
+	if len(changes.Updates) > 0 || len(changes.Deletes) > 0 {
+		return fmt.Errorf("TDengine 目标端当前仅支持 INSERT 写入，暂不支持 UPDATE/DELETE 差异同步，请改用仅插入或全量覆盖模式")
+	}
+
+	qualifiedTable := quoteTDengineTable("", tableName)
+	for _, row := range changes.Inserts {
+		query, err := buildTDengineInsertSQL(qualifiedTable, row)
+		if err != nil {
+			return err
+		}
+		if query == "" {
+			continue
+		}
+		if _, err := t.conn.Exec(query); err != nil {
+			return fmt.Errorf("insert error: %v; sql=%s", err, query)
+		}
+	}
+	return nil
+}
+
+func buildTDengineInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {
+	if strings.TrimSpace(qualifiedTable) == "" {
+		return "", fmt.Errorf("qualified table required")
+	}
+	if len(row) == 0 {
+		return "", nil
+	}
+
+	cols := make([]string, 0, len(row))
+	for key := range row {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		cols = append(cols, key)
+	}
+	if len(cols) == 0 {
+		return "", nil
+	}
+	sort.Strings(cols)
+
+	quotedCols := make([]string, 0, len(cols))
+	values := make([]string, 0, len(cols))
+	for _, col := range cols {
+		quotedCols = append(quotedCols, fmt.Sprintf("`%s`", escapeBacktickIdent(col)))
+		values = append(values, tdengineLiteral(row[col]))
+	}
+
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(quotedCols, ", "), strings.Join(values, ", ")), nil
+}
+
+func tdengineLiteral(value interface{}) string {
+	switch val := value.(type) {
+	case nil:
+		return "NULL"
+	case bool:
+		if val {
+			return "1"
+		}
+		return "0"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprintf("%v", val)
+	case time.Time:
+		return fmt.Sprintf("'%s'", val.Format("2006-01-02 15:04:05"))
+	case []byte:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(val), "'", "''"))
+	default:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", val), "'", "''"))
+	}
 }
 
 func getValueFromRow(row map[string]interface{}, keys ...string) (interface{}, bool) {

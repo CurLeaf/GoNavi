@@ -27,4 +27,3 @@ type Reporter struct {
 	OnLog      func(event SyncLogEvent)
 	OnProgress func(event SyncProgressEvent)
 }
-

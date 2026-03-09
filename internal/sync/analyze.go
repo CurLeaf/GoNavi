@@ -1,22 +1,27 @@
 package sync
 
 import (
-	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
 	"fmt"
 	"strings"
 )
 
 type TableDiffSummary struct {
-	Table     string `json:"table"`
-	PKColumn  string `json:"pkColumn,omitempty"`
-	CanSync   bool   `json:"canSync"`
-	Inserts   int    `json:"inserts"`
-	Updates   int    `json:"updates"`
-	Deletes   int    `json:"deletes"`
-	Same      int    `json:"same"`
-	Message   string `json:"message,omitempty"`
-	HasSchema bool   `json:"hasSchema,omitempty"`
+	Table              string   `json:"table"`
+	PKColumn           string   `json:"pkColumn,omitempty"`
+	CanSync            bool     `json:"canSync"`
+	Inserts            int      `json:"inserts"`
+	Updates            int      `json:"updates"`
+	Deletes            int      `json:"deletes"`
+	Same               int      `json:"same"`
+	Message            string   `json:"message,omitempty"`
+	HasSchema          bool     `json:"hasSchema,omitempty"`
+	TargetTableExists  bool     `json:"targetTableExists,omitempty"`
+	PlannedAction      string   `json:"plannedAction,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	UnsupportedObjects []string `json:"unsupportedObjects,omitempty"`
+	IndexesToCreate    int      `json:"indexesToCreate,omitempty"`
+	IndexesSkipped     int      `json:"indexesSkipped,omitempty"`
 }
 
 type SyncAnalyzeResult struct {
@@ -27,6 +32,12 @@ type SyncAnalyzeResult struct {
 
 func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 	result := SyncAnalyzeResult{Success: true, Tables: []TableDiffSummary{}}
+	if isRedisToMongoKeyspacePair(config) {
+		return s.analyzeRedisToMongo(config)
+	}
+	if isMongoToRedisKeyspacePair(config) {
+		return s.analyzeMongoToRedis(config)
+	}
 
 	contentRaw := strings.ToLower(strings.TrimSpace(config.Content))
 	syncSchema := false
@@ -48,25 +59,23 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 	totalTables := len(config.Tables)
 	s.progress(config.JobID, 0, totalTables, "", "差异分析开始")
 
-	sourceDB, err := db.NewDatabase(config.SourceConfig.Type)
+	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化源数据库驱动失败：类型=%s", config.SourceConfig.Type)
 		return SyncAnalyzeResult{Success: false, Message: "初始化源数据库驱动失败: " + err.Error()}
 	}
-	targetDB, err := db.NewDatabase(config.TargetConfig.Type)
+	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化目标数据库驱动失败：类型=%s", config.TargetConfig.Type)
 		return SyncAnalyzeResult{Success: false, Message: "初始化目标数据库驱动失败: " + err.Error()}
 	}
 
-	// Connect Source
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
 		logger.Error(err, "源数据库连接失败：%s", formatConnSummaryForSync(config.SourceConfig))
 		return SyncAnalyzeResult{Success: false, Message: "源数据库连接失败: " + err.Error()}
 	}
 	defer sourceDB.Close()
 
-	// Connect Target
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
 		logger.Error(err, "目标数据库连接失败：%s", formatConnSummaryForSync(config.TargetConfig))
 		return SyncAnalyzeResult{Success: false, Message: "目标数据库连接失败: " + err.Error()}
@@ -88,51 +97,76 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 				HasSchema: syncSchema,
 			}
 
-			sourceSchema, sourceTable := normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)
-			targetSchema, targetTable := normalizeSchemaAndTable(config.TargetConfig.Type, config.TargetConfig.Database, tableName)
-			sourceQueryTable := qualifiedNameForQuery(config.SourceConfig.Type, sourceSchema, sourceTable, tableName)
-			targetQueryTable := qualifiedNameForQuery(config.TargetConfig.Type, targetSchema, targetTable, tableName)
-
-			cols, err := sourceDB.GetColumns(sourceSchema, sourceTable)
+			plan, cols, _, err := buildSchemaMigrationPlan(config, tableName, sourceDB, targetDB)
 			if err != nil {
-				summary.Message = "获取源表字段失败: " + err.Error()
+				summary.Message = err.Error()
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+			summary.TargetTableExists = plan.TargetTableExists
+			summary.PlannedAction = plan.PlannedAction
+			summary.Warnings = append(summary.Warnings, plan.Warnings...)
+			summary.UnsupportedObjects = append(summary.UnsupportedObjects, plan.UnsupportedObjects...)
+			summary.IndexesToCreate = plan.IndexesToCreate
+			summary.IndexesSkipped = plan.IndexesSkipped
+
+			if !plan.TargetTableExists && !plan.AutoCreate {
+				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，无法执行同步")
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 
 			if !syncData {
 				summary.CanSync = true
-				summary.Message = "仅同步结构，未执行数据差异分析"
+				summary.Message = firstNonEmpty(plan.PlannedAction, "仅同步结构，未执行数据差异分析")
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 
+			tableMode := normalizeSyncMode(config.Mode)
 			pkCols := make([]string, 0, 2)
 			for _, c := range cols {
 				if c.Key == "PRI" || c.Key == "PK" {
 					pkCols = append(pkCols, c.Name)
 				}
 			}
-			if len(pkCols) == 0 {
-				summary.Message = "无主键，不支持数据对比/同步"
-				result.Tables = append(result.Tables, summary)
-				return
-			}
-			if len(pkCols) > 1 {
-				summary.Message = fmt.Sprintf("复合主键（%s），暂不支持数据对比/同步", strings.Join(pkCols, ","))
-				result.Tables = append(result.Tables, summary)
-				return
-			}
-			summary.PKColumn = pkCols[0]
 
-			// Query data for diff
-			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.SourceConfig.Type, sourceQueryTable)))
+			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.SourceConfig.Type, plan.SourceQueryTable)))
 			if err != nil {
 				summary.Message = "读取源表失败: " + err.Error()
 				result.Tables = append(result.Tables, summary)
 				return
 			}
-			targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.TargetConfig.Type, targetQueryTable)))
+
+			if !plan.TargetTableExists && plan.AutoCreate {
+				summary.CanSync = true
+				summary.Inserts = len(sourceRows)
+				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，执行时将自动建表并导入全部源数据")
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+
+			if tableMode != "insert_update" {
+				summary.CanSync = true
+				summary.Inserts = len(sourceRows)
+				summary.Message = firstNonEmpty(plan.PlannedAction, "当前模式无需差异对比，将按源表数据执行导入")
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+
+			if len(pkCols) == 0 {
+				summary.Message = "无主键，不支持差异对比同步；如需直接导入请使用仅插入或全量覆盖模式"
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+			if len(pkCols) > 1 {
+				summary.Message = fmt.Sprintf("复合主键（%s），暂不支持差异对比同步", strings.Join(pkCols, ","))
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+			summary.PKColumn = pkCols[0]
+
+			targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.TargetConfig.Type, plan.TargetQueryTable)))
 			if err != nil {
 				summary.Message = "读取目标表失败: " + err.Error()
 				result.Tables = append(result.Tables, summary)
@@ -188,6 +222,9 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			}
 
 			summary.CanSync = true
+			if strings.TrimSpace(summary.Message) == "" {
+				summary.Message = firstNonEmpty(plan.PlannedAction, "差异分析完成")
+			}
 			result.Tables = append(result.Tables, summary)
 		}()
 	}
@@ -195,4 +232,13 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 	s.progress(config.JobID, totalTables, totalTables, "", "差异分析完成")
 	result.Message = fmt.Sprintf("已完成 %d 张表的差异分析", len(result.Tables))
 	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

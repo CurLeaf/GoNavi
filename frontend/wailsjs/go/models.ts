@@ -277,6 +277,9 @@ export namespace sync {
 	    mode: string;
 	    jobId?: string;
 	    autoAddColumns?: boolean;
+	    targetTableStrategy?: string;
+	    createIndexes?: boolean;
+	    mongoCollectionName?: string;
 	    tableOptions?: Record<string, TableOptions>;
 	
 	    static createFrom(source: any = {}) {
@@ -292,6 +295,9 @@ export namespace sync {
 	        this.mode = source["mode"];
 	        this.jobId = source["jobId"];
 	        this.autoAddColumns = source["autoAddColumns"];
+	        this.targetTableStrategy = source["targetTableStrategy"];
+	        this.createIndexes = source["createIndexes"];
+	        this.mongoCollectionName = source["mongoCollectionName"];
 	        this.tableOptions = this.convertValues(source["tableOptions"], TableOptions, true);
 	    }
 	
