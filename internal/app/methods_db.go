@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -547,6 +548,24 @@ func ensureNonNilSlice[T any](items []T) []T {
 
 func (a *App) DBGetDatabases(config connection.ConnectionConfig) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, "")
+	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "redis") {
+		runConfig.Type = "redis"
+		client, err := a.getRedisClient(runConfig)
+		if err != nil {
+			logger.Error(err, "DBGetDatabases 获取 Redis 连接失败：%s", formatConnSummary(runConfig))
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		dbs, err := client.GetDatabases()
+		if err != nil {
+			logger.Error(err, "DBGetDatabases 获取 Redis 库列表失败：%s", formatConnSummary(runConfig))
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		resData := make([]map[string]string, 0, len(dbs))
+		for _, item := range dbs {
+			resData = append(resData, map[string]string{"Database": strconv.Itoa(item.Index)})
+		}
+		return connection.QueryResult{Success: true, Data: resData}
+	}
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		logger.Error(err, "DBGetDatabases 获取连接失败：%s", formatConnSummary(runConfig))
@@ -579,6 +598,48 @@ func (a *App) DBGetDatabases(config connection.ConnectionConfig) connection.Quer
 
 func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
+	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "redis") {
+		runConfig.Type = "redis"
+		client, err := a.getRedisClient(runConfig)
+		if err != nil {
+			logger.Error(err, "DBGetTables 获取 Redis 连接失败：%s", formatConnSummary(runConfig))
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		cursor := uint64(0)
+		tables := make([]string, 0, 128)
+		seen := make(map[string]struct{}, 128)
+		for {
+			result, err := client.ScanKeys("*", cursor, 1000)
+			if err != nil {
+				logger.Error(err, "DBGetTables 扫描 Redis Key 失败：%s", formatConnSummary(runConfig))
+				return connection.QueryResult{Success: false, Message: err.Error()}
+			}
+			for _, item := range result.Keys {
+				key := strings.TrimSpace(item.Key)
+				if key == "" {
+					continue
+				}
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				tables = append(tables, key)
+			}
+			if strings.TrimSpace(result.Cursor) == "" || strings.TrimSpace(result.Cursor) == "0" {
+				break
+			}
+			next, err := strconv.ParseUint(strings.TrimSpace(result.Cursor), 10, 64)
+			if err != nil || next == cursor {
+				break
+			}
+			cursor = next
+		}
+		resData := make([]map[string]string, 0, len(tables))
+		for _, name := range tables {
+			resData = append(resData, map[string]string{"Table": name})
+		}
+		return connection.QueryResult{Success: true, Data: resData}
+	}
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {

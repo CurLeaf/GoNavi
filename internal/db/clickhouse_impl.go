@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -676,5 +677,136 @@ func isClickHouseTruthy(value interface{}) bool {
 	default:
 		normalized := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", value)))
 		return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "y"
+	}
+}
+
+func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+	if c.conn == nil {
+		return fmt.Errorf("connection not open")
+	}
+
+	database, table, err := c.resolveDatabaseAndTable(c.database, tableName)
+	if err != nil {
+		return err
+	}
+	qualifiedTable := fmt.Sprintf("%s.%s", quoteClickHouseIdentifier(database), quoteClickHouseIdentifier(table))
+
+	for _, pk := range changes.Deletes {
+		whereExpr := buildClickHouseWhereClause(pk)
+		if whereExpr == "" {
+			continue
+		}
+		query := fmt.Sprintf("ALTER TABLE %s DELETE WHERE %s", qualifiedTable, whereExpr)
+		if _, err := c.conn.Exec(query); err != nil {
+			return fmt.Errorf("delete error: %v; sql=%s", err, query)
+		}
+	}
+
+	for _, update := range changes.Updates {
+		setExpr := buildClickHouseAssignments(update.Values)
+		whereExpr := buildClickHouseWhereClause(update.Keys)
+		if setExpr == "" || whereExpr == "" {
+			continue
+		}
+		query := fmt.Sprintf("ALTER TABLE %s UPDATE %s WHERE %s", qualifiedTable, setExpr, whereExpr)
+		if _, err := c.conn.Exec(query); err != nil {
+			return fmt.Errorf("update error: %v; sql=%s", err, query)
+		}
+	}
+
+	for _, row := range changes.Inserts {
+		query, err := buildClickHouseInsertSQL(qualifiedTable, row)
+		if err != nil {
+			return err
+		}
+		if query == "" {
+			continue
+		}
+		if _, err := c.conn.Exec(query); err != nil {
+			return fmt.Errorf("insert error: %v; sql=%s", err, query)
+		}
+	}
+	return nil
+}
+
+func buildClickHouseInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {
+	if len(row) == 0 {
+		return "", nil
+	}
+	cols := make([]string, 0, len(row))
+	for k := range row {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		cols = append(cols, k)
+	}
+	if len(cols) == 0 {
+		return "", nil
+	}
+	sort.Strings(cols)
+	quotedCols := make([]string, 0, len(cols))
+	values := make([]string, 0, len(cols))
+	for _, col := range cols {
+		quotedCols = append(quotedCols, quoteClickHouseIdentifier(col))
+		values = append(values, clickHouseLiteral(row[col]))
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(quotedCols, ", "), strings.Join(values, ", ")), nil
+}
+
+func buildClickHouseAssignments(values map[string]interface{}) string {
+	if len(values) == 0 {
+		return ""
+	}
+	cols := make([]string, 0, len(values))
+	for k := range values {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		cols = append(cols, k)
+	}
+	sort.Strings(cols)
+	parts := make([]string, 0, len(cols))
+	for _, col := range cols {
+		parts = append(parts, fmt.Sprintf("%s = %s", quoteClickHouseIdentifier(col), clickHouseLiteral(values[col])))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func buildClickHouseWhereClause(keys map[string]interface{}) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	cols := make([]string, 0, len(keys))
+	for k := range keys {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		cols = append(cols, k)
+	}
+	sort.Strings(cols)
+	parts := make([]string, 0, len(cols))
+	for _, col := range cols {
+		parts = append(parts, fmt.Sprintf("%s = %s", quoteClickHouseIdentifier(col), clickHouseLiteral(keys[col])))
+	}
+	return strings.Join(parts, " AND ")
+}
+
+func clickHouseLiteral(value interface{}) string {
+	switch val := value.(type) {
+	case nil:
+		return "NULL"
+	case bool:
+		if val {
+			return "1"
+		}
+		return "0"
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprintf("%v", val)
+	case time.Time:
+		return fmt.Sprintf("'%s'", val.Format("2006-01-02 15:04:05"))
+	case []byte:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(string(val), "'", "''"))
+	default:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(fmt.Sprintf("%v", val), "'", "''"))
 	}
 }

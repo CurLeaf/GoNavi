@@ -90,6 +90,7 @@ type IndexDefinition struct {
 	NonUnique  int    `json:"nonUnique"`
 	SeqInIndex int    `json:"seqInIndex"`
 	IndexType  string `json:"indexType"`
+	SubPart    int    `json:"subPart,omitempty"`
 }
 
 // ForeignKeyDefinition represents a foreign key

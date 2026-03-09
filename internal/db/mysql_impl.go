@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -441,12 +442,22 @@ func (m *MySQLDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefini
 			}
 		}
 
+		subPart := 0
+		if val, ok := row["Sub_part"]; ok && val != nil {
+			if f, ok := val.(float64); ok {
+				subPart = int(f)
+			} else if i, ok := val.(int64); ok {
+				subPart = int(i)
+			}
+		}
+
 		idx := connection.IndexDefinition{
 			Name:       fmt.Sprintf("%v", row["Key_name"]),
 			ColumnName: fmt.Sprintf("%v", row["Column_name"]),
 			NonUnique:  nonUnique,
 			SeqInIndex: seq,
 			IndexType:  fmt.Sprintf("%v", row["Index_type"]),
+			SubPart:    subPart,
 		}
 		indexes = append(indexes, idx)
 	}
@@ -606,6 +617,18 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 	return tx.Commit()
 }
 
+func normalizeMySQLComplexValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case map[string]interface{}, []interface{}:
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+		return fmt.Sprintf("%v", value)
+	default:
+		return value
+	}
+}
+
 func normalizeMySQLDateTimeValue(value interface{}) interface{} {
 	text, ok := value.(string)
 	if !ok {
@@ -670,7 +693,7 @@ func (m *MySQLDB) loadColumnTypeMap(tableName string) map[string]string {
 func normalizeMySQLValueForInsert(columnName string, value interface{}, columnTypeMap map[string]string) (interface{}, bool) {
 	columnType := strings.ToLower(strings.TrimSpace(columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]))
 	if !isMySQLTemporalColumnType(columnType) {
-		return value, false
+		return normalizeMySQLComplexValue(value), false
 	}
 	text, ok := value.(string)
 	if ok && strings.TrimSpace(text) == "" {

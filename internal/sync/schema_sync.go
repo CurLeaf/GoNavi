@@ -7,15 +7,16 @@ import (
 )
 
 func (s *SyncEngine) syncTableSchema(config SyncConfig, res *SyncResult, sourceDB db.Database, targetDB db.Database, tableName string) error {
-	targetType := strings.ToLower(strings.TrimSpace(config.TargetConfig.Type))
+	targetType := resolveMigrationDBType(config.TargetConfig)
 	if targetType != "mysql" {
 		s.appendLog(config.JobID, res, "warn", fmt.Sprintf("目标数据库类型=%s 暂不支持结构同步，已跳过表 %s", config.TargetConfig.Type, tableName))
 		return nil
 	}
 
-	sourceSchema, sourceTable := normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)
-	targetSchema, targetTable := normalizeSchemaAndTable(config.TargetConfig.Type, config.TargetConfig.Database, tableName)
-	targetQueryTable := qualifiedNameForQuery(config.TargetConfig.Type, targetSchema, targetTable, tableName)
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	sourceSchema, sourceTable := normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
+	targetSchema, targetTable := normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	targetQueryTable := qualifiedNameForQuery(targetType, targetSchema, targetTable, tableName)
 
 	// 1) 获取源表字段
 	sourceCols, err := sourceDB.GetColumns(sourceSchema, sourceTable)
@@ -26,7 +27,6 @@ func (s *SyncEngine) syncTableSchema(config SyncConfig, res *SyncResult, sourceD
 	// 2) 确保目标表存在
 	targetCols, err := targetDB.GetColumns(targetSchema, targetTable)
 	if err != nil {
-		sourceType := strings.ToLower(strings.TrimSpace(config.SourceConfig.Type))
 		if sourceType != "mysql" {
 			return fmt.Errorf("目标表不存在且源类型=%s 暂不支持自动建表: %w", config.SourceConfig.Type, err)
 		}
@@ -62,7 +62,6 @@ func (s *SyncEngine) syncTableSchema(config SyncConfig, res *SyncResult, sourceD
 
 	// 3) 补齐目标缺失字段（安全策略：新增字段统一允许 NULL）
 	missing := make([]string, 0)
-	sourceType := strings.ToLower(strings.TrimSpace(config.SourceConfig.Type))
 	for _, c := range sourceCols {
 		colName := strings.TrimSpace(c.Name)
 		if colName == "" {

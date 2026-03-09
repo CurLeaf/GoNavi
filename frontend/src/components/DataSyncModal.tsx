@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Modal, Form, Select, Button, message, Steps, Transfer, Card, Alert, Divider, Typography, Progress, Checkbox, Table, Drawer, Tabs } from 'antd';
+import { Modal, Form, Select, Input, Button, message, Steps, Transfer, Card, Alert, Divider, Typography, Progress, Checkbox, Table, Drawer, Tabs, theme as antdTheme } from 'antd';
+import { DatabaseOutlined, RocketOutlined, SwapOutlined, TableOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBGetDatabases, DBGetTables, DataSync, DataSyncAnalyze, DataSyncPreview } from '../../wailsjs/go/app/App';
 import { SavedConnection } from '../types';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -21,6 +23,12 @@ type TableDiffSummary = {
   deletes?: number;
   same?: number;
   message?: string;
+  targetTableExists?: boolean;
+  plannedAction?: string;
+  warnings?: string[];
+  unsupportedObjects?: string[];
+  indexesToCreate?: number;
+  indexesSkipped?: number;
 };
 type TableOps = {
   insert: boolean;
@@ -30,6 +38,8 @@ type TableOps = {
   selectedUpdatePks?: string[];
   selectedDeletePks?: string[];
 };
+
+type WorkflowType = 'sync' | 'migration';
 
 const quoteSqlIdent = (dbType: string, ident: string): string => {
   const raw = String(ident || '').trim();
@@ -74,6 +84,11 @@ const toSqlLiteral = (value: any, dbType: string): string => {
     }
   }
   return `'${String(value).replace(/'/g, "''")}'`;
+};
+
+const resolveRedisDbIndex = (raw?: string): number => {
+  const value = Number(String(raw || '').trim());
+  return Number.isInteger(value) && value >= 0 && value <= 15 ? value : 0;
 };
 
 const buildSqlPreview = (
@@ -145,8 +160,14 @@ const buildSqlPreview = (
 
 const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const connections = useStore((state) => state.connections);
+  const themeMode = useStore((state) => state.theme);
+  const appearance = useStore((state) => state.appearance);
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const { token } = antdTheme.useToken();
+  const darkMode = themeMode === 'dark';
+  const resolvedAppearance = resolveAppearanceValues(appearance);
+  const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   
   // Step 1: Config
   const [sourceConnId, setSourceConnId] = useState<string>('');
@@ -162,9 +183,13 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
 
   // Options
+  const [workflowType, setWorkflowType] = useState<WorkflowType>('sync');
   const [syncContent, setSyncContent] = useState<'data' | 'schema' | 'both'>('data');
   const [syncMode, setSyncMode] = useState<string>('insert_update');
   const [autoAddColumns, setAutoAddColumns] = useState<boolean>(true);
+  const [targetTableStrategy, setTargetTableStrategy] = useState<'existing_only' | 'auto_create_if_missing' | 'smart'>('existing_only');
+  const [createIndexes, setCreateIndexes] = useState<boolean>(false);
+  const [mongoCollectionName, setMongoCollectionName] = useState<string>('');
   const [showSameTables, setShowSameTables] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [diffTables, setDiffTables] = useState<TableDiffSummary[]>([]);
@@ -240,9 +265,12 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
         setSourceDb('');
         setTargetDb('');
         setSelectedTables([]);
+        setWorkflowType('sync');
         setSyncContent('data');
         setSyncMode('insert_update');
         setAutoAddColumns(true);
+        setTargetTableStrategy('existing_only');
+        setCreateIndexes(false);
         setShowSameTables(false);
         setAnalyzing(false);
         setDiffTables([]);
@@ -259,6 +287,30 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
         autoScrollRef.current = true;
     }
   }, [open]);
+
+  useEffect(() => {
+      if (workflowType === 'migration') {
+          if (syncMode === 'insert_update') {
+              setSyncMode('insert_only');
+          }
+          if (syncContent === 'schema') {
+              setSyncContent('both');
+          }
+          if (targetTableStrategy === 'existing_only') {
+              setTargetTableStrategy('smart');
+          }
+          if (!createIndexes) {
+              setCreateIndexes(true);
+          }
+      } else {
+          if (targetTableStrategy !== 'existing_only') {
+              setTargetTableStrategy('existing_only');
+          }
+          if (createIndexes) {
+              setCreateIndexes(false);
+          }
+      }
+  }, [workflowType]);
 
   const handleSourceConnChange = async (connId: string) => {
       setSourceConnId(connId);
@@ -357,6 +409,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           content: syncContent,
           mode: "insert_update",
           autoAddColumns,
+          targetTableStrategy,
+          createIndexes,
+          mongoCollectionName: mongoCollectionName.trim(),
           jobId,
       };
 
@@ -407,6 +462,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           content: "data",
           mode: "insert_update",
           autoAddColumns,
+          targetTableStrategy,
+          createIndexes,
+          mongoCollectionName: mongoCollectionName.trim(),
       };
 
       try {
@@ -483,6 +541,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           content: syncContent,
           mode: syncMode,
           autoAddColumns,
+          targetTableStrategy,
+          createIndexes,
+          mongoCollectionName: mongoCollectionName.trim(),
           tableOptions,
           jobId,
       };
@@ -530,10 +591,132 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       return buildSqlPreview(previewData, previewTable, targetType, ops);
   }, [previewData, previewTable, targetConnId, connections, tableOptions]);
 
+  const analysisWarnings = useMemo(() => {
+      const items: string[] = [];
+      diffTables.forEach((table) => {
+          (table.warnings || []).forEach((warning) => items.push(`${table.table}: ${warning}`));
+          (table.unsupportedObjects || []).forEach((warning) => items.push(`${table.table}: ${warning}`));
+      });
+      return Array.from(new Set(items));
+  }, [diffTables]);
+
+  const isMigrationWorkflow = workflowType === 'migration';
+  const sourceConn = useMemo(() => connections.find(c => c.id === sourceConnId), [connections, sourceConnId]);
+  const targetConn = useMemo(() => connections.find(c => c.id === targetConnId), [connections, targetConnId]);
+  const sourceType = String(sourceConn?.config?.type || '').toLowerCase();
+  const targetType = String(targetConn?.config?.type || '').toLowerCase();
+  const isRedisMongoKeyspaceMigration = isMigrationWorkflow && (
+      (sourceType === 'redis' && targetType === 'mongodb') ||
+      (sourceType === 'mongodb' && targetType === 'redis')
+  );
+  const defaultMongoCollectionName = useMemo(() => {
+      if (sourceType === 'redis' && targetType === 'mongodb') {
+          return `redis_db_${resolveRedisDbIndex(sourceDb || sourceConn?.config?.database)}_keys`;
+      }
+      if (sourceType === 'mongodb' && targetType === 'redis') {
+          return selectedTables[0] || `redis_db_${resolveRedisDbIndex(targetDb || targetConn?.config?.database)}_keys`;
+      }
+      return '';
+  }, [sourceType, targetType, sourceDb, targetDb, sourceConn, targetConn, selectedTables]);
+
+  const modalPanelStyle = useMemo(() => ({
+      background: darkMode
+          ? 'linear-gradient(180deg, rgba(16,22,34,0.96) 0%, rgba(10,14,24,0.98) 100%)'
+          : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
+      boxShadow: darkMode ? '0 24px 56px rgba(0,0,0,0.36)' : '0 18px 44px rgba(15,23,42,0.14)',
+      backdropFilter: darkMode ? 'blur(18px)' : 'none',
+  }), [darkMode]);
+
+  const shellCardStyle = useMemo<React.CSSProperties>(() => ({
+      borderRadius: 18,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.03)' : `rgba(255,255,255,${Math.max(effectiveOpacity, 0.88)})`,
+      boxShadow: darkMode ? '0 12px 32px rgba(0,0,0,0.22)' : '0 10px 24px rgba(15,23,42,0.08)',
+      overflow: 'hidden',
+  }), [darkMode, effectiveOpacity]);
+
+  const heroPanelStyle = useMemo<React.CSSProperties>(() => ({
+      padding: 18,
+      borderRadius: 18,
+      border: darkMode ? '1px solid rgba(255,214,102,0.12)' : '1px solid rgba(24,144,255,0.12)',
+      background: darkMode
+          ? 'linear-gradient(135deg, rgba(255,214,102,0.10) 0%, rgba(255,255,255,0.03) 100%)'
+          : 'linear-gradient(135deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.95) 100%)',
+      marginBottom: 18,
+  }), [darkMode]);
+
+  const badgeStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      padding: '6px 10px',
+      borderRadius: 999,
+      border: darkMode ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(15,23,42,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.86)',
+      color: darkMode ? 'rgba(255,255,255,0.88)' : '#334155',
+      fontSize: 12,
+      fontWeight: 600,
+  }), [darkMode]);
+
+  const quietPanelStyle = useMemo<React.CSSProperties>(() => ({
+      padding: 14,
+      borderRadius: 16,
+      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.08)',
+      background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(248,250,252,0.92)',
+  }), [darkMode]);
+
+  const modalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100%',
+      minHeight: 0,
+  }), []);
+
+  const modalScrollableContentStyle = useMemo<React.CSSProperties>(() => ({
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      paddingRight: 4,
+      overscrollBehavior: 'contain',
+  }), []);
+
+  const modalFooterBarStyle = useMemo<React.CSSProperties>(() => ({
+      marginTop: 18,
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: 8,
+      paddingTop: 12,
+      borderTop: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(15,23,42,0.06)',
+      flex: '0 0 auto',
+  }), [darkMode]);
+
+  const renderModalTitle = (title: string, description: string) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{
+              width: 38,
+              height: 38,
+              borderRadius: 14,
+              display: 'grid',
+              placeItems: 'center',
+              background: darkMode ? 'rgba(255,214,102,0.12)' : 'rgba(24,144,255,0.10)',
+              color: darkMode ? '#ffd666' : token.colorPrimary,
+              flexShrink: 0,
+          }}>
+              {isMigrationWorkflow ? <RocketOutlined /> : <SwapOutlined />}
+          </div>
+          <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: darkMode ? '#f8fafc' : '#0f172a' }}>{title}</div>
+              <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(15,23,42,0.58)' }}>{description}</div>
+          </div>
+      </div>
+  );
+
   return (
     <>
     <Modal
-        title="数据同步"
+        title={renderModalTitle(isMigrationWorkflow ? '跨库迁移工作台' : '数据同步工作台', isMigrationWorkflow ? '按源库 → 目标库完成建表、导入与风险预检。' : '按已有目标表完成差异对比、同步执行与结果确认。')}
         open={open}
         onCancel={() => {
             if (syncing) {
@@ -542,23 +725,61 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
             }
             onClose();
         }}
-        width={800}
+        width={920}
         footer={null}
         destroyOnHidden
         closable={!syncing}
         maskClosable={!syncing}
+        styles={{
+            content: modalPanelStyle,
+            header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 },
+            body: {
+                paddingTop: 8,
+                height: 760,
+                maxHeight: 'calc(100vh - 120px)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+            },
+            footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 },
+        }}
     >
+      <div style={modalWorkspaceStyle}>
+      <div style={{ flex: '0 0 auto' }}>
+      <div style={heroPanelStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: darkMode ? '#f8fafc' : '#0f172a' }}>{isMigrationWorkflow ? '跨数据源迁移' : '数据同步'}</div>
+                  <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.7, color: darkMode ? 'rgba(255,255,255,0.62)' : 'rgba(15,23,42,0.62)' }}>
+                      {isMigrationWorkflow
+                          ? '适合把源表迁移到另一套数据库，可按策略自动建表、导入数据并补建可兼容索引。'
+                          : '适合目标表已存在的场景，先做差异分析，再按勾选执行插入、更新或删除。'}
+                  </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <span style={badgeStyle}>{isMigrationWorkflow ? <RocketOutlined /> : <SwapOutlined />} {isMigrationWorkflow ? '迁移模式' : '同步模式'}</span>
+                  <span style={badgeStyle}><DatabaseOutlined /> {sourceConnId ? '已选源连接' : '待选源连接'}</span>
+                  <span style={badgeStyle}><TableOutlined /> {selectedTables.length || 0} 张表</span>
+              </div>
+          </div>
+      </div>
       <Steps current={currentStep} style={{ marginBottom: 24 }}>
         <Step title="配置源与目标" />
         <Step title="选择表" />
         <Step title="执行结果" />
       </Steps>
+      </div>
 
+      <div style={modalScrollableContentStyle}>
       {/* STEP 1: CONFIG */}
       {currentStep === 0 && (
           <div>
-              <div style={{ display: 'flex', gap: 24, justifyContent: 'center' }}>
-                  <Card title="源数据库" style={{ width: 350 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 44px minmax(0, 1fr)', gap: 18, alignItems: 'stretch' }}>
+                  <Card
+                      title="源数据库"
+                      style={shellCardStyle}
+                      styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
+                  >
                       <Form layout="vertical">
                           <Form.Item label="连接">
                               <Select value={sourceConnId} onChange={handleSourceConnChange}>
@@ -572,8 +793,16 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                           </Form.Item>
                       </Form>
                   </Card>
-                  <div style={{ display: 'flex', alignItems: 'center' }}>至</div>
-                  <Card title="目标数据库" style={{ width: 350 }}>
+                  <div style={{ display: 'grid', placeItems: 'center' }}>
+                      <div style={{ ...badgeStyle, width: 44, height: 44, borderRadius: 14, justifyContent: 'center', padding: 0 }}>
+                          <SwapOutlined />
+                      </div>
+                  </div>
+                  <Card
+                      title="目标数据库"
+                      style={shellCardStyle}
+                      styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
+                  >
                       <Form layout="vertical">
                           <Form.Item label="连接">
                               <Select value={targetConnId} onChange={handleTargetConnChange}>
@@ -589,27 +818,94 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                   </Card>
               </div>
 
-              <Card title="同步选项" style={{ marginTop: 16 }}>
+              <Card
+                  title={isMigrationWorkflow ? '迁移选项' : '同步选项'}
+                  style={{ ...shellCardStyle, marginTop: 18 }}
+                  styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
+              >
+                  <div style={{ ...quietPanelStyle, marginBottom: 14 }}>
+                      <Text style={{ color: darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(15,23,42,0.68)', lineHeight: 1.7 }}>
+                          先明确当前要做的是“已有目标表同步”还是“跨库迁移”，页面会按功能类型自动给出更安全的默认策略。
+                      </Text>
+                  </div>
                   <Form layout="vertical">
-                      <Form.Item label="同步内容">
+                      <Form.Item label="功能类型">
+                          <Select value={workflowType} onChange={setWorkflowType}>
+                              <Option value="sync">数据同步（基于已有目标表做差异同步）</Option>
+                              <Option value="migration">跨库迁移（可自动建表后导入）</Option>
+                          </Select>
+                      </Form.Item>
+                      <Alert
+                          type={isMigrationWorkflow ? 'info' : 'success'}
+                          showIcon
+                          style={{ marginBottom: 12 }}
+                          message={isMigrationWorkflow
+                              ? '当前为“跨库迁移”模式：适合将表迁移到另一数据源，可自动建表并导入数据。'
+                              : '当前为“数据同步”模式：适合目标表已存在时做增量同步或覆盖导入。'}
+                      />
+                      <Form.Item label={isMigrationWorkflow ? '迁移内容' : '同步内容'}>
                           <Select value={syncContent} onChange={setSyncContent}>
                               <Option value="data">仅同步数据</Option>
                               <Option value="schema">仅同步结构</Option>
                               <Option value="both">同步结构 + 数据</Option>
                           </Select>
                       </Form.Item>
-                      <Form.Item label="同步模式">
+                      <Form.Item label={isMigrationWorkflow ? '迁移模式' : '同步模式'}>
                           <Select value={syncMode} onChange={setSyncMode} disabled={syncContent === 'schema'}>
                               <Option value="insert_update">增量同步（对比差异，按插入/更新/删除勾选执行）</Option>
                               <Option value="insert_only">仅插入（不对比目标；无主键表将跳过）</Option>
                               <Option value="full_overwrite">全量覆盖（清空目标表后插入）</Option>
                           </Select>
                       </Form.Item>
+                      <Form.Item label={isMigrationWorkflow ? '目标表处理策略' : '目标表要求'}>
+                          <Select value={targetTableStrategy} onChange={setTargetTableStrategy} disabled={!isMigrationWorkflow}>
+                              <Option value="existing_only">仅使用已有目标表</Option>
+                              <Option value="auto_create_if_missing">目标表不存在时自动建表后导入</Option>
+                              <Option value="smart">智能模式（存在则直接导入，不存在则自动建表）</Option>
+                          </Select>
+                      </Form.Item>
+                      {isRedisMongoKeyspaceMigration && (
+                          <Form.Item
+                              label="Mongo 集合名（可选）"
+                              extra={sourceType === 'redis'
+                                  ? '为空时沿用默认集合名；填写后本次 Redis 键空间会统一写入该 Mongo 集合。'
+                                  : 'MongoDB → Redis 场景下通常直接选择源集合；这里留空即可，未显式选集合时才会回退使用该名称。'}
+                          >
+                              <Input
+                                  value={mongoCollectionName}
+                                  onChange={(e) => setMongoCollectionName(e.target.value)}
+                                  placeholder={defaultMongoCollectionName || '请输入 Mongo 集合名'}
+                                  allowClear
+                                  maxLength={128}
+                              />
+                          </Form.Item>
+                      )}
                       <Form.Item>
                           <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)}>
-                              自动补齐目标表缺失字段（仅 MySQL 目标）
+                              自动补齐目标表缺失字段（当前支持 MySQL 目标及 MySQL → Kingbase）
                           </Checkbox>
                       </Form.Item>
+                      <Form.Item>
+                          <Checkbox checked={createIndexes} onChange={(e) => setCreateIndexes(e.target.checked)} disabled={!isMigrationWorkflow || targetTableStrategy === 'existing_only'}>
+                              自动迁移可兼容的普通索引/唯一索引（仅自动建表模式生效）
+                          </Checkbox>
+                      </Form.Item>
+                      {isMigrationWorkflow && targetTableStrategy !== 'existing_only' && (
+                          <Alert
+                              type="info"
+                              showIcon
+                              message="自动建表模式首期仅支持 MySQL → Kingbase；将迁移字段、主键、普通/唯一/联合索引，并显式跳过全文、空间、前缀、函数类索引。"
+                              style={{ marginBottom: 12 }}
+                          />
+                      )}
+                      {!isMigrationWorkflow && (
+                          <Alert
+                              type="info"
+                              showIcon
+                              message="数据同步模式默认基于已有目标表执行；如需跨数据源建表导入，请切换到“跨库迁移”。"
+                              style={{ marginBottom: 12 }}
+                          />
+                      )}
                       {syncContent !== 'schema' && syncMode === 'full_overwrite' && (
                           <Alert
                               type="warning"
@@ -624,26 +920,42 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 
       {/* STEP 2: TABLES */}
       {currentStep === 1 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text type="secondary">请选择需要同步的表:</Text>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={quietPanelStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <Text type="secondary">请选择需要同步的表：</Text>
                   <Checkbox checked={showSameTables} onChange={(e) => setShowSameTables(e.target.checked)}>
                       显示相同表
                   </Checkbox>
-              </div>
-              <Transfer
+                  </div>
+                  <Transfer
                 dataSource={allTables.map(t => ({ key: t, title: t }))}
                 titles={['源表', '已选表']}
                 targetKeys={selectedTables}
                 onChange={(keys) => setSelectedTables(keys as string[])}
                 render={item => item.title}
-                listStyle={{ width: 350, height: 280, marginTop: 0 }}
-                locale={{ itemUnit: '项', itemsUnit: '项', searchPlaceholder: '搜索表', notFoundContent: '暂无数据' }}
+                listStyle={{ width: 390, height: 320, marginTop: 0, borderRadius: 14, overflow: 'hidden' }}
+                locale={{ itemUnit: '项', itemsUnit: '项', searchPlaceholder: '搜索表…', notFoundContent: '暂无数据' }}
               />
+              </div>
 
               {diffTables.length > 0 && (
-                  <div>
-                      <Divider orientation="left">对比结果</Divider>
+                  <div style={quietPanelStyle}>
+                      <Divider orientation="left" style={{ marginTop: 0 }}>对比结果</Divider>
+                      {analysisWarnings.length > 0 && (
+                          <Alert
+                              type="warning"
+                              showIcon
+                              message="预检发现风险或降级项，请在执行前确认"
+                              description={
+                                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                      {analysisWarnings.slice(0, 8).map((item) => <li key={item}>{item}</li>)}
+                                      {analysisWarnings.length > 8 && <li>还有 {analysisWarnings.length - 8} 项未展开</li>}
+                                  </ul>
+                              }
+                              style={{ marginBottom: 12 }}
+                          />
+                      )}
                       <Table
                           size="small"
                           pagination={false}
@@ -655,13 +967,29 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                               const same = Number(t.same || 0);
                               const msg = String(t.message || '').trim();
                               const can = !!t.canSync;
+                              const warns = Array.isArray(t.warnings) ? t.warnings.length : 0;
+                              const unsupported = Array.isArray(t.unsupportedObjects) ? t.unsupportedObjects.length : 0;
                               if (showSameTables) return true;
                               if (!can) return true;
-                              if (msg) return true;
+                              if (msg || warns > 0 || unsupported > 0) return true;
                               return ins > 0 || upd > 0 || del > 0 || same === 0;
                           })}
                           columns={[
                               { title: '表名', dataIndex: 'table', key: 'table', ellipsis: true },
+                              {
+                                  title: '目标表',
+                                  key: 'targetTableExists',
+                                  width: 90,
+                                  render: (_: any, r: any) => r.targetTableExists ? '已存在' : '不存在'
+                              },
+                              {
+                                  title: '计划',
+                                  dataIndex: 'plannedAction',
+                                  key: 'plannedAction',
+                                  width: 220,
+                                  ellipsis: true,
+                                  render: (v: any) => String(v || '')
+                              },
                               {
                                   title: '插入',
                                   key: 'inserts',
@@ -670,11 +998,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                       const ops = tableOptions[r.table] || { insert: true, update: true, delete: false };
                                       const disabled = !r.canSync || analyzing || Number(r.inserts || 0) === 0;
                                       return (
-                                          <Checkbox
-                                              checked={!!ops.insert}
-                                              disabled={disabled}
-                                              onChange={(e) => updateTableOption(r.table, 'insert', e.target.checked)}
-                                          >
+                                          <Checkbox checked={!!ops.insert} disabled={disabled} onChange={(e) => updateTableOption(r.table, 'insert', e.target.checked)}>
                                               {Number(r.inserts || 0)}
                                           </Checkbox>
                                       );
@@ -688,11 +1012,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                       const ops = tableOptions[r.table] || { insert: true, update: true, delete: false };
                                       const disabled = !r.canSync || analyzing || Number(r.updates || 0) === 0;
                                       return (
-                                          <Checkbox
-                                              checked={!!ops.update}
-                                              disabled={disabled}
-                                              onChange={(e) => updateTableOption(r.table, 'update', e.target.checked)}
-                                          >
+                                          <Checkbox checked={!!ops.update} disabled={disabled} onChange={(e) => updateTableOption(r.table, 'update', e.target.checked)}>
                                               {Number(r.updates || 0)}
                                           </Checkbox>
                                       );
@@ -706,18 +1026,28 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                       const ops = tableOptions[r.table] || { insert: true, update: true, delete: false };
                                       const disabled = !r.canSync || analyzing || Number(r.deletes || 0) === 0;
                                       return (
-                                          <Checkbox
-                                              checked={!!ops.delete}
-                                              disabled={disabled}
-                                              onChange={(e) => updateTableOption(r.table, 'delete', e.target.checked)}
-                                          >
+                                          <Checkbox checked={!!ops.delete} disabled={disabled} onChange={(e) => updateTableOption(r.table, 'delete', e.target.checked)}>
                                               {Number(r.deletes || 0)}
                                           </Checkbox>
                                       );
                                   }
                               },
                               { title: '相同', dataIndex: 'same', key: 'same', width: 70, render: (v: any) => Number(v || 0) },
-                              { title: '消息', dataIndex: 'message', key: 'message', ellipsis: true, render: (v: any) => (v ? String(v) : '') },
+                              {
+                                  title: '风险',
+                                  key: 'warnings',
+                                  width: 220,
+                                  render: (_: any, r: any) => {
+                                      const warns = [...(Array.isArray(r.warnings) ? r.warnings : []), ...(Array.isArray(r.unsupportedObjects) ? r.unsupportedObjects : [])];
+                                      if (warns.length === 0) return '-';
+                                      return (
+                                          <div style={{ color: '#d48806', fontSize: 12, lineHeight: 1.5 }}>
+                                              {warns.slice(0, 2).map((item: string) => <div key={item}>{item}</div>)}
+                                              {warns.length > 2 && <div>还有 {warns.length - 2} 项</div>}
+                                          </div>
+                                      );
+                                  }
+                              },
                               {
                                   title: '预览',
                                   key: 'preview',
@@ -741,7 +1071,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 
       {/* STEP 3: RESULT */}
       {currentStep === 2 && (
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={quietPanelStyle}>
               <Alert
                   message={syncing ? "正在同步" : (syncResult?.success ? "同步完成" : "同步失败")}
                   description={
@@ -753,7 +1084,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                   showIcon
               />
 
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 14 }}>
                   <Progress
                       percent={syncProgress.percent}
                       status={syncing ? "active" : (syncResult?.success ? "success" : "exception")}
@@ -761,7 +1092,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                   />
               </div>
 
-              <Divider orientation="left">日志</Divider>
+              </div>
+              <div style={quietPanelStyle}>
+              <Divider orientation="left" style={{ marginTop: 0 }}>执行日志</Divider>
               <div
                   ref={logBoxRef}
                   onScroll={() => {
@@ -770,14 +1103,25 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
                       autoScrollRef.current = nearBottom;
                   }}
-                  style={{ background: '#f5f5f5', padding: 12, height: 300, overflowY: 'auto', fontFamily: 'monospace' }}
+                  style={{
+                      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(248,250,252,0.92)',
+                      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)',
+                      borderRadius: 14,
+                      padding: 12,
+                      height: 300,
+                      overflowY: 'auto',
+                      fontFamily: 'SFMono-Regular, ui-monospace, Menlo, Consolas, monospace'
+                  }}
               >
                   {syncLogs.map((item, i: number) => <div key={i}>{renderSyncLogItem(item)}</div>)}
+              </div>
               </div>
           </div>
       )}
 
-      <div style={{ marginTop: 24, textAlign: 'right' }}>
+      </div>
+
+      <div style={modalFooterBarStyle}>
           {currentStep === 0 && (
               <Button type="primary" onClick={nextToTables} loading={loading}>下一步</Button>
           )}
@@ -804,14 +1148,16 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
               </>
           )}
       </div>
+      </div>
     </Modal>
     <Drawer
         title={`差异预览：${previewTable}`}
+        styles={{ body: { background: darkMode ? 'rgba(9,13,20,0.98)' : '#f8fafc' } }}
         open={previewOpen}
         onClose={() => { setPreviewOpen(false); setPreviewTable(''); setPreviewData(null); }}
         width={900}
     >
-        {previewLoading && <Alert type="info" showIcon message="正在加载差异预览..." />}
+        {previewLoading && <Alert type="info" showIcon message="正在加载差异预览…" />}
         {!previewLoading && previewData && (
             <div>
                 <Alert
