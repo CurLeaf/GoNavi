@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -205,80 +204,9 @@ func (d *DamengDB) Exec(query string) (int64, error) {
 }
 
 func (d *DamengDB) GetDatabases() ([]string, error) {
-	// 达梦将「用户/模式」作为数据库列表来源，不同权限下可见口径不同。
-	// 这里采用多查询口径聚合，避免仅依赖单一视图导致“少库”。
-	queries := []string{
-		"SELECT USERNAME AS DATABASE_NAME FROM SYS.DBA_USERS ORDER BY USERNAME",
-		"SELECT USERNAME AS DATABASE_NAME FROM DBA_USERS ORDER BY USERNAME",
-		"SELECT USERNAME AS DATABASE_NAME FROM ALL_USERS ORDER BY USERNAME",
-		"SELECT USERNAME AS DATABASE_NAME FROM USER_USERS",
-		"SELECT DISTINCT OWNER AS DATABASE_NAME FROM ALL_TABLES ORDER BY OWNER",
-	}
-
-	seen := make(map[string]struct{})
-	dbs := make([]string, 0, 64)
-	var lastErr error
-	success := false
-
-	for _, q := range queries {
-		data, _, err := d.Query(q)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		success = true
-		for _, row := range data {
-			name := getDamengRowString(row, "DATABASE_NAME", "USERNAME", "OWNER", "SCHEMA_NAME")
-			if name == "" {
-				// 回退到第一列，兼容驱动返回列名差异。
-				for _, v := range row {
-					text := strings.TrimSpace(fmt.Sprintf("%v", v))
-					if text == "" || strings.EqualFold(text, "<nil>") {
-						continue
-					}
-					name = text
-					break
-				}
-			}
-			if name == "" {
-				continue
-			}
-			key := strings.ToUpper(name)
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			dbs = append(dbs, name)
-		}
-	}
-
-	if !success && lastErr != nil {
-		return nil, lastErr
-	}
-
-	sort.Slice(dbs, func(i, j int) bool {
-		return strings.ToUpper(dbs[i]) < strings.ToUpper(dbs[j])
-	})
-	return dbs, nil
-}
-
-func getDamengRowString(row map[string]interface{}, keys ...string) string {
-	if len(row) == 0 {
-		return ""
-	}
-	for _, key := range keys {
-		for k, v := range row {
-			if !strings.EqualFold(strings.TrimSpace(k), strings.TrimSpace(key)) {
-				continue
-			}
-			text := strings.TrimSpace(fmt.Sprintf("%v", v))
-			if text == "" || strings.EqualFold(text, "<nil>") {
-				return ""
-			}
-			return text
-		}
-	}
-	return ""
+	// 达梦在本项目中将 schema/owner 作为“数据库”展示口径。
+	// 先查当前 schema / 当前用户，再聚合可见用户与 owner，避免权限受限时返回空列表。
+	return collectDamengDatabaseNames(d.Query)
 }
 
 func (d *DamengDB) GetTables(dbName string) ([]string, error) {

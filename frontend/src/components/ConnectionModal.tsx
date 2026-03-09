@@ -1259,24 +1259,30 @@ const ConnectionModal: React.FC<{
               ? await RedisConnect(config as any)
               : await TestConnection(config as any);
 
-		  if (res.success) {
-			  setTestResult({ type: 'success', message: res.message });
-			  if (isRedisType) {
-				  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
-			  } else {
-				  // Other databases: fetch database list
-				  const dbRes = await DBGetDatabases(config as any);
-				  if (dbRes.success) {
-					  const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
-					  const dbs = dbRows
-						  .map((row: any) => row?.Database || row?.database)
-						  .filter((name: any) => typeof name === 'string' && name.trim() !== '');
-					  setDbList(dbs);
+			  if (res.success) {
+				  setTestResult({ type: 'success', message: res.message });
+				  if (isRedisType) {
+					  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
 				  } else {
-					  setDbList([]);
+					  // Other databases: fetch database list
+					  const dbRes = await DBGetDatabases(config as any);
+					  if (dbRes.success) {
+						  const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
+						  const dbs = dbRows
+							  .map((row: any) => row?.Database || row?.database)
+							  .filter((name: any) => typeof name === 'string' && name.trim() !== '');
+						  setDbList(dbs);
+						  if (dbs.length === 0) {
+							  message.warning(values.type === 'dameng'
+								  ? '连接成功，但未获取到可见 schema；请检查当前账号权限或默认 schema 配置'
+								  : '连接成功，但未获取到可见数据库列表');
+						  }
+					  } else {
+						  setDbList([]);
+						  message.warning(`连接成功，但获取数据库列表失败：${dbRes.message || '未知错误'}`);
+					  }
 				  }
-			  }
-		  } else {
+			  } else {
               const failMessage = buildTestFailureMessage(
                   res?.message,
                   '连接被拒绝或参数无效，请检查后重试'
