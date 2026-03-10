@@ -50,6 +50,11 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
     return raw;
   }
 
+  // SQL Server 使用 [bracket] 标识符
+  if (dbTypeLower === 'sqlserver' || dbTypeLower === 'mssql') {
+    return `[${raw.replace(/]/g, ']]')}]`;
+  }
+
   // 其他数据库默认加双引号
   return `"${raw.replace(/"/g, '""')}"`;
 };
@@ -160,7 +165,8 @@ export const buildPaginatedSelectSQL = (
       }
       return `SELECT * FROM (SELECT "__gonavi_page__".*, ROWNUM "__gonavi_rn__" FROM (${orderedSql}) "__gonavi_page__" WHERE ROWNUM <= ${upperBound}) WHERE "__gonavi_rn__" > ${safeOffset}`;
     }
-    case 'sqlserver': {
+    case 'sqlserver':
+    case 'mssql': {
       const effectiveOrderBy = orderBy.trim() ? orderBy : ' ORDER BY (SELECT NULL)';
       return `${base}${effectiveOrderBy} OFFSET ${safeOffset} ROWS FETCH NEXT ${safeLimit} ROWS ONLY`;
     }
