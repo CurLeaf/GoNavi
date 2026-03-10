@@ -759,6 +759,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const setEnableColumnOrderMemory = useStore(state => state.setEnableColumnOrderMemory);
   const clearTableColumnOrder = useStore(state => state.clearTableColumnOrder);
   
+  const tableHiddenColumns = useStore(state => state.tableHiddenColumns);
+  const enableHiddenColumnMemory = useStore(state => state.enableHiddenColumnMemory);
+  const setTableHiddenColumns = useStore(state => state.setTableHiddenColumns);
+  const setEnableHiddenColumnMemory = useStore(state => state.setEnableHiddenColumnMemory);
+  const clearTableHiddenColumns = useStore(state => state.clearTableHiddenColumns);
+  
   const isMacLike = useMemo(() => isMacLikePlatform(), []);
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
@@ -767,9 +773,45 @@ const DataGrid: React.FC<DataGridProps> = ({
   const showColumnComment = queryOptions?.showColumnComment !== false;
   const showColumnType = queryOptions?.showColumnType !== false;
 
-  // --- Display Columns Order Management ---
+  // --- Display Columns Order & Visibility Management ---
+  const [allOrderedColumnNames, setAllOrderedColumnNames] = useState<string[]>([]);
   const [displayColumnNames, setDisplayColumnNames] = useState<string[]>([]);
-  
+  const [localHiddenColumns, setLocalHiddenColumns] = useState<string[]>([]);
+  const [columnSearchText, setColumnSearchText] = useState('');
+
+  // Sync hidden columns from store
+  useEffect(() => {
+      if (enableHiddenColumnMemory && connectionId && dbName && tableName) {
+          const storedHidden = tableHiddenColumns[`${connectionId}-${dbName}-${tableName}`];
+          setLocalHiddenColumns(Array.isArray(storedHidden) ? storedHidden : []);
+      } else {
+          setLocalHiddenColumns([]);
+      }
+  }, [tableHiddenColumns, enableHiddenColumnMemory, connectionId, dbName, tableName]);
+
+  const toggleColumnVisibility = useCallback((col: string, visible: boolean) => {
+      setLocalHiddenColumns(prev => {
+          const nextSet = new Set(prev);
+          if (visible) nextSet.delete(col);
+          else nextSet.add(col);
+          const nextArray = Array.from(nextSet);
+          if (enableHiddenColumnMemory && connectionId && dbName && tableName) {
+              setTableHiddenColumns(connectionId, dbName, tableName, nextArray);
+          }
+          return nextArray;
+      });
+  }, [enableHiddenColumnMemory, connectionId, dbName, tableName, setTableHiddenColumns]);
+
+  const toggleAllColumnsVisibility = useCallback((visible: boolean) => {
+      setLocalHiddenColumns(() => {
+          const nextArray = visible ? [] : [...allOrderedColumnNames];
+          if (enableHiddenColumnMemory && connectionId && dbName && tableName) {
+              setTableHiddenColumns(connectionId, dbName, tableName, nextArray);
+          }
+          return nextArray;
+      });
+  }, [allOrderedColumnNames, enableHiddenColumnMemory, connectionId, dbName, tableName, setTableHiddenColumns]);
+
   // Sync display order from incoming prop and store memory
   useEffect(() => {
     let nextOrder = [...columnNames];
@@ -784,8 +826,14 @@ const DataGrid: React.FC<DataGridProps> = ({
         nextOrder = [...validStored, ...missingNew];
       }
     }
-    setDisplayColumnNames(nextOrder);
+    setAllOrderedColumnNames(nextOrder);
   }, [columnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
+
+  // Compute final display columns
+  useEffect(() => {
+      const hiddenSet = new Set(localHiddenColumns);
+      setDisplayColumnNames(allOrderedColumnNames.filter(col => !hiddenSet.has(col)));
+  }, [allOrderedColumnNames, localHiddenColumns]);
 
   // Handle Dragging
   const sensors = useSensors(
@@ -797,14 +845,36 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (active.id !== over?.id && over) {
-      setDisplayColumnNames((prev) => {
-        const oldIndex = prev.indexOf(active.id as string);
-        const newIndex = prev.indexOf(over.id as string);
-        const nextOrder = arrayMove(prev, oldIndex, newIndex);
-        if (enableColumnOrderMemory && connectionId && dbName && tableName) {
-            setTableColumnOrder(connectionId, dbName, tableName, nextOrder);
-        }
-        return nextOrder;
+      setAllOrderedColumnNames((prevAllOrder) => {
+          // Calculate the new order of all columns by applying the movement
+          // We only move the visible columns relative to each other, but the easiest way 
+          // is to map the visible column movement back to the full array.
+          const hiddenSet = new Set(localHiddenColumns);
+          const visibleOrder = prevAllOrder.filter(col => !hiddenSet.has(col));
+          
+          const oldVisibleIndex = visibleOrder.indexOf(active.id as string);
+          const newVisibleIndex = visibleOrder.indexOf(over.id as string);
+          
+          if (oldVisibleIndex === -1 || newVisibleIndex === -1) return prevAllOrder;
+          
+          const nextVisibleOrder = arrayMove(visibleOrder, oldVisibleIndex, newVisibleIndex);
+          
+          // Reconstruct allOrderedColumnNames by inserting hidden columns back to their original relative positions
+          // Or simpler: just keep hidden columns at the end, but that ruins user's layout.
+          // Better approach: build a new array
+          let vIndex = 0;
+          const nextOrder = prevAllOrder.map(col => {
+              if (hiddenSet.has(col)) {
+                  return col; // Hidden columns stay at their absolute index in the master list
+              } else {
+                  return nextVisibleOrder[vIndex++];
+              }
+          });
+
+          if (enableColumnOrderMemory && connectionId && dbName && tableName) {
+              setTableColumnOrder(connectionId, dbName, tableName, nextOrder);
+          }
+          return nextOrder;
       });
     }
   };
@@ -2068,7 +2138,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const formMap: Record<string, any> = {};
       const nullCols = new Set<string>();
 
-      displayColumnNames.forEach((col) => {
+      columnNames.forEach((col) => {
           const baseVal = (baseRow as any)?.[col];
           const displayVal = (displayRow as any)?.[col];
           baseRawMap[col] = baseVal;
@@ -2178,7 +2248,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const keyStr = rowKeyStr(rowKey);
           const normalizedNext: Record<string, any> = {};
           let hasAnyVisibleChange = false;
-          displayColumnNames.forEach((col) => {
+          columnNames.forEach((col) => {
               const currentVal = (currentRow as any)?.[col];
               const editedVal = Object.prototype.hasOwnProperty.call(nextItem, col) ? (nextItem as any)[col] : currentVal;
               if (!isJsonViewValueEqual(currentVal, editedVal)) hasAnyVisibleChange = true;
@@ -2197,7 +2267,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const originalRow = originalMap.get(keyStr);
           if (!originalRow) continue;
           const patch: Record<string, any> = {};
-          displayColumnNames.forEach((col) => {
+          columnNames.forEach((col) => {
               const prevVal = (originalRow as any)?.[col];
               const nextVal = normalizedNext[col];
               if (!isCellValueEqualForDiff(prevVal, nextVal)) patch[col] = nextVal;
@@ -2389,11 +2459,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
       const newRow: any = { [GONAVI_ROW_KEY]: newKey };
-      displayColumnNames.forEach(col => newRow[col] = ''); 
+      columnNames.forEach(col => newRow[col] = ''); 
       pendingScrollToBottomRef.current = true;
       setAddedRows(prev => [...prev, newRow]);
   };
-
   const handleDeleteSelected = () => {
       setDeletedRowKeys(prev => {
           const newDeleted = new Set(prev);
@@ -2898,19 +2967,49 @@ const DataGrid: React.FC<DataGridProps> = ({
   ];
 
   const columnInfoSettingContent = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 168 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200, maxWidth: 300 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666' }}>显示设置</div>
           <Checkbox
               checked={showColumnComment}
               onChange={(e) => setQueryOptions({ showColumnComment: e.target.checked })}
           >
-              下方显示备注
+              表头显示备注
           </Checkbox>
           <Checkbox
               checked={showColumnType}
               onChange={(e) => setQueryOptions({ showColumnType: e.target.checked })}
           >
-              下方显示类型
+              表头显示类型
           </Checkbox>
+          <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
+          
+          <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>列可见性</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                  <a style={{ fontSize: 12 }} onClick={() => toggleAllColumnsVisibility(true)}>全显</a>
+                  <a style={{ fontSize: 12 }} onClick={() => toggleAllColumnsVisibility(false)}>全隐</a>
+              </div>
+          </div>
+          <Input 
+              placeholder="搜索列名..." 
+              size="small" 
+              value={columnSearchText}
+              onChange={e => setColumnSearchText(e.target.value)}
+              allowClear
+          />
+          <div className="custom-scrollbar" style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {allOrderedColumnNames.filter(col => !columnSearchText || col.toLowerCase().includes(columnSearchText.toLowerCase())).map(col => (
+                  <Checkbox
+                      key={col}
+                      checked={!localHiddenColumns.includes(col)}
+                      onChange={(e) => toggleColumnVisibility(col, e.target.checked)}
+                      style={{ marginLeft: 0 }}
+                  >
+                      {col}
+                  </Checkbox>
+              ))}
+          </div>
+
           <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
           <Checkbox
               checked={enableColumnOrderMemory}
@@ -2918,19 +3017,43 @@ const DataGrid: React.FC<DataGridProps> = ({
           >
               记忆自定义列序
           </Checkbox>
-          <Button
-              size="small"
-              danger
-              disabled={!connectionId || !dbName || !tableName || !tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
-              onClick={() => {
-                  if (connectionId && dbName && tableName) {
-                      clearTableColumnOrder(connectionId, dbName, tableName);
-                      message.success('已恢复默认列排序');
-                  }
-              }}
+          <Checkbox
+              checked={enableHiddenColumnMemory}
+              onChange={(e) => setEnableHiddenColumnMemory(e.target.checked)}
           >
-              重置列顺序
-          </Button>
+              记忆隐藏列配置
+          </Checkbox>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <Button
+                  size="small"
+                  danger
+                  style={{ flex: 1 }}
+                  disabled={!connectionId || !dbName || !tableName || !tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
+                  onClick={() => {
+                      if (connectionId && dbName && tableName) {
+                          clearTableColumnOrder(connectionId, dbName, tableName);
+                          message.success('已恢复默认列排序');
+                      }
+                  }}
+              >
+                  重置排序
+              </Button>
+              <Button
+                  size="small"
+                  danger
+                  style={{ flex: 1 }}
+                  disabled={!connectionId || !dbName || !tableName || !tableHiddenColumns[`${connectionId}-${dbName}-${tableName}`]}
+                  onClick={() => {
+                      if (connectionId && dbName && tableName) {
+                          clearTableHiddenColumns(connectionId, dbName, tableName);
+                          setLocalHiddenColumns([]);
+                          message.success('已恢复全列显示');
+                      }
+                  }}
+              >
+                  重置隐藏
+              </Button>
+          </div>
       </div>
   );
 
