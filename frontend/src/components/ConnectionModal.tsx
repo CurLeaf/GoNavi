@@ -1179,7 +1179,8 @@ const ConnectionModal: React.FC<{
 
   const handleOk = async () => {
     try {
-      const values = await form.validateFields();
+      await form.validateFields();
+      const values = form.getFieldsValue(true);
       const unavailableReason = await resolveDriverUnavailableReason(values.type);
       if (unavailableReason) {
           message.warning(unavailableReason);
@@ -1241,7 +1242,8 @@ const ConnectionModal: React.FC<{
       if (testInFlightRef.current) return;
       testInFlightRef.current = true;
       try {
-          const values = await form.validateFields();
+          await form.validateFields();
+          const values = form.getFieldsValue(true);
           const unavailableReason = await resolveDriverUnavailableReason(values.type);
           if (unavailableReason) {
               const failMessage = buildTestFailureMessage(unavailableReason, '驱动未安装启用');
@@ -1311,7 +1313,8 @@ const ConnectionModal: React.FC<{
           return;
       }
       try {
-          const values = await form.validateFields();
+          await form.validateFields();
+          const values = form.getFieldsValue(true);
           setDiscoveringMembers(true);
           const config = await buildConfig(values, false);
           const result = await MongoDiscoverMembers(config as any);
