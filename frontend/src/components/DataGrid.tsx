@@ -4,6 +4,23 @@ import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, S
 import type { SortOrder } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
+import { 
+    DndContext, 
+    DragEndEvent, 
+    PointerSensor, 
+    MouseSensor,
+    TouchSensor,
+    useSensor, 
+    useSensors, 
+    closestCenter 
+} from '@dnd-kit/core';
+import { 
+    SortableContext, 
+    useSortable, 
+    horizontalListSortingStrategy, 
+    arrayMove 
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
@@ -323,7 +340,7 @@ const coerceJsonEditorValueForStorage = (currentValue: any, editedValue: any): a
 };
 
 // --- Resizable Header (Native Implementation) ---
-const ResizableTitle = (props: any) => {
+const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) => {
   const { onResizeStart, width, ...restProps } = props;
 
   const nextStyle = { ...(restProps.style || {}) } as React.CSSProperties;
@@ -334,11 +351,11 @@ const ResizableTitle = (props: any) => {
   // 注意：virtual table 模式下，rc-table 会依赖 header cell 的 width 样式来渲染选择列。
   // 若这里丢失 width，可能导致左上角“全选”checkbox 不显示。
   if (!width || typeof onResizeStart !== 'function') {
-    return <th {...restProps} style={nextStyle} />;
+    return <th ref={ref} {...restProps} style={nextStyle} />;
   }
 
   return (
-    <th {...restProps} style={{ ...nextStyle, position: 'relative' }}>
+    <th ref={ref} {...restProps} style={{ ...nextStyle, position: 'relative' }}>
       {restProps.children}
       <span
         className="react-resizable-handle"
@@ -361,7 +378,103 @@ const ResizableTitle = (props: any) => {
       />
     </th>
   );
-};
+});
+
+// --- Sortable Header Cell ---
+interface SortableHeaderCellProps extends React.HTMLAttributes<HTMLTableCellElement> {
+    id?: string;
+}
+
+// --- Sortable Header Cell ---
+interface SortableHeaderCellProps extends React.HTMLAttributes<HTMLTableCellElement> {
+    id?: string;
+}
+
+// 静态 CSS 移到组件外，强制去除 th 内边距并确保指针穿透
+const sortableHeaderStaticStyles = `
+    .gonavi-sortable-header-cell {
+        padding: 0 !important;
+    }
+    .gonavi-sortable-header-cell[data-cursor-grabbing="true"],
+    .gonavi-sortable-header-cell[data-cursor-grabbing="true"] *,
+    .gonavi-sortable-header-cell.is-dragging,
+    .gonavi-sortable-header-cell.is-dragging * {
+        cursor: grabbing !important;
+    }
+    .sortable-header-cell-drag-handle {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+        min-height: 44px;
+        padding: 0 10px;
+        user-select: none;
+        cursor: inherit;
+    }
+`;
+
+const SortableHeaderCell: React.FC<SortableHeaderCellProps> = React.memo((props) => {
+    const { id, children, style: propStyle, className: propClassName, ...restProps } = props;
+    const [isPressed, setIsPressed] = useState(false);
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: id || '' });
+
+    const style: React.CSSProperties = {
+        ...propStyle,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        ...(isDragging ? { 
+            position: 'relative', 
+            zIndex: 9999, 
+            opacity: 0.6, 
+            backgroundColor: 'rgba(24, 144, 255, 0.15)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+        } : {}),
+        touchAction: 'none',
+        willChange: 'transform',
+        // 核心修复：将指针直接绑定到 th 级别，并由 isPressed 控制
+        cursor: (isDragging || isPressed) ? 'grabbing' : 'pointer',
+    };
+
+    useEffect(() => {
+        const handleGlobalMouseUp = () => setIsPressed(false);
+        window.addEventListener('mouseup', handleGlobalMouseUp);
+        return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+    }, []);
+
+    if (!id || id === 'GONAVI_SELECTION_COLUMN') {
+        return <ResizableTitle {...restProps} style={{ ...propStyle, ...style }}>{children}</ResizableTitle>;
+    }
+
+    return (
+        <ResizableTitle 
+            ref={setNodeRef} 
+            style={style} 
+            className={`${propClassName || ''} ${isDragging ? 'is-dragging' : ''}`}
+            data-cursor-grabbing={isDragging || isPressed}
+            {...restProps} 
+            {...attributes} 
+            {...listeners}
+            onPointerDown={(e: any) => {
+                setIsPressed(true);
+                if (listeners?.onPointerDown) listeners.onPointerDown(e);
+            }}
+        >
+            <style>{sortableHeaderStaticStyles}</style>
+            <div className="sortable-header-cell-drag-handle" title="拖拽以调整列顺序">
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, cursor: 'inherit' }}>
+                    {children}
+                </div>
+            </div>
+        </ResizableTitle>
+    );
+});
 
 // --- Contexts ---
 const EditableContext = React.createContext<any>(null);
@@ -640,6 +753,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const appearance = useStore(state => state.appearance);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const tableColumnOrders = useStore(state => state.tableColumnOrders);
+  const enableColumnOrderMemory = useStore(state => state.enableColumnOrderMemory);
+  const setTableColumnOrder = useStore(state => state.setTableColumnOrder);
+  const setEnableColumnOrderMemory = useStore(state => state.setEnableColumnOrderMemory);
+  const clearTableColumnOrder = useStore(state => state.clearTableColumnOrder);
+  
   const isMacLike = useMemo(() => isMacLikePlatform(), []);
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
@@ -647,6 +766,49 @@ const DataGrid: React.FC<DataGridProps> = ({
   const canModifyData = !readOnly && !!tableName;
   const showColumnComment = queryOptions?.showColumnComment !== false;
   const showColumnType = queryOptions?.showColumnType !== false;
+
+  // --- Display Columns Order Management ---
+  const [displayColumnNames, setDisplayColumnNames] = useState<string[]>([]);
+  
+  // Sync display order from incoming prop and store memory
+  useEffect(() => {
+    let nextOrder = [...columnNames];
+    if (enableColumnOrderMemory && connectionId && dbName && tableName) {
+      const storedOrder = tableColumnOrders[`${connectionId}-${dbName}-${tableName}`];
+      if (Array.isArray(storedOrder) && storedOrder.length > 0) {
+        // Only layout known columns. Filter out missing or new columns.
+        const storedSet = new Set(storedOrder);
+        const incomingSet = new Set(nextOrder);
+        const validStored = storedOrder.filter(col => incomingSet.has(col));
+        const missingNew = nextOrder.filter(col => !storedSet.has(col));
+        nextOrder = [...validStored, ...missingNew];
+      }
+    }
+    setDisplayColumnNames(nextOrder);
+  }, [columnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
+
+  // Handle Dragging
+  const sensors = useSensors(
+      useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+      useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+      useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id && over) {
+      setDisplayColumnNames((prev) => {
+        const oldIndex = prev.indexOf(active.id as string);
+        const newIndex = prev.indexOf(over.id as string);
+        const nextOrder = arrayMove(prev, oldIndex, newIndex);
+        if (enableColumnOrderMemory && connectionId && dbName && tableName) {
+            setTableColumnOrder(connectionId, dbName, tableName, nextOrder);
+        }
+        return nextOrder;
+      });
+    }
+  };
+
   const selectionColumnWidth = 46;
   const currentConnConfig = connections.find(c => c.id === connectionId)?.config;
   const dataSourceCaps = getDataSourceCapabilities(currentConnConfig);
@@ -854,7 +1016,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       try {
           const cleanRows = rows.map(({ [GONAVI_ROW_KEY]: _rowKey, ...rest }) => rest);
           // Pass tableName (or 'export') as default filename
-          const res = await ExportData(cleanRows, columnNames, tableName || 'export', format);
+          const res = await ExportData(cleanRows, displayColumnNames, tableName || 'export', format);
           if (res.success) {
               message.success("导出成功");
           } else if (res.message !== "Cancelled") {
@@ -1142,13 +1304,13 @@ const DataGrid: React.FC<DataGridProps> = ({
               id: nextId,
               enabled: cond?.enabled !== false,
               logic: normalizeFilterLogic(cond?.logic),
-              column: rawColumn || (op === 'CUSTOM' ? '' : String(columnNames[0] || '')),
+              column: rawColumn || (op === 'CUSTOM' ? '' : String(displayColumnNames[0] || '')),
               op,
               value: String(cond?.value ?? ''),
               value2: String(cond?.value2 ?? ''),
           };
       });
-  }, [columnNames, normalizeFilterLogic]);
+  }, [displayColumnNames, normalizeFilterLogic]);
 
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
@@ -1196,9 +1358,9 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const columnIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    columnNames.forEach((name, idx) => map.set(name, idx));
+    displayColumnNames.forEach((name: string, idx: number) => map.set(name, idx));
     return map;
-  }, [columnNames]);
+  }, [displayColumnNames]);
 
   // 直接操作 DOM 更新选中效果，避免 React 重渲染
   const updateCellSelection = useCallback((newSelection: Set<string>) => {
@@ -1377,7 +1539,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const row = currentData[i];
           const rKey = String(row?.[GONAVI_ROW_KEY]);
           for (let j = minColIndex; j <= maxColIndex; j++) {
-            newSelectedCells.add(makeCellKey(rKey, columnNames[j]));
+            newSelectedCells.add(makeCellKey(rKey, displayColumnNames[j]));
           }
         }
 
@@ -1548,7 +1710,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellSelectionPointerRef.current = null;
       isDraggingRef.current = false;
     };
-  }, [cellEditMode, columnNames, columnIndexMap, updateCellSelection]);
+  }, [cellEditMode, displayColumnNames, columnIndexMap, updateCellSelection]);
 
   // 批量填充到选中行
   const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {
@@ -1906,7 +2068,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const formMap: Record<string, any> = {};
       const nullCols = new Set<string>();
 
-      columnNames.forEach((col) => {
+      displayColumnNames.forEach((col) => {
           const baseVal = (baseRow as any)?.[col];
           const displayVal = (displayRow as any)?.[col];
           baseRawMap[col] = baseVal;
@@ -1922,7 +2084,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       rowEditorForm.setFieldsValue(formMap);
       setRowEditorRowKey(keyStr);
       setRowEditorOpen(true);
-  }, [canModifyData, mergedDisplayData, data, addedRows, columnNames, rowEditorForm, rowKeyStr]);
+  }, [canModifyData, mergedDisplayData, data, addedRows, displayColumnNames, rowEditorForm, rowKeyStr]);
 
   const openRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -2016,7 +2178,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const keyStr = rowKeyStr(rowKey);
           const normalizedNext: Record<string, any> = {};
           let hasAnyVisibleChange = false;
-          columnNames.forEach((col) => {
+          displayColumnNames.forEach((col) => {
               const currentVal = (currentRow as any)?.[col];
               const editedVal = Object.prototype.hasOwnProperty.call(nextItem, col) ? (nextItem as any)[col] : currentVal;
               if (!isJsonViewValueEqual(currentVal, editedVal)) hasAnyVisibleChange = true;
@@ -2035,7 +2197,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const originalRow = originalMap.get(keyStr);
           if (!originalRow) continue;
           const patch: Record<string, any> = {};
-          columnNames.forEach((col) => {
+          displayColumnNames.forEach((col) => {
               const prevVal = (originalRow as any)?.[col];
               const nextVal = normalizedNext[col];
               if (!isCellValueEqualForDiff(prevVal, nextVal)) patch[col] = nextVal;
@@ -2062,7 +2224,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       setJsonEditorOpen(false);
       message.success("JSON 修改已应用到当前结果集，可继续“提交事务”");
-  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, columnNames]);
+  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, displayColumnNames]);
 
   const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
       if (!dataIndex) return;
@@ -2089,7 +2251,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const baseRawMap = rowEditorBaseRawRef.current || {};
       const patch: Record<string, any> = {};
-      columnNames.forEach((col) => {
+      displayColumnNames.forEach((col) => {
           const nextVal = values[col];
           const baseVal = baseRawMap[col];
           if (!isCellValueEqualForDiff(baseVal, nextVal)) patch[col] = nextVal;
@@ -2103,14 +2265,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, displayColumnNames, rowKeyStr, closeRowEditor]);
 
 
   const enableVirtual = viewMode === 'table';
   const enableInlineEditableCell = canModifyData;
 
   const columns = useMemo(() => {
-      return columnNames.map(key => ({
+      return displayColumnNames.map(key => ({
           title: renderColumnTitle(key),
           dataIndex: key,
           key: key,
@@ -2130,7 +2292,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               return !isCellValueEqualForRender(record?.[key], prevRecord?.[key]);
           },
           onHeaderCell: (column: any) => ({
+              id: key,
               width: column.width,
+              className: 'gonavi-sortable-header-cell',
               onResizeStart: handleResizeStart(key), // Only need start
               onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
                   if (!onSort) return;
@@ -2154,7 +2318,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [columnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle]);
 
   const mergedColumns = useMemo(() => columns.map(col => {
       if (!col.editable) return col;
@@ -2225,7 +2389,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
       const newRow: any = { [GONAVI_ROW_KEY]: newKey };
-      columnNames.forEach(col => newRow[col] = ''); 
+      displayColumnNames.forEach(col => newRow[col] = ''); 
       pendingScrollToBottomRef.current = true;
       setAddedRows(prev => [...prev, newRow]);
   };
@@ -2284,7 +2448,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!hasRowKey) {
               values = { ...(newRow as any) };
           } else {
-              columnNames.forEach((col) => {
+              displayColumnNames.forEach((col) => {
                   const nextVal = (newRow as any)?.[col];
                   const prevVal = (originalRow as any)?.[col];
                   if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
@@ -2676,7 +2840,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               id: nextFilterId,
               enabled: true,
               logic: 'AND',
-              column: columnNames[0] || '',
+              column: displayColumnNames[0] || '',
               op: '=',
               value: '',
               value2: '',
@@ -2747,6 +2911,26 @@ const DataGrid: React.FC<DataGridProps> = ({
           >
               下方显示类型
           </Checkbox>
+          <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
+          <Checkbox
+              checked={enableColumnOrderMemory}
+              onChange={(e) => setEnableColumnOrderMemory(e.target.checked)}
+          >
+              记忆自定义列序
+          </Checkbox>
+          <Button
+              size="small"
+              danger
+              disabled={!connectionId || !dbName || !tableName || !tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
+              onClick={() => {
+                  if (connectionId && dbName && tableName) {
+                      clearTableColumnOrder(connectionId, dbName, tableName);
+                      message.success('已恢复默认列排序');
+                  }
+              }}
+          >
+              重置列顺序
+          </Button>
       </div>
   );
 
@@ -2776,7 +2960,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const rowPropsFactory = useCallback((record: any) => ({ record } as any), []);
 
-  const totalWidth = columns.reduce((sum, col) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
+  const totalWidth = columns.reduce((sum: number, col: any) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
   const useContextMenuRow = false;
   const tableScrollX = useMemo(() => {
       const baseWidth = Math.max(totalWidth, 1000);
@@ -2796,8 +2980,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           body.row = ContextMenuRow;
       }
       return Object.keys(body).length > 0
-          ? { body, header: { cell: ResizableTitle } }
-          : { header: { cell: ResizableTitle } };
+          ? { body, header: { cell: SortableHeaderCell } }
+          : { header: { cell: SortableHeaderCell } };
   }, [enableInlineEditableCell, useContextMenuRow]);
   const tableOnRow = useMemo(() => (useContextMenuRow ? rowPropsFactory : undefined), [useContextMenuRow, rowPropsFactory]);
 
@@ -3412,7 +3596,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                             style={{ width: 180 }}
                             value={cond.column}
                             onChange={v => updateFilter(cond.id, 'column', v)}
-                            options={columnNames.map(c => ({ value: c, label: c }))}
+                            options={displayColumnNames.map(c => ({ value: c, label: c }))}
                             showSearch
                             optionFilterProp="label"
                             filterOption={(input, option) =>
@@ -3508,7 +3692,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 </div>
                 <Form form={rowEditorForm} layout="vertical">
                     <div className="custom-scrollbar" style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
-                        {columnNames.map((col) => {
+                        {displayColumnNames.map((col: string) => {
                             const sample = rowEditorDisplayRef.current?.[col] ?? '';
                             const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
                             const isJson = looksLikeJsonText(sample);
@@ -3645,25 +3829,29 @@ const DataGrid: React.FC<DataGridProps> = ({
                     <DataContext.Provider value={dataContextValue}>
                         <CellContextMenuContext.Provider value={cellContextMenuValue}>
                                 <EditableContext.Provider value={form}>
-                                    <Table
-                                        components={tableComponents}
-                                        dataSource={mergedDisplayData}
-                                        columns={mergedColumns}
-                                        showSorterTooltip={{ target: 'sorter-icon' }}
-                                        size="small"
-                                        tableLayout="fixed"
-                                        scroll={tableScrollConfig}
-                                        sticky={false}
-                                        virtual={enableVirtual}
-                                            loading={loading}
-                                            rowKey={GONAVI_ROW_KEY}
-                                            pagination={false}
-                                            onChange={handleTableChange}
-                                            bordered
-                                            rowSelection={rowSelectionConfig}
-                                            rowClassName={rowClassName}
-                                            onRow={tableOnRow}
-                                        />
+                                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                                        <SortableContext items={displayColumnNames} strategy={horizontalListSortingStrategy}>
+                                            <Table
+                                                components={tableComponents}
+                                                dataSource={mergedDisplayData}
+                                                columns={mergedColumns}
+                                                showSorterTooltip={{ target: 'sorter-icon' }}
+                                                size="small"
+                                                tableLayout="fixed"
+                                                scroll={tableScrollConfig}
+                                                sticky={false}
+                                                virtual={enableVirtual}
+                                                    loading={loading}
+                                                    rowKey={GONAVI_ROW_KEY}
+                                                    pagination={false}
+                                                    onChange={handleTableChange}
+                                                    bordered
+                                                    rowSelection={rowSelectionConfig}
+                                                    rowClassName={rowClassName}
+                                                    onRow={tableOnRow}
+                                                />
+                                        </SortableContext>
+                                    </DndContext>
                                 </EditableContext.Provider>
                         </CellContextMenuContext.Provider>
                     </DataContext.Provider>
@@ -3734,7 +3922,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     )}
                 </div>
 	                <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '8px 12px' }}>
-                    {currentTextRow ? columnNames.map((col) => (
+                    {currentTextRow ? displayColumnNames.map((col) => (
                         <div key={col} style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 10, padding: '6px 0', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)', alignItems: 'start' }}>
                             <div style={{ fontWeight: 600, color: darkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.88)', wordBreak: 'break-all' }}>
                                 {col} :
