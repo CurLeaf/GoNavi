@@ -1202,11 +1202,11 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   // 直接操作 DOM 更新选中效果，避免 React 重渲染
   const updateCellSelection = useCallback((newSelection: Set<string>) => {
-    const tableBody = containerRef.current?.querySelector('.ant-table-body');
-    if (!tableBody) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    // 只同步可见单元格（兼容 virtual 渲染 + 极大选区）
-    const visibleCells = tableBody.querySelectorAll('td[data-row-key][data-col-name]');
+    // 只同步可见单元格，严格限定 `.ant-table-cell`，避免虚拟列表中内嵌的 EditableCell 被重复获取并打上 selected 样式从而产生白边。
+    const visibleCells = container.querySelectorAll('.ant-table-cell[data-row-key][data-col-name]');
     visibleCells.forEach((cell) => {
       const el = cell as HTMLElement;
       const rowKey = el.getAttribute('data-row-key');
@@ -1334,10 +1334,10 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     const getCellInfo = (target: HTMLElement | null): { rowKey: string; colName: string } | null => {
       if (!target) return null;
-      const td = target.closest('td[data-row-key][data-col-name]') as HTMLElement;
-      if (!td) return null;
-      const rowKey = td.getAttribute('data-row-key');
-      const colName = td.getAttribute('data-col-name');
+      const cell = target.closest('[data-row-key][data-col-name]') as HTMLElement;
+      if (!cell) return null;
+      const rowKey = cell.getAttribute('data-row-key');
+      const colName = cell.getAttribute('data-col-name');
       if (!rowKey || !colName) return null;
       return { rowKey, colName };
     };
@@ -2105,16 +2105,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       closeRowEditor();
   }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
 
-  const estimatedVisibleCellCount = mergedDisplayData.length * Math.max(columnNames.length, 1);
-  const enableLargeResultOptimizedEditing =
-      viewMode === 'table' && (
-          mergedDisplayData.length >= 60 ||
-          estimatedVisibleCellCount >= 1600 ||
-          columnNames.length >= 36 ||
-          (isMacLike && columnNames.length >= 24)
-      );
-  const enableVirtual = enableLargeResultOptimizedEditing;
-  const enableInlineEditableCell = canModifyData && !enableLargeResultOptimizedEditing;
+
+  const enableVirtual = viewMode === 'table';
+  const enableInlineEditableCell = canModifyData;
 
   const columns = useMemo(() => {
       return columnNames.map(key => ({
@@ -2169,27 +2162,28 @@ const DataGrid: React.FC<DataGridProps> = ({
       return {
           ...col,
           onCell: (record: Item) => {
-              if (!enableInlineEditableCell) {
-                  const rowKey = record?.[GONAVI_ROW_KEY];
-                  return {
-                      'data-row-key': rowKey === undefined || rowKey === null ? undefined : String(rowKey),
-                      'data-col-name': dataIndex,
-                      onDoubleClick: () => handleVirtualCellActivate(record, dataIndex, dataIndex),
-                      onContextMenu: (e: React.MouseEvent) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          showCellContextMenu(e, record, dataIndex, dataIndex);
-                      },
-                  };
-              }
-              return {
-                  record,
-                  editable: col.editable,
-                  dataIndex: col.dataIndex,
-                  title: dataIndex,
-                  handleSave: handleCellSave,
-                  focusCell: openCellEditor,
+              const rowKey = record?.[GONAVI_ROW_KEY];
+              const cellProps: any = {
+                  'data-row-key': rowKey === undefined || rowKey === null ? undefined : String(rowKey),
+                  'data-col-name': dataIndex,
               };
+
+              if (!enableInlineEditableCell) {
+                  cellProps.onDoubleClick = () => handleVirtualCellActivate(record, dataIndex, dataIndex);
+                  cellProps.onContextMenu = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      showCellContextMenu(e, record, dataIndex, dataIndex);
+                  };
+              } else {
+                  cellProps.record = record;
+                  cellProps.editable = col.editable;
+                  cellProps.dataIndex = col.dataIndex;
+                  cellProps.title = dataIndex;
+                  cellProps.handleSave = handleCellSave;
+                  cellProps.focusCell = openCellEditor;
+              }
+              return cellProps;
           },
           render: (text: any, record: Item, index: number) => {
               const originalRenderContent = col.render ? (col.render as any)(text, record, index) : text;
@@ -4044,12 +4038,13 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-tbody .ant-table-row.row-added:hover > .ant-table-cell { background-color: ${rowAddedHover} !important; }
                 .${gridId} .ant-table-tbody > tr.row-modified:hover > td,
                 .${gridId} .ant-table-tbody .ant-table-row.row-modified:hover > .ant-table-cell { background-color: ${rowModHover} !important; }
-                .${gridId}.cell-edit-mode .ant-table-tbody > tr > td[data-col-name],
-                .${gridId}.cell-edit-mode .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
-                .${gridId}.cell-edit-mode .ant-table-tbody > tr > td[data-cell-selected="true"],
-                .${gridId}.cell-edit-mode .ant-table-tbody .ant-table-row > .ant-table-cell[data-cell-selected="true"] {
-                    box-shadow: inset 0 0 0 2px ${selectionAccentHex};
-                    background-image: linear-gradient(${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}, ${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`});
+                .${gridId} .ant-table-tbody > tr > td[data-col-name],
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
+                .${gridId} .ant-table-tbody > tr > td[data-cell-selected="true"],
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-cell-selected="true"],
+                .${gridId} [data-cell-selected="true"] {
+                    box-shadow: inset 0 0 0 2px ${selectionAccentHex} !important;
+                    background-image: linear-gradient(${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}, ${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}) !important;
                 }
                 .${gridId} .ant-table-content,
                 .${gridId} .ant-table-body {
