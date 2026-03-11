@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -174,8 +175,31 @@ func (r *RedisClientImpl) toDisplayKey(key string) string {
 	return strings.TrimPrefix(key, prefix)
 }
 
+// sanitizeRedisPassword 对 Redis 密码进行防御性 URL 解码。
+// 当密码中包含 URL 编码序列（如 %40）时，尝试解码还原原始字符。
+// 这可以防止前端 URI 构建中 encodeURIComponent 编码后的密码被误传入。
+func sanitizeRedisPassword(password string) string {
+	if password == "" {
+		return password
+	}
+	// 仅当密码中包含 '%' 且后跟两位十六进制数字时，才尝试 URL 解码
+	if !strings.Contains(password, "%") {
+		return password
+	}
+	decoded, err := url.QueryUnescape(password)
+	if err != nil {
+		// 解码失败，使用原始密码
+		return password
+	}
+	if decoded != password {
+		logger.Warnf("Redis 密码检测到 URL 编码，已自动解码（原长度=%d 解码后长度=%d）", len(password), len(decoded))
+	}
+	return decoded
+}
+
 // Connect establishes a connection to Redis
 func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
+	config.Password = sanitizeRedisPassword(config.Password)
 	r.config = config
 	if r.config.RedisDB < 0 || r.config.RedisDB > 15 {
 		r.config.RedisDB = 0
