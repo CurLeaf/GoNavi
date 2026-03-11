@@ -21,9 +21,10 @@ import (
 )
 
 type KingbaseDB struct {
-	conn        *sql.DB
-	pingTimeout time.Duration
-	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
+	conn              *sql.DB
+	pingTimeout       time.Duration
+	defaultSearchPath string
+	forwarder         *ssh.LocalForwarder // Store SSH tunnel forwarder
 }
 
 func quoteConnValue(v string) string {
@@ -75,6 +76,9 @@ func (k *KingbaseDB) getDSN(config connection.ConnectionConfig) string {
 		quoteConnValue(resolvePostgresSSLMode(config)),
 		getConnectTimeoutSeconds(config),
 	)
+	if strings.TrimSpace(k.defaultSearchPath) != "" {
+		dsn += fmt.Sprintf(" search_path=%s", quoteConnValue(k.defaultSearchPath))
+	}
 
 	return dsn
 }
@@ -120,6 +124,9 @@ func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {
 
 	var failures []string
 	for idx, attempt := range attempts {
+		// 避免跨连接缓存 defaultSearchPath 造成的污染：每次 Connect 都重新探测一次。
+		k.defaultSearchPath = ""
+
 		dsn := k.getDSN(attempt)
 		db, err := sql.Open("kingbase", dsn)
 		if err != nil {
@@ -137,9 +144,164 @@ func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {
 		if idx > 0 {
 			logger.Warnf("人大金仓 SSL 优先连接失败，已回退至明文连接")
 		}
+
+		k.reconnectWithPreferredSearchPathIfNeeded(attempt)
 		return nil
 	}
 	return fmt.Errorf("连接建立后验证失败：%s", strings.Join(failures, "；"))
+}
+
+func (k *KingbaseDB) reconnectWithPreferredSearchPathIfNeeded(config connection.ConnectionConfig) {
+	if k.conn == nil {
+		return
+	}
+
+	timeout := k.pingTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := utils.ContextWithTimeout(timeout)
+	defer cancel()
+
+	var currentSchema string
+	if err := k.conn.QueryRowContext(ctx, "SELECT current_schema()").Scan(&currentSchema); err != nil {
+		logger.Warnf("人大金仓读取当前 schema 失败：%v", err)
+		return
+	}
+
+	if schema := strings.TrimSpace(currentSchema); schema != "" && !strings.EqualFold(schema, "public") {
+		return
+	}
+
+	searchPath, chosenSchema := k.detectPreferredSearchPath(ctx, config)
+	if strings.TrimSpace(searchPath) == "" {
+		return
+	}
+
+	oldConn := k.conn
+	prevSearchPath := k.defaultSearchPath
+	k.defaultSearchPath = searchPath
+
+	dsn := k.getDSN(config)
+	newConn, err := sql.Open("kingbase", dsn)
+	if err != nil {
+		k.defaultSearchPath = prevSearchPath
+		logger.Warnf("人大金仓重连以设置 search_path 失败：%v", err)
+		return
+	}
+	if err := newConn.PingContext(ctx); err != nil {
+		_ = newConn.Close()
+		k.defaultSearchPath = prevSearchPath
+		logger.Warnf("人大金仓重连后验证失败：%v", err)
+		return
+	}
+
+	k.conn = newConn
+	_ = oldConn.Close()
+	logger.Infof("人大金仓已设置默认 schema：%s", chosenSchema)
+}
+
+func (k *KingbaseDB) kingbaseSchemaExists(ctx context.Context, schema string) (bool, error) {
+	if schema = strings.TrimSpace(schema); schema == "" {
+		return false, nil
+	}
+
+	var one int
+	err := k.conn.QueryRowContext(ctx, "SELECT 1 FROM pg_namespace WHERE nspname = $1", schema).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (k *KingbaseDB) detectPreferredSearchPath(ctx context.Context, config connection.ConnectionConfig) (searchPath string, chosenSchema string) {
+	// 1) 优先使用与数据库名/用户名同名的 schema（需要存在）
+	candidates := []string{
+		normalizeKingbaseIdentifier(config.Database),
+		normalizeKingbaseIdentifier(config.User),
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" || strings.EqualFold(candidate, "public") {
+			continue
+		}
+		key := strings.ToLower(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		exists, err := k.kingbaseSchemaExists(ctx, candidate)
+		if err != nil {
+			logger.Warnf("人大金仓检查 schema 是否存在失败：schema=%s err=%v", candidate, err)
+			continue
+		}
+		if !exists {
+			continue
+		}
+
+		return fmt.Sprintf("%s,public", quoteKingbaseIdent(candidate)), candidate
+	}
+
+	// 2) 如果只有一个“用户 schema”含有表，则将其作为默认 schema（更符合 DB GUI 的直觉）
+	schema, err := k.detectSingleUserSchemaWithTables(ctx)
+	if err != nil {
+		logger.Warnf("人大金仓探测默认 schema 失败：%v", err)
+		return "", ""
+	}
+	if schema == "" || strings.EqualFold(schema, "public") {
+		return "", ""
+	}
+	return fmt.Sprintf("%s,public", quoteKingbaseIdent(schema)), schema
+}
+
+func (k *KingbaseDB) detectSingleUserSchemaWithTables(ctx context.Context) (string, error) {
+	if k.conn == nil {
+		return "", nil
+	}
+
+	// 仅在“唯一用户 schema”场景做兜底，避免多 schema 下误选导致对象解析歧义。
+	// 注：information_schema.tables 的视图在 PG/金仓语义稳定且权限要求相对低。
+	query := `
+SELECT table_schema, COUNT(*) AS table_count
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE'
+  AND table_schema NOT IN ('pg_catalog', 'information_schema', 'public')
+  AND table_schema NOT LIKE 'pg_%'
+GROUP BY table_schema
+ORDER BY table_count DESC, table_schema
+LIMIT 2`
+
+	rows, err := k.conn.QueryContext(ctx, query)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	type row struct {
+		schema string
+		count  int64
+	}
+	var results []row
+	for rows.Next() {
+		var r row
+		if scanErr := rows.Scan(&r.schema, &r.count); scanErr != nil {
+			return "", scanErr
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	if len(results) != 1 {
+		return "", nil
+	}
+	return normalizeKingbaseIdentifier(results[0].schema), nil
 }
 
 func (k *KingbaseDB) Close() error {

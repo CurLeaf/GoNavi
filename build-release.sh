@@ -20,6 +20,11 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+MAC_VOLICON_PATH="build/darwin/icon.icns"
+if [ ! -f "$MAC_VOLICON_PATH" ]; then
+    MAC_VOLICON_PATH=""
+fi
+
 echo -e "${GREEN}🚀 开始构建 $APP_NAME $VERSION...${NC}"
 
 # 清理并创建输出目录
@@ -37,15 +42,25 @@ if [ $? -eq 0 ]; then
     # 移动 .app 到 dist
     mv "$APP_SRC" "$DIST_DIR/$APP_DEST_NAME"
     
+    # Ad-hoc 代码签名（无 Apple Developer 账号时防止 Gatekeeper 报已损坏）
+    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (arm64)..."
+    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+
     # 创建 DMG
     if command -v create-dmg &> /dev/null; then
         echo "   📦 正在打包 DMG (arm64)..."
         # 移除已存在的 DMG (以防万一)
         rm -f "$DIST_DIR/$DMG_NAME"
-        
-        create-dmg \
-            --volname "${APP_NAME} ${VERSION}" \
-            --volicon "build/appicon.icns" \
+
+        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
+        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+        if [ -n "$MAC_VOLICON_PATH" ]; then
+            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
+        else
+            echo -e "${YELLOW}   ⚠️  未找到 macOS 卷图标 (build/darwin/icon.icns)，跳过 --volicon。${NC}"
+        fi
+
+        create-dmg "${CREATE_DMG_ARGS[@]}" \
             --window-pos 200 120 \
             --window-size 800 400 \
             --icon-size 100 \
@@ -54,23 +69,47 @@ if [ $? -eq 0 ]; then
             --app-drop-link 600 185 \
             "$DIST_DIR/$DMG_NAME" \
             "$DIST_DIR/$APP_DEST_NAME"
+
+        CREATE_DMG_EXIT_CODE=$?
         
-        # 检查是否生成了 rw.* 的临时文件并重命名 (create-dmg 有时会有此行为)
-        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
-             RW_FILE=$(find "$DIST_DIR" -name "rw.*.dmg" -print -quit)
-             if [ -n "$RW_FILE" ]; then
-                 echo -e "${YELLOW}   ⚠️  检测到临时文件名，正在重命名...${NC}"
-                 mv "$RW_FILE" "$DIST_DIR/$DMG_NAME"
-             fi
+        if [ $CREATE_DMG_EXIT_CODE -ne 0 ]; then
+            echo -e "${RED}   ❌ create-dmg 执行失败 (exit=$CREATE_DMG_EXIT_CODE)，保留 .app 以便排查。${NC}"
+        else
+            # create-dmg 可能会在失败时遗留 rw.*.dmg 中间产物；不要直接当作最终产物使用
+            if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+                RW_FILE=$(find "$DIST_DIR" -maxdepth 1 -name "rw.*.dmg" -print -quit)
+                if [ -n "$RW_FILE" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 create-dmg 中间产物: $(basename "$RW_FILE")，正在转换为可分发 DMG...${NC}"
+                    hdiutil convert "$RW_FILE" -format UDZO -o "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                    rm -f "$RW_FILE"
+                fi
+            fi
+
+            # 防御性：即使生成了目标文件，也要确保不是 UDRW（UDRW 在 Finder 下可能表现为“已损坏/无法打开”）
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                DMG_FORMAT=$(hdiutil imageinfo "$DIST_DIR/$DMG_NAME" 2>/dev/null | awk -F': ' '/^Format:/{print $2; exit}')
+                if [ "$DMG_FORMAT" = "UDRW" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 UDRW（可写原始映像），正在转换为 UDZO...${NC}"
+                    TMP_UDZO="$DIST_DIR/.tmp.$DMG_NAME"
+                    rm -f "$TMP_UDZO"
+                    hdiutil convert "$DIST_DIR/$DMG_NAME" -format UDZO -o "$TMP_UDZO" >/dev/null 2>&1 && mv "$TMP_UDZO" "$DIST_DIR/$DMG_NAME"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+                else
+                    # 删除中间的 .app 文件，保持目录整洁
+                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+                    echo "   ✅ 已生成 $DMG_NAME"
+                fi
+            fi
         fi
 
-        # 删除中间的 .app 文件，保持目录整洁
-        rm -rf "$DIST_DIR/$APP_DEST_NAME"
-        
-        if [ -f "$DIST_DIR/$DMG_NAME" ]; then
-             echo "   ✅ 已生成 $DMG_NAME"
-        else
-             echo -e "${RED}   ❌ DMG 生成失败，请检查 create-dmg 输出。${NC}"
+        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+            echo -e "${RED}   ❌ DMG 生成失败，请检查 create-dmg 输出。${NC}"
         fi
     else
         echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具，跳过 DMG 打包，仅保留 .app。${NC}"
@@ -90,13 +129,23 @@ if [ $? -eq 0 ]; then
     
     mv "$APP_SRC" "$DIST_DIR/$APP_DEST_NAME"
     
+    # Ad-hoc 代码签名
+    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (amd64)..."
+    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+
     if command -v create-dmg &> /dev/null; then
         echo "   📦 正在打包 DMG (amd64)..."
         rm -f "$DIST_DIR/$DMG_NAME"
-        
-        create-dmg \
-            --volname "${APP_NAME} ${VERSION}" \
-            --volicon "build/appicon.icns" \
+
+        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
+        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+        if [ -n "$MAC_VOLICON_PATH" ]; then
+            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
+        else
+            echo -e "${YELLOW}   ⚠️  未找到 macOS 卷图标 (build/darwin/icon.icns)，跳过 --volicon。${NC}"
+        fi
+
+        create-dmg "${CREATE_DMG_ARGS[@]}" \
             --window-pos 200 120 \
             --window-size 800 400 \
             --icon-size 100 \
@@ -106,21 +155,43 @@ if [ $? -eq 0 ]; then
             "$DIST_DIR/$DMG_NAME" \
             "$DIST_DIR/$APP_DEST_NAME"
 
-        # 检查是否生成了 rw.* 的临时文件并重命名
-        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
-             RW_FILE=$(find "$DIST_DIR" -name "rw.*.dmg" -print -quit)
-             if [ -n "$RW_FILE" ]; then
-                 echo -e "${YELLOW}   ⚠️  检测到临时文件名，正在重命名...${NC}"
-                 mv "$RW_FILE" "$DIST_DIR/$DMG_NAME"
-             fi
+        CREATE_DMG_EXIT_CODE=$?
+
+        if [ $CREATE_DMG_EXIT_CODE -ne 0 ]; then
+            echo -e "${RED}   ❌ create-dmg 执行失败 (exit=$CREATE_DMG_EXIT_CODE)，保留 .app 以便排查。${NC}"
+        else
+            if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+                RW_FILE=$(find "$DIST_DIR" -maxdepth 1 -name "rw.*.dmg" -print -quit)
+                if [ -n "$RW_FILE" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 create-dmg 中间产物: $(basename "$RW_FILE")，正在转换为可分发 DMG...${NC}"
+                    hdiutil convert "$RW_FILE" -format UDZO -o "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                    rm -f "$RW_FILE"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                DMG_FORMAT=$(hdiutil imageinfo "$DIST_DIR/$DMG_NAME" 2>/dev/null | awk -F': ' '/^Format:/{print $2; exit}')
+                if [ "$DMG_FORMAT" = "UDRW" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 UDRW（可写原始映像），正在转换为 UDZO...${NC}"
+                    TMP_UDZO="$DIST_DIR/.tmp.$DMG_NAME"
+                    rm -f "$TMP_UDZO"
+                    hdiutil convert "$DIST_DIR/$DMG_NAME" -format UDZO -o "$TMP_UDZO" >/dev/null 2>&1 && mv "$TMP_UDZO" "$DIST_DIR/$DMG_NAME"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+                else
+                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+                    echo "   ✅ 已生成 $DMG_NAME"
+                fi
+            fi
         fi
         
-        rm -rf "$DIST_DIR/$APP_DEST_NAME"
-        
-        if [ -f "$DIST_DIR/$DMG_NAME" ]; then
-             echo "   ✅ 已生成 $DMG_NAME"
-        else
-             echo -e "${RED}   ❌ DMG 生成失败。${NC}"
+        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+            echo -e "${RED}   ❌ DMG 生成失败。${NC}"
         fi
     else
         echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具。${NC}"
