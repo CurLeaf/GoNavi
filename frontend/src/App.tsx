@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Layout, Button, ConfigProvider, theme, Dropdown, MenuProps, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetSize, WindowToggleMaximise } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -218,6 +218,7 @@ function App() {
       const maxApplyAttempts = 6;
       const applyRetryDelayMs = 400;
       const settleDelayMs = 160;
+      const useMaximiseForStartup = isWindowsPlatform();
 
       const checkStartupPreferenceApplied = async (): Promise<boolean> => {
           try {
@@ -253,15 +254,21 @@ function App() {
                       if (await checkStartupPreferenceApplied()) {
                           return;
                       }
-                      // 优先尝试全屏，若当前平台/时机不生效，后续走最大化兜底。
+                      // Windows 使用最大化，避免进入真正全屏后无法通过标题栏交互退出。
+                      // 其他平台保持全屏优先、最大化兜底。
                       try {
-                          await WindowFullscreen();
-                          await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
-                          if (await checkStartupPreferenceApplied()) {
-                              return;
+                          if (useMaximiseForStartup) {
+                              await WindowMaximise();
+                              await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                          } else {
+                              await WindowFullscreen();
+                              await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                              if (await checkStartupPreferenceApplied()) {
+                                  return;
+                              }
+                              await WindowMaximise();
+                              await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
                           }
-                          await WindowMaximise();
-                          await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
                       } catch (e) {
                           console.warn("Wails Window APIs unavailable", e);
                       }
@@ -640,6 +647,8 @@ function App() {
 
   const isMacRuntime = runtimePlatform === 'darwin'
       || (runtimePlatform === '' && /mac/i.test(detectNavigatorPlatform()));
+  const isWindowsRuntime = runtimePlatform === 'windows'
+      || (runtimePlatform === '' && isWindowsPlatform());
 
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
@@ -1075,12 +1084,24 @@ function App() {
       setIsDriverModalOpen(true);
   };
 
+  const handleTitleBarWindowToggle = async () => {
+      try {
+          if (await WindowIsFullscreen()) {
+              await WindowUnfullscreen();
+              return;
+          }
+          await WindowToggleMaximise();
+      } catch (_) {
+          // ignore
+      }
+  };
+
   const handleTitleBarDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest('[data-no-titlebar-toggle="true"]')) {
           return;
       }
-      try { WindowToggleMaximise(); } catch(e) {}
+      void handleTitleBarWindowToggle();
   };
   
   // Sidebar Resizing
@@ -1447,7 +1468,7 @@ function App() {
                     type="text" 
                     icon={<BorderOutlined />} 
                     style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                    onClick={WindowToggleMaximise} 
+                    onClick={() => { void handleTitleBarWindowToggle(); }} 
                   />
                   <Button 
                     type="text" 
@@ -1836,11 +1857,11 @@ function App() {
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 8, fontWeight: 500 }}>启动窗口</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                      <span>启动时全屏</span>
+                                      <span>{isWindowsRuntime ? '启动时全屏（Windows 按最大化处理）' : '启动时全屏'}</span>
                                       <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
                                   </div>
                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                      * 修改后下次启动生效
+                                      {isWindowsRuntime ? '* Windows 下该选项按“启动时最大化”处理，修改后下次启动生效' : '* 修改后下次启动生效'}
                                   </div>
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
