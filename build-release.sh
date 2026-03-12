@@ -20,6 +20,75 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+get_file_size_bytes() {
+    local target="$1"
+    if [ ! -f "$target" ]; then
+        echo 0
+        return
+    fi
+    if stat -f%z "$target" >/dev/null 2>&1; then
+        stat -f%z "$target"
+        return
+    fi
+    if stat -c%s "$target" >/dev/null 2>&1; then
+        stat -c%s "$target"
+        return
+    fi
+    wc -c <"$target" | tr -d '[:space:]'
+}
+
+format_size_mb() {
+    local bytes="${1:-0}"
+    awk -v b="$bytes" 'BEGIN { printf "%.2fMB", b / 1024 / 1024 }'
+}
+
+try_compress_binary_with_upx() {
+    local exe_path="$1"
+    local label="$2"
+    if [ ! -f "$exe_path" ]; then
+        echo -e "${RED}   ❌ 未找到 ${label} 文件：$exe_path${NC}"
+        exit 1
+    fi
+
+    if ! command -v upx >/dev/null 2>&1; then
+        echo -e "${RED}   ❌ 未找到 upx，${label} 必须进行压缩后才能继续打包。${NC}"
+        case "$(uname -s)" in
+            Darwin)
+                echo "      安装命令: brew install upx"
+                ;;
+            Linux)
+                echo "      安装命令: sudo apt-get install -y upx-ucl  (或对应发行版包管理器)"
+                ;;
+        esac
+        exit 1
+    fi
+
+    local before_bytes after_bytes
+    before_bytes=$(get_file_size_bytes "$exe_path")
+    echo "   🗜️  正在使用 UPX 压缩 ${label}..."
+    if upx --best --lzma --force "$exe_path" >/dev/null 2>&1; then
+        if ! upx -t "$exe_path" >/dev/null 2>&1; then
+            echo -e "${RED}   ❌ UPX 校验失败：${label}${NC}"
+            exit 1
+        fi
+        after_bytes=$(get_file_size_bytes "$exe_path")
+        if [ "$after_bytes" -lt "$before_bytes" ]; then
+            local saved_bytes=$((before_bytes - after_bytes))
+            echo "   ✅ UPX 压缩完成: $(format_size_mb "$before_bytes") -> $(format_size_mb "$after_bytes")，减少 $(format_size_mb "$saved_bytes")"
+        else
+            echo "   ℹ️  UPX 压缩完成: $(format_size_mb "$before_bytes") -> $(format_size_mb "$after_bytes")"
+        fi
+    else
+        echo -e "${RED}   ❌ UPX 压缩失败：${label}${NC}"
+        exit 1
+    fi
+}
+
+MAC_VOLICON_PATH="build/darwin/icon.icns"
+if [ ! -f "$MAC_VOLICON_PATH" ]; then
+    MAC_VOLICON_PATH=""
+fi
+
 echo -e "${GREEN}🚀 开始构建 $APP_NAME $VERSION...${NC}"
 
 # 清理并创建输出目录
@@ -36,47 +105,101 @@ if [ $? -eq 0 ]; then
     
     # 移动 .app 到 dist
     mv "$APP_SRC" "$DIST_DIR/$APP_DEST_NAME"
+
+    APP_BIN_PATH=$(find "$DIST_DIR/$APP_DEST_NAME/Contents/MacOS" -maxdepth 1 -type f -print -quit)
+    if [ -n "$APP_BIN_PATH" ] && [ -f "$APP_BIN_PATH" ]; then
+        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS arm64 应用主程序"
+    else
+        echo -e "${RED}   ❌ 未找到 macOS arm64 主程序文件，无法执行 UPX 压缩。${NC}"
+        exit 1
+    fi
     
-    # 创建 DMG
-    if command -v create-dmg &> /dev/null; then
-        echo "   📦 正在打包 DMG (arm64)..."
-        # 移除已存在的 DMG (以防万一)
-        rm -f "$DIST_DIR/$DMG_NAME"
-        
-        create-dmg \
-            --volname "${APP_NAME} ${VERSION}" \
-            --volicon "build/appicon.icns" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --icon "$APP_DEST_NAME" 200 190 \
-            --hide-extension "$APP_DEST_NAME" \
-            --app-drop-link 600 185 \
-            "$DIST_DIR/$DMG_NAME" \
-            "$DIST_DIR/$APP_DEST_NAME"
-        
-        # 检查是否生成了 rw.* 的临时文件并重命名 (create-dmg 有时会有此行为)
-        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
-             RW_FILE=$(find "$DIST_DIR" -name "rw.*.dmg" -print -quit)
-             if [ -n "$RW_FILE" ]; then
-                 echo -e "${YELLOW}   ⚠️  检测到临时文件名，正在重命名...${NC}"
-                 mv "$RW_FILE" "$DIST_DIR/$DMG_NAME"
-             fi
+	    # Ad-hoc 代码签名（无 Apple Developer 账号时防止 Gatekeeper 报已损坏）
+	    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (arm64)..."
+	    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+
+	    # 创建 DMG
+	    if command -v create-dmg &> /dev/null; then
+	        echo "   📦 正在打包 DMG (arm64)..."
+	        # 移除已存在的 DMG (以防万一)
+	        rm -f "$DIST_DIR/$DMG_NAME"
+	        # create-dmg 的 source 需要是“包含 .app 的目录”，不能直接传 .app 路径。
+	        STAGE_DIR=$(mktemp -d "$DIST_DIR/.dmg-stage-${APP_NAME}-${VERSION}-arm64.XXXXXX")
+	        if [ -z "$STAGE_DIR" ] || [ ! -d "$STAGE_DIR" ]; then
+	            echo -e "${RED}   ❌ 创建 DMG 临时目录失败，跳过 DMG 打包。${NC}"
+	        else
+	            if command -v ditto &> /dev/null; then
+	                ditto "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
+	            else
+	                cp -R "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
+	            fi
+
+	        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
+	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+	        if [ -n "$MAC_VOLICON_PATH" ]; then
+	            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
+        else
+            echo -e "${YELLOW}   ⚠️  未找到 macOS 卷图标 (build/darwin/icon.icns)，跳过 --volicon。${NC}"
         fi
 
-        # 删除中间的 .app 文件，保持目录整洁
-        rm -rf "$DIST_DIR/$APP_DEST_NAME"
-        
-        if [ -f "$DIST_DIR/$DMG_NAME" ]; then
-             echo "   ✅ 已生成 $DMG_NAME"
-        else
-             echo -e "${RED}   ❌ DMG 生成失败，请检查 create-dmg 输出。${NC}"
+	        create-dmg "${CREATE_DMG_ARGS[@]}" \
+	            --window-pos 200 120 \
+	            --window-size 800 400 \
+	            --icon-size 100 \
+	            --icon "$APP_DEST_NAME" 200 190 \
+	            --hide-extension "$APP_DEST_NAME" \
+	            --app-drop-link 600 185 \
+	            "$DIST_DIR/$DMG_NAME" \
+	            "$STAGE_DIR"
+
+	        CREATE_DMG_EXIT_CODE=$?
+	        rm -rf "$STAGE_DIR"
+	        
+	        if [ $CREATE_DMG_EXIT_CODE -ne 0 ]; then
+	            echo -e "${RED}   ❌ create-dmg 执行失败 (exit=$CREATE_DMG_EXIT_CODE)，保留 .app 以便排查。${NC}"
+	        else
+            # create-dmg 可能会在失败时遗留 rw.*.dmg 中间产物；不要直接当作最终产物使用
+            if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+                RW_FILE=$(find "$DIST_DIR" -maxdepth 1 -name "rw.*.dmg" -print -quit)
+                if [ -n "$RW_FILE" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 create-dmg 中间产物: $(basename "$RW_FILE")，正在转换为可分发 DMG...${NC}"
+                    hdiutil convert "$RW_FILE" -format UDZO -o "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                    rm -f "$RW_FILE"
+                fi
+            fi
+
+            # 防御性：即使生成了目标文件，也要确保不是 UDRW（UDRW 在 Finder 下可能表现为“已损坏/无法打开”）
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                DMG_FORMAT=$(hdiutil imageinfo "$DIST_DIR/$DMG_NAME" 2>/dev/null | awk -F': ' '/^Format:/{print $2; exit}')
+                if [ "$DMG_FORMAT" = "UDRW" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 UDRW（可写原始映像），正在转换为 UDZO...${NC}"
+                    TMP_UDZO="$DIST_DIR/.tmp.$DMG_NAME"
+                    rm -f "$TMP_UDZO"
+                    hdiutil convert "$DIST_DIR/$DMG_NAME" -format UDZO -o "$TMP_UDZO" >/dev/null 2>&1 && mv "$TMP_UDZO" "$DIST_DIR/$DMG_NAME"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+                else
+                    # 删除中间的 .app 文件，保持目录整洁
+                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+                    echo "   ✅ 已生成 $DMG_NAME"
+                fi
+            fi
         fi
-    else
-        echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具，跳过 DMG 打包，仅保留 .app。${NC}"
-        echo "      安装命令: brew install create-dmg"
-    fi
-else
+
+	        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+	            echo -e "${RED}   ❌ DMG 生成失败，请检查 create-dmg 输出。${NC}"
+	        fi
+	        fi
+	    else
+	        echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具，跳过 DMG 打包，仅保留 .app。${NC}"
+	        echo "      安装命令: brew install create-dmg"
+	    fi
+	else
     echo -e "${RED}   ❌ macOS arm64 构建失败。${NC}"
 fi
 
@@ -89,44 +212,96 @@ if [ $? -eq 0 ]; then
     DMG_NAME="${APP_NAME}-${VERSION}-mac-amd64.dmg"
     
     mv "$APP_SRC" "$DIST_DIR/$APP_DEST_NAME"
-    
-    if command -v create-dmg &> /dev/null; then
-        echo "   📦 正在打包 DMG (amd64)..."
-        rm -f "$DIST_DIR/$DMG_NAME"
-        
-        create-dmg \
-            --volname "${APP_NAME} ${VERSION}" \
-            --volicon "build/appicon.icns" \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 100 \
-            --icon "$APP_DEST_NAME" 200 190 \
-            --hide-extension "$APP_DEST_NAME" \
-            --app-drop-link 600 185 \
-            "$DIST_DIR/$DMG_NAME" \
-            "$DIST_DIR/$APP_DEST_NAME"
 
-        # 检查是否生成了 rw.* 的临时文件并重命名
-        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
-             RW_FILE=$(find "$DIST_DIR" -name "rw.*.dmg" -print -quit)
-             if [ -n "$RW_FILE" ]; then
-                 echo -e "${YELLOW}   ⚠️  检测到临时文件名，正在重命名...${NC}"
-                 mv "$RW_FILE" "$DIST_DIR/$DMG_NAME"
-             fi
-        fi
-        
-        rm -rf "$DIST_DIR/$APP_DEST_NAME"
-        
-        if [ -f "$DIST_DIR/$DMG_NAME" ]; then
-             echo "   ✅ 已生成 $DMG_NAME"
-        else
-             echo -e "${RED}   ❌ DMG 生成失败。${NC}"
-        fi
+    APP_BIN_PATH=$(find "$DIST_DIR/$APP_DEST_NAME/Contents/MacOS" -maxdepth 1 -type f -print -quit)
+    if [ -n "$APP_BIN_PATH" ] && [ -f "$APP_BIN_PATH" ]; then
+        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS amd64 应用主程序"
     else
-        echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具。${NC}"
+        echo -e "${RED}   ❌ 未找到 macOS amd64 主程序文件，无法执行 UPX 压缩。${NC}"
+        exit 1
     fi
-else
-    echo -e "${RED}   ❌ macOS amd64 构建失败。${NC}"
+    
+	    # Ad-hoc 代码签名
+	    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (amd64)..."
+	    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+
+	    if command -v create-dmg &> /dev/null; then
+	        echo "   📦 正在打包 DMG (amd64)..."
+	        rm -f "$DIST_DIR/$DMG_NAME"
+	        # create-dmg 的 source 需要是“包含 .app 的目录”，不能直接传 .app 路径。
+	        STAGE_DIR=$(mktemp -d "$DIST_DIR/.dmg-stage-${APP_NAME}-${VERSION}-amd64.XXXXXX")
+	        if [ -z "$STAGE_DIR" ] || [ ! -d "$STAGE_DIR" ]; then
+	            echo -e "${RED}   ❌ 创建 DMG 临时目录失败，跳过 DMG 打包。${NC}"
+	        else
+	            if command -v ditto &> /dev/null; then
+	                ditto "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
+	            else
+	                cp -R "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
+	            fi
+
+	        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
+	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+	        if [ -n "$MAC_VOLICON_PATH" ]; then
+	            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
+        else
+            echo -e "${YELLOW}   ⚠️  未找到 macOS 卷图标 (build/darwin/icon.icns)，跳过 --volicon。${NC}"
+        fi
+
+	        create-dmg "${CREATE_DMG_ARGS[@]}" \
+	            --window-pos 200 120 \
+	            --window-size 800 400 \
+	            --icon-size 100 \
+	            --icon "$APP_DEST_NAME" 200 190 \
+	            --hide-extension "$APP_DEST_NAME" \
+	            --app-drop-link 600 185 \
+	            "$DIST_DIR/$DMG_NAME" \
+	            "$STAGE_DIR"
+
+	        CREATE_DMG_EXIT_CODE=$?
+	        rm -rf "$STAGE_DIR"
+
+	        if [ $CREATE_DMG_EXIT_CODE -ne 0 ]; then
+	            echo -e "${RED}   ❌ create-dmg 执行失败 (exit=$CREATE_DMG_EXIT_CODE)，保留 .app 以便排查。${NC}"
+	        else
+            if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+                RW_FILE=$(find "$DIST_DIR" -maxdepth 1 -name "rw.*.dmg" -print -quit)
+                if [ -n "$RW_FILE" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 create-dmg 中间产物: $(basename "$RW_FILE")，正在转换为可分发 DMG...${NC}"
+                    hdiutil convert "$RW_FILE" -format UDZO -o "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                    rm -f "$RW_FILE"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                DMG_FORMAT=$(hdiutil imageinfo "$DIST_DIR/$DMG_NAME" 2>/dev/null | awk -F': ' '/^Format:/{print $2; exit}')
+                if [ "$DMG_FORMAT" = "UDRW" ]; then
+                    echo -e "${YELLOW}   ⚠️  检测到 UDRW（可写原始映像），正在转换为 UDZO...${NC}"
+                    TMP_UDZO="$DIST_DIR/.tmp.$DMG_NAME"
+                    rm -f "$TMP_UDZO"
+                    hdiutil convert "$DIST_DIR/$DMG_NAME" -format UDZO -o "$TMP_UDZO" >/dev/null 2>&1 && mv "$TMP_UDZO" "$DIST_DIR/$DMG_NAME"
+                fi
+            fi
+
+            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+                else
+                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+                    echo "   ✅ 已生成 $DMG_NAME"
+                fi
+            fi
+        fi
+        
+	        if [ ! -f "$DIST_DIR/$DMG_NAME" ]; then
+	            echo -e "${RED}   ❌ DMG 生成失败。${NC}"
+	        fi
+	        fi
+	    else
+	        echo -e "${YELLOW}   ⚠️  未找到 create-dmg 工具。${NC}"
+	    fi
+	else
+	    echo -e "${RED}   ❌ macOS amd64 构建失败。${NC}"
 fi
 
 # --- Windows AMD64 构建 ---
@@ -134,7 +309,9 @@ echo -e "${GREEN}🪟 正在构建 Windows (amd64)...${NC}"
 if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
     wails build -platform windows/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$DIST_DIR/${APP_NAME}-${VERSION}-windows-amd64.exe"
+        TARGET_EXE="$DIST_DIR/${APP_NAME}-${VERSION}-windows-amd64.exe"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$TARGET_EXE"
+        try_compress_binary_with_upx "$TARGET_EXE" "Windows amd64 可执行文件"
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-amd64.exe"
     else
         echo -e "${RED}   ❌ Windows amd64 构建失败。${NC}"
@@ -148,7 +325,9 @@ echo -e "${GREEN}🪟 正在构建 Windows (arm64)...${NC}"
 if command -v aarch64-w64-mingw32-gcc &> /dev/null; then
     wails build -platform windows/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$DIST_DIR/${APP_NAME}-${VERSION}-windows-arm64.exe"
+        TARGET_EXE="$DIST_DIR/${APP_NAME}-${VERSION}-windows-arm64.exe"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$TARGET_EXE"
+        try_compress_binary_with_upx "$TARGET_EXE" "Windows arm64 可执行文件"
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-arm64.exe"
     else
         echo -e "${RED}   ❌ Windows arm64 构建失败。${NC}"
@@ -168,8 +347,10 @@ if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "x86_64" ]; then
     # 本机 Linux amd64，直接构建
     wails build -platform linux/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
-        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$TARGET_LINUX_BIN"
+        chmod +x "$TARGET_LINUX_BIN"
+        try_compress_binary_with_upx "$TARGET_LINUX_BIN" "Linux amd64 可执行文件"
         # 打包为 tar.gz
         cd "$DIST_DIR"
         tar -czvf "${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-${VERSION}-linux-amd64"
@@ -186,8 +367,10 @@ elif command -v x86_64-linux-gnu-gcc &> /dev/null; then
     export CGO_ENABLED=1
     wails build -platform linux/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
-        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$TARGET_LINUX_BIN"
+        chmod +x "$TARGET_LINUX_BIN"
+        try_compress_binary_with_upx "$TARGET_LINUX_BIN" "Linux amd64 可执行文件"
         cd "$DIST_DIR"
         tar -czvf "${APP_NAME}-${VERSION}-linux-amd64.tar.gz" "${APP_NAME}-${VERSION}-linux-amd64"
         rm "${APP_NAME}-${VERSION}-linux-amd64"
@@ -208,8 +391,10 @@ if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "aarch64" ]; then
     # 本机 Linux arm64，直接构建
     wails build -platform linux/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
-        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$TARGET_LINUX_BIN"
+        chmod +x "$TARGET_LINUX_BIN"
+        try_compress_binary_with_upx "$TARGET_LINUX_BIN" "Linux arm64 可执行文件"
         cd "$DIST_DIR"
         tar -czvf "${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-${VERSION}-linux-arm64"
         rm "${APP_NAME}-${VERSION}-linux-arm64"
@@ -225,8 +410,10 @@ elif command -v aarch64-linux-gnu-gcc &> /dev/null; then
     export CGO_ENABLED=1
     wails build -platform linux/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
-        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
-        chmod +x "$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
+        mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}" "$TARGET_LINUX_BIN"
+        chmod +x "$TARGET_LINUX_BIN"
+        try_compress_binary_with_upx "$TARGET_LINUX_BIN" "Linux arm64 可执行文件"
         cd "$DIST_DIR"
         tar -czvf "${APP_NAME}-${VERSION}-linux-arm64.tar.gz" "${APP_NAME}-${VERSION}-linux-arm64"
         rm "${APP_NAME}-${VERSION}-linux-arm64"

@@ -416,6 +416,10 @@ interface AppState {
   sqlLogs: SqlLog[];
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, 'name' | 'frequency'>;
+  tableColumnOrders: Record<string, string[]>;
+  enableColumnOrderMemory: boolean;
+  tableHiddenColumns: Record<string, string[]>;
+  enableHiddenColumnMemory: boolean;
 
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
@@ -458,6 +462,13 @@ interface AppState {
 
   recordTableAccess: (connectionId: string, dbName: string, tableName: string) => void;
   setTableSortPreference: (connectionId: string, dbName: string, sortBy: 'name' | 'frequency') => void;
+  setTableColumnOrder: (connectionId: string, dbName: string, tableName: string, order: string[]) => void;
+  setEnableColumnOrderMemory: (enabled: boolean) => void;
+  clearTableColumnOrder: (connectionId: string, dbName: string, tableName: string) => void;
+  
+  setTableHiddenColumns: (connectionId: string, dbName: string, tableName: string, hiddenColumns: string[]) => void;
+  setEnableHiddenColumnMemory: (enabled: boolean) => void;
+  clearTableHiddenColumns: (connectionId: string, dbName: string, tableName: string) => void;
 }
 
 const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
@@ -517,6 +528,28 @@ const sanitizeTableSortPreference = (value: unknown): Record<string, 'name' | 'f
   const result: Record<string, 'name' | 'frequency'> = {};
   Object.entries(raw).forEach(([key, preference]) => {
     result[key] = preference === 'frequency' ? 'frequency' : 'name';
+  });
+  return result;
+};
+
+const sanitizeTableColumnOrders = (value: unknown): Record<string, string[]> => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const result: Record<string, string[]> = {};
+  Object.entries(raw).forEach(([key, orderArray]) => {
+    if (Array.isArray(orderArray)) {
+      result[key] = orderArray.map(col => String(col));
+    }
+  });
+  return result;
+};
+
+const sanitizeTableHiddenColumns = (value: unknown): Record<string, string[]> => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const result: Record<string, string[]> = {};
+  Object.entries(raw).forEach(([key, hiddenArray]) => {
+    if (Array.isArray(hiddenArray)) {
+      result[key] = hiddenArray.map(col => String(col));
+    }
   });
   return result;
 };
@@ -598,6 +631,10 @@ export const useStore = create<AppState>()(
       sqlLogs: [],
       tableAccessCount: {},
       tableSortPreference: {},
+      tableColumnOrders: {},
+      enableColumnOrderMemory: true,
+      tableHiddenColumns: {},
+      enableHiddenColumnMemory: true,
 
       addConnection: (conn) => set((state) => ({ connections: [...state.connections, conn] })),
       updateConnection: (conn) => set((state) => ({
@@ -800,6 +837,44 @@ export const useStore = create<AppState>()(
           }
         };
       }),
+
+      setTableColumnOrder: (connectionId, dbName, tableName, order) => set((state) => {
+        const key = `${connectionId}-${dbName}-${tableName}`;
+        return {
+          tableColumnOrders: {
+            ...state.tableColumnOrders,
+            [key]: order
+          }
+        };
+      }),
+
+      clearTableColumnOrder: (connectionId, dbName, tableName) => set((state) => {
+        const key = `${connectionId}-${dbName}-${tableName}`;
+        const newOrders = { ...state.tableColumnOrders };
+        delete newOrders[key];
+        return { tableColumnOrders: newOrders };
+      }),
+
+      setEnableColumnOrderMemory: (enabled) => set({ enableColumnOrderMemory: !!enabled }),
+
+      setTableHiddenColumns: (connectionId, dbName, tableName, hiddenColumns) => set((state) => {
+        const key = `${connectionId}-${dbName}-${tableName}`;
+        return {
+          tableHiddenColumns: {
+            ...state.tableHiddenColumns,
+            [key]: hiddenColumns
+          }
+        };
+      }),
+
+      clearTableHiddenColumns: (connectionId, dbName, tableName) => set((state) => {
+        const key = `${connectionId}-${dbName}-${tableName}`;
+        const newHidden = { ...state.tableHiddenColumns };
+        delete newHidden[key];
+        return { tableHiddenColumns: newHidden };
+      }),
+
+      setEnableHiddenColumnMemory: (enabled) => set({ enableHiddenColumnMemory: !!enabled }),
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
@@ -825,6 +900,13 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(state.shortcutOptions);
         nextState.tableAccessCount = sanitizeTableAccessCount(state.tableAccessCount);
         nextState.tableSortPreference = sanitizeTableSortPreference(state.tableSortPreference);
+        // 新增的列排序记忆状态不需要做版本特殊兼容，直接做基本的类型保护
+        const safeOrders = sanitizeTableColumnOrders(state.tableColumnOrders);
+        nextState.tableColumnOrders = safeOrders;
+        nextState.enableColumnOrderMemory = state.enableColumnOrderMemory !== false; 
+        const safeHidden = sanitizeTableHiddenColumns(state.tableHiddenColumns);
+        nextState.tableHiddenColumns = safeHidden;
+        nextState.enableHiddenColumnMemory = state.enableHiddenColumnMemory !== false; 
         return nextState as AppState;
       },
       merge: (persistedState, currentState) => {
@@ -841,11 +923,16 @@ export const useStore = create<AppState>()(
           fontSize: sanitizeFontSize(state.fontSize),
           startupFullscreen: sanitizeStartupFullscreen(state.startupFullscreen),
           globalProxy: sanitizeGlobalProxy(state.globalProxy),
+          tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
+          tableColumnOrders: sanitizeTableColumnOrders(state.tableColumnOrders),
+          enableColumnOrderMemory: state.enableColumnOrderMemory !== false,
+          tableHiddenColumns: sanitizeTableHiddenColumns(state.tableHiddenColumns),
+          enableHiddenColumnMemory: state.enableHiddenColumnMemory !== false,
+
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
-          tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
         };
       },
       partialize: (state) => ({
@@ -862,7 +949,11 @@ export const useStore = create<AppState>()(
         queryOptions: state.queryOptions,
         shortcutOptions: state.shortcutOptions,
         tableAccessCount: state.tableAccessCount,
-        tableSortPreference: state.tableSortPreference
+        tableSortPreference: state.tableSortPreference,
+        tableColumnOrders: state.tableColumnOrders,
+        enableColumnOrderMemory: state.enableColumnOrderMemory,
+        tableHiddenColumns: state.tableHiddenColumns,
+        enableHiddenColumnMemory: state.enableHiddenColumnMemory
       }), // Don't persist logs
     }
   )

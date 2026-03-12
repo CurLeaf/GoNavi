@@ -93,27 +93,39 @@ function App() {
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
   useEffect(() => {
-    void SetWindowTranslucency(resolvedAppearance.opacity, resolvedAppearance.blur).catch(() => undefined);
+    try {
+        void SetWindowTranslucency(resolvedAppearance.opacity, resolvedAppearance.blur).catch(() => undefined);
+    } catch(e) { /* ignore */ }
   }, [resolvedAppearance.blur, resolvedAppearance.opacity]);
 
   useEffect(() => {
       let cancelled = false;
-      Environment()
-          .then((env) => {
-              if (cancelled) return;
-              const platform = String(env?.platform || '').toLowerCase();
-              setRuntimePlatform(platform);
-              setIsLinuxRuntime(platform === 'linux');
-          })
-          .catch(() => {
-              if (cancelled) return;
-              const platform = detectNavigatorPlatform();
-              const normalized = /linux/i.test(platform)
-                  ? 'linux'
-                  : (/mac/i.test(platform) ? 'darwin' : (/win/i.test(platform) ? 'windows' : ''));
-              setRuntimePlatform(normalized);
-              setIsLinuxRuntime(normalized === 'linux');
-          });
+      try {
+          Environment()
+              .then((env) => {
+                  if (cancelled) return;
+                  const platform = String(env?.platform || '').toLowerCase();
+                  setRuntimePlatform(platform);
+                  setIsLinuxRuntime(platform === 'linux');
+              })
+              .catch(() => {
+                  if (cancelled) return;
+                  const platform = detectNavigatorPlatform();
+                  const normalized = /linux/i.test(platform)
+                      ? 'linux'
+                      : (/mac/i.test(platform) ? 'darwin' : (/win/i.test(platform) ? 'windows' : ''));
+                  setRuntimePlatform(normalized);
+                  setIsLinuxRuntime(normalized === 'linux');
+              });
+      } catch(e) {
+          if (cancelled) return;
+          const platform = detectNavigatorPlatform();
+          const normalized = /linux/i.test(platform)
+              ? 'linux'
+              : (/mac/i.test(platform) ? 'darwin' : (/win/i.test(platform) ? 'windows' : ''));
+          setRuntimePlatform(normalized);
+          setIsLinuxRuntime(normalized === 'linux');
+      }
       return () => {
           cancelled = true;
       };
@@ -156,32 +168,36 @@ function App() {
 
       const enabledForBackend = globalProxy.enabled && !invalidWhenEnabled;
       let cancelled = false;
-      ConfigureGlobalProxy(enabledForBackend, {
-          type: globalProxy.type,
-          host,
-          port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
-          user: String(globalProxy.user || '').trim(),
-          password: globalProxy.password || '',
-      })
-          .then((res) => {
-              if (cancelled || res?.success) {
-                  return;
-              }
-              void message.error({
-                  content: '全局代理配置失败: ' + (res?.message || '未知错误'),
-                  key: 'global-proxy-sync-error',
-              });
+      try {
+          ConfigureGlobalProxy(enabledForBackend, {
+              type: globalProxy.type,
+              host,
+              port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
+              user: String(globalProxy.user || '').trim(),
+              password: globalProxy.password || '',
           })
-          .catch((err) => {
-              if (cancelled) {
-                  return;
-              }
-              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
-              void message.error({
-                  content: '全局代理配置失败: ' + errMsg,
-                  key: 'global-proxy-sync-error',
+              .then((res) => {
+                  if (cancelled || res?.success) {
+                      return;
+                  }
+                  void message.error({
+                      content: '全局代理配置失败: ' + (res?.message || '未知错误'),
+                      key: 'global-proxy-sync-error',
+                  });
+              })
+              .catch((err) => {
+                  if (cancelled) {
+                      return;
+                  }
+                  const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+                  void message.error({
+                      content: '全局代理配置失败: ' + errMsg,
+                      key: 'global-proxy-sync-error',
+                  });
               });
-          });
+      } catch (e) {
+          console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
+      }
 
       return () => {
           cancelled = true;
@@ -238,13 +254,18 @@ function App() {
                           return;
                       }
                       // 优先尝试全屏，若当前平台/时机不生效，后续走最大化兜底。
-                      await WindowFullscreen();
-                      await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
-                      if (await checkStartupPreferenceApplied()) {
-                          return;
+                      try {
+                          await WindowFullscreen();
+                          await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                          if (await checkStartupPreferenceApplied()) {
+                              return;
+                          }
+                          await WindowMaximise();
+                          await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                      } catch (e) {
+                          console.warn("Wails Window APIs unavailable", e);
                       }
-                      await WindowMaximise();
-                      await new Promise((resolve) => window.setTimeout(resolve, settleDelayMs));
+                      
                       if (await checkStartupPreferenceApplied()) {
                           return;
                       }
@@ -315,11 +336,15 @@ function App() {
               }
 
               const nudgedWidth = width > 480 ? width - 1 : width + 1;
-              WindowSetSize(nudgedWidth, height);
-              await wait(28);
-              WindowSetSize(width, height);
+              try {
+                  WindowSetSize(nudgedWidth, height);
+                  await wait(28);
+                  WindowSetSize(width, height);
+              } catch(e) {}
               window.dispatchEvent(new Event('resize'));
               lastFixAt = Date.now();
+          } catch(e) {
+              console.warn("Wails Window APIs unavailable in fixWindowScaleIfNeeded", e);
           } finally {
               inFlight = false;
           }
@@ -649,7 +674,12 @@ function App() {
           total: info.assetSize || 0,
           message: ''
       });
-      const res = await (window as any).go.app.App.DownloadUpdate();
+      let res: any = null;
+      try {
+          res = await (window as any).go.app.App.DownloadUpdate();
+      } catch (e) {
+          console.warn("Wails API: DownloadUpdate unavailable", e);
+      }
       updateDownloadInFlightRef.current = false;
       if (res?.success) {
           const resultData = (res?.data || {}) as UpdateDownloadResultData;
@@ -1050,7 +1080,7 @@ function App() {
       if (target?.closest('[data-no-titlebar-toggle="true"]')) {
           return;
       }
-      WindowToggleMaximise();
+      try { WindowToggleMaximise(); } catch(e) {}
   };
   
   // Sidebar Resizing
@@ -1158,7 +1188,9 @@ function App() {
   }, [checkForUpdates]);
 
   useEffect(() => {
-      const offDownloadProgress = EventsOn('update:download-progress', (event: UpdateDownloadProgressEvent) => {
+      let offDownloadProgress: any = null;
+      try {
+          offDownloadProgress = EventsOn('update:download-progress', (event: UpdateDownloadProgressEvent) => {
           if (!event) return;
           const status = event.status || 'downloading';
           const nextStatus: 'idle' | 'start' | 'downloading' | 'done' | 'error' =
@@ -1181,8 +1213,11 @@ function App() {
               message: String(event.message || '')
           }));
       });
+      } catch (e) {
+          console.warn("Wails API: EventsOn unavailable", e);
+      }
       return () => {
-          offDownloadProgress();
+          if (offDownloadProgress) offDownloadProgress();
       };
   }, []);
 

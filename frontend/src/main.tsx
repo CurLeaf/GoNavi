@@ -9,6 +9,36 @@ import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 loader.config({ monaco })
 
+if (typeof window !== 'undefined' && !(window as any).go) {
+    (window as any).go = {
+        app: {
+            App: {
+                CheckUpdate: async () => ({ success: false }),
+                DownloadUpdate: async () => ({ success: false }),
+                GetSavedConnections: async () => [],
+                SaveConnection: async () => null,
+                DeleteConnection: async () => null,
+                OpenConnection: async () => null,
+                CloseConnection: async () => null,
+                GetDatabases: async () => [],
+                GetTables: async () => [],
+                GetTableData: async () => ({ columns: [], rows: [], total: 0 }),
+                GetTableColumns: async () => [],
+                ExecuteQuery: async () => ({ columns: [], rows: [], time: 0 }),
+                GetSavedQueries: async () => [],
+                SaveQuery: async () => null,
+                DeleteQuery: async () => null,
+                GetAppInfo: async () => ({}),
+                CheckForUpdates: async () => ({ success: false }),
+                OpenDownloadedUpdateDirectory: async () => ({ success: false }),
+                InstallUpdateAndRestart: async () => ({ success: false }),
+                ImportConfigFile: async () => ({ success: false }),
+                ExportData: async () => ({ success: false }),
+            }
+        }
+    };
+}
+
 // 全局注册透明主题，避免每个 Editor 组件 beforeMount 中重复定义
 monaco.editor.defineTheme('transparent-dark', {
   base: 'vs-dark', inherit: true, rules: [],

@@ -568,6 +568,7 @@ const ConnectionModal: React.FC<{
           return {
               host: primary?.host || 'localhost',
               port: primary?.port || 6379,
+              user: parsed.username || '',
               password: parsed.password || '',
               useSSL: isRediss,
               sslMode: isRediss ? (skipVerify ? 'skip-verify' : 'required') : 'disable',
@@ -823,8 +824,15 @@ const ConnectionModal: React.FC<{
           if (hosts.length > 1 || values.redisTopology === 'cluster') {
               params.set('topology', 'cluster');
           }
+          const redisUser = String(values.user || '').trim();
           const redisPassword = String(values.password || '');
-          const redisAuth = redisPassword ? `:${encodeURIComponent(redisPassword)}@` : '';
+          let redisAuth = '';
+          if (redisUser || redisPassword) {
+              const encodedPassword = redisPassword ? encodeURIComponent(redisPassword) : '';
+              redisAuth = redisUser
+                  ? `${encodeURIComponent(redisUser)}${redisPassword ? `:${encodedPassword}` : ''}@`
+                  : `:${encodedPassword}@`;
+          }
           const redisDB = Number.isFinite(Number(values.redisDB))
               ? Math.max(0, Math.min(15, Math.trunc(Number(values.redisDB))))
               : 0;
@@ -1041,6 +1049,12 @@ const ConnectionModal: React.FC<{
 
   useEffect(() => {
       if (open) {
+          setLoading(false);
+          testInFlightRef.current = false;
+          if (testTimerRef.current !== null) {
+              window.clearTimeout(testTimerRef.current);
+              testTimerRef.current = null;
+          }
           setTestResult(null); // Reset test result
           setTestErrorLogOpen(false);
           setDbList([]);
@@ -1232,6 +1246,22 @@ const ConnectionModal: React.FC<{
       }, 0);
   };
 
+  const withClientTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> => {
+      let timer: number | null = null;
+      try {
+          return await Promise.race([
+              promise,
+              new Promise<T>((_, reject) => {
+                  timer = window.setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+              }),
+          ]);
+      } finally {
+          if (timer !== null) {
+              window.clearTimeout(timer);
+          }
+      }
+  };
+
   const buildTestFailureMessage = (reason: unknown, fallback: string) => {
       const text = String(reason ?? '').trim();
       const normalized = text && text !== 'undefined' && text !== 'null' ? text : fallback;
@@ -1254,12 +1284,21 @@ const ConnectionModal: React.FC<{
           setLoading(true);
           setTestResult(null);
           const config = await buildConfig(values, false);
+          const timeoutSecondsRaw = Number(values.timeout);
+          const timeoutSeconds = Number.isFinite(timeoutSecondsRaw) && timeoutSecondsRaw > 0
+              ? Math.min(timeoutSecondsRaw, MAX_TIMEOUT_SECONDS)
+              : 30;
+          const rpcTimeoutMs = (timeoutSeconds + 5) * 1000;
 
           // Use different API for Redis
           const isRedisType = values.type === 'redis';
-          const res = isRedisType
-              ? await RedisConnect(config as any)
-              : await TestConnection(config as any);
+          const res = await withClientTimeout(
+              isRedisType
+                  ? RedisConnect(config as any)
+                  : TestConnection(config as any),
+              rpcTimeoutMs,
+              `连接测试超时（>${timeoutSeconds} 秒），请检查网络/代理/SSH配置后重试`
+          );
 
 			  if (res.success) {
 				  setTestResult({ type: 'success', message: res.message });
@@ -1267,7 +1306,11 @@ const ConnectionModal: React.FC<{
 					  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
 				  } else {
 					  // Other databases: fetch database list
-					  const dbRes = await DBGetDatabases(config as any);
+					  const dbRes = await withClientTimeout(
+						  DBGetDatabases(config as any),
+						  rpcTimeoutMs,
+						  `连接成功但拉取数据库列表超时（>${timeoutSeconds} 秒）`
+					  );
 					  if (dbRes.success) {
 						  const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
 						  const dbs = dbRows
@@ -1368,6 +1411,16 @@ const ConnectionModal: React.FC<{
       const defaultPort = getDefaultPortByType(type);
       const isFileDbType = isFileDatabaseType(type);
       const sslCapableType = supportsSSLForType(type);
+
+      // Redis 默认不展示用户名字段；若 URI 可解析则以 URI 为准覆盖 user，
+      // 同时清理历史默认值 root，避免 go-redis 发送 ACL AUTH(user, pass) 导致 WRONGPASS。
+      if (type === 'redis') {
+          if (parsedUriValues && Object.prototype.hasOwnProperty.call(parsedUriValues, 'user')) {
+              mergedValues.user = String((parsedUriValues as any).user || '');
+          } else if (String(mergedValues.user || '').trim() === 'root') {
+              mergedValues.user = '';
+          }
+      }
       const sslModeRaw = String(mergedValues.sslMode || 'preferred').trim().toLowerCase();
       const sslMode: 'preferred' | 'required' | 'skip-verify' | 'disable' = sslModeRaw === 'required'
           ? 'required'
@@ -1554,12 +1607,13 @@ const ConnectionModal: React.FC<{
       };
   };
 
-  const handleTypeSelect = async (type: string) => {
-      const unavailableReason = await resolveDriverUnavailableReason(type);
-      if (unavailableReason) {
-          const normalized = normalizeDriverType(type);
-          const driverName = driverStatusMap[normalized]?.name || type;
-          setTypeSelectWarning({ driverName, reason: unavailableReason });
+  const handleTypeSelect = (type: string) => {
+      const normalized = normalizeDriverType(type);
+      const snapshot = driverStatusMap[normalized];
+      if (snapshot && !snapshot.connectable) {
+          const driverName = snapshot.name || type;
+          const reason = snapshot.message || `${driverName} 驱动未安装启用，请先在驱动管理中安装`;
+          setTypeSelectWarning({ driverName, reason });
           return;
       }
       setTypeSelectWarning(null);
@@ -1618,7 +1672,11 @@ const ConnectionModal: React.FC<{
               redisDB: 0,
           });
       } else if (type !== 'custom') {
-          const defaultUser = type === 'clickhouse' ? 'default' : 'root';
+          const defaultUser = type === 'clickhouse'
+              ? 'default'
+              : type === 'redis'
+                  ? ''
+                  : 'root';
           const sslCapableType = supportsSSLForType(type);
           setUseSSL(false);
           setUseHttpTunnel(false);
@@ -1657,6 +1715,10 @@ const ConnectionModal: React.FC<{
 
       setMongoMembers([]);
       setStep(2);
+
+      if (!driverStatusLoaded || !snapshot) {
+          void refreshDriverStatus();
+      }
   };
 
   const isFileDb = isFileDatabaseType(dbType);
@@ -1829,7 +1891,6 @@ const ConnectionModal: React.FC<{
                           >
                               <Input
                                   placeholder={isFileDb ? (dbType === 'duckdb' ? '/path/to/db.duckdb' : '/path/to/db.sqlite') : 'localhost'}
-                                  onDoubleClick={requestTest}
                               />
                           </Form.Item>
                           {isFileDb ? (

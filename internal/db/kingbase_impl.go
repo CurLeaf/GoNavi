@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -136,9 +137,86 @@ func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {
 		if idx > 0 {
 			logger.Warnf("人大金仓 SSL 优先连接失败，已回退至明文连接")
 		}
+
+		// 获取 schema 列表以重构带有 search_path 的连接池
+		searchPathStr := k.getSearchPathStr()
+		if searchPathStr != "" {
+			// 将 search_path 参数拼入 DSN
+			finalDSN := dsn + " search_path=" + quoteConnValue(searchPathStr)
+			if finalDB, err := sql.Open("kingbase", finalDSN); err == nil {
+				k.pingTimeout = getConnectTimeout(attempt)
+				finalDB.SetConnMaxLifetime(5 * time.Minute)
+
+				// 临时将 k.conn 指向 finalDB 来做 ping 测试
+				oldConn := k.conn
+				k.conn = finalDB
+				if err := k.Ping(); err == nil {
+					// 成功使用带 search_path 的连接池
+					_ = oldConn.Close()
+					logger.Infof("人大金仓已配置连接级 search_path：%s", searchPathStr)
+				} else {
+					_ = finalDB.Close()
+					k.conn = oldConn
+				}
+			}
+		}
+		if searchPathStr != "" {
+			timeout := k.pingTimeout
+			if timeout <= 0 {
+				timeout = 5 * time.Second
+			}
+			ctx, cancel := utils.ContextWithTimeout(timeout)
+			defer cancel()
+			if _, err := k.conn.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", searchPathStr)); err != nil {
+				logger.Warnf("人大金仓显式设置 search_path 失败：%v", err)
+			} else {
+				logger.Infof("人大金仓已设置默认 search_path：%s", searchPathStr)
+			}
+		}
+
 		return nil
 	}
 	return fmt.Errorf("连接建立后验证失败：%s", strings.Join(failures, "；"))
+}
+
+// getSearchPathStr 查询当前数据库中所有用户 schema，配置 DSN 的 search_path。
+// KingBase 默认 search_path 为 "$user", public，对于自定义 schema 下的表不可见。
+func (k *KingbaseDB) getSearchPathStr() string {
+	if k.conn == nil {
+		return ""
+	}
+
+	query := `SELECT nspname FROM pg_namespace
+		WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND nspname NOT LIKE 'pg_%'
+		ORDER BY nspname`
+
+	rows, err := k.conn.Query(query)
+	if err != nil {
+		logger.Warnf("人大金仓查询用户 schema 失败，跳过 search_path 设置：%v", err)
+		return ""
+	}
+	defer rows.Close()
+
+	var schemas []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			// 使用 SQL 标准的双引号包裹标识符
+			escaped := strings.ReplaceAll(name, `"`, `""`)
+			schemas = append(schemas, `"`+escaped+`"`)
+		}
+	}
+
+	if len(schemas) == 0 {
+		return ""
+	}
+
+	return strings.Join(schemas, ", ")
 }
 
 func (k *KingbaseDB) Close() error {
@@ -775,64 +853,63 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 }
 
 func normalizeKingbaseIdentifier(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return ""
+	return normalizeKingbaseIdentCommon(raw)
+}
+
+// kingbaseIdentNeedsQuote 判断标识符是否需要双引号包裹。
+// 与前端 sql.ts 中 needsQuote 逻辑保持一致。
+func kingbaseIdentNeedsQuote(ident string) bool {
+	if ident == "" {
+		return false
 	}
-
-	// 兼容 JSON/字符串转义后传入的标识符：\"schema\" -> "schema"
-	value = strings.ReplaceAll(value, `\"`, `"`)
-	value = strings.TrimSpace(value)
-
-	// 兼容异常多重包裹引号（例如 ""schema""、""""schema""""）。
-	// strings.Trim 会移除两端连续引号，迭代后可收敛到纯标识符。
-	for i := 0; i < 4; i++ {
-		next := strings.TrimSpace(strings.Trim(value, `"`))
-		if next == value {
-			break
+	// 不是合法裸标识符格式（必须以字母或下划线开头，仅含字母、数字、下划线）
+	if matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, ident); !matched {
+		return true
+	}
+	// 包含大写字母时需要引号保护（KingbaseES/PostgreSQL 默认将未加引号的标识符折叠为小写）
+	for _, r := range ident {
+		if r >= 'A' && r <= 'Z' {
+			return true
 		}
-		value = next
 	}
+	// 是 SQL 保留字
+	return isKingbaseReservedWord(ident)
+}
 
-	// 兼容其他方言可能残留的引用形式
-	if len(value) >= 2 && strings.HasPrefix(value, "`") && strings.HasSuffix(value, "`") {
-		value = strings.TrimSpace(strings.Trim(value, "`"))
+// isKingbaseReservedWord 检查是否为常见 SQL 保留字（简化版，与前端保持一致）。
+func isKingbaseReservedWord(ident string) bool {
+	switch strings.ToLower(ident) {
+	case "select", "from", "where", "table", "index", "user", "order", "group", "by",
+		"limit", "offset", "and", "or", "not", "null", "true", "false", "key",
+		"primary", "foreign", "references", "default", "constraint",
+		"create", "drop", "alter", "insert", "update", "delete", "set", "values", "into",
+		"join", "left", "right", "inner", "outer", "on", "as", "is", "in", "like",
+		"between", "case", "when", "then", "else", "end", "having", "distinct",
+		"all", "any", "exists", "union", "except", "intersect",
+		"column", "check", "unique", "with", "grant", "revoke", "trigger",
+		"begin", "commit", "rollback", "schema", "database", "view", "function",
+		"procedure", "sequence", "type", "domain", "role", "session", "current",
+		"authorization", "cross", "full", "natural", "some", "cast", "fetch",
+		"for", "to", "do", "if", "return", "returns", "declare", "cursor", "server", "owner":
+		return true
 	}
-	if len(value) >= 2 && strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
-		value = strings.TrimSpace(value[1 : len(value)-1])
-	}
-
-	return value
+	return false
 }
 
 func quoteKingbaseIdent(name string) string {
 	n := normalizeKingbaseIdentifier(name)
-	n = strings.ReplaceAll(n, `"`, `""`)
 	if n == "" {
 		return "\"\""
 	}
+	if !kingbaseIdentNeedsQuote(n) {
+		return n
+	}
+	n = strings.ReplaceAll(n, `"`, `""`)
 	return `"` + n + `"`
 }
 
 func splitKingbaseQualifiedTable(tableName string) (schema string, table string) {
-	raw := strings.TrimSpace(tableName)
-	if raw == "" {
-		return "", ""
-	}
-
-	if parts := strings.SplitN(raw, ".", 2); len(parts) == 2 {
-		schema = normalizeKingbaseIdentifier(parts[0])
-		table = normalizeKingbaseIdentifier(parts[1])
-		if table == "" {
-			return "", normalizeKingbaseIdentifier(raw)
-		}
-		if schema == "" {
-			return "", table
-		}
-		return schema, table
-	}
-
-	return "", normalizeKingbaseIdentifier(raw)
+	return splitKingbaseQualifiedNameCommon(tableName)
 }
 
 func (k *KingbaseDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
