@@ -1012,6 +1012,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   // 批量编辑模式状态
   const [cellEditMode, setCellEditMode] = useState(false);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
+  const [copiedCellPatch, setCopiedCellPatch] = useState<{ sourceRowKey: string; values: Record<string, any> } | null>(null);
   const [batchEditModalOpen, setBatchEditModalOpen] = useState(false);
   const [batchEditValue, setBatchEditValue] = useState('');
   const [batchEditSetNull, setBatchEditSetNull] = useState(false);
@@ -1407,6 +1408,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
+      setCopiedCellPatch(null);
       setRowEditorOpen(false);
       setRowEditorRowKey('');
       rowEditorBaseRawRef.current = {};
@@ -1774,6 +1776,163 @@ const DataGrid: React.FC<DataGridProps> = ({
       isDraggingRef.current = false;
     };
   }, [cellEditMode, displayColumnNames, columnIndexMap, updateCellSelection]);
+
+  const handleCopySelectedColumnsFromRow = useCallback(() => {
+    const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+    if (activeSelection.size === 0) {
+      void message.info('请先在同一行选中要复制的单元格');
+      return;
+    }
+
+    const parsed = Array.from(activeSelection)
+      .map((cellKey) => splitCellKey(cellKey))
+      .filter((item): item is { rowKey: string; colName: string } => !!item);
+    if (parsed.length === 0) {
+      void message.info('未识别到可复制的单元格');
+      return;
+    }
+
+    const sourceRowKeySet = new Set(parsed.map((item) => item.rowKey));
+    if (sourceRowKeySet.size !== 1) {
+      void message.info('复制列值时请只选择同一行的单元格');
+      return;
+    }
+
+    const sourceRowKey = parsed[0].rowKey;
+    const selectedColumnNames = Array.from(new Set(parsed.map((item) => item.colName)));
+    if (selectedColumnNames.length === 0) {
+      void message.info('未识别到可复制的列');
+      return;
+    }
+
+    const sourceBaseRow = displayDataRef.current.find((row) => {
+      const key = row?.[GONAVI_ROW_KEY];
+      return key !== undefined && key !== null && rowKeyStr(key) === sourceRowKey;
+    });
+    const sourceAddedRow = addedRows.find((row) => {
+      const key = row?.[GONAVI_ROW_KEY];
+      return key !== undefined && key !== null && rowKeyStr(key) === sourceRowKey;
+    });
+    const sourceModified = modifiedRows[sourceRowKey];
+
+    const values: Record<string, any> = {};
+    selectedColumnNames.forEach((colName) => {
+      if (sourceAddedRow) {
+        values[colName] = sourceAddedRow[colName];
+        return;
+      }
+
+      if (sourceModified && Object.prototype.hasOwnProperty.call(sourceModified as any, colName)) {
+        values[colName] = (sourceModified as any)[colName];
+        return;
+      }
+
+      values[colName] = sourceBaseRow?.[colName];
+    });
+
+    setCopiedCellPatch({ sourceRowKey, values });
+    void message.success(`已复制 ${selectedColumnNames.length} 列，可粘贴到目标行`);
+  }, [selectedCells, rowKeyStr, addedRows, modifiedRows]);
+
+  const handlePasteCopiedColumnsToSelectedRows = useCallback((fallbackRowKey?: React.Key) => {
+    if (!copiedCellPatch || Object.keys(copiedCellPatch.values).length === 0) {
+      void message.info('请先复制列值');
+      return;
+    }
+
+    const targetKeySet = new Set<string>();
+    const selectedKeys = selectedRowKeysRef.current;
+    if (selectedKeys.length > 0) {
+      selectedKeys.forEach((key) => targetKeySet.add(rowKeyStr(key)));
+    } else if (fallbackRowKey !== undefined && fallbackRowKey !== null) {
+      targetKeySet.add(rowKeyStr(fallbackRowKey));
+    } else {
+      void message.info('请先选择目标行');
+      return;
+    }
+
+    targetKeySet.delete(copiedCellPatch.sourceRowKey);
+    if (targetKeySet.size === 0) {
+      void message.info('目标行不能仅为源行，请选择其他行');
+      return;
+    }
+
+    const addedRowMap = new Map<string, any>();
+    addedRows.forEach((row) => {
+      const key = row?.[GONAVI_ROW_KEY];
+      if (key === undefined || key === null) return;
+      addedRowMap.set(rowKeyStr(key), row);
+    });
+
+    const baseRowMap = new Map<string, any>();
+    displayDataRef.current.forEach((row) => {
+      const key = row?.[GONAVI_ROW_KEY];
+      if (key === undefined || key === null) return;
+      baseRowMap.set(rowKeyStr(key), row);
+    });
+
+    const patchesByRow = new Map<string, Record<string, any>>();
+    let updatedCellCount = 0;
+
+    targetKeySet.forEach((targetRowKey) => {
+      const patch: Record<string, any> = {};
+      const existing = modifiedRows[targetRowKey];
+      const addedRow = addedRowMap.get(targetRowKey);
+      const baseRow = baseRowMap.get(targetRowKey);
+
+      Object.entries(copiedCellPatch.values).forEach(([colName, nextValue]) => {
+        let currentValue: any;
+
+        if (addedRow) {
+          currentValue = addedRow[colName];
+        } else if (existing && Object.prototype.hasOwnProperty.call(existing as any, GONAVI_ROW_KEY)) {
+          currentValue = (existing as any)[colName];
+        } else if (existing && Object.prototype.hasOwnProperty.call(existing as any, colName)) {
+          currentValue = (existing as any)[colName];
+        } else {
+          currentValue = baseRow?.[colName];
+        }
+
+        if (isCellValueEqualForDiff(currentValue, nextValue)) return;
+        patch[colName] = nextValue;
+        updatedCellCount++;
+      });
+
+      if (Object.keys(patch).length > 0) {
+        patchesByRow.set(targetRowKey, patch);
+      }
+    });
+
+    if (patchesByRow.size === 0 || updatedCellCount === 0) {
+      void message.info('目标行无需更新');
+      return;
+    }
+
+    setAddedRows(prev => prev.map((row) => {
+      const key = row?.[GONAVI_ROW_KEY];
+      if (key === undefined || key === null) return row;
+      const patch = patchesByRow.get(rowKeyStr(key));
+      if (!patch) return row;
+      return { ...row, ...patch };
+    }));
+
+    setModifiedRows(prev => {
+      let next: Record<string, any> | null = null;
+
+      patchesByRow.forEach((patch, keyStr) => {
+        if (addedRowMap.has(keyStr)) return;
+        const existing = prev[keyStr];
+        const merged = existing ? { ...(existing as any), ...patch } : patch;
+        if (!next) next = { ...prev };
+        next[keyStr] = merged;
+      });
+
+      return next || prev;
+    });
+
+    void message.success(`已粘贴到 ${patchesByRow.size} 行，共 ${updatedCellCount} 个单元格`);
+    setCellContextMenu(prev => ({ ...prev, visible: false }));
+  }, [copiedCellPatch, addedRows, modifiedRows, rowKeyStr]);
 
   // 批量填充到选中行
   const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {
@@ -3576,15 +3735,35 @@ const DataGrid: React.FC<DataGridProps> = ({
                        {cellEditMode && selectedCells.size > 0 && (
                            <>
                                <Button
-                                   type="primary"
-                                   onClick={() => {
-                                       setBatchEditValue('');
-                                       setBatchEditSetNull(false);
+                                   icon={<CopyOutlined />}
+                                   onClick={handleCopySelectedColumnsFromRow}
+                               >
+                                   复制选区列值 ({selectedCells.size})
+                               </Button>
+                                <Button
+                                    type="primary"
+                                    onClick={() => {
+                                        setBatchEditValue('');
+                                        setBatchEditSetNull(false);
                                        setBatchEditModalOpen(true);
                                    }}
+                                >
+                                    批量填充 ({selectedCells.size})
+                                </Button>
+                            </>
+                        )}
+                       {cellEditMode && copiedCellPatch && (
+                           <>
+                               <Button
+                                   icon={<VerticalAlignBottomOutlined />}
+                                   disabled={selectedRowKeys.length === 0}
+                                   onClick={() => handlePasteCopiedColumnsToSelectedRows()}
                                >
-                                   批量填充 ({selectedCells.size})
+                                   粘贴到选中行 ({selectedRowKeys.length})
                                </Button>
+                               <span style={{ fontSize: '12px', color: '#888' }}>
+                                   已复制 {Object.keys(copiedCellPatch.values).length} 列
+                               </span>
                            </>
                        )}
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
@@ -4104,6 +4283,26 @@ const DataGrid: React.FC<DataGridProps> = ({
                 >
                     <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
                     填充到选中行 ({selectedRowKeys.length})
+                </div>
+                <div
+                    style={{
+                        padding: '8px 12px',
+                        cursor: copiedCellPatch ? 'pointer' : 'not-allowed',
+                        transition: 'background 0.2s',
+                        opacity: copiedCellPatch ? 1 : 0.5,
+                    }}
+                    onMouseEnter={(e) => {
+                        if (copiedCellPatch) e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    onClick={() => {
+                        if (!copiedCellPatch) return;
+                        const fallbackKey = cellContextMenu.record?.[GONAVI_ROW_KEY];
+                        handlePasteCopiedColumnsToSelectedRows(fallbackKey);
+                    }}
+                >
+                    <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
+                    粘贴已复制列（同名列）
                 </div>
                 <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
                     </>
