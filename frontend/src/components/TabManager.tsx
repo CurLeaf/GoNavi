@@ -144,12 +144,8 @@ const TabManager: React.FC = () => {
   const items = useMemo(() => tabs.map((tab, index) => {
     const connectionName = connections.find((conn) => conn.id === tab.connectionId)?.name;
     const displayTitle = buildTabDisplayTitle(tab, connectionName);
-    const keepMountedWhenInactive = tab.type === 'query' || tab.type === 'redis-command';
-    const shouldRenderContent = activeTabId === tab.id || keepMountedWhenInactive;
     let content;
-    if (!shouldRenderContent) {
-      content = null;
-    } else if (tab.type === 'query') {
+    if (tab.type === 'query') {
       content = <QueryEditor tab={tab} />;
     } else if (tab.type === 'table') {
       content = <DataViewer tab={tab} />;
@@ -203,7 +199,7 @@ const TabManager: React.FC = () => {
       key: tab.id,
       children: content,
     };
-  }), [tabs, connections, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs]);
+  }), [tabs, connections, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs]);
 
   return (
     <>
@@ -297,6 +293,7 @@ const TabManager: React.FC = () => {
             <Tabs
                 className="main-tabs"
                 type="editable-card"
+                destroyInactiveTabPane={false}
                 onChange={(newActiveKey) => {
                   if (Date.now() < suppressClickUntilRef.current) return;
                   onChange(newActiveKey);

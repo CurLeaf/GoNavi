@@ -247,6 +247,20 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   const currentConnCaps = getDataSourceCapabilities(currentConnConfig);
   const currentConnType = currentConnCaps.type;
   const forceReadOnly = currentConnCaps.forceReadOnlyQueryResult;
+  const persistViewerSnapshot = useCallback((tabId: string, overrides?: Partial<ViewerFilterSnapshot>) => {
+    const normalizedTabId = String(tabId || '').trim();
+    if (!normalizedTabId) return;
+    viewerFilterSnapshotsByTab.set(normalizedTabId, {
+      showFilter,
+      conditions: normalizeViewerFilterConditions(filterConditions),
+      currentPage: pagination.current,
+      pageSize: pagination.pageSize,
+      sortInfo,
+      scrollTop: scrollSnapshotRef.current.top,
+      scrollLeft: scrollSnapshotRef.current.left,
+      ...overrides,
+    });
+  }, [showFilter, filterConditions, pagination.current, pagination.pageSize, sortInfo]);
 
   useEffect(() => {
     const snapshot = getViewerFilterSnapshot(tab.id);
@@ -258,16 +272,14 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
   }, [tab.id]);
 
   useEffect(() => {
-    viewerFilterSnapshotsByTab.set(tab.id, {
-      showFilter,
-      conditions: normalizeViewerFilterConditions(filterConditions),
-      currentPage: pagination.current,
-      pageSize: pagination.pageSize,
-      sortInfo,
-      scrollTop: scrollSnapshotRef.current.top,
-      scrollLeft: scrollSnapshotRef.current.left,
-    });
-  }, [tab.id, showFilter, filterConditions, pagination.current, pagination.pageSize, sortInfo]);
+    persistViewerSnapshot(tab.id);
+  }, [tab.id, persistViewerSnapshot]);
+
+  useEffect(() => {
+    return () => {
+      persistViewerSnapshot(tab.id);
+    };
+  }, [tab.id, persistViewerSnapshot]);
 
   useEffect(() => {
     const snapshot = getViewerFilterSnapshot(tab.id);
@@ -298,13 +310,11 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const handleTableScrollSnapshotChange = useCallback((snapshot: ViewerScrollSnapshot) => {
     scrollSnapshotRef.current = snapshot;
-    const cached = getViewerFilterSnapshot(tab.id);
-    viewerFilterSnapshotsByTab.set(tab.id, {
-      ...cached,
+    persistViewerSnapshot(tab.id, {
       scrollTop: snapshot.top,
       scrollLeft: snapshot.left,
     });
-  }, [tab.id]);
+  }, [tab.id, persistViewerSnapshot]);
 
   const handleDuckDBManualCount = useCallback(async () => {
     if (latestDbTypeRef.current !== 'duckdb') {
