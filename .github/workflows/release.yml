@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # Phase 1: Build in parallel and output artifacts
   build:
@@ -306,7 +309,7 @@ jobs:
           fi
           BEFORE_BYTES=$(wc -c <"$APP_BIN" | tr -d '[:space:]')
           echo "🗜️ 正在使用 UPX 压缩 macOS 可执行文件: $APP_BIN ..."
-          upx --best --lzma --force "$APP_BIN"
+          upx --best --lzma --force --force-macos "$APP_BIN"
           upx -t "$APP_BIN"
           AFTER_BYTES=$(wc -c <"$APP_BIN" | tr -d '[:space:]')
           if [ "$AFTER_BYTES" -lt "$BEFORE_BYTES" ]; then
@@ -361,21 +364,35 @@ jobs:
               exit 1
           }
 
-          $upxCmd = Get-Command upx -ErrorAction SilentlyContinue
-          if ($null -eq $upxCmd) {
-              Write-Error "❌ 未找到 upx，无法保证 Windows 产物经过压缩"
-              exit 1
-          }
-          $beforeBytes = (Get-Item -LiteralPath $finalExe).Length
-          Write-Host "🗜️ 使用 UPX 压缩 $finalExe ..."
-          & upx --best --lzma --force $finalExe | Out-Host
-          & upx -t $finalExe | Out-Host
-          $afterBytes = (Get-Item -LiteralPath $finalExe).Length
-          if ($afterBytes -lt $beforeBytes) {
-              $savedBytes = $beforeBytes - $afterBytes
-              Write-Host ("✅ UPX 压缩完成：{0:N2}MB -> {1:N2}MB，减少 {2:N2}MB" -f ($beforeBytes / 1MB), ($afterBytes / 1MB), ($savedBytes / 1MB))
+          $isArm64Target = "${{ matrix.arch_name }}".ToLowerInvariant() -eq "arm64"
+          if ($isArm64Target) {
+              Write-Warning "⚠️ UPX 当前不支持 win64/arm64，跳过压缩并保留原始 EXE。"
+              $LASTEXITCODE = 0
           } else {
-              Write-Host ("ℹ️ UPX 压缩完成：{0:N2}MB -> {1:N2}MB" -f ($beforeBytes / 1MB), ($afterBytes / 1MB))
+              $upxCmd = Get-Command upx -ErrorAction SilentlyContinue
+              if ($null -eq $upxCmd) {
+                  Write-Error "❌ 未找到 upx，无法保证 Windows 产物经过压缩"
+                  exit 1
+              }
+              $beforeBytes = (Get-Item -LiteralPath $finalExe).Length
+              Write-Host "🗜️ 使用 UPX 压缩 $finalExe ..."
+              & upx --best --lzma --force $finalExe | Out-Host
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "❌ UPX 压缩失败（$LASTEXITCODE）"
+                  exit 1
+              }
+              & upx -t $finalExe | Out-Host
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "❌ UPX 校验失败（$LASTEXITCODE）"
+                  exit 1
+              }
+              $afterBytes = (Get-Item -LiteralPath $finalExe).Length
+              if ($afterBytes -lt $beforeBytes) {
+                  $savedBytes = $beforeBytes - $afterBytes
+                  Write-Host ("✅ UPX 压缩完成：{0:N2}MB -> {1:N2}MB，减少 {2:N2}MB" -f ($beforeBytes / 1MB), ($afterBytes / 1MB), ($savedBytes / 1MB))
+              } else {
+                  Write-Host ("ℹ️ UPX 压缩完成：{0:N2}MB -> {1:N2}MB" -f ($beforeBytes / 1MB), ($afterBytes / 1MB))
+              }
           }
 
           Write-Host "📦 输出 Windows 可执行文件 $finalExeName..."

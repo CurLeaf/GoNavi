@@ -45,6 +45,7 @@ format_size_mb() {
 try_compress_binary_with_upx() {
     local exe_path="$1"
     local label="$2"
+    local is_macos_binary="${3:-false}"
     if [ ! -f "$exe_path" ]; then
         echo -e "${RED}   ❌ 未找到 ${label} 文件：$exe_path${NC}"
         exit 1
@@ -63,10 +64,21 @@ try_compress_binary_with_upx() {
         exit 1
     fi
 
+    local upx_cmd=(upx --best --lzma --force)
+    if [ "$is_macos_binary" = "true" ]; then
+        if upx --help 2>&1 | grep -q -- "--force-macos"; then
+            upx_cmd+=(--force-macos)
+        else
+            echo -e "${RED}   ❌ 当前 upx 不支持 --force-macos，无法压缩 ${label}。${NC}"
+            echo "      请升级 upx 到支持 macOS 压缩的版本（UPX 5+）。"
+            exit 1
+        fi
+    fi
+
     local before_bytes after_bytes
     before_bytes=$(get_file_size_bytes "$exe_path")
     echo "   🗜️  正在使用 UPX 压缩 ${label}..."
-    if upx --best --lzma --force "$exe_path" >/dev/null 2>&1; then
+    if "${upx_cmd[@]}" "$exe_path" >/dev/null 2>&1; then
         if ! upx -t "$exe_path" >/dev/null 2>&1; then
             echo -e "${RED}   ❌ UPX 校验失败：${label}${NC}"
             exit 1
@@ -108,7 +120,7 @@ if [ $? -eq 0 ]; then
 
     APP_BIN_PATH=$(find "$DIST_DIR/$APP_DEST_NAME/Contents/MacOS" -maxdepth 1 -type f -print -quit)
     if [ -n "$APP_BIN_PATH" ] && [ -f "$APP_BIN_PATH" ]; then
-        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS arm64 应用主程序"
+        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS arm64 应用主程序" "true"
     else
         echo -e "${RED}   ❌ 未找到 macOS arm64 主程序文件，无法执行 UPX 压缩。${NC}"
         exit 1
@@ -215,7 +227,7 @@ if [ $? -eq 0 ]; then
 
     APP_BIN_PATH=$(find "$DIST_DIR/$APP_DEST_NAME/Contents/MacOS" -maxdepth 1 -type f -print -quit)
     if [ -n "$APP_BIN_PATH" ] && [ -f "$APP_BIN_PATH" ]; then
-        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS amd64 应用主程序"
+        try_compress_binary_with_upx "$APP_BIN_PATH" "macOS amd64 应用主程序" "true"
     else
         echo -e "${RED}   ❌ 未找到 macOS amd64 主程序文件，无法执行 UPX 压缩。${NC}"
         exit 1
@@ -327,7 +339,7 @@ if command -v aarch64-w64-mingw32-gcc &> /dev/null; then
     if [ $? -eq 0 ]; then
         TARGET_EXE="$DIST_DIR/${APP_NAME}-${VERSION}-windows-arm64.exe"
         mv "$BUILD_BIN_DIR/${DEFAULT_BINARY_NAME}.exe" "$TARGET_EXE"
-        try_compress_binary_with_upx "$TARGET_EXE" "Windows arm64 可执行文件"
+        echo -e "${YELLOW}   ⚠️  当前 UPX 不支持 win64/arm64，跳过 Windows arm64 压缩。${NC}"
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-arm64.exe"
     else
         echo -e "${RED}   ❌ Windows arm64 构建失败。${NC}"
