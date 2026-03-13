@@ -162,3 +162,45 @@ func findKingbaseQualifiedSeparator(raw string) int {
 
 	return -1
 }
+
+// buildKingbaseSearchPathCommon 统一构建 Kingbase search_path。
+// 返回 search_path SQL 片段和规范化后的 schema 列表（用于调试/扩展）。
+func buildKingbaseSearchPathCommon(rawSchemas []string) (string, []string) {
+	if len(rawSchemas) == 0 {
+		return "", nil
+	}
+
+	seen := make(map[string]struct{}, len(rawSchemas)+1)
+	quotedParts := make([]string, 0, len(rawSchemas)+1)
+	normalizedSchemas := make([]string, 0, len(rawSchemas)+1)
+
+	appendSchema := func(raw string) {
+		cleaned := normalizeKingbaseIdentCommon(raw)
+		if cleaned == "" {
+			return
+		}
+		if strings.EqualFold(cleaned, "public") {
+			cleaned = "public"
+		}
+		key := strings.ToLower(cleaned)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		normalizedSchemas = append(normalizedSchemas, cleaned)
+		escaped := strings.ReplaceAll(cleaned, `"`, `""`)
+		quotedParts = append(quotedParts, `"`+escaped+`"`)
+	}
+
+	for _, raw := range rawSchemas {
+		appendSchema(raw)
+	}
+	if _, ok := seen["public"]; !ok {
+		appendSchema("public")
+	}
+
+	if len(quotedParts) == 0 {
+		return "", normalizedSchemas
+	}
+	return strings.Join(quotedParts, ", "), normalizedSchemas
+}
