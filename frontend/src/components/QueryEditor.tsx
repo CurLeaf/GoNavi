@@ -12,6 +12,14 @@ import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
 
+const SQL_KEYWORDS = [
+    'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
+    'INNER', 'OUTER', 'ON', 'GROUP BY', 'ORDER BY', 'AS', 'AND', 'OR', 'NOT', 'NULL', 'IS',
+    'IN', 'VALUES', 'SET', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'ADD', 'MODIFY', 'CHANGE',
+    'COLUMN', 'KEY', 'PRIMARY', 'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'DEFAULT', 'AUTO_INCREMENT',
+    'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN',
+];
+
 const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
   
@@ -62,6 +70,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       [connections]
   );
   const addSqlLog = useStore(state => state.addSqlLog);
+  const addTab = useStore(state => state.addTab);
+  const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
   const connectionsRef = useRef(connections);
@@ -75,6 +85,18 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeTabId = useStore(state => state.activeTabId);
+
+  const currentSavedQuery = useMemo(() => {
+      const savedId = String(tab.savedQueryId || '').trim();
+      if (savedId) {
+          return savedQueries.find((item) => item.id === savedId) || null;
+      }
+      const tabId = String(tab.id || '').trim();
+      if (!tabId) {
+          return null;
+      }
+      return savedQueries.find((item) => item.id === tabId) || null;
+  }, [savedQueries, tab.id, tab.savedQueryId]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -511,6 +533,17 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               const currentDatabase = currentDbRef.current || '';
+              const wordPrefix = (word.word || '').toLowerCase();
+              const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
+              const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
+              const shouldBoostKeywords = !expectsTableName
+                  && wordPrefix.length > 0
+                  && SQL_KEYWORDS.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
+              const sortGroups = shouldBoostKeywords
+                  ? { keyword: '00', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
+                  : expectsTableName
+                      ? { keyword: '20', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
+                      : { keyword: '30', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
 
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
@@ -518,7 +551,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
-                      return foundTables.has(fullIdent) || foundTables.has(shortIdent);
+                      return (foundTables.has(fullIdent) || foundTables.has(shortIdent)) && startsWithPrefix(c.name || '');
                   })
                   .map(c => {
                       // 当前库的表字段优先级更高
@@ -529,12 +562,18 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                           insertText: c.name,
                           detail: `${c.type} (${c.dbName}.${c.tableName})`,
                           range,
-                          sortText: isCurrentDb ? '00' + c.name : '01' + c.name // FROM 表字段最优先
+                          sortText: isCurrentDb ? sortGroups.columnCurrent + c.name : sortGroups.columnOther + c.name,
                       };
                   });
 
               // 表提示：当前库显示表名，其他库显示 db.table 格式
-              const tableSuggestions = tablesRef.current.map(t => {
+              const tableSuggestions = tablesRef.current
+                .filter(t => {
+                    const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                    const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
+                    return startsWithPrefix(label || '');
+                })
+                .map(t => {
                   const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
                   const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
                   const insertText = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
@@ -544,27 +583,31 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                       insertText,
                       detail: `Table (${t.dbName})`,
                       range,
-                      sortText: isCurrentDb ? '10' + t.tableName : '11' + t.tableName // 表次优先
+                      sortText: isCurrentDb ? sortGroups.tableCurrent + t.tableName : sortGroups.tableOther + t.tableName,
                   };
               });
 
               // 数据库提示
-              const dbSuggestions = visibleDbsRef.current.map(db => ({
-                  label: db,
-                  kind: monaco.languages.CompletionItemKind.Module,
-                  insertText: db,
-                  detail: 'Database',
-                  range,
-                  sortText: '20' + db // 数据库最后
-              }));
+              const dbSuggestions = visibleDbsRef.current
+                  .filter((db) => startsWithPrefix(db))
+                  .map(db => ({
+                      label: db,
+                      kind: monaco.languages.CompletionItemKind.Module,
+                      insertText: db,
+                      detail: 'Database',
+                      range,
+                      sortText: sortGroups.db + db,
+                  }));
 
               // 关键字提示
-              const keywordSuggestions = ['SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'GROUP BY', 'ORDER BY', 'AS', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'VALUES', 'SET', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'Add', 'MODIFY', 'CHANGE', 'COLUMN', 'KEY', 'PRIMARY', 'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'DEFAULT', 'AUTO_INCREMENT', 'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].map(k => ({
+              const keywordSuggestions = SQL_KEYWORDS
+                  .filter((k) => startsWithPrefix(k))
+                  .map(k => ({
                   label: k,
                   kind: monaco.languages.CompletionItemKind.Keyword,
                   insertText: k,
                   range,
-                  sortText: '30' + k // 关键字权重最低
+                  sortText: sortGroups.keyword + k,
               }));
 
               const suggestions = [
@@ -1425,16 +1468,60 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       };
   }, [activeTabId, tab.id, handleRun]);
 
+  const resolveDefaultQueryName = () => {
+      const rawTitle = String(tab.title || '').trim();
+      if (!rawTitle || rawTitle.startsWith('新建查询')) {
+          return '未命名查询';
+      }
+      return rawTitle;
+  };
+
+  const persistQuery = (payload: { id: string; name: string; createdAt?: number }) => {
+      const sql = getCurrentQuery();
+      const saved = {
+          id: payload.id,
+          name: payload.name,
+          sql,
+          connectionId: currentConnectionId,
+          dbName: currentDb || tab.dbName || '',
+          createdAt: payload.createdAt ?? Date.now(),
+      };
+      saveQuery(saved);
+      addTab({
+          ...tab,
+          title: payload.name,
+          query: sql,
+          connectionId: currentConnectionId,
+          dbName: currentDb || tab.dbName || '',
+          savedQueryId: payload.id,
+      });
+      return saved;
+  };
+
+  const handleQuickSave = () => {
+      const existed = currentSavedQuery || null;
+      const fallbackSavedId = String(tab.savedQueryId || '').trim();
+      const saveId = existed?.id || fallbackSavedId || '';
+      if (!saveId) {
+          saveForm.setFieldsValue({ name: resolveDefaultQueryName() });
+          setIsSaveModalOpen(true);
+          return;
+      }
+      const saveName = existed?.name || resolveDefaultQueryName();
+      persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
+      message.success('查询已保存！');
+  };
+
   const handleSave = async () => {
       try {
           const values = await saveForm.validateFields();
-          saveQuery({
-              id: tab.id.startsWith('saved-') ? tab.id : `saved-${Date.now()}`,
-              name: values.name,
-              sql: getCurrentQuery(),
-              connectionId: currentConnectionId,
-              dbName: currentDb || tab.dbName || '',
-              createdAt: Date.now()
+          const existed = currentSavedQuery || null;
+          const fallbackSavedId = String(tab.savedQueryId || '').trim();
+          const nextSavedId = existed?.id || fallbackSavedId || `saved-${Date.now()}`;
+          persistQuery({
+              id: nextSavedId,
+              name: String(values.name || '').trim() || '未命名查询',
+              createdAt: existed?.createdAt,
           });
           message.success('查询已保存！');
           setIsSaveModalOpen(false);
@@ -1555,10 +1642,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             </Button>
           )}
         </Button.Group>
-        <Button icon={<SaveOutlined />} onClick={() => {
-            saveForm.setFieldsValue({ name: tab.title.replace('Query (', '').replace(')', '') });
-            setIsSaveModalOpen(true);
-        }}>
+        <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
           保存
         </Button>
         

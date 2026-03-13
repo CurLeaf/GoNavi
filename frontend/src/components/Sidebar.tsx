@@ -1479,7 +1479,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               type: 'query',
               connectionId: q.connectionId,
               dbName: q.dbName,
-              query: q.sql
+              query: q.sql,
+              savedQueryId: q.id,
           });
           return;
       } else if (node.type === 'redis-db') {
@@ -3259,13 +3260,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '新建查询',
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
+                   const tableName = String(node.dataRef?.tableName || '').trim();
+                   const queryTemplate = tableName ? `SELECT * FROM ${tableName};` : 'SELECT * FROM ';
                    addTab({
                        id: `query-${Date.now()}`,
                        title: `新建查询`,
                        type: 'query',
                        connectionId: node.dataRef.id,
                        dbName: node.dataRef.dbName,
-                       query: ''
+                       query: queryTemplate
                    });
                 }
             },
