@@ -50,6 +50,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const monacoRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(tab.query || '');
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
+  const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<{dbName: string, tableName: string}[]>([]); // Store tables for autocomplete (cross-db)
   const allColumnsRef = useRef<{dbName: string, tableName: string, name: string, type: string}[]>([]); // Store all columns (cross-db)
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
@@ -1342,6 +1344,46 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   };
 
   useEffect(() => {
+      const handleSelectAllInEditor = (event: KeyboardEvent) => {
+          if (activeTabId !== tab.id) {
+              return;
+          }
+          if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
+              return;
+          }
+
+          const editor = editorRef.current;
+          if (!editor) {
+              return;
+          }
+
+          const targetNode = event.target instanceof Node ? event.target : null;
+          const editorHasFocus = !!editor.hasTextFocus?.();
+          const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inEditorPane) {
+              return;
+          }
+          if (!editorHasFocus && isEditableElement(event.target) && !inEditorPane) {
+              return;
+          }
+          if (!editorHasFocus && !inQueryEditor) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          editor.focus?.();
+          editor.trigger('keyboard', 'editor.action.selectAll', null);
+      };
+
+      window.addEventListener('keydown', handleSelectAllInEditor, true);
+      return () => {
+          window.removeEventListener('keydown', handleSelectAllInEditor, true);
+      };
+  }, [activeTabId, tab.id]);
+
+  useEffect(() => {
       const binding = shortcutOptions.runQuery;
       if (!binding?.enabled || !binding.combo) {
           return;
@@ -1417,7 +1459,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   };
 
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div ref={queryEditorRootRef} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <style>{`
         .query-result-tabs {
           flex: 1 1 auto;
@@ -1460,6 +1502,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           transition: none !important;
         }
       `}</style>
+      <div ref={editorPaneRef}>
       <div style={{ padding: '8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
@@ -1557,6 +1600,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         }} 
         title="拖动调整高度"
       />
+      </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
         {resultSets.length > 0 ? (
