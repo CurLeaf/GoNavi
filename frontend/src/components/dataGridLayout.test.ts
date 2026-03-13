@@ -1,8 +1,12 @@
-import { strict as assert } from 'node:assert';
-
 import { calculateTableBodyBottomPadding } from './dataGridLayout';
 
-assert.equal(
+const assertEqual = (actual: unknown, expected: unknown, message: string) => {
+  if (actual !== expected) {
+    throw new Error(`${message}\nactual: ${String(actual)}\nexpected: ${String(expected)}`);
+  }
+};
+
+assertEqual(
   calculateTableBodyBottomPadding({
     hasHorizontalOverflow: false,
     floatingScrollbarHeight: 10,
@@ -12,7 +16,7 @@ assert.equal(
   '无横向滚动条时不应增加底部间距'
 );
 
-assert.equal(
+assertEqual(
   calculateTableBodyBottomPadding({
     hasHorizontalOverflow: true,
     floatingScrollbarHeight: 10,
@@ -22,7 +26,7 @@ assert.equal(
   '默认悬浮滚动条应预留滚动条高度、间距和额外安全区'
 );
 
-assert.equal(
+assertEqual(
   calculateTableBodyBottomPadding({
     hasHorizontalOverflow: true,
     floatingScrollbarHeight: 14,
