@@ -198,7 +198,7 @@ func (k *KingbaseDB) getSearchPathStr() string {
 	}
 	defer rows.Close()
 
-	var schemas []string
+	var rawSchemas []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
@@ -206,17 +206,12 @@ func (k *KingbaseDB) getSearchPathStr() string {
 		}
 		name = strings.TrimSpace(name)
 		if name != "" {
-			// 使用 SQL 标准的双引号包裹标识符
-			escaped := strings.ReplaceAll(name, `"`, `""`)
-			schemas = append(schemas, `"`+escaped+`"`)
+			rawSchemas = append(rawSchemas, name)
 		}
 	}
 
-	if len(schemas) == 0 {
-		return ""
-	}
-
-	return strings.Join(schemas, ", ")
+	searchPath, _ := buildKingbaseSearchPathCommon(rawSchemas)
+	return searchPath
 }
 
 func (k *KingbaseDB) Close() error {

@@ -582,27 +582,8 @@ func (d *OptionalDriverAgentDB) listKingbaseSchemas(ctx context.Context) ([]stri
 }
 
 func buildKingbaseSearchPathFromSchemas(schemas []string) string {
-	if len(schemas) == 0 {
-		return ""
-	}
-	seen := make(map[string]struct{}, len(schemas)+1)
-	parts := make([]string, 0, len(schemas)+1)
-	for _, name := range schemas {
-		trimmed := normalizeKingbaseAgentIdent(name)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		parts = append(parts, quoteKingbaseAgentIdent(trimmed))
-	}
-	if _, ok := seen["public"]; !ok {
-		parts = append(parts, "public")
-	}
-	return strings.Join(parts, ", ")
+	searchPath, _ := buildKingbaseSearchPathCommon(schemas)
+	return searchPath
 }
 
 func quoteKingbaseAgentIdent(name string) string {
