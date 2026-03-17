@@ -1437,6 +1437,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                     });
             });
 
+            // 后端附带的提示信息（如数据源不支持原生多语句执行的回退提示）
+            if (res.message) {
+                message.info(res.message);
+            }
             if (resultSetDataArray.length > 1) {
                 message.success(`已执行完成，生成 ${nextResultSets.length} 个结果集。`);
             } else if (nextResultSets.length === 0) {

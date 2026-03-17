@@ -616,7 +616,12 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	if resultSets == nil {
 		resultSets = []connection.ResultSetData{}
 	}
-	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID}
+	// 回退到逐条执行且有多条语句时，附加提示信息
+	var fallbackMsg string
+	if len(statements) > 1 {
+		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
+	}
+	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
 }
 
 func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {

@@ -128,6 +128,30 @@ func (s *SqlServerDB) Ping() error {
 	return s.conn.PingContext(ctx)
 }
 
+func (s *SqlServerDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	if s.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := s.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (s *SqlServerDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	if s.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := s.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
 func (s *SqlServerDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
 		return nil, nil, fmt.Errorf("连接未打开")

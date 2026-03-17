@@ -41,7 +41,7 @@ func (m *MariaDB) getDSN(config connection.ConnectionConfig) (string, error) {
 	tlsMode := resolveMySQLTLSMode(config)
 
 	return fmt.Sprintf(
-		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s",
+		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s&multiStatements=true",
 		config.User, config.Password, protocol, address, database, timeout, url.QueryEscape(tlsMode),
 	), nil
 }
@@ -82,6 +82,30 @@ func (m *MariaDB) Ping() error {
 	ctx, cancel := utils.ContextWithTimeout(timeout)
 	defer cancel()
 	return m.conn.PingContext(ctx)
+}
+
+func (m *MariaDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	if m.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := m.conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (m *MariaDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	if m.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := m.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
 }
 
 func (m *MariaDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
