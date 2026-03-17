@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
+import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
@@ -1157,36 +1157,33 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         const dbType = String((config as any).type || 'mysql');
         const normalizedDbType = dbType.trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
-        const splitInput = normalizedDbType === 'mongodb'
-            ? normalizedRawSQL
+
+        // MongoDB 仍走逐条执行的旧路径
+        const isMongoDB = normalizedDbType === 'mongodb';
+
+        if (isMongoDB) {
+            // MongoDB: 保持逐条执行
+            const splitInput = normalizedRawSQL
                 .replace(/^\s*\/\/.*$/gm, '')
-                .replace(/^\s*#.*$/gm, '')
-            : normalizedRawSQL;
-        const statements = splitSQLStatements(splitInput);
-        if (statements.length === 0) {
-            message.info('没有可执行的 SQL。');
-            setResultSets([]);
-            setActiveResultKey('');
-            return;
-        }
+                .replace(/^\s*#.*$/gm, '');
+            const statements = splitSQLStatements(splitInput);
+            if (statements.length === 0) {
+                message.info('没有可执行的 SQL。');
+                setResultSets([]);
+                setActiveResultKey('');
+                return;
+            }
 
-        const nextResultSets: ResultSet[] = [];
-        const maxRows = Number(queryOptions?.maxRows) || 0;
-        const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
-        const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
-        const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
-        let anyTruncated = false;
-        const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
+            const nextResultSets: ResultSet[] = [];
+            const maxRows = Number(queryOptions?.maxRows) || 0;
+            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
+            const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
+            const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
+            let anyTruncated = false;
 
-        for (let idx = 0; idx < statements.length; idx++) {
-            const rawStatement = statements[idx];
-            const leadingKeyword = getLeadingKeyword(rawStatement);
-            const shouldAutoLimit = leadingKeyword === 'select' || leadingKeyword === 'with';
-
-            const limitApplied = shouldAutoLimit && wantsLimitProbe;
-            const limited = limitApplied ? applyAutoLimit(rawStatement, dbType, probeLimit) : { sql: rawStatement, applied: false, maxRows: probeLimit };
-            let executedSql = limited.sql;
-            if (String(dbType || '').trim().toLowerCase() === 'mongodb') {
+            for (let idx = 0; idx < statements.length; idx++) {
+                const rawStatement = statements[idx];
+                let executedSql = rawStatement;
                 const shellConvert = convertMongoShellToJsonCommand(executedSql);
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
@@ -1200,10 +1197,97 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                         executedSql = shellConvert.command;
                     }
                 }
-            }
-            const startTime = Date.now();
+                const startTime = Date.now();
+                let queryId: string;
+                try {
+                    queryId = await GenerateQueryID();
+                } catch (error) {
+                    console.warn('GenerateQueryID failed, using local UUID fallback:', error);
+                    queryId = 'query-' + uuidv4();
+                }
+                setQueryId(queryId);
 
-            // Generate query ID for cancellation using backend UUID with fallback
+                const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
+                const duration = Date.now() - startTime;
+                addSqlLog({
+                    id: `log-${Date.now()}-query-${idx + 1}`,
+                    timestamp: Date.now(),
+                    sql: executedSql,
+                    status: res.success ? 'success' : 'error',
+                    duration,
+                    message: res.success ? '' : res.message,
+                    affectedRows: (res.success && !Array.isArray(res.data)) ? (res.data as any).affectedRows : (Array.isArray(res.data) ? res.data.length : undefined),
+                    dbName: currentDb
+                });
+                if (!res.success) {
+                    const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                    message.error(prefix + res.message);
+                    setResultSets([]);
+                    setActiveResultKey('');
+                    return;
+                }
+                if (Array.isArray(res.data)) {
+                    let rows = (res.data as any[]) || [];
+                    let truncated = false;
+                    if (wantsLimitProbe && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                        truncated = true;
+                        anyTruncated = true;
+                        rows = rows.slice(0, maxRows);
+                    }
+                    const cols = (res.fields && res.fields.length > 0)
+                        ? (res.fields as string[])
+                        : (rows.length > 0 ? Object.keys(rows[0]) : []);
+                    rows.forEach((row: any, i: number) => {
+                        if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
+                    });
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: rawStatement,
+                        exportSql: rawStatement,
+                        rows,
+                        columns: cols,
+                        pkColumns: [],
+                        readOnly: true,
+                        truncated
+                    });
+                } else {
+                    const affected = Number((res.data as any)?.affectedRows);
+                    if (Number.isFinite(affected)) {
+                        const row = { affectedRows: affected };
+                        (row as any)[GONAVI_ROW_KEY] = 0;
+                        nextResultSets.push({
+                            key: `result-${idx + 1}`,
+                            sql: rawStatement,
+                            exportSql: rawStatement,
+                            rows: [row],
+                            columns: ['affectedRows'],
+                            pkColumns: [],
+                            readOnly: true
+                        });
+                    }
+                }
+            }
+            setResultSets(nextResultSets);
+            setActiveResultKey(nextResultSets[0]?.key || '');
+            if (statements.length > 1) {
+                message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
+            } else if (nextResultSets.length === 0) {
+                message.success('执行成功。');
+            }
+            if (anyTruncated && maxRows > 0) {
+                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            }
+        } else {
+            // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
+            const fullSQL = normalizedRawSQL;
+            if (!fullSQL.trim()) {
+                message.info('没有可执行的 SQL。');
+                setResultSets([]);
+                setActiveResultKey('');
+                return;
+            }
+
+            const startTime = Date.now();
             let queryId: string;
             try {
                 queryId = await GenerateQueryID();
@@ -1213,22 +1297,20 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
             setQueryId(queryId);
 
-            const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
+            const res = await DBQueryMulti(config as any, currentDb, fullSQL, queryId);
             const duration = Date.now() - startTime;
 
             addSqlLog({
-                id: `log-${Date.now()}-query-${idx + 1}`,
+                id: `log-${Date.now()}-query-multi`,
                 timestamp: Date.now(),
-                sql: executedSql,
+                sql: fullSQL,
                 status: res.success ? 'success' : 'error',
                 duration,
                 message: res.success ? '' : res.message,
-                affectedRows: (res.success && !Array.isArray(res.data)) ? (res.data as any).affectedRows : (Array.isArray(res.data) ? res.data.length : undefined),
                 dbName: currentDb
             });
 
             if (!res.success) {
-                // 检查是否为查询取消错误
                 const errorMsg = res.message.toLowerCase();
                 const isCancelledError = errorMsg.includes('context canceled') ||
                                          errorMsg.includes('查询已取消') ||
@@ -1236,72 +1318,49 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                                          errorMsg.includes('cancelled') ||
                                          errorMsg.includes('statement canceled') ||
                                          errorMsg.includes('sql: statement canceled');
-
-                // 确保不是超时错误
                 const isTimeoutError = errorMsg.includes('context deadline exceeded') ||
                                        errorMsg.includes('timeout') ||
                                        errorMsg.includes('超时') ||
                                        errorMsg.includes('deadline exceeded');
 
                 if (isCancelledError && !isTimeoutError) {
-                    // 查询已被用户取消，不显示错误消息，清理状态
                     setResultSets([]);
                     setActiveResultKey('');
-                    // 清除查询ID，与handleCancel保持一致
                     if (currentQueryIdRef.current) {
                         clearQueryId();
                     }
                     return;
                 }
 
-                const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                message.error(prefix + res.message);
+                message.error(res.message);
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
             }
 
-            if (Array.isArray(res.data)) {
-                let rows = (res.data as any[]) || [];
-                let truncated = false;
-                if (limited.applied && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
-                    truncated = true;
-                    anyTruncated = true;
-                    rows = rows.slice(0, maxRows);
-                }
-                const cols = (res.fields && res.fields.length > 0)
-                    ? (res.fields as string[])
-                    : (rows.length > 0 ? Object.keys(rows[0]) : []);
+            // res.data 是 ResultSetData[] 数组
+            const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
+            const nextResultSets: ResultSet[] = [];
+            const maxRows = Number(queryOptions?.maxRows) || 0;
+            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
+            let anyTruncated = false;
+            const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
 
-                rows.forEach((row: any, i: number) => {
-                    if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
-                });
+            // 前端也拆分语句用于匹配原始 SQL（展示和表名检测）
+            const statements = splitSQLStatements(fullSQL);
 
-                let simpleTableName: string | undefined = undefined;
-                const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
-                if (tableMatch) {
-                    simpleTableName = tableMatch[1];
-                    if (!forceReadOnlyResult) {
-                        pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
-                    }
-                }
+            for (let idx = 0; idx < resultSetDataArray.length; idx++) {
+                const rsData = resultSetDataArray[idx];
+                const rawStatement = (idx < statements.length) ? statements[idx] : '';
 
-                nextResultSets.push({
-                    key: `result-${idx + 1}`,
-                    sql: rawStatement,
-                    exportSql: limited.applied ? applyAutoLimit(rawStatement, dbType, Math.max(1, Number(maxRows) || 1)).sql : rawStatement,
-                    rows,
-                    columns: cols,
-                    tableName: simpleTableName,
-                    pkColumns: [],
-                    readOnly: true,
-                    pkLoading: !!simpleTableName,
-                    truncated
-                });
-            } else {
-                const affected = Number((res.data as any)?.affectedRows);
-                if (Number.isFinite(affected)) {
-                    const row = { affectedRows: affected };
+                // 检查是否为 affectedRows 类结果集
+                const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
+                    && rsData.columns && rsData.columns.length === 1
+                    && rsData.columns[0] === 'affectedRows';
+
+                if (isAffectedResult) {
+                    const affected = Number(rsData.rows[0]?.affectedRows);
+                    const row = { affectedRows: Number.isFinite(affected) ? affected : 0 };
                     (row as any)[GONAVI_ROW_KEY] = 0;
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
@@ -1312,37 +1371,76 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                         pkColumns: [],
                         readOnly: true
                     });
+                } else {
+                    let rows = Array.isArray(rsData.rows) ? rsData.rows : [];
+                    let truncated = false;
+                    if (Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                        truncated = true;
+                        anyTruncated = true;
+                        rows = rows.slice(0, maxRows);
+                    }
+                    const cols = (rsData.columns && rsData.columns.length > 0)
+                        ? rsData.columns
+                        : (rows.length > 0 ? Object.keys(rows[0]) : []);
+
+                    rows.forEach((row: any, i: number) => {
+                        if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
+                    });
+
+                    let simpleTableName: string | undefined = undefined;
+                    if (rawStatement) {
+                        const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
+                        if (tableMatch) {
+                            simpleTableName = tableMatch[1];
+                            if (!forceReadOnlyResult) {
+                                pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
+                            }
+                        }
+                    }
+
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: rawStatement,
+                        exportSql: rawStatement,
+                        rows,
+                        columns: cols,
+                        tableName: simpleTableName,
+                        pkColumns: [],
+                        readOnly: true,
+                        pkLoading: !!simpleTableName,
+                        truncated
+                    });
                 }
             }
-        }
 
-        setResultSets(nextResultSets);
-        setActiveResultKey(nextResultSets[0]?.key || '');
+            setResultSets(nextResultSets);
+            setActiveResultKey(nextResultSets[0]?.key || '');
 
-        pendingPk.forEach(({ resultKey, tableName }) => {
-            DBGetColumns(config as any, currentDb, tableName)
-                .then((resCols: any) => {
-                    if (runSeqRef.current !== runSeq) return;
-                    if (!resCols?.success) {
+            pendingPk.forEach(({ resultKey, tableName }) => {
+                DBGetColumns(config as any, currentDb, tableName)
+                    .then((resCols: any) => {
+                        if (runSeqRef.current !== runSeq) return;
+                        if (!resCols?.success) {
+                            setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
+                            return;
+                        }
+                        const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
+                        setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
+                    })
+                    .catch(() => {
+                        if (runSeqRef.current !== runSeq) return;
                         setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                        return;
-                    }
-                    const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
-                })
-                .catch(() => {
-                    if (runSeqRef.current !== runSeq) return;
-                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                });
-        });
+                    });
+            });
 
-        if (statements.length > 1) {
-            message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
-        } else if (nextResultSets.length === 0) {
-            message.success('执行成功。');
-        }
-        if (anyTruncated && maxRows > 0) {
-            message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            if (resultSetDataArray.length > 1) {
+                message.success(`已执行完成，生成 ${nextResultSets.length} 个结果集。`);
+            } else if (nextResultSets.length === 0) {
+                message.success('执行成功。');
+            }
+            if (anyTruncated && maxRows > 0) {
+                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            }
         }
     } catch (e: any) {
         message.error("Error executing query: " + e.message);

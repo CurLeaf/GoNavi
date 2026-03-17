@@ -74,6 +74,10 @@ export function DBQueryIsolated(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQueryIsolated'](arg1, arg2, arg3);
 }
 
+export function DBQueryMulti(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DBQueryMulti'](arg1, arg2, arg3, arg4);
+}
+
 export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
 }

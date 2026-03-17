@@ -63,6 +63,12 @@ type ConnectionConfig struct {
 	MongoReplicaPassword string           `json:"mongoReplicaPassword,omitempty"` // MongoDB replica auth password
 }
 
+// ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。
+type ResultSetData struct {
+	Rows    []map[string]interface{} `json:"rows"`
+	Columns []string                 `json:"columns"`
+}
+
 // QueryResult 是 Wails 绑定方法的统一响应格式，前端通过此结构体接收后端结果。
 type QueryResult struct {
 	Success bool        `json:"success"`

@@ -2,6 +2,7 @@ package db
 
 import (
 	"GoNavi-Wails/internal/connection"
+	"context"
 	"fmt"
 	"strings"
 )
@@ -36,6 +37,17 @@ type Database interface {
 	GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error)
 	// GetTriggers 返回指定表的触发器定义列表。
 	GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error)
+}
+
+// MultiResultQuerier 是可选接口，支持多结果集的驱动实现此接口。
+// 执行可能包含多条 SQL 语句的查询，返回所有结果集。
+type MultiResultQuerier interface {
+	QueryMulti(query string) ([]connection.ResultSetData, error)
+}
+
+// MultiResultQuerierContext 是带 context 的多结果集查询接口。
+type MultiResultQuerierContext interface {
+	QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error)
 }
 
 // BatchApplier 定义了批量变更提交接口。

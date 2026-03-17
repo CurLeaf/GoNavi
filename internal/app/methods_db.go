@@ -487,6 +487,138 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}
 }
 
+// DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
+// 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
+// 否则按分号拆分后逐条执行，模拟多结果集。
+func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+	runConfig := normalizeRunConfig(config, dbName)
+
+	if queryID == "" {
+		queryID = generateQueryID()
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "DBQueryMulti 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+
+	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	timeoutSeconds := runConfig.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	defer cancel()
+
+	a.queryMu.Lock()
+	a.runningQueries[queryID] = queryContext{
+		cancel:  cancel,
+		started: time.Now(),
+	}
+	a.queryMu.Unlock()
+	defer func() {
+		a.queryMu.Lock()
+		delete(a.runningQueries, queryID)
+		a.queryMu.Unlock()
+	}()
+
+	// 尝试使用驱动原生多结果集支持
+	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, error) {
+		if q, ok := inst.(db.MultiResultQuerierContext); ok {
+			return q.QueryMultiContext(ctx, query)
+		}
+		if q, ok := inst.(db.MultiResultQuerier); ok {
+			return q.QueryMulti(query)
+		}
+		return nil, nil // 返回 nil 表示不支持
+	}
+
+	results, err := runMultiQuery(dbInst)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBQueryMulti 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+				return connection.QueryResult{Success: false, Message: retryErr.Error(), QueryID: queryID}
+			}
+			results, err = runMultiQuery(retryInst)
+		}
+	}
+	if err != nil {
+		logger.Error(err, "DBQueryMulti 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+
+	// 驱动支持多结果集，直接返回
+	if results != nil {
+		return connection.QueryResult{Success: true, Data: results, QueryID: queryID}
+	}
+
+	// 驱动不支持多结果集，回退到逐条执行
+	statements := splitSQLStatements(query)
+	if len(statements) == 0 {
+		return connection.QueryResult{
+			Success: true,
+			Data:    []connection.ResultSetData{},
+			QueryID: queryID,
+		}
+	}
+
+	var resultSets []connection.ResultSetData
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		if isReadOnlySQLQuery(runConfig.Type, stmt) {
+			var data []map[string]interface{}
+			var columns []string
+			if q, ok := dbInst.(interface {
+				QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+			}); ok {
+				data, columns, err = q.QueryContext(ctx, stmt)
+			} else {
+				data, columns, err = dbInst.Query(stmt)
+			}
+			if err != nil {
+				logger.Error(err, "DBQueryMulti 逐条查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(stmt))
+				return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+			}
+			if data == nil {
+				data = make([]map[string]interface{}, 0)
+			}
+			if columns == nil {
+				columns = []string{}
+			}
+			resultSets = append(resultSets, connection.ResultSetData{Rows: data, Columns: columns})
+		} else {
+			var affected int64
+			if e, ok := dbInst.(interface {
+				ExecContext(context.Context, string) (int64, error)
+			}); ok {
+				affected, err = e.ExecContext(ctx, stmt)
+			} else {
+				affected, err = dbInst.Exec(stmt)
+			}
+			if err != nil {
+				logger.Error(err, "DBQueryMulti 逐条执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(stmt))
+				return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+			}
+			resultSets = append(resultSets, connection.ResultSetData{
+				Rows:    []map[string]interface{}{{"affectedRows": affected}},
+				Columns: []string{"affectedRows"},
+			})
+		}
+	}
+
+	if resultSets == nil {
+		resultSets = []connection.ResultSetData{}
+	}
+	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID}
+}
+
 func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
 
