@@ -232,7 +232,7 @@ func (k *KingbaseDB) Close() error {
 
 func (k *KingbaseDB) Ping() error {
 	if k.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := k.pingTimeout
 	if timeout <= 0 {
@@ -245,7 +245,7 @@ func (k *KingbaseDB) Ping() error {
 
 func (k *KingbaseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if k.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := k.conn.QueryContext(ctx, query)
@@ -259,7 +259,7 @@ func (k *KingbaseDB) QueryContext(ctx context.Context, query string) ([]map[stri
 
 func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if k.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := k.conn.Query(query)
@@ -272,7 +272,7 @@ func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, er
 
 func (k *KingbaseDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if k.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := k.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -283,7 +283,7 @@ func (k *KingbaseDB) ExecContext(ctx context.Context, query string) (int64, erro
 
 func (k *KingbaseDB) Exec(query string) (int64, error) {
 	if k.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := k.conn.Exec(query)
 	if err != nil {
@@ -367,7 +367,7 @@ func (k *KingbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -440,7 +440,7 @@ ORDER BY a.attnum`, esc(schema), esc(table))
 func (k *KingbaseDB) getColumnsWithCurrentSchema(tableName string) ([]connection.ColumnDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	// 转义函数
@@ -524,7 +524,7 @@ func (k *KingbaseDB) GetIndexes(dbName, tableName string) ([]connection.IndexDef
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -622,7 +622,7 @@ func (k *KingbaseDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -704,7 +704,7 @@ func (k *KingbaseDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -747,7 +747,7 @@ func (k *KingbaseDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 
 func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if k.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := k.conn.Begin()
@@ -758,7 +758,7 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 
 	schema, table := splitKingbaseQualifiedTable(tableName)
 	if table == "" {
-		return fmt.Errorf("table name required")
+		return fmt.Errorf("表名不能为空")
 	}
 
 	qualifiedTable := ""
@@ -811,7 +811,7 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
@@ -840,7 +840,7 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v; sql=%s", err, query)
+			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
 		}
 	}
 

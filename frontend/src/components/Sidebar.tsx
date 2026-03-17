@@ -1561,7 +1561,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       hide();
       if (res.success) {
           message.success('导出成功');
-      } else if (res.message !== 'Cancelled') {
+      } else if (res.message !== '已取消') {
           message.error('导出失败: ' + res.message);
       }
   };
@@ -1584,7 +1584,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           hide();
           if (res.success) {
               message.success('导出成功');
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
@@ -1611,7 +1611,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           hide();
           if (res.success) {
               message.success('导出成功');
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
@@ -1800,7 +1800,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               } else {
                   message.success('导出成功');
               }
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
@@ -1940,7 +1940,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               hide();
               if (res.success) {
                   message.success(`${db.dbName} 导出成功`);
-              } else if (res.message !== 'Cancelled') {
+              } else if (res.message !== '已取消') {
                   message.error(`${db.dbName} 导出失败: ` + res.message);
                   break;
               } else {
@@ -1981,7 +1981,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               dbName: dbName,
               query: sqlContent
           });
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           message.error("读取文件失败: " + res.message);
       }
   };

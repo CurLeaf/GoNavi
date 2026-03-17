@@ -267,7 +267,7 @@ func (m *MySQLDB) Close() error {
 
 func (m *MySQLDB) Ping() error {
 	if m.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := m.pingTimeout
 	if timeout <= 0 {
@@ -280,7 +280,7 @@ func (m *MySQLDB) Ping() error {
 
 func (m *MySQLDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if m.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := m.conn.QueryContext(ctx, query)
@@ -294,7 +294,7 @@ func (m *MySQLDB) QueryContext(ctx context.Context, query string) ([]map[string]
 
 func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if m.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := m.conn.Query(query)
@@ -307,7 +307,7 @@ func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error
 
 func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := m.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -318,7 +318,7 @@ func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) 
 
 func (m *MySQLDB) Exec(query string) (int64, error) {
 	if m.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := m.conn.Exec(query)
 	if err != nil {
@@ -380,7 +380,7 @@ func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (m *MySQLDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -514,7 +514,7 @@ func (m *MySQLDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDef
 
 func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if m.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	columnTypeMap := m.loadColumnTypeMap(tableName)
@@ -539,7 +539,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		query := fmt.Sprintf("DELETE FROM `%s` WHERE %s", tableName, strings.Join(wheres, " AND "))
 		res, err := tx.Exec(query, args...)
 		if err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 			return fmt.Errorf("删除未生效：未匹配到任何行")
@@ -567,13 +567,13 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE `%s` SET %s WHERE %s", tableName, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		res, err := tx.Exec(query, args...)
 		if err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 			return fmt.Errorf("更新未生效：未匹配到任何行")
@@ -600,7 +600,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 			query := fmt.Sprintf("INSERT INTO `%s` () VALUES ()", tableName)
 			res, err := tx.Exec(query)
 			if err != nil {
-				return fmt.Errorf("insert error: %v", err)
+				return fmt.Errorf("插入失败：%v", err)
 			}
 			if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 				return fmt.Errorf("插入未生效：未影响任何行")
@@ -611,7 +611,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", tableName, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		res, err := tx.Exec(query, args...)
 		if err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 			return fmt.Errorf("插入未生效：未影响任何行")
@@ -774,7 +774,7 @@ func formatMySQLDateTime(t time.Time) string {
 func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", dbName)
 	if dbName == "" {
-		return nil, fmt.Errorf("database name required for GetAllColumns")
+		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
 	}
 
 	data, _, err := m.Query(query)

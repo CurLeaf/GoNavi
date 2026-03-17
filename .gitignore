@@ -19,7 +19,8 @@ GoNavi-Wails.exe
 .ace-tool/
 .superpowers/
 .claude/
-tmpclaude-*
+.gemini/
+**/tmpclaude-*
 
 CLAUDE.md
 **/CLAUDE.md

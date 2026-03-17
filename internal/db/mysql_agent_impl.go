@@ -429,7 +429,7 @@ func (m *MySQLAgentDB) ApplyChanges(tableName string, changes connection.ChangeS
 
 func (m *MySQLAgentDB) requireClient() (*mysqlAgentClient, error) {
 	if m.client == nil {
-		return nil, fmt.Errorf("connection not open")
+		return nil, fmt.Errorf("连接未打开")
 	}
 	return m.client, nil
 }

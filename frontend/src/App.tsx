@@ -953,7 +953,7 @@ function App() {
           } catch (e) {
               void message.error("解析 JSON 失败");
           }
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           void message.error("导入失败: " + res.message);
       }
   };
@@ -966,7 +966,7 @@ function App() {
       const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           void message.error("导出失败: " + res.message);
       }
   };

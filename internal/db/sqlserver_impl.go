@@ -117,7 +117,7 @@ func (s *SqlServerDB) Close() error {
 
 func (s *SqlServerDB) Ping() error {
 	if s.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := s.pingTimeout
 	if timeout <= 0 {
@@ -130,7 +130,7 @@ func (s *SqlServerDB) Ping() error {
 
 func (s *SqlServerDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := s.conn.QueryContext(ctx, query)
@@ -144,7 +144,7 @@ func (s *SqlServerDB) QueryContext(ctx context.Context, query string) ([]map[str
 
 func (s *SqlServerDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := s.conn.Query(query)
@@ -157,7 +157,7 @@ func (s *SqlServerDB) Query(query string) ([]map[string]interface{}, []string, e
 
 func (s *SqlServerDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if s.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := s.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *SqlServerDB) ExecContext(ctx context.Context, query string) (int64, err
 
 func (s *SqlServerDB) Exec(query string) (int64, error) {
 	if s.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := s.conn.Exec(query)
 	if err != nil {
@@ -236,7 +236,7 @@ func (s *SqlServerDB) GetColumns(dbName, tableName string) ([]connection.ColumnD
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -344,7 +344,7 @@ func (s *SqlServerDB) GetIndexes(dbName, tableName string) ([]connection.IndexDe
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -425,7 +425,7 @@ func (s *SqlServerDB) GetForeignKeys(dbName, tableName string) ([]connection.For
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -483,7 +483,7 @@ func (s *SqlServerDB) GetTriggers(dbName, tableName string) ([]connection.Trigge
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -530,7 +530,7 @@ ORDER BY tr.name`,
 
 func (s *SqlServerDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if s.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := s.conn.Begin()
@@ -573,7 +573,7 @@ func (s *SqlServerDB) ApplyChanges(tableName string, changes connection.ChangeSe
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -601,12 +601,12 @@ func (s *SqlServerDB) ApplyChanges(tableName string, changes connection.ChangeSe
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -630,7 +630,7 @@ func (s *SqlServerDB) ApplyChanges(tableName string, changes connection.ChangeSe
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

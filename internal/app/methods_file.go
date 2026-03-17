@@ -48,7 +48,7 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	content, err := os.ReadFile(selection)
@@ -75,7 +75,7 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	content, err := os.ReadFile(selection)
@@ -120,7 +120,7 @@ func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -192,7 +192,7 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -203,7 +203,7 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 // PreviewImportFile 解析导入文件，返回字段列表、总行数、前 5 行预览数据
 func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 	if filePath == "" {
-		return connection.QueryResult{Success: false, Message: "File path required"}
+		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
 	}
 
 	rows, columns, err := parseImportFile(filePath)
@@ -243,7 +243,7 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	// 返回文件路径供前端预览
@@ -492,7 +492,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 	}
 
 	if len(rows) == 0 {
-		return connection.QueryResult{Success: true, Message: "No data to import"}
+		return connection.QueryResult{Success: true, Message: "无可导入数据"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -584,7 +584,7 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 	})
 
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -616,7 +616,7 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 
-		return connection.QueryResult{Success: true, Message: "Export successful"}
+		return connection.QueryResult{Success: true, Message: "导出完成"}
 	}
 
 	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(runConfig.Type, tableName))
@@ -632,10 +632,10 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 	}
 	defer f.Close()
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func (a *App) ExportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeData bool) connection.QueryResult {
@@ -648,7 +648,7 @@ func (a *App) ExportTablesDataSQL(config connection.ConnectionConfig, dbName str
 
 func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeSchema bool, includeData bool) connection.QueryResult {
 	if !includeSchema && !includeData {
-		return connection.QueryResult{Success: false, Message: "invalid export mode"}
+		return connection.QueryResult{Success: false, Message: "无效的导出模式"}
 	}
 
 	safeDbName := strings.TrimSpace(dbName)
@@ -671,7 +671,7 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 		DefaultFilename: defaultFilename,
 	})
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -717,13 +717,13 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName string, includeData bool) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "dbName required"}
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
 	suffix := "schema"
 	if includeData {
@@ -735,7 +735,7 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		DefaultFilename: fmt.Sprintf("%s_%s.sql", safeDbName, suffix),
 	})
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -772,7 +772,7 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func quoteIdentByType(dbType string, ident string) string {
@@ -1471,7 +1471,7 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 
 	if err != nil || filename == "" {
 		logger.Infof("ExportData 已取消或未选择文件：err=%v", err)
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
 
@@ -1482,11 +1482,11 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 	defer f.Close()
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
 		logger.Warnf("ExportData 写入失败：file=%s err=%v", filename, err)
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportData 完成：file=%s rows=%d", filename, len(data))
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 // ExportQuery exports by executing the provided SELECT query on backend side.
@@ -1494,7 +1494,7 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, query string, defaultName string, format string) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return connection.QueryResult{Success: false, Message: "query required"}
+		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
 	}
 
 	if defaultName == "" {
@@ -1507,7 +1507,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	})
 	if err != nil || filename == "" {
 		logger.Infof("ExportQuery 已取消或未选择文件：err=%v", err)
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
 
@@ -1520,7 +1520,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
 	lowerQuery := strings.ToLower(strings.TrimSpace(query))
 	if !(strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "with")) {
-		return connection.QueryResult{Success: false, Message: "Only SELECT/WITH queries are supported"}
+		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
 	}
 
 	data, columns, err := queryDataForExport(dbInst, runConfig, query)
@@ -1537,11 +1537,11 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
 		logger.Warnf("ExportQuery 写入失败：file=%s err=%v", filename, err)
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, len(data), len(columns))
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func queryDataForExport(dbInst db.Database, config connection.ConnectionConfig, query string) ([]map[string]interface{}, []string, error) {

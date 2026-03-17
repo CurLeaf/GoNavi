@@ -135,7 +135,7 @@ func (o *OracleDB) Close() error {
 
 func (o *OracleDB) Ping() error {
 	if o.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := o.pingTimeout
 	if timeout <= 0 {
@@ -148,7 +148,7 @@ func (o *OracleDB) Ping() error {
 
 func (o *OracleDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if o.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := o.conn.QueryContext(ctx, query)
@@ -162,7 +162,7 @@ func (o *OracleDB) QueryContext(ctx context.Context, query string) ([]map[string
 
 func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if o.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := o.conn.Query(query)
@@ -175,7 +175,7 @@ func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, erro
 
 func (o *OracleDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if o.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := o.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -186,7 +186,7 @@ func (o *OracleDB) ExecContext(ctx context.Context, query string) (int64, error)
 
 func (o *OracleDB) Exec(query string) (int64, error) {
 	if o.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := o.conn.Exec(query)
 	if err != nil {
@@ -259,7 +259,7 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -391,7 +391,7 @@ func (o *OracleDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 
 func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if o.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := o.conn.Begin()
@@ -439,7 +439,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -467,12 +467,12 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -496,7 +496,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

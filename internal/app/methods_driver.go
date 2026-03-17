@@ -353,7 +353,7 @@ func (a *App) SelectDriverDownloadDirectory(currentDir string) connection.QueryR
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	resolved, err := resolveDriverDownloadDirectory(selection)
@@ -392,7 +392,7 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	if abs, err := filepath.Abs(selection); err == nil {
@@ -423,7 +423,7 @@ func (a *App) SelectDriverPackageDirectory(currentPath string) connection.QueryR
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs

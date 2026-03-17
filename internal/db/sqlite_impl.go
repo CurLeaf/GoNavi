@@ -184,7 +184,7 @@ func (s *SQLiteDB) Close() error {
 
 func (s *SQLiteDB) Ping() error {
 	if s.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := s.pingTimeout
 	if timeout <= 0 {
@@ -197,7 +197,7 @@ func (s *SQLiteDB) Ping() error {
 
 func (s *SQLiteDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := s.conn.QueryContext(ctx, query)
@@ -211,7 +211,7 @@ func (s *SQLiteDB) QueryContext(ctx context.Context, query string) ([]map[string
 
 func (s *SQLiteDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if s.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := s.conn.Query(query)
@@ -224,7 +224,7 @@ func (s *SQLiteDB) Query(query string) ([]map[string]interface{}, []string, erro
 
 func (s *SQLiteDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if s.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := s.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -235,7 +235,7 @@ func (s *SQLiteDB) ExecContext(ctx context.Context, query string) (int64, error)
 
 func (s *SQLiteDB) Exec(query string) (int64, error) {
 	if s.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := s.conn.Exec(query)
 	if err != nil {
@@ -275,13 +275,13 @@ func (s *SQLiteDB) GetCreateStatement(dbName, tableName string) (string, error) 
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (s *SQLiteDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -372,7 +372,7 @@ func (s *SQLiteDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 func (s *SQLiteDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -463,7 +463,7 @@ func (s *SQLiteDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 func (s *SQLiteDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -537,7 +537,7 @@ func (s *SQLiteDB) GetForeignKeys(dbName, tableName string) ([]connection.Foreig
 func (s *SQLiteDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -588,7 +588,7 @@ func (s *SQLiteDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 
 func (s *SQLiteDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if s.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := s.conn.Begin()
@@ -634,7 +634,7 @@ func (s *SQLiteDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -659,12 +659,12 @@ func (s *SQLiteDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -686,7 +686,7 @@ func (s *SQLiteDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

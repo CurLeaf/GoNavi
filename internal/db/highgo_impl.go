@@ -125,7 +125,7 @@ func (h *HighGoDB) Close() error {
 
 func (h *HighGoDB) Ping() error {
 	if h.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := h.pingTimeout
 	if timeout <= 0 {
@@ -138,7 +138,7 @@ func (h *HighGoDB) Ping() error {
 
 func (h *HighGoDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if h.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := h.conn.QueryContext(ctx, query)
@@ -152,7 +152,7 @@ func (h *HighGoDB) QueryContext(ctx context.Context, query string) ([]map[string
 
 func (h *HighGoDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if h.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := h.conn.Query(query)
@@ -165,7 +165,7 @@ func (h *HighGoDB) Query(query string) ([]map[string]interface{}, []string, erro
 
 func (h *HighGoDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if h.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := h.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -176,7 +176,7 @@ func (h *HighGoDB) ExecContext(ctx context.Context, query string) (int64, error)
 
 func (h *HighGoDB) Exec(query string) (int64, error) {
 	if h.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := h.conn.Exec(query)
 	if err != nil {
@@ -232,7 +232,7 @@ func (h *HighGoDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -302,7 +302,7 @@ func (h *HighGoDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -407,7 +407,7 @@ func (h *HighGoDB) GetForeignKeys(dbName, tableName string) ([]connection.Foreig
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -467,7 +467,7 @@ func (h *HighGoDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -531,7 +531,7 @@ ORDER BY table_schema, table_name, ordinal_position`
 
 func (h *HighGoDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if h.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := h.conn.Begin()
@@ -579,7 +579,7 @@ func (h *HighGoDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -607,12 +607,12 @@ func (h *HighGoDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -636,7 +636,7 @@ func (h *HighGoDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

@@ -124,7 +124,7 @@ func (v *VastbaseDB) Close() error {
 
 func (v *VastbaseDB) Ping() error {
 	if v.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := v.pingTimeout
 	if timeout <= 0 {
@@ -137,7 +137,7 @@ func (v *VastbaseDB) Ping() error {
 
 func (v *VastbaseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if v.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := v.conn.QueryContext(ctx, query)
@@ -151,7 +151,7 @@ func (v *VastbaseDB) QueryContext(ctx context.Context, query string) ([]map[stri
 
 func (v *VastbaseDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if v.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := v.conn.Query(query)
@@ -164,7 +164,7 @@ func (v *VastbaseDB) Query(query string) ([]map[string]interface{}, []string, er
 
 func (v *VastbaseDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if v.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := v.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -175,7 +175,7 @@ func (v *VastbaseDB) ExecContext(ctx context.Context, query string) (int64, erro
 
 func (v *VastbaseDB) Exec(query string) (int64, error) {
 	if v.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := v.conn.Exec(query)
 	if err != nil {
@@ -231,7 +231,7 @@ func (v *VastbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -301,7 +301,7 @@ func (v *VastbaseDB) GetIndexes(dbName, tableName string) ([]connection.IndexDef
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -406,7 +406,7 @@ func (v *VastbaseDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -466,7 +466,7 @@ func (v *VastbaseDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -530,7 +530,7 @@ ORDER BY table_schema, table_name, ordinal_position`
 
 func (v *VastbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if v.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := v.conn.Begin()
@@ -578,7 +578,7 @@ func (v *VastbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -606,12 +606,12 @@ func (v *VastbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -635,7 +635,7 @@ func (v *VastbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

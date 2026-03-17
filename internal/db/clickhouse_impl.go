@@ -271,7 +271,7 @@ func (c *ClickHouseDB) Close() error {
 
 func (c *ClickHouseDB) Ping() error {
 	if c.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := c.pingTimeout
 	if timeout <= 0 {
@@ -284,7 +284,7 @@ func (c *ClickHouseDB) Ping() error {
 
 func (c *ClickHouseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 	rows, err := c.conn.QueryContext(ctx, query)
 	if err != nil {
@@ -296,7 +296,7 @@ func (c *ClickHouseDB) QueryContext(ctx context.Context, query string) ([]map[st
 
 func (c *ClickHouseDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 	rows, err := c.conn.Query(query)
 	if err != nil {
@@ -308,7 +308,7 @@ func (c *ClickHouseDB) Query(query string) ([]map[string]interface{}, []string, 
 
 func (c *ClickHouseDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := c.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -319,7 +319,7 @@ func (c *ClickHouseDB) ExecContext(ctx context.Context, query string) (int64, er
 
 func (c *ClickHouseDB) Exec(query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := c.conn.Exec(query)
 	if err != nil {
@@ -404,7 +404,7 @@ func (c *ClickHouseDB) GetCreateStatement(dbName, tableName string) (string, err
 		return "", err
 	}
 	if len(data) == 0 {
-		return "", fmt.Errorf("create statement not found")
+		return "", fmt.Errorf("未找到建表语句")
 	}
 	row := data[0]
 	if val, ok := getClickHouseValueFromRow(row, "statement", "create_statement", "sql", "query"); ok {
@@ -427,7 +427,7 @@ func (c *ClickHouseDB) GetCreateStatement(dbName, tableName string) (string, err
 	if longest != "" {
 		return longest, nil
 	}
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (c *ClickHouseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -582,7 +582,7 @@ func (c *ClickHouseDB) GetTriggers(dbName, tableName string) ([]connection.Trigg
 func (c *ClickHouseDB) resolveDatabaseAndTable(dbName, tableName string) (string, string, error) {
 	rawTable := strings.TrimSpace(tableName)
 	if rawTable == "" {
-		return "", "", fmt.Errorf("table name required")
+		return "", "", fmt.Errorf("表名不能为空")
 	}
 
 	resolvedDB := strings.TrimSpace(dbName)
@@ -603,7 +603,7 @@ func (c *ClickHouseDB) resolveDatabaseAndTable(dbName, tableName string) (string
 		resolvedDB = defaultClickHouseDatabase
 	}
 	if resolvedTable == "" {
-		return "", "", fmt.Errorf("table name required")
+		return "", "", fmt.Errorf("表名不能为空")
 	}
 	return resolvedDB, resolvedTable, nil
 }
@@ -682,7 +682,7 @@ func isClickHouseTruthy(value interface{}) bool {
 
 func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if c.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	database, table, err := c.resolveDatabaseAndTable(c.database, tableName)
@@ -723,7 +723,7 @@ func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeS
 			continue
 		}
 		if _, err := c.conn.Exec(query); err != nil {
-			return fmt.Errorf("insert error: %v; sql=%s", err, query)
+			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
 		}
 	}
 	return nil

@@ -120,7 +120,7 @@ func (t *TDengineDB) Close() error {
 
 func (t *TDengineDB) Ping() error {
 	if t.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := t.pingTimeout
 	if timeout <= 0 {
@@ -133,7 +133,7 @@ func (t *TDengineDB) Ping() error {
 
 func (t *TDengineDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if t.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := t.conn.QueryContext(ctx, query)
@@ -147,7 +147,7 @@ func (t *TDengineDB) QueryContext(ctx context.Context, query string) ([]map[stri
 
 func (t *TDengineDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if t.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := t.conn.Query(query)
@@ -161,7 +161,7 @@ func (t *TDengineDB) Query(query string) ([]map[string]interface{}, []string, er
 
 func (t *TDengineDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if t.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := t.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -172,7 +172,7 @@ func (t *TDengineDB) ExecContext(ctx context.Context, query string) (int64, erro
 
 func (t *TDengineDB) Exec(query string) (int64, error) {
 	if t.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := t.conn.Exec(query)
 	if err != nil {
@@ -274,7 +274,7 @@ func (t *TDengineDB) GetCreateStatement(dbName, tableName string) (string, error
 	if lastErr != nil {
 		return "", lastErr
 	}
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (t *TDengineDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -325,7 +325,7 @@ func (t *TDengineDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 
 func (t *TDengineDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	if strings.TrimSpace(dbName) == "" {
-		return nil, fmt.Errorf("database name required for GetAllColumns")
+		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
 	}
 
 	tables, err := t.GetTables(dbName)
@@ -365,10 +365,10 @@ func (t *TDengineDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 
 func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if t.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	if strings.TrimSpace(tableName) == "" {
-		return fmt.Errorf("table name required")
+		return fmt.Errorf("表名不能为空")
 	}
 	if len(changes.Updates) > 0 || len(changes.Deletes) > 0 {
 		return fmt.Errorf("TDengine 目标端当前仅支持 INSERT 写入，暂不支持 UPDATE/DELETE 差异同步，请改用仅插入或全量覆盖模式")
@@ -384,7 +384,7 @@ func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet
 			continue
 		}
 		if _, err := t.conn.Exec(query); err != nil {
-			return fmt.Errorf("insert error: %v; sql=%s", err, query)
+			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
 		}
 	}
 	return nil
@@ -392,7 +392,7 @@ func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet
 
 func buildTDengineInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {
 	if strings.TrimSpace(qualifiedTable) == "" {
-		return "", fmt.Errorf("qualified table required")
+		return "", fmt.Errorf("需要指定完整的表名")
 	}
 	if len(row) == 0 {
 		return "", nil

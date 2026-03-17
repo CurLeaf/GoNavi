@@ -847,7 +847,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
     const fileRes = await SelectDriverPackageFile(downloadDir);
     if (!fileRes?.success) {
-      if (String(fileRes?.message || '') !== 'Cancelled') {
+      if (String(fileRes?.message || '') !== '已取消') {
         message.error(fileRes?.message || '选择本地驱动包文件失败');
       }
       return;
@@ -863,7 +863,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const installDriversFromDirectory = useCallback(async () => {
     const directoryRes = await SelectDriverPackageDirectory(downloadDir);
     if (!directoryRes?.success) {
-      if (String(directoryRes?.message || '') !== 'Cancelled') {
+      if (String(directoryRes?.message || '') !== '已取消') {
         message.error(directoryRes?.message || '选择本地驱动包目录失败');
       }
       return;

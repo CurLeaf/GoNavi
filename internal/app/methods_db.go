@@ -116,7 +116,7 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Database created successfully"}
+	return connection.QueryResult{Success: true, Message: "数据库创建成功"}
 }
 
 func resolveDDLDBType(config connection.ConnectionConfig) string {

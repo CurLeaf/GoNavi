@@ -1086,7 +1086,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const res = await ExportData(cleanRows, displayColumnNames, tableName || 'export', format);
           if (res.success) {
               void message.success("导出成功");
-          } else if (res.message !== "Cancelled") {
+          } else if (res.message !== "已取消") {
               void message.error("导出失败: " + res.message);
           }
       } catch (e: any) {
@@ -2829,7 +2829,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const res = await ExportQuery(config as any, dbName || '', sql, defaultName || 'export', format);
           if (res.success) {
               void message.success("导出成功");
-          } else if (res.message !== "Cancelled") {
+          } else if (res.message !== "已取消") {
               void message.error("导出失败: " + res.message);
           }
       } catch (e: any) {
@@ -2947,7 +2947,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               const res = await ExportTable(config as any, dbName || '', tableName, format);
               if (res.success) {
                   void message.success("导出成功");
-              } else if (res.message !== "Cancelled") {
+              } else if (res.message !== "已取消") {
                   void message.error("导出失败: " + res.message);
               }
           } catch (e: any) {
@@ -3023,7 +3023,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (res.success && res.data && res.data.filePath) {
           setImportFilePath(res.data.filePath);
           setImportPreviewVisible(true);
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           void message.error("选择文件失败: " + res.message);
       }
   };
@@ -3371,11 +3371,6 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const liveTargets = tableScrollTargetsRef.current;
-      if (liveTargets.length === 0) {
-          return;
-      }
-
       if (Math.abs(lastExternalScrollLeftRef.current - externalScroll.scrollLeft) < 1) {
           return;
       }
@@ -3383,10 +3378,19 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       horizontalSyncSourceRef.current = 'external';
       const tableContainer = tableContainerRef.current;
+      // 虚拟表格路径：直接操作 DOM 的 marginLeft / scrollLeft，不依赖 liveTargets。
+      // 将此分支提前到 liveTargets 检查之前，避免 targets 在数据加载时暂时为空
+      // 导致虚拟表格的横向滚动同步被永久阻塞。
       if (enableVirtual && tableContainer instanceof HTMLElement) {
           if (applyVirtualHorizontalOffset(tableContainer, externalScroll.scrollLeft)) {
               lastTableScrollLeftRef.current = externalScroll.scrollLeft;
           }
+          horizontalSyncSourceRef.current = '';
+          return;
+      }
+      // 非虚拟表格路径：依赖 liveTargets 进行 scrollLeft 同步
+      const liveTargets = tableScrollTargetsRef.current;
+      if (liveTargets.length === 0) {
           horizontalSyncSourceRef.current = '';
           return;
       }
