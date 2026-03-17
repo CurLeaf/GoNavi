@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
+import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
@@ -41,7 +41,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [activeResultKey, setActiveResultKey] = useState<string>('');
   
   const [loading, setLoading] = useState(false);
-  const [currentQueryId, setCurrentQueryId] = useState<string>('');
+  const [, setCurrentQueryId] = useState<string>('');
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
@@ -183,7 +183,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               setDbList([]);
           }
       };
-      fetchDbs();
+      void fetchDbs();
   }, [currentConnectionId, connections]);
 
   // Fetch Metadata for Autocomplete (Cross-database)
@@ -235,7 +235,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           tablesRef.current = allTables;
           allColumnsRef.current = allColumns;
       };
-      fetchMetadata();
+      void fetchMetadata();
   }, [currentConnectionId, connections, dbList]); // dbList 变化时触发重新加载
 
   // Query ID management helpers
@@ -370,7 +370,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
 
               // 0) 三段式 db.table.column 格式：当输入 db.table. 时提示列
-              const threePartMatch = linePrefix.match(/([`"]?[\w]+[`"]?)\.([`"]?[\w]+[`"]?)\.(\w*)$/);
+              const threePartMatch = linePrefix.match(/([`"]?\w+[`"]?)\.([`"]?\w+[`"]?)\.(\w*)$/);
               if (threePartMatch) {
                   const dbPart = stripQuotes(threePartMatch[1]);
                   const tablePart = stripQuotes(threePartMatch[2]);
@@ -398,7 +398,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               // 1) 两段式 qualifier.xxx 格式
-              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_][\w]*[`"]?)\.(\w*)$/);
+              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_]\w*[`"]?)\.(\w*)$/);
               if (qualifierMatch) {
                   const qualifier = stripQuotes(qualifierMatch[1]);
                   const prefix = (qualifierMatch[2] || '').toLowerCase();
@@ -463,7 +463,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                   const aliasMap: Record<string, {dbName: string, tableName: string}> = {};
                   // Capture table and optional alias, support db.table format
-                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?[\w]+[`"]?))?/gi;
+                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?\w+[`"]?))?/gi;
                   let m;
                   while ((m = aliasRegex.exec(fullText)) !== null) {
                       const tableIdent = normalizeQualifiedName(m[1] || '');
@@ -492,7 +492,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
                       // Prefer preloaded MySQL all-columns cache
-                      let cols: { name: string, type?: string, tableName?: string, dbName?: string }[] = [];
+                      let cols: { name: string, type?: string, tableName?: string, dbName?: string }[];
                       if (allColumnsRef.current.length > 0) {
                           cols = allColumnsRef.current
                               .filter(c =>
@@ -522,7 +522,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               // 2) global/table/column completion
-              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)/gi;
+              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)/gi;
               const foundTables = new Set<string>();
               let match;
               while ((match = tableRegex.exec(fullText)) !== null) {
@@ -626,7 +626,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           const formatted = format(getCurrentQuery(), { language: 'mysql', keywordCase: sqlFormatOptions.keywordCase });
           syncQueryToEditor(formatted);
       } catch (e) {
-          message.error("格式化失败: SQL 语法可能有误");
+          void message.error("格式化失败: SQL 语法可能有误");
       }
   };
 
@@ -776,6 +776,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     return statements;
   };
 
+  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
+  // 当恢复前端自动行数限制功能时需要启用。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getLeadingKeyword = (sql: string): string => {
       const text = (sql || '').replace(/\r\n/g, '\n');
       const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
@@ -1068,6 +1071,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       return -1;
   };
 
+  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
+  // 当恢复前端自动行数限制功能时需要启用。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
       const normalizedType = (dbType || 'mysql').toLowerCase();
       const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === 'clickhouse' || normalizedType === '';
@@ -1176,9 +1182,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
             const nextResultSets: ResultSet[] = [];
             const maxRows = Number(queryOptions?.maxRows) || 0;
-            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
             const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
-            const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
             let anyTruncated = false;
 
             for (let idx = 0; idx < statements.length; idx++) {
@@ -1635,8 +1639,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
           setActiveResultKey(prevActive => {
               if (prevActive && prevActive !== key) return prevActive;
-              const nextKey = next[idx]?.key || next[idx - 1]?.key || next[0]?.key || '';
-              return nextKey;
+              return next[idx]?.key || next[idx - 1]?.key || next[0]?.key || '';
           });
 
           return next;
