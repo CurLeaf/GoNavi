@@ -237,9 +237,6 @@ func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	params.Set("serverSelectionTimeoutMS", strconv.Itoa(timeout*1000))
 
 	authSource := strings.TrimSpace(config.AuthSource)
-	if authSource == "" && strings.TrimSpace(config.Database) != "" {
-		authSource = strings.TrimSpace(config.Database)
-	}
 	if authSource == "" {
 		authSource = "admin"
 	}
