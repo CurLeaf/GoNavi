@@ -2676,7 +2676,7 @@ END;`;
             cancelText="取消"
         >
             <div style={{ maxHeight: '400px', overflow: 'auto' }}>
-                <pre style={{ background: '#f5f5f5', padding: '10px', borderRadius: '4px', border: '1px solid #eee', whiteSpace: 'pre-wrap' }}>
+                <pre style={{ background: darkMode ? '#1e1e1e' : '#f5f5f5', color: darkMode ? '#d4d4d4' : 'inherit', padding: '10px', borderRadius: '4px', border: darkMode ? '1px solid #333' : '1px solid #eee', whiteSpace: 'pre-wrap' }}>
                     {previewSql}
                 </pre>
             </div>
