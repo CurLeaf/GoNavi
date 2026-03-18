@@ -690,7 +690,7 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
     ];
 
     return (
-        <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
+        <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']} getPopupContainer={() => document.body} autoAdjustOverflow>
             <tr {...props}>{children}</tr>
         </Dropdown>
     );
@@ -1099,10 +1099,25 @@ const DataGrid: React.FC<DataGridProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const titleText = typeof (title as any) === 'string' ? (title as string) : (typeof (title as any) === 'number' ? String(title) : String(dataIndex));
+    // 预估菜单尺寸（菜单项数 × 行高 + 分隔线 + padding）
+    const estimatedMenuHeight = 320;
+    const estimatedMenuWidth = 200;
+    const viewportH = window.innerHeight;
+    const viewportW = window.innerWidth;
+    let menuY = e.clientY;
+    let menuX = e.clientX;
+    // 底部空间不足时向上偏移
+    if (menuY + estimatedMenuHeight > viewportH) {
+      menuY = Math.max(4, viewportH - estimatedMenuHeight);
+    }
+    // 右侧空间不足时向左偏移
+    if (menuX + estimatedMenuWidth > viewportW) {
+      menuX = Math.max(4, viewportW - estimatedMenuWidth);
+    }
     setCellContextMenu({
       visible: true,
-      x: e.clientX,
-      y: e.clientY,
+      x: menuX,
+      y: menuY,
       record,
       dataIndex,
       title: titleText,
@@ -4204,8 +4219,16 @@ const DataGrid: React.FC<DataGridProps> = ({
 	               setSelectedRowKeys([]);
 	               onReload();
 	           }}>刷新</Button>}
-	           {canImport && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
-	           {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
+
+	           {onToggleFilter && (
+	               <>
+	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
+	                   <Button icon={<FilterOutlined />} type={showFilter ? 'primary' : 'default'} onClick={() => { 
+	                       onToggleFilter(); 
+	                       if (filterConditions.length === 0 && !showFilter) addFilter(); 
+	                   }}>筛选</Button>
+	               </>
+	           )}
 	           
 	           {canModifyData && (
 	               <>
@@ -4295,13 +4318,11 @@ const DataGrid: React.FC<DataGridProps> = ({
                </>
            )}
 
-           {onToggleFilter && (
+           {(canImport || canExport) && (
                <>
                    <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
-                   <Button icon={<FilterOutlined />} type={showFilter ? 'primary' : 'default'} onClick={() => { 
-                       onToggleFilter(); 
-                       if (filterConditions.length === 0 && !showFilter) addFilter(); 
-                   }}>筛选</Button>
+                   {canImport && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
+                   {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
                </>
            )}
 
@@ -4771,6 +4792,8 @@ const DataGrid: React.FC<DataGridProps> = ({
                     borderRadius: 4,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                     minWidth: 160,
+                    maxHeight: `calc(100vh - ${cellContextMenu.y}px - 8px)`,
+                    overflowY: 'auto',
                     color: darkMode ? '#fff' : 'rgba(0, 0, 0, 0.88)'
                 }}
                 onClick={(e) => e.stopPropagation()}
