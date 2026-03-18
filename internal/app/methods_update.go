@@ -957,8 +957,25 @@ if %ERRORLEVEL%==0 (
 )
 call :log host process exited
 
+rem -- Win10 needs extra time for kernel to release exe file handles --
+timeout /t 3 /nobreak >nul
+call :log cooldown finished, starting file replace
+
 set /a RETRY=0
 :move_retry
+call :log attempt !RETRY!: trying rename-then-copy strategy
+ren "%TARGET%" "%TARGET_NAME%.old" >> "%LOG_FILE%" 2>&1
+if %ERRORLEVEL%==0 (
+  copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
+  if !ERRORLEVEL!==0 (
+    del /F /Q "%TARGET%.old" >> "%LOG_FILE%" 2>&1
+    goto move_done
+  )
+  call :log copy after rename failed, restoring old file
+  ren "%TARGET_NAME%.old" "%TARGET_NAME%" >> "%LOG_FILE%" 2>&1
+)
+
+call :log rename strategy failed, trying direct move
 move /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL%==0 goto move_done
 
@@ -966,8 +983,13 @@ copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL%==0 goto move_done
 
 set /a RETRY+=1
-if !RETRY! LSS 20 (
-  timeout /t 1 /nobreak >nul
+if !RETRY! LSS 15 (
+  set /a WAIT=1
+  if !RETRY! GEQ 3 set /a WAIT=2
+  if !RETRY! GEQ 6 set /a WAIT=3
+  if !RETRY! GEQ 9 set /a WAIT=5
+  call :log waiting !WAIT! seconds before retry
+  timeout /t !WAIT! /nobreak >nul
   goto move_retry
 )
 
@@ -975,6 +997,7 @@ call :log replace failed after retries (portable mode, no elevation): check dire
 exit /b 1
 
 :move_done
+del /F /Q "%TARGET%.old" >> "%LOG_FILE%" 2>&1
 start "" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process
