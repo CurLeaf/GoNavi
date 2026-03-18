@@ -107,6 +107,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const tableSortPreference = useStore(state => state.tableSortPreference);
   const recordTableAccess = useStore(state => state.recordTableAccess);
   const setTableSortPreference = useStore(state => state.setTableSortPreference);
+  const addSqlLog = useStore(state => state.addSqlLog);
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
@@ -1806,6 +1807,95 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       } catch (e: any) {
           hide();
           message.error('导出失败: ' + (e?.message || String(e)));
+      }
+  };
+
+  const handleBatchClear = async () => {
+      const selectedObjects = batchTables.filter(t => checkedTableKeys.includes(t.key));
+      if (selectedObjects.length === 0) {
+          message.warning('请至少选择一个对象');
+          return;
+      }
+
+      const { conn, dbName } = batchDbContext;
+      const objectNames = selectedObjects.map(t => t.objectName);
+
+      const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+              title: '确认清空选中表',
+              content: `清空选中表会永久删除表中所有数据，操作不可逆，是否继续？\r\n\r\n连接: ${conn.name}\n数据库: ${dbName}`,
+              okText: '继续',
+              cancelText: '取消',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+          });
+      });
+      if (!ok) return;
+
+      setIsBatchModalOpen(false);
+      const hide = message.loading(`正在清空选中表 (${objectNames.length})...`, 0);
+      const startTime = Date.now();
+      try {
+          const app = (window as any).go.app.App;
+          const res = await app.TruncateTables(normalizeConnConfig(conn.config), dbName, objectNames);
+          const duration = Date.now() - startTime;
+          hide();
+          if (res.success) {
+              message.success('清空成功');
+              // 构造 SQL 日志
+              let logSql = `/* Truncate Tables (${objectNames.length} tables) */\n`;
+              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
+                  logSql += res.data.executedSQLs.join(';\n') + ';';
+              } else {
+                  logSql += objectNames.map(name => name).join('; ');
+              }
+              addSqlLog({
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  sql: logSql,
+                  status: 'success',
+                  duration,
+                  message: res.message,
+                  dbName,
+                  affectedRows: res.data?.count || 0
+              });
+          } else if (res.message !== 'Cancelled') {
+              message.error('清空失败: ' + res.message);
+              // 记录失败的日志
+              const duration = Date.now() - startTime;
+              let logSql = `/* Truncate Tables (${objectNames.length} tables) - FAILED */\n`;
+              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
+                  logSql += res.data.executedSQLs.join(';\n') + ';';
+              } else {
+                  logSql += objectNames.map(name => name).join('; ');
+              }
+              addSqlLog({
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  sql: logSql,
+                  status: 'error',
+                  duration,
+                  message: res.message,
+                  dbName
+              });
+          }
+      } catch (e: any) {
+          const duration = Date.now() - startTime;
+          hide();
+          const errMsg = e?.message || String(e);
+          message.error('清空失败: ' + errMsg);
+          // 记录异常的日志
+          let logSql = `/* Truncate Tables (${objectNames.length} tables) - ERROR */\n`;
+          logSql += objectNames.map(name => name).join('; ');
+          addSqlLog({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              sql: logSql,
+              status: 'error',
+              duration,
+              message: errMsg,
+              dbName
+          });
       }
   };
 
@@ -3717,6 +3807,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         取消
                     </Button>
                     <Space size={8} wrap style={{ marginLeft: 'auto' }}>
+                        <Button
+                            key="clear"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => handleBatchClear()}
+                            disabled={checkedTableKeys.length === 0}
+                        >
+                            清空表
+                        </Button>
                         <Button
                             key="export-schema"
                             icon={<ExportOutlined />}
