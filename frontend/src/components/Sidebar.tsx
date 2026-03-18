@@ -89,6 +89,7 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const deleteQuery = useStore(state => state.deleteQuery);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -2064,7 +2065,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           const { dbName, id } = node.dataRef;
           addTab({
               id: `query-${Date.now()}`,
-              title: `Import SQL`,
+              title: `运行外部SQL文件`,
               type: 'query',
               connectionId: node.type === 'connection' ? node.key : node.dataRef.id,
               dbName: dbName,
@@ -2072,6 +2073,27 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           });
       } else if (res.message !== "已取消") {
           message.error("读取文件失败: " + res.message);
+      }
+  };
+
+  const handleOpenSQLFileFromToolbar = async () => {
+      const ctx = useStore.getState().activeContext;
+      if (!ctx?.connectionId) {
+          message.warning('请先选择一个连接或数据库');
+          return;
+      }
+      const res = await (window as any).go.app.App.OpenSQLFile();
+      if (res.success) {
+          addTab({
+              id: `query-${Date.now()}`,
+              title: `运行外部SQL文件`,
+              type: 'query',
+              connectionId: ctx.connectionId,
+              dbName: ctx.dbName || undefined,
+              query: res.data
+          });
+      } else if (res.message !== '已取消') {
+          message.error('读取文件失败: ' + res.message);
       }
   };
 
@@ -3071,6 +3093,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                    });
                }
              },
+             {
+                 key: 'open-sql-file',
+                 label: '运行外部SQL文件',
+                 icon: <FileAddOutlined />,
+                 onClick: () => handleRunSQLFile(node)
+             },
              { type: 'divider' },
              {
                  key: 'edit',
@@ -3257,7 +3285,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
              },
              {
                  key: 'run-sql',
-                 label: '运行 SQL 文件...',
+                 label: '运行外部SQL文件',
                  icon: <FileAddOutlined />,
                  onClick: () => handleRunSQLFile(node)
              }
@@ -3414,6 +3442,56 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
         ];
     }
+
+    // 已存查询节点的右键菜单
+    if (node.type === 'saved-query') {
+        const q = node.dataRef;
+        return [
+            {
+                key: 'open-query',
+                label: '打开查询',
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: q.id,
+                        title: q.name,
+                        type: 'query',
+                        connectionId: q.connectionId,
+                        dbName: q.dbName,
+                        query: q.sql,
+                        savedQueryId: q.id,
+                    });
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-query',
+                label: '删除查询',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    Modal.confirm({
+                        title: '确认删除',
+                        content: `确定要删除已保存的查询 "${q.name}" 吗？此操作不可恢复。`,
+                        okButtonProps: { danger: true },
+                        onOk: () => {
+                            deleteQuery(q.id);
+                            // 从树中移除节点
+                            setTreeData(origin => {
+                                const removeNode = (list: TreeNode[]): TreeNode[] =>
+                                    list
+                                        .filter(n => n.key !== node.key)
+                                        .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
+                                return removeNode(origin);
+                            });
+                            message.success('查询已删除');
+                        }
+                    });
+                }
+            }
+        ];
+    }
+
     return [];
   };
 
@@ -3625,6 +3703,14 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 style={{ flex: '1 1 auto' }}
             >
                 批量操作库
+            </Button>
+            <Button
+                size="small"
+                icon={<FileAddOutlined />}
+                onClick={handleOpenSQLFileFromToolbar}
+                style={{ flex: '1 1 auto' }}
+            >
+                运行外部SQL文件
             </Button>
         </div>
 
