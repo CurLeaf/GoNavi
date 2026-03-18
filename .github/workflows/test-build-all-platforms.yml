@@ -1,4 +1,4 @@
-﻿name: Test Build All Platforms (Manual)
+name: Test Build All Platforms (Manual)
 
 on:
   workflow_dispatch:
@@ -100,13 +100,21 @@ jobs:
         if: contains(matrix.platform, 'windows')
         shell: pwsh
         run: |
-          choco install upx --no-progress -y
-          $upxCmd = Get-Command upx -ErrorAction SilentlyContinue
-          if ($null -eq $upxCmd) {
+          $UPX_VERSION = "4.2.4"
+          $url = "https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-win64.zip"
+          $zipPath = "$env:RUNNER_TEMP\upx.zip"
+          $extractPath = "$env:RUNNER_TEMP\upx"
+          Write-Host "📥 从 GitHub Releases 下载 UPX v${UPX_VERSION} ..."
+          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          $upxDir = Get-ChildItem -Path $extractPath -Directory | Select-Object -First 1
+          "$($upxDir.FullName)" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $upxCmd = Join-Path $upxDir.FullName "upx.exe"
+          if (!(Test-Path $upxCmd)) {
             Write-Error "❌ 未检测到 upx，无法保证 Windows 测试产物经过压缩"
             exit 1
           }
-          & upx --version
+          & $upxCmd --version
 
       - name: Install Linux Dependencies
         if: contains(matrix.platform, 'linux')
