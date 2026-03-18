@@ -373,3 +373,7 @@ export function SetWindowTranslucency(arg1, arg2) {
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
+
+export function TruncateTables(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TruncateTables'](arg1, arg2, arg3);
+}
