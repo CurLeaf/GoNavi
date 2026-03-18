@@ -747,6 +747,10 @@ type ColumnMeta = {
     comment: string;
 };
 
+// P2 性能优化：提取内联 style 对象为模块级常量，避免每次 render 创建新对象
+const CELL_ELLIPSIS_STYLE: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+const VIRTUAL_CELL_WRAPPER_STYLE: React.CSSProperties = { margin: -8, padding: '8px 8px 8px 8px' };
+
 const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], readOnly = false,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions,
@@ -898,82 +902,101 @@ const DataGrid: React.FC<DataGridProps> = ({
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
-  // Background Helper
-  const getBg = (darkHex: string) => {
-      if (!darkMode) return `rgba(255, 255, 255, ${opacity})`;
-      const hex = darkHex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-  };
-  const bgContent = getBg('#1d1d1d');
-  const bgFilter = getBg('#262626');
-  const bgContextMenu = darkMode ? '#1f1f1f' : '#ffffff';
-  
-  // Row Colors with Opacity
-  const getRowBg = (r: number, g: number, b: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`;
-  const rowAddedBg = darkMode ? getRowBg(22, 43, 22) : getRowBg(246, 255, 237);
-  const rowModBg = darkMode ? getRowBg(22, 34, 56) : getRowBg(230, 247, 255);
-  const rowAddedHover = darkMode ? getRowBg(31, 61, 31) : getRowBg(217, 247, 190);
-  const rowModHover = darkMode ? getRowBg(29, 53, 94) : getRowBg(186, 231, 255);
-  const selectionAccentHex = darkMode ? '#f6c453' : '#1890ff';
-  const selectionAccentRgb = darkMode ? '246, 196, 83' : '24, 144, 255';
-  const darkHighlightTextColor = 'rgba(255, 236, 179, 0.98)';
-  const lightMetaHintColor = '#595959';
-  const lightMetaTooltipColor = '#262626';
+  // --- 主题样式变量（仅在 darkMode / opacity / blur 变化时重算） ---
+  const themeStyles = useMemo(() => {
+      const _getBg = (darkHex: string) => {
+          if (!darkMode) return `rgba(255, 255, 255, ${opacity})`;
+          const hex = darkHex.replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16);
+          const g = parseInt(hex.substring(2, 4), 16);
+          const b = parseInt(hex.substring(4, 6), 16);
+          return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+      };
+      const _rowBg = (r: number, g: number, b: number) => `rgba(${r}, ${g}, ${b}, ${opacity})`;
+      const _glassMode = opacity < 0.999 || resolvedAppearance.blur > 0;
+
+      return {
+          bgContent: _getBg('#1d1d1d'),
+          bgFilter: _getBg('#262626'),
+          bgContextMenu: darkMode ? '#1f1f1f' : '#ffffff',
+          rowAddedBg: darkMode ? _rowBg(22, 43, 22) : _rowBg(246, 255, 237),
+          rowModBg: darkMode ? _rowBg(22, 34, 56) : _rowBg(230, 247, 255),
+          rowAddedHover: darkMode ? _rowBg(31, 61, 31) : _rowBg(217, 247, 190),
+          rowModHover: darkMode ? _rowBg(29, 53, 94) : _rowBg(186, 231, 255),
+          selectionAccentHex: darkMode ? '#f6c453' : '#1890ff',
+          selectionAccentRgb: darkMode ? '246, 196, 83' : '24, 144, 255',
+          columnMetaHintColor: darkMode ? 'rgba(255, 236, 179, 0.98)' : '#595959',
+          columnMetaTooltipColor: darkMode ? 'rgba(255, 236, 179, 0.98)' : '#262626',
+          panelFrameColor: darkMode ? 'rgba(0, 0, 0, 0.42)' : 'rgba(0, 0, 0, 0.18)',
+          floatingScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.44)',
+          floatingScrollbarThumbBorderColor: darkMode ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.52)',
+          floatingScrollbarThumbShadow: darkMode ? '0 4px 14px rgba(0,0,0,0.42)' : '0 4px 10px rgba(0,0,0,0.20)',
+          verticalScrollbarTrackBg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+          horizontalScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.14)',
+          toolbarDividerColor: darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)',
+          paginationShellBg: darkMode
+              ? `linear-gradient(135deg, rgba(17,22,34,${_glassMode ? Math.max(0.22, opacity * 0.38) : 0.82}) 0%, rgba(10,14,24,${_glassMode ? Math.max(0.28, opacity * 0.46) : 0.9}) 100%)`
+              : `linear-gradient(135deg, rgba(255,255,255,${_glassMode ? Math.max(0.24, opacity * 0.36) : 0.96}) 0%, rgba(246,248,252,${_glassMode ? Math.max(0.32, opacity * 0.44) : 0.99}) 100%)`,
+          paginationShellBorderColor: darkMode
+              ? `rgba(255,255,255,${_glassMode ? 0.10 : 0.08})`
+              : `rgba(16,24,40,${_glassMode ? 0.08 : 0.08})`,
+          paginationShellShadow: darkMode
+              ? `0 16px 34px rgba(0,0,0,${_glassMode ? 0.10 : 0.22})`
+              : `0 14px 30px rgba(15,23,42,${_glassMode ? 0.03 : 0.08})`,
+          paginationChipBg: darkMode
+              ? `rgba(255,255,255,${_glassMode ? Math.max(0.02, opacity * 0.035) : 0.04})`
+              : `rgba(255,255,255,${_glassMode ? Math.max(0.18, opacity * 0.26) : 0.86})`,
+          paginationChipBorderColor: darkMode
+              ? `rgba(255,255,255,${_glassMode ? 0.10 : 0.08})`
+              : `rgba(16,24,40,${_glassMode ? 0.10 : 0.08})`,
+          paginationHoverBg: darkMode
+              ? `rgba(255,255,255,${_glassMode ? Math.max(0.04, opacity * 0.06) : 0.07})`
+              : `rgba(255,255,255,${_glassMode ? Math.max(0.24, opacity * 0.34) : 0.96})`,
+          paginationPrimaryTextColor: darkMode ? '#f5f7ff' : '#162033',
+          paginationSecondaryTextColor: darkMode ? 'rgba(255,255,255,0.54)' : 'rgba(16,24,40,0.56)',
+          paginationAccentBg: darkMode ? 'rgba(255,214,102,0.14)' : 'rgba(24,144,255,0.10)',
+          paginationAccentBorderColor: darkMode ? 'rgba(255,214,102,0.38)' : 'rgba(24,144,255,0.22)',
+          paginationActiveItemBg: darkMode ? 'rgba(255,214,102,0.18)' : 'rgba(24,144,255,0.12)',
+          paginationActiveItemBorderColor: darkMode ? 'rgba(255,214,102,0.46)' : 'rgba(24,144,255,0.28)',
+          paginationActiveItemTextColor: darkMode ? '#fff7d6' : '#0958d9',
+      };
+  }, [darkMode, opacity, resolvedAppearance.blur]);
+
+  // 解构常用变量以保持后续代码引用不变
+  const {
+      bgContent, bgFilter, bgContextMenu,
+      rowAddedBg, rowModBg, rowAddedHover, rowModHover,
+      selectionAccentHex, selectionAccentRgb,
+      columnMetaHintColor, columnMetaTooltipColor,
+      panelFrameColor,
+      floatingScrollbarThumbBg, floatingScrollbarThumbBorderColor, floatingScrollbarThumbShadow,
+      verticalScrollbarTrackBg, horizontalScrollbarThumbBg,
+      toolbarDividerColor,
+      paginationShellBg, paginationShellBorderColor, paginationShellShadow,
+      paginationChipBg, paginationChipBorderColor, paginationHoverBg,
+      paginationPrimaryTextColor, paginationSecondaryTextColor,
+      paginationAccentBg, paginationAccentBorderColor,
+      paginationActiveItemBg, paginationActiveItemBorderColor, paginationActiveItemTextColor,
+  } = themeStyles;
+
+  // 布局常量（纯数字/字符串，无需 memoize）
   const panelRadius = 10;
   const panelOuterGap = 6;
   const panelPaddingY = 10;
   const panelPaddingX = 12;
   const toolbarBottomPadding = 6;
   const filterTopPadding = 2;
-  const panelFrameColor = darkMode ? 'rgba(0, 0, 0, 0.42)' : 'rgba(0, 0, 0, 0.18)';
   const floatingScrollbarGap = 8;
   const floatingScrollbarBottomOffset = 0;
   const floatingScrollbarInset = 10;
   const floatingScrollbarHeight = 10;
-  const floatingScrollbarThumbBg = darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.44)';
-  const floatingScrollbarThumbBorderColor = darkMode ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.52)';
-  const floatingScrollbarThumbShadow = darkMode ? '0 4px 14px rgba(0,0,0,0.42)' : '0 4px 10px rgba(0,0,0,0.20)';
-  const verticalScrollbarTrackBg = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
   const horizontalScrollbarTrackBg = 'transparent';
   const horizontalScrollbarTrackBorderColor = 'transparent';
   const horizontalScrollbarTrackShadow = 'none';
-  const horizontalScrollbarThumbBg = darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.14)';
   const horizontalScrollbarThumbBorderColor = 'transparent';
   const horizontalScrollbarThumbShadow = 'none';
   const externalScrollbarMinWidth = 1;
-  const toolbarDividerColor = darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
-  const columnMetaHintColor = darkMode ? darkHighlightTextColor : lightMetaHintColor;
-  const columnMetaTooltipColor = darkMode ? darkHighlightTextColor : lightMetaTooltipColor;
   const paginationPageSizeOptions = ['100', '200', '500', '1000'];
-  const paginationGlassMode = opacity < 0.999 || resolvedAppearance.blur > 0;
-  const paginationShellBg = darkMode
-      ? `linear-gradient(135deg, rgba(17,22,34,${paginationGlassMode ? Math.max(0.22, opacity * 0.38) : 0.82}) 0%, rgba(10,14,24,${paginationGlassMode ? Math.max(0.28, opacity * 0.46) : 0.9}) 100%)`
-      : `linear-gradient(135deg, rgba(255,255,255,${paginationGlassMode ? Math.max(0.24, opacity * 0.36) : 0.96}) 0%, rgba(246,248,252,${paginationGlassMode ? Math.max(0.32, opacity * 0.44) : 0.99}) 100%)`;
-  const paginationShellBorderColor = darkMode
-      ? `rgba(255,255,255,${paginationGlassMode ? 0.10 : 0.08})`
-      : `rgba(16,24,40,${paginationGlassMode ? 0.08 : 0.08})`;
-  const paginationShellShadow = darkMode
-      ? `0 16px 34px rgba(0,0,0,${paginationGlassMode ? 0.10 : 0.22})`
-      : `0 14px 30px rgba(15,23,42,${paginationGlassMode ? 0.03 : 0.08})`;
-  const paginationChipBg = darkMode
-      ? `rgba(255,255,255,${paginationGlassMode ? Math.max(0.02, opacity * 0.035) : 0.04})`
-      : `rgba(255,255,255,${paginationGlassMode ? Math.max(0.18, opacity * 0.26) : 0.86})`;
-  const paginationChipBorderColor = darkMode
-      ? `rgba(255,255,255,${paginationGlassMode ? 0.10 : 0.08})`
-      : `rgba(16,24,40,${paginationGlassMode ? 0.10 : 0.08})`;
-  const paginationHoverBg = darkMode
-      ? `rgba(255,255,255,${paginationGlassMode ? Math.max(0.04, opacity * 0.06) : 0.07})`
-      : `rgba(255,255,255,${paginationGlassMode ? Math.max(0.24, opacity * 0.34) : 0.96})`;
-  const paginationPrimaryTextColor = darkMode ? '#f5f7ff' : '#162033';
-  const paginationSecondaryTextColor = darkMode ? 'rgba(255,255,255,0.54)' : 'rgba(16,24,40,0.56)';
-  const paginationAccentBg = darkMode ? 'rgba(255,214,102,0.14)' : 'rgba(24,144,255,0.10)';
-  const paginationAccentBorderColor = darkMode ? 'rgba(255,214,102,0.38)' : 'rgba(24,144,255,0.22)';
-  const paginationActiveItemBg = darkMode ? 'rgba(255,214,102,0.18)' : 'rgba(24,144,255,0.12)';
-  const paginationActiveItemBorderColor = darkMode ? 'rgba(255,214,102,0.46)' : 'rgba(24,144,255,0.28)';
-  const paginationActiveItemTextColor = darkMode ? '#fff7d6' : '#0958d9';
   
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
@@ -1305,12 +1328,452 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [tableHeight, setTableHeight] = useState(500);
   const [tableViewportWidth, setTableViewportWidth] = useState(0);
   const [tableBodyBottomPadding, setTableBodyBottomPadding] = useState(0);
+
+  // P0 性能优化：CSS 模板字符串 memoize，仅在主题/布局变量变化时重算
+  const gridCssText = useMemo(() => `
+                .${gridId} .data-grid-toolbar-scroll > * {
+                    flex-shrink: 0;
+                }
+                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar {
+                    height: 7px;
+                }
+                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb {
+                    background: ${darkMode ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)'};
+                    border-radius: 999px;
+                }
+                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .${gridId} .ant-table,
+                .${gridId} .ant-table-wrapper,
+                .${gridId} .ant-table-container {
+                    background: transparent !important;
+                    border-radius: ${panelRadius}px !important;
+                }
+                .${gridId} .ant-table-wrapper,
+                .${gridId} .ant-table-container {
+                    border: none !important;
+                    overflow: hidden !important;
+                }
+                .${gridId} .ant-table-tbody > tr > td,
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
+                .${gridId} .ant-table-thead > tr > th { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
+                .${gridId} .ant-table-thead > tr:first-child > th:first-child,
+                .${gridId} .ant-table-header table > thead > tr:first-child > th:first-child {
+                    border-top-left-radius: ${panelRadius}px !important;
+                }
+                .${gridId} .ant-table-thead > tr:first-child > th:last-child,
+                .${gridId} .ant-table-header table > thead > tr:first-child > th:last-child {
+                    border-top-right-radius: ${panelRadius}px !important;
+                }
+                .${gridId} .ant-table-body {
+                    border-bottom-left-radius: ${panelRadius}px !important;
+                    border-bottom-right-radius: ${panelRadius}px !important;
+                }
+                .${gridId} .ant-table-thead > tr > th::before { display: none !important; }
+                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorters { cursor: default !important; }
+                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter,
+                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter * { cursor: pointer !important; }
+                .${gridId} .ant-table-tbody > tr:hover > td,
+                .${gridId} .ant-table-tbody .ant-table-row:hover > .ant-table-cell { background-color: ${darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)'} !important; }
+                .${gridId} .ant-table-tbody > tr.ant-table-row-selected > td,
+                .${gridId} .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.18)` : `rgba(${selectionAccentRgb}, 0.08)`} !important; }
+                .${gridId} .ant-table-tbody > tr.ant-table-row-selected:hover > td,
+                .${gridId} .ant-table-tbody .ant-table-row.ant-table-row-selected:hover > .ant-table-cell { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.28)` : `rgba(${selectionAccentRgb}, 0.12)`} !important; }
+                .${gridId} .row-added td,
+                .${gridId} .row-added > .ant-table-cell { background-color: ${rowAddedBg} !important; color: ${darkMode ? '#e6fffb' : 'inherit'}; }
+                .${gridId} .row-modified td,
+                .${gridId} .row-modified > .ant-table-cell { background-color: ${rowModBg} !important; color: ${darkMode ? '#e6f7ff' : 'inherit'}; }
+                .${gridId} .ant-table-tbody > tr.row-added:hover > td,
+                .${gridId} .ant-table-tbody .ant-table-row.row-added:hover > .ant-table-cell { background-color: ${rowAddedHover} !important; }
+                .${gridId} .ant-table-tbody > tr.row-modified:hover > td,
+                .${gridId} .ant-table-tbody .ant-table-row.row-modified:hover > .ant-table-cell { background-color: ${rowModHover} !important; }
+                .${gridId} .ant-table-tbody > tr > td[data-col-name],
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
+                .${gridId} .ant-table-tbody > tr > td[data-cell-selected="true"],
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-cell-selected="true"],
+                .${gridId} [data-cell-selected="true"] {
+                    box-shadow: inset 0 0 0 2px ${selectionAccentHex} !important;
+                    background-image: linear-gradient(${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}, ${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}) !important;
+                }
+                .${gridId} .ant-table-content,
+                .${gridId} .ant-table-body {
+                    scrollbar-gutter: stable;
+                }
+                .${gridId} .ant-table-body {
+                    padding-bottom: ${tableBodyBottomPadding}px;
+                    box-sizing: border-box;
+                    scroll-padding-bottom: ${tableBodyBottomPadding}px;
+                }
+                .${gridId} .ant-table-tbody-virtual-holder,
+                .${gridId} .rc-virtual-list-holder {
+                    padding-bottom: ${tableBodyBottomPadding}px;
+                    box-sizing: border-box;
+                    scroll-padding-bottom: ${tableBodyBottomPadding}px;
+                }
+                .${gridId} .ant-table-tbody-virtual-holder-inner {
+                    padding-bottom: ${tableBodyBottomPadding}px;
+                    box-sizing: border-box;
+                }
+                .${gridId} .data-grid-table-wrap {
+                    width: 100%;
+                    max-width: 100%;
+                    overflow: hidden;
+                }
+                .${gridId} .ant-table-sticky-scroll {
+                    display: none !important;
+                }
+                .${gridId} .ant-table-tbody-virtual-scrollbar.ant-table-tbody-virtual-scrollbar-horizontal {
+                    display: none !important;
+                }
+                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-content {
+                    overflow-x: hidden !important;
+                }
+                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-body {
+                    overflow-x: hidden !important;
+                    overflow-y: auto !important;
+                }
+                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-tbody-virtual-holder,
+                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .rc-virtual-list-holder {
+                    overflow-x: hidden !important;
+                }
+                .${gridId} .ant-table-body {
+                    scrollbar-width: thin;
+                    scrollbar-color: ${floatingScrollbarThumbBg} transparent;
+                }
+                .${gridId} .ant-table-body::-webkit-scrollbar {
+                    width: ${floatingScrollbarHeight}px;
+                    height: 0;
+                }
+                .${gridId} .ant-table-body::-webkit-scrollbar-track {
+                    background: ${verticalScrollbarTrackBg};
+                    margin: 8px 0;
+                    border-radius: 999px;
+                }
+                .${gridId} .ant-table-body::-webkit-scrollbar-thumb {
+                    background: ${floatingScrollbarThumbBg};
+                    border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    border-radius: 999px;
+                    box-shadow: ${floatingScrollbarThumbShadow};
+                }
+                .${gridId} .rc-virtual-list-holder {
+                    scrollbar-width: thin;
+                    scrollbar-color: ${floatingScrollbarThumbBg} transparent;
+                }
+                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar {
+                    width: ${floatingScrollbarHeight}px;
+                    height: 0;
+                }
+                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-track {
+                    background: ${verticalScrollbarTrackBg};
+                    margin: 8px 0;
+                    border-radius: 999px;
+                }
+                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb {
+                    background: ${floatingScrollbarThumbBg};
+                    border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    border-radius: 999px;
+                    box-shadow: ${floatingScrollbarThumbShadow};
+                }
+                .${gridId} .data-grid-external-horizontal-scroll {
+                    position: absolute;
+                    left: ${floatingScrollbarInset}px;
+                    right: ${floatingScrollbarInset}px;
+                    bottom: ${floatingScrollbarBottomOffset}px;
+                    height: ${floatingScrollbarHeight + 4}px;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    background: transparent;
+                    z-index: 24;
+                }
+                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar {
+                    height: ${floatingScrollbarHeight}px;
+                }
+                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-track {
+                    background: ${horizontalScrollbarTrackBg};
+                    border: 1px solid ${horizontalScrollbarTrackBorderColor};
+                    border-radius: 999px;
+                    box-shadow: ${horizontalScrollbarTrackShadow};
+                }
+                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb {
+                    background: ${horizontalScrollbarThumbBg};
+                    border: 1px solid ${horizontalScrollbarThumbBorderColor};
+                    border-radius: 999px;
+                    box-shadow: ${horizontalScrollbarThumbShadow};
+                }
+                .${gridId} .data-grid-external-horizontal-scroll-inner {
+                    height: 1px;
+                }
+                .${gridId} .data-grid-pagination-shell {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: flex-end;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                    max-width: 100%;
+                    padding: 8px 10px;
+                    border-radius: 16px;
+                    border: 1px solid ${paginationShellBorderColor};
+                    background: ${paginationShellBg};
+                    box-shadow: ${paginationShellShadow};
+                    backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
+                    -webkit-backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
+                }
+                .${gridId} .data-grid-pagination-summary,
+                .${gridId} .data-grid-pagination-page-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-height: 34px;
+                    padding: 0 12px;
+                    border-radius: 999px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    color: ${paginationPrimaryTextColor};
+                    font-size: 12px;
+                    line-height: 1;
+                    font-variant-numeric: tabular-nums;
+                    white-space: nowrap;
+                }
+                .${gridId} .data-grid-pagination-kicker {
+                    display: inline-flex;
+                    align-items: center;
+                    height: 20px;
+                    padding: 0 8px;
+                    border-radius: 999px;
+                    background: ${paginationAccentBg};
+                    border: 1px solid ${paginationAccentBorderColor};
+                    color: ${paginationActiveItemTextColor};
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.02em;
+                }
+                .${gridId} .data-grid-pagination-summary-value {
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-page-chip {
+                    color: ${paginationSecondaryTextColor};
+                    font-weight: 600;
+                }
+                .${gridId} .ant-pagination {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    margin: 0;
+                    color: ${paginationPrimaryTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-item,
+                .${gridId} .ant-pagination .ant-pagination-prev,
+                .${gridId} .ant-pagination .ant-pagination-next,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev,
+                .${gridId} .ant-pagination .ant-pagination-jump-next {
+                    min-width: 34px;
+                    height: 34px;
+                    margin-inline-end: 0;
+                    border-radius: 12px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    box-shadow: none;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    overflow: hidden;
+                    transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+                }
+                .${gridId} .ant-pagination .ant-pagination-item a,
+                .${gridId} .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-next .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-prev > *,
+                .${gridId} .ant-pagination .ant-pagination-next > * {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    border: none;
+                    background: transparent;
+                    border-radius: inherit;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-item:hover,
+                .${gridId} .ant-pagination .ant-pagination-prev:hover,
+                .${gridId} .ant-pagination .ant-pagination-next:hover {
+                    background: ${paginationHoverBg};
+                    border-color: ${paginationActiveItemBorderColor};
+                    transform: translateY(-1px);
+                }
+                .${gridId} .ant-pagination .ant-pagination-item-active {
+                    border-color: ${paginationActiveItemBorderColor};
+                    background: ${paginationActiveItemBg};
+                    box-shadow: inset 0 0 0 1px ${paginationAccentBorderColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-item-active a {
+                    color: ${paginationActiveItemTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-disabled,
+                .${gridId} .ant-pagination .ant-pagination-disabled:hover {
+                    background: transparent;
+                    border-color: ${paginationChipBorderColor};
+                    transform: none;
+                    opacity: 0.42;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev,
+                .${gridId} .ant-pagination .ant-pagination-jump-next {
+                    padding: 0;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    padding: 0;
+                    margin: 0;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-container,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    position: relative;
+                    line-height: 1;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon {
+                    position: absolute !important;
+                    top: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    left: 0 !important;
+                    inset: 0 !important;
+                    width: fit-content !important;
+                    height: fit-content !important;
+                    min-width: 0 !important;
+                    min-height: 0 !important;
+                    margin: auto !important;
+                    padding: 0 !important;
+                    transform: none !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    line-height: 1 !important;
+                    color: ${paginationSecondaryTextColor};
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis {
+                    letter-spacing: 0.18em;
+                    text-indent: 0.18em;
+                    text-align: center;
+                }
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon .anticon,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon .anticon,
+                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon svg,
+                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon svg {
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    width: 1em;
+                    height: 1em;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-nav-icon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                    font-size: 12px;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-nav-icon .anticon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 100%;
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-size-select {
+                    min-width: 112px;
+                    height: 34px;
+                    display: inline-flex;
+                    align-items: stretch;
+                }
+                .${gridId} .data-grid-pagination-size-select.ant-select-single,
+                .${gridId} .data-grid-pagination-size-select.ant-select-single.ant-select-sm {
+                    height: 34px;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selector {
+                    height: 34px !important;
+                    border-radius: 12px !important;
+                    border: 1px solid ${paginationChipBorderColor} !important;
+                    background: ${paginationChipBg} !important;
+                    box-shadow: none !important;
+                    padding: 0 12px !important;
+                    display: flex !important;
+                    align-items: center !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-wrap {
+                    display: flex !important;
+                    align-items: center !important;
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search,
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search-input {
+                    height: 100% !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-item,
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-placeholder {
+                    display: flex;
+                    align-items: center;
+                    height: 100%;
+                    line-height: 34px !important;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search {
+                    inset-inline-start: 12px !important;
+                    inset-inline-end: 32px !important;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-arrow {
+                    color: ${paginationSecondaryTextColor};
+                    inset-inline-end: 12px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    margin-top: 0;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    height: 16px;
+                    line-height: 1;
+                }
+                .${gridId} .data-grid-pagination-size-select .ant-select-arrow .anticon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    line-height: 1;
+                }
+  `, [themeStyles, gridId, tableBodyBottomPadding, darkMode, opacity]);
+
   const recalculateTableMetrics = useCallback((targetElement?: HTMLElement | null) => {
       const target = targetElement || containerRef.current;
       if (!target) return;
 
-      const height = target.getBoundingClientRect().height;
-      const width = target.getBoundingClientRect().width;
+      // P5 性能优化：合并 getBoundingClientRect 调用，减少 DOM 查询次数
+      const rect = target.getBoundingClientRect();
+      const height = rect.height;
+      const width = rect.width;
       if (!Number.isFinite(height) || height < 50) return;
       if (Number.isFinite(width) && width > 0) {
           setTableViewportWidth(Math.floor(width));
@@ -1383,6 +1846,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       return String(logic || '').trim().toUpperCase() === 'OR' ? 'OR' : 'AND';
   }, []);
 
+  // P6 性能优化：使用 ref 缓存首列名，避免 displayColumnNames 变化导致级联更新
+  const firstColumnNameRef = useRef(displayColumnNames[0] || '');
+  firstColumnNameRef.current = displayColumnNames[0] || '';
+
   const normalizeGridFilterConditions = useCallback((conditions?: FilterCondition[]): GridFilterCondition[] => {
       if (!Array.isArray(conditions)) return [];
       return conditions.map((cond, index) => {
@@ -1394,13 +1861,13 @@ const DataGrid: React.FC<DataGridProps> = ({
               id: nextId,
               enabled: cond?.enabled !== false,
               logic: normalizeFilterLogic(cond?.logic),
-              column: rawColumn || (op === 'CUSTOM' ? '' : String(displayColumnNames[0] || '')),
+              column: rawColumn || (op === 'CUSTOM' ? '' : String(firstColumnNameRef.current || '')),
               op,
               value: String(cond?.value ?? ''),
               value2: String(cond?.value2 ?? ''),
           };
       });
-  }, [displayColumnNames, normalizeFilterLogic]);
+  }, [normalizeFilterLogic]);
 
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
@@ -2530,7 +2997,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           sortOrder: (sortInfo?.columnKey === key ? sortInfo.order : null) as SortOrder | undefined,
           editable: canModifyData, // Only editable if table name known and not readonly
           render: (text: any) => (
-              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={CELL_ELLIPSIS_STYLE}>
                   {formatCellValue(text)}
               </div>
           ),
@@ -2609,7 +3076,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                           handleSave={handleCellSave}
                           focusCell={openCellEditor}
                           as="div"
-                          style={{ margin: -8, padding: '8px 8px 8px 8px' }}
+                          style={VIRTUAL_CELL_WRAPPER_STYLE}
                       >
                           {originalRenderContent}
                       </EditableCell>
@@ -2618,7 +3085,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (enableVirtual) {
                   return (
                       <div
-                          style={{ margin: -8, padding: '8px 8px 8px 8px' }}
+                          style={VIRTUAL_CELL_WRAPPER_STYLE}
                           onContextMenu={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
@@ -4539,441 +5006,7 @@ const DataGrid: React.FC<DataGridProps> = ({
            </div>
        )}
 
-		        <style>{`
-	                .${gridId} .data-grid-toolbar-scroll > * {
-	                    flex-shrink: 0;
-	                }
-	                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar {
-	                    height: 7px;
-	                }
-	                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb {
-	                    background: ${darkMode ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)'};
-	                    border-radius: 999px;
-	                }
-	                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-track {
-	                    background: transparent;
-	                }
-                .${gridId} .ant-table,
-                .${gridId} .ant-table-wrapper,
-                .${gridId} .ant-table-container {
-                    background: transparent !important;
-                    border-radius: ${panelRadius}px !important;
-                }
-                .${gridId} .ant-table-wrapper,
-                .${gridId} .ant-table-container {
-                    border: none !important;
-                    overflow: hidden !important;
-                }
-                .${gridId} .ant-table-tbody > tr > td,
-                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
-                .${gridId} .ant-table-thead > tr > th { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
-                .${gridId} .ant-table-thead > tr:first-child > th:first-child,
-                .${gridId} .ant-table-header table > thead > tr:first-child > th:first-child {
-                    border-top-left-radius: ${panelRadius}px !important;
-                }
-                .${gridId} .ant-table-thead > tr:first-child > th:last-child,
-                .${gridId} .ant-table-header table > thead > tr:first-child > th:last-child {
-                    border-top-right-radius: ${panelRadius}px !important;
-                }
-                .${gridId} .ant-table-body {
-                    border-bottom-left-radius: ${panelRadius}px !important;
-                    border-bottom-right-radius: ${panelRadius}px !important;
-                }
-                .${gridId} .ant-table-thead > tr > th::before { display: none !important; }
-                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorters { cursor: default !important; }
-                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter,
-                .${gridId} .ant-table-thead > tr > th .ant-table-column-sorter * { cursor: pointer !important; }
-                .${gridId} .ant-table-tbody > tr:hover > td,
-                .${gridId} .ant-table-tbody .ant-table-row:hover > .ant-table-cell { background-color: ${darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)'} !important; }
-                .${gridId} .ant-table-tbody > tr.ant-table-row-selected > td,
-                .${gridId} .ant-table-tbody .ant-table-row.ant-table-row-selected > .ant-table-cell { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.18)` : `rgba(${selectionAccentRgb}, 0.08)`} !important; }
-                .${gridId} .ant-table-tbody > tr.ant-table-row-selected:hover > td,
-                .${gridId} .ant-table-tbody .ant-table-row.ant-table-row-selected:hover > .ant-table-cell { background-color: ${darkMode ? `rgba(${selectionAccentRgb}, 0.28)` : `rgba(${selectionAccentRgb}, 0.12)`} !important; }
-	            .${gridId} .row-added td,
-	            .${gridId} .row-added > .ant-table-cell { background-color: ${rowAddedBg} !important; color: ${darkMode ? '#e6fffb' : 'inherit'}; }
-	            .${gridId} .row-modified td,
-	            .${gridId} .row-modified > .ant-table-cell { background-color: ${rowModBg} !important; color: ${darkMode ? '#e6f7ff' : 'inherit'}; }
-                .${gridId} .ant-table-tbody > tr.row-added:hover > td,
-                .${gridId} .ant-table-tbody .ant-table-row.row-added:hover > .ant-table-cell { background-color: ${rowAddedHover} !important; }
-                .${gridId} .ant-table-tbody > tr.row-modified:hover > td,
-                .${gridId} .ant-table-tbody .ant-table-row.row-modified:hover > .ant-table-cell { background-color: ${rowModHover} !important; }
-                .${gridId} .ant-table-tbody > tr > td[data-col-name],
-                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
-                .${gridId} .ant-table-tbody > tr > td[data-cell-selected="true"],
-                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-cell-selected="true"],
-                .${gridId} [data-cell-selected="true"] {
-                    box-shadow: inset 0 0 0 2px ${selectionAccentHex} !important;
-                    background-image: linear-gradient(${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}, ${darkMode ? `rgba(${selectionAccentRgb}, 0.20)` : `rgba(${selectionAccentRgb}, 0.08)`}) !important;
-                }
-                .${gridId} .ant-table-content,
-                .${gridId} .ant-table-body {
-                    scrollbar-gutter: stable;
-                }
-                .${gridId} .ant-table-body {
-                    padding-bottom: ${tableBodyBottomPadding}px;
-                    box-sizing: border-box;
-                    scroll-padding-bottom: ${tableBodyBottomPadding}px;
-                }
-                .${gridId} .ant-table-tbody-virtual-holder,
-                .${gridId} .rc-virtual-list-holder {
-                    padding-bottom: ${tableBodyBottomPadding}px;
-                    box-sizing: border-box;
-                    scroll-padding-bottom: ${tableBodyBottomPadding}px;
-                }
-                .${gridId} .ant-table-tbody-virtual-holder-inner {
-                    padding-bottom: ${tableBodyBottomPadding}px;
-                    box-sizing: border-box;
-                }
-                .${gridId} .data-grid-table-wrap {
-                    width: 100%;
-                    max-width: 100%;
-                    overflow: hidden;
-                }
-                .${gridId} .ant-table-sticky-scroll {
-                    display: none !important;
-                }
-                .${gridId} .ant-table-tbody-virtual-scrollbar.ant-table-tbody-virtual-scrollbar-horizontal {
-                    display: none !important;
-                }
-                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-content {
-                    overflow-x: hidden !important;
-                }
-                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-body {
-                    overflow-x: hidden !important;
-                    overflow-y: auto !important;
-                }
-                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .ant-table-tbody-virtual-holder,
-                .${gridId} .data-grid-table-wrap.data-grid-table-wrap-external-active .rc-virtual-list-holder {
-                    overflow-x: hidden !important;
-                }
-                .${gridId} .ant-table-body {
-                    scrollbar-width: thin;
-                    scrollbar-color: ${floatingScrollbarThumbBg} transparent;
-                }
-                .${gridId} .ant-table-body::-webkit-scrollbar {
-                    width: ${floatingScrollbarHeight}px;
-                    height: 0;
-                }
-                .${gridId} .ant-table-body::-webkit-scrollbar-track {
-                    background: ${verticalScrollbarTrackBg};
-                    margin: 8px 0;
-                    border-radius: 999px;
-                }
-                .${gridId} .ant-table-body::-webkit-scrollbar-thumb {
-                    background: ${floatingScrollbarThumbBg};
-                    border: 1px solid ${floatingScrollbarThumbBorderColor};
-                    border-radius: 999px;
-                    box-shadow: ${floatingScrollbarThumbShadow};
-                }
-                .${gridId} .rc-virtual-list-holder {
-                    scrollbar-width: thin;
-                    scrollbar-color: ${floatingScrollbarThumbBg} transparent;
-                }
-                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar {
-                    width: ${floatingScrollbarHeight}px;
-                    height: 0;
-                }
-                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-track {
-                    background: ${verticalScrollbarTrackBg};
-                    margin: 8px 0;
-                    border-radius: 999px;
-                }
-                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb {
-                    background: ${floatingScrollbarThumbBg};
-                    border: 1px solid ${floatingScrollbarThumbBorderColor};
-                    border-radius: 999px;
-                    box-shadow: ${floatingScrollbarThumbShadow};
-                }
-                .${gridId} .data-grid-external-horizontal-scroll {
-                    position: absolute;
-                    left: ${floatingScrollbarInset}px;
-                    right: ${floatingScrollbarInset}px;
-                    bottom: ${floatingScrollbarBottomOffset}px;
-                    height: ${floatingScrollbarHeight + 4}px;
-                    overflow-x: auto;
-                    overflow-y: hidden;
-                    background: transparent;
-                    z-index: 24;
-                }
-                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar {
-                    height: ${floatingScrollbarHeight}px;
-                }
-                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-track {
-                    background: ${horizontalScrollbarTrackBg};
-                    border: 1px solid ${horizontalScrollbarTrackBorderColor};
-                    border-radius: 999px;
-                    box-shadow: ${horizontalScrollbarTrackShadow};
-                }
-                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb {
-                    background: ${horizontalScrollbarThumbBg};
-                    border: 1px solid ${horizontalScrollbarThumbBorderColor};
-                    border-radius: 999px;
-                    box-shadow: ${horizontalScrollbarThumbShadow};
-                }
-                .${gridId} .data-grid-external-horizontal-scroll-inner {
-                    height: 1px;
-                }
-                .${gridId} .data-grid-pagination-shell {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: flex-end;
-                    gap: 10px;
-                    flex-wrap: wrap;
-                    max-width: 100%;
-                    padding: 8px 10px;
-                    border-radius: 16px;
-                    border: 1px solid ${paginationShellBorderColor};
-                    background: ${paginationShellBg};
-                    box-shadow: ${paginationShellShadow};
-                    backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
-                    -webkit-backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
-                }
-                .${gridId} .data-grid-pagination-summary,
-                .${gridId} .data-grid-pagination-page-chip {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 8px;
-                    min-height: 34px;
-                    padding: 0 12px;
-                    border-radius: 999px;
-                    border: 1px solid ${paginationChipBorderColor};
-                    background: ${paginationChipBg};
-                    color: ${paginationPrimaryTextColor};
-                    font-size: 12px;
-                    line-height: 1;
-                    font-variant-numeric: tabular-nums;
-                    white-space: nowrap;
-                }
-                .${gridId} .data-grid-pagination-kicker {
-                    display: inline-flex;
-                    align-items: center;
-                    height: 20px;
-                    padding: 0 8px;
-                    border-radius: 999px;
-                    background: ${paginationAccentBg};
-                    border: 1px solid ${paginationAccentBorderColor};
-                    color: ${paginationActiveItemTextColor};
-                    font-size: 11px;
-                    font-weight: 700;
-                    letter-spacing: 0.02em;
-                }
-                .${gridId} .data-grid-pagination-summary-value {
-                    color: ${paginationPrimaryTextColor};
-                    font-weight: 600;
-                    font-variant-numeric: tabular-nums;
-                }
-                .${gridId} .data-grid-pagination-page-chip {
-                    color: ${paginationSecondaryTextColor};
-                    font-weight: 600;
-                }
-                .${gridId} .ant-pagination {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 6px;
-                    margin: 0;
-                    color: ${paginationPrimaryTextColor};
-                }
-                .${gridId} .ant-pagination .ant-pagination-item,
-                .${gridId} .ant-pagination .ant-pagination-prev,
-                .${gridId} .ant-pagination .ant-pagination-next,
-                .${gridId} .ant-pagination .ant-pagination-jump-prev,
-                .${gridId} .ant-pagination .ant-pagination-jump-next {
-                    min-width: 34px;
-                    height: 34px;
-                    margin-inline-end: 0;
-                    border-radius: 12px;
-                    border: 1px solid ${paginationChipBorderColor};
-                    background: ${paginationChipBg};
-                    box-shadow: none;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    overflow: hidden;
-                    transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
-                }
-                .${gridId} .ant-pagination .ant-pagination-item a,
-                .${gridId} .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
-                .${gridId} .ant-pagination .ant-pagination-next .ant-pagination-item-link,
-                .${gridId} .ant-pagination .ant-pagination-prev > *,
-                .${gridId} .ant-pagination .ant-pagination-next > * {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                    color: ${paginationPrimaryTextColor};
-                    font-weight: 600;
-                    border: none;
-                    background: transparent;
-                    border-radius: inherit;
-                    line-height: 1;
-                }
-                .${gridId} .ant-pagination .ant-pagination-item:hover,
-                .${gridId} .ant-pagination .ant-pagination-prev:hover,
-                .${gridId} .ant-pagination .ant-pagination-next:hover {
-                    background: ${paginationHoverBg};
-                    border-color: ${paginationActiveItemBorderColor};
-                    transform: translateY(-1px);
-                }
-                .${gridId} .ant-pagination .ant-pagination-item-active {
-                    border-color: ${paginationActiveItemBorderColor};
-                    background: ${paginationActiveItemBg};
-                    box-shadow: inset 0 0 0 1px ${paginationAccentBorderColor};
-                }
-                .${gridId} .ant-pagination .ant-pagination-item-active a {
-                    color: ${paginationActiveItemTextColor};
-                }
-                .${gridId} .ant-pagination .ant-pagination-disabled,
-                .${gridId} .ant-pagination .ant-pagination-disabled:hover {
-                    background: transparent;
-                    border-color: ${paginationChipBorderColor};
-                    transform: none;
-                    opacity: 0.42;
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev,
-                .${gridId} .ant-pagination .ant-pagination-jump-next {
-                    padding: 0;
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link {
-                    position: relative;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                    padding: 0;
-                    margin: 0;
-                    line-height: 1;
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-container,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-container {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                    position: relative;
-                    line-height: 1;
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis,
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon {
-                    position: absolute !important;
-                    top: 0 !important;
-                    right: 0 !important;
-                    bottom: 0 !important;
-                    left: 0 !important;
-                    inset: 0 !important;
-                    width: fit-content !important;
-                    height: fit-content !important;
-                    min-width: 0 !important;
-                    min-height: 0 !important;
-                    margin: auto !important;
-                    padding: 0 !important;
-                    transform: none !important;
-                    display: inline-flex !important;
-                    align-items: center !important;
-                    justify-content: center !important;
-                    line-height: 1 !important;
-                    color: ${paginationSecondaryTextColor};
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-ellipsis,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-ellipsis {
-                    letter-spacing: 0.18em;
-                    text-indent: 0.18em;
-                    text-align: center;
-                }
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon .anticon,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon .anticon,
-                .${gridId} .ant-pagination .ant-pagination-jump-prev .ant-pagination-item-link-icon svg,
-                .${gridId} .ant-pagination .ant-pagination-jump-next .ant-pagination-item-link-icon svg {
-                    display: inline-flex !important;
-                    align-items: center !important;
-                    justify-content: center !important;
-                    width: 1em;
-                    height: 1em;
-                    line-height: 1;
-                }
-                .${gridId} .data-grid-pagination-nav-icon {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                    font-size: 12px;
-                    line-height: 1;
-                }
-                .${gridId} .data-grid-pagination-nav-icon .anticon {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                }
-                .${gridId} .data-grid-pagination-size-select {
-                    min-width: 112px;
-                    height: 34px;
-                    display: inline-flex;
-                    align-items: stretch;
-                }
-                .${gridId} .data-grid-pagination-size-select.ant-select-single,
-                .${gridId} .data-grid-pagination-size-select.ant-select-single.ant-select-sm {
-                    height: 34px;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-selector {
-                    height: 34px !important;
-                    border-radius: 12px !important;
-                    border: 1px solid ${paginationChipBorderColor} !important;
-                    background: ${paginationChipBg} !important;
-                    box-shadow: none !important;
-                    padding: 0 12px !important;
-                    display: flex !important;
-                    align-items: center !important;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-wrap {
-                    display: flex !important;
-                    align-items: center !important;
-                    height: 100%;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search,
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search-input {
-                    height: 100% !important;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-item,
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-placeholder {
-                    display: flex;
-                    align-items: center;
-                    height: 100%;
-                    line-height: 34px !important;
-                    color: ${paginationPrimaryTextColor};
-                    font-weight: 600;
-                    font-variant-numeric: tabular-nums;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-selection-search {
-                    inset-inline-start: 12px !important;
-                    inset-inline-end: 32px !important;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-arrow {
-                    color: ${paginationSecondaryTextColor};
-                    inset-inline-end: 12px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    margin-top: 0;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    height: 16px;
-                    line-height: 1;
-                }
-                .${gridId} .data-grid-pagination-size-select .ant-select-arrow .anticon {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    line-height: 1;
-                }
-	        `}</style>
+		        <style>{gridCssText}</style>
        
        {/* Ghost Resize Line for Columns */}
        <div
