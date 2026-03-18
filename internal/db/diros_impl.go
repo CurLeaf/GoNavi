@@ -151,7 +151,7 @@ func (d *DirosDB) getDSN(config connection.ConnectionConfig) (string, error) {
 	tlsMode := resolveMySQLTLSMode(config)
 
 	return fmt.Sprintf(
-		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s",
+		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s&multiStatements=true",
 		config.User, config.Password, protocol, address, database, timeout, url.QueryEscape(tlsMode),
 	), nil
 }

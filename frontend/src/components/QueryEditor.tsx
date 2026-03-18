@@ -6,11 +6,19 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
+import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
+
+const SQL_KEYWORDS = [
+    'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
+    'INNER', 'OUTER', 'ON', 'GROUP BY', 'ORDER BY', 'AS', 'AND', 'OR', 'NOT', 'NULL', 'IS',
+    'IN', 'VALUES', 'SET', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'ADD', 'MODIFY', 'CHANGE',
+    'COLUMN', 'KEY', 'PRIMARY', 'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'DEFAULT', 'AUTO_INCREMENT',
+    'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN',
+];
 
 const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
@@ -33,7 +41,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [activeResultKey, setActiveResultKey] = useState<string>('');
   
   const [loading, setLoading] = useState(false);
-  const [currentQueryId, setCurrentQueryId] = useState<string>('');
+  const [, setCurrentQueryId] = useState<string>('');
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
@@ -50,6 +58,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const monacoRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(tab.query || '');
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
+  const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<{dbName: string, tableName: string}[]>([]); // Store tables for autocomplete (cross-db)
   const allColumnsRef = useRef<{dbName: string, tableName: string, name: string, type: string}[]>([]); // Store all columns (cross-db)
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
@@ -60,6 +70,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       [connections]
   );
   const addSqlLog = useStore(state => state.addSqlLog);
+  const addTab = useStore(state => state.addTab);
+  const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
   const connectionsRef = useRef(connections);
@@ -73,6 +85,18 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeTabId = useStore(state => state.activeTabId);
+
+  const currentSavedQuery = useMemo(() => {
+      const savedId = String(tab.savedQueryId || '').trim();
+      if (savedId) {
+          return savedQueries.find((item) => item.id === savedId) || null;
+      }
+      const tabId = String(tab.id || '').trim();
+      if (!tabId) {
+          return null;
+      }
+      return savedQueries.find((item) => item.id === tabId) || null;
+  }, [savedQueries, tab.id, tab.savedQueryId]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -159,7 +183,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               setDbList([]);
           }
       };
-      fetchDbs();
+      void fetchDbs();
   }, [currentConnectionId, connections]);
 
   // Fetch Metadata for Autocomplete (Cross-database)
@@ -211,7 +235,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           tablesRef.current = allTables;
           allColumnsRef.current = allColumns;
       };
-      fetchMetadata();
+      void fetchMetadata();
   }, [currentConnectionId, connections, dbList]); // dbList 变化时触发重新加载
 
   // Query ID management helpers
@@ -346,7 +370,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
 
               // 0) 三段式 db.table.column 格式：当输入 db.table. 时提示列
-              const threePartMatch = linePrefix.match(/([`"]?[\w]+[`"]?)\.([`"]?[\w]+[`"]?)\.(\w*)$/);
+              const threePartMatch = linePrefix.match(/([`"]?\w+[`"]?)\.([`"]?\w+[`"]?)\.(\w*)$/);
               if (threePartMatch) {
                   const dbPart = stripQuotes(threePartMatch[1]);
                   const tablePart = stripQuotes(threePartMatch[2]);
@@ -374,7 +398,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               // 1) 两段式 qualifier.xxx 格式
-              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_][\w]*[`"]?)\.(\w*)$/);
+              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_]\w*[`"]?)\.(\w*)$/);
               if (qualifierMatch) {
                   const qualifier = stripQuotes(qualifierMatch[1]);
                   const prefix = (qualifierMatch[2] || '').toLowerCase();
@@ -439,7 +463,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                   const aliasMap: Record<string, {dbName: string, tableName: string}> = {};
                   // Capture table and optional alias, support db.table format
-                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?[\w]+[`"]?))?/gi;
+                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?\w+[`"]?))?/gi;
                   let m;
                   while ((m = aliasRegex.exec(fullText)) !== null) {
                       const tableIdent = normalizeQualifiedName(m[1] || '');
@@ -468,7 +492,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
                       // Prefer preloaded MySQL all-columns cache
-                      let cols: { name: string, type?: string, tableName?: string, dbName?: string }[] = [];
+                      let cols: { name: string, type?: string, tableName?: string, dbName?: string }[];
                       if (allColumnsRef.current.length > 0) {
                           cols = allColumnsRef.current
                               .filter(c =>
@@ -498,7 +522,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               // 2) global/table/column completion
-              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?[\w]+[`"]?(?:\s*\.\s*[`"]?[\w]+[`"]?)?)/gi;
+              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)/gi;
               const foundTables = new Set<string>();
               let match;
               while ((match = tableRegex.exec(fullText)) !== null) {
@@ -509,6 +533,17 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
 
               const currentDatabase = currentDbRef.current || '';
+              const wordPrefix = (word.word || '').toLowerCase();
+              const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
+              const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
+              const shouldBoostKeywords = !expectsTableName
+                  && wordPrefix.length > 0
+                  && SQL_KEYWORDS.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
+              const sortGroups = shouldBoostKeywords
+                  ? { keyword: '00', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
+                  : expectsTableName
+                      ? { keyword: '20', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
+                      : { keyword: '30', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
 
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
@@ -516,7 +551,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
-                      return foundTables.has(fullIdent) || foundTables.has(shortIdent);
+                      return (foundTables.has(fullIdent) || foundTables.has(shortIdent)) && startsWithPrefix(c.name || '');
                   })
                   .map(c => {
                       // 当前库的表字段优先级更高
@@ -527,12 +562,18 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                           insertText: c.name,
                           detail: `${c.type} (${c.dbName}.${c.tableName})`,
                           range,
-                          sortText: isCurrentDb ? '00' + c.name : '01' + c.name // FROM 表字段最优先
+                          sortText: isCurrentDb ? sortGroups.columnCurrent + c.name : sortGroups.columnOther + c.name,
                       };
                   });
 
               // 表提示：当前库显示表名，其他库显示 db.table 格式
-              const tableSuggestions = tablesRef.current.map(t => {
+              const tableSuggestions = tablesRef.current
+                .filter(t => {
+                    const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                    const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
+                    return startsWithPrefix(label || '');
+                })
+                .map(t => {
                   const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
                   const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
                   const insertText = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
@@ -542,27 +583,31 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                       insertText,
                       detail: `Table (${t.dbName})`,
                       range,
-                      sortText: isCurrentDb ? '10' + t.tableName : '11' + t.tableName // 表次优先
+                      sortText: isCurrentDb ? sortGroups.tableCurrent + t.tableName : sortGroups.tableOther + t.tableName,
                   };
               });
 
               // 数据库提示
-              const dbSuggestions = visibleDbsRef.current.map(db => ({
-                  label: db,
-                  kind: monaco.languages.CompletionItemKind.Module,
-                  insertText: db,
-                  detail: 'Database',
-                  range,
-                  sortText: '20' + db // 数据库最后
-              }));
+              const dbSuggestions = visibleDbsRef.current
+                  .filter((db) => startsWithPrefix(db))
+                  .map(db => ({
+                      label: db,
+                      kind: monaco.languages.CompletionItemKind.Module,
+                      insertText: db,
+                      detail: 'Database',
+                      range,
+                      sortText: sortGroups.db + db,
+                  }));
 
               // 关键字提示
-              const keywordSuggestions = ['SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'GROUP BY', 'ORDER BY', 'AS', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'VALUES', 'SET', 'CREATE', 'TABLE', 'DROP', 'ALTER', 'Add', 'MODIFY', 'CHANGE', 'COLUMN', 'KEY', 'PRIMARY', 'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'DEFAULT', 'AUTO_INCREMENT', 'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].map(k => ({
+              const keywordSuggestions = SQL_KEYWORDS
+                  .filter((k) => startsWithPrefix(k))
+                  .map(k => ({
                   label: k,
                   kind: monaco.languages.CompletionItemKind.Keyword,
                   insertText: k,
                   range,
-                  sortText: '30' + k // 关键字权重最低
+                  sortText: sortGroups.keyword + k,
               }));
 
               const suggestions = [
@@ -581,7 +626,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           const formatted = format(getCurrentQuery(), { language: 'mysql', keywordCase: sqlFormatOptions.keywordCase });
           syncQueryToEditor(formatted);
       } catch (e) {
-          message.error("格式化失败: SQL 语法可能有误");
+          void message.error("格式化失败: SQL 语法可能有误");
       }
   };
 
@@ -731,6 +776,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     return statements;
   };
 
+  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
+  // 当恢复前端自动行数限制功能时需要启用。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getLeadingKeyword = (sql: string): string => {
       const text = (sql || '').replace(/\r\n/g, '\n');
       const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
@@ -1023,6 +1071,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       return -1;
   };
 
+  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
+  // 当恢复前端自动行数限制功能时需要启用。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
       const normalizedType = (dbType || 'mysql').toLowerCase();
       const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === 'clickhouse' || normalizedType === '';
@@ -1112,36 +1163,31 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         const dbType = String((config as any).type || 'mysql');
         const normalizedDbType = dbType.trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
-        const splitInput = normalizedDbType === 'mongodb'
-            ? normalizedRawSQL
+
+        // MongoDB 仍走逐条执行的旧路径
+        const isMongoDB = normalizedDbType === 'mongodb';
+
+        if (isMongoDB) {
+            // MongoDB: 保持逐条执行
+            const splitInput = normalizedRawSQL
                 .replace(/^\s*\/\/.*$/gm, '')
-                .replace(/^\s*#.*$/gm, '')
-            : normalizedRawSQL;
-        const statements = splitSQLStatements(splitInput);
-        if (statements.length === 0) {
-            message.info('没有可执行的 SQL。');
-            setResultSets([]);
-            setActiveResultKey('');
-            return;
-        }
+                .replace(/^\s*#.*$/gm, '');
+            const statements = splitSQLStatements(splitInput);
+            if (statements.length === 0) {
+                message.info('没有可执行的 SQL。');
+                setResultSets([]);
+                setActiveResultKey('');
+                return;
+            }
 
-        const nextResultSets: ResultSet[] = [];
-        const maxRows = Number(queryOptions?.maxRows) || 0;
-        const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
-        const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
-        const probeLimit = wantsLimitProbe ? (maxRows + 1) : 0;
-        let anyTruncated = false;
-        const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
+            const nextResultSets: ResultSet[] = [];
+            const maxRows = Number(queryOptions?.maxRows) || 0;
+            const wantsLimitProbe = Number.isFinite(maxRows) && maxRows > 0;
+            let anyTruncated = false;
 
-        for (let idx = 0; idx < statements.length; idx++) {
-            const rawStatement = statements[idx];
-            const leadingKeyword = getLeadingKeyword(rawStatement);
-            const shouldAutoLimit = leadingKeyword === 'select' || leadingKeyword === 'with';
-
-            const limitApplied = shouldAutoLimit && wantsLimitProbe;
-            const limited = limitApplied ? applyAutoLimit(rawStatement, dbType, probeLimit) : { sql: rawStatement, applied: false, maxRows: probeLimit };
-            let executedSql = limited.sql;
-            if (String(dbType || '').trim().toLowerCase() === 'mongodb') {
+            for (let idx = 0; idx < statements.length; idx++) {
+                const rawStatement = statements[idx];
+                let executedSql = rawStatement;
                 const shellConvert = convertMongoShellToJsonCommand(executedSql);
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
@@ -1155,10 +1201,97 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                         executedSql = shellConvert.command;
                     }
                 }
-            }
-            const startTime = Date.now();
+                const startTime = Date.now();
+                let queryId: string;
+                try {
+                    queryId = await GenerateQueryID();
+                } catch (error) {
+                    console.warn('GenerateQueryID failed, using local UUID fallback:', error);
+                    queryId = 'query-' + uuidv4();
+                }
+                setQueryId(queryId);
 
-            // Generate query ID for cancellation using backend UUID with fallback
+                const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
+                const duration = Date.now() - startTime;
+                addSqlLog({
+                    id: `log-${Date.now()}-query-${idx + 1}`,
+                    timestamp: Date.now(),
+                    sql: executedSql,
+                    status: res.success ? 'success' : 'error',
+                    duration,
+                    message: res.success ? '' : res.message,
+                    affectedRows: (res.success && !Array.isArray(res.data)) ? (res.data as any).affectedRows : (Array.isArray(res.data) ? res.data.length : undefined),
+                    dbName: currentDb
+                });
+                if (!res.success) {
+                    const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                    message.error(prefix + res.message);
+                    setResultSets([]);
+                    setActiveResultKey('');
+                    return;
+                }
+                if (Array.isArray(res.data)) {
+                    let rows = (res.data as any[]) || [];
+                    let truncated = false;
+                    if (wantsLimitProbe && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                        truncated = true;
+                        anyTruncated = true;
+                        rows = rows.slice(0, maxRows);
+                    }
+                    const cols = (res.fields && res.fields.length > 0)
+                        ? (res.fields as string[])
+                        : (rows.length > 0 ? Object.keys(rows[0]) : []);
+                    rows.forEach((row: any, i: number) => {
+                        if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
+                    });
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: rawStatement,
+                        exportSql: rawStatement,
+                        rows,
+                        columns: cols,
+                        pkColumns: [],
+                        readOnly: true,
+                        truncated
+                    });
+                } else {
+                    const affected = Number((res.data as any)?.affectedRows);
+                    if (Number.isFinite(affected)) {
+                        const row = { affectedRows: affected };
+                        (row as any)[GONAVI_ROW_KEY] = 0;
+                        nextResultSets.push({
+                            key: `result-${idx + 1}`,
+                            sql: rawStatement,
+                            exportSql: rawStatement,
+                            rows: [row],
+                            columns: ['affectedRows'],
+                            pkColumns: [],
+                            readOnly: true
+                        });
+                    }
+                }
+            }
+            setResultSets(nextResultSets);
+            setActiveResultKey(nextResultSets[0]?.key || '');
+            if (statements.length > 1) {
+                message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
+            } else if (nextResultSets.length === 0) {
+                message.success('执行成功。');
+            }
+            if (anyTruncated && maxRows > 0) {
+                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            }
+        } else {
+            // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
+            const fullSQL = normalizedRawSQL;
+            if (!fullSQL.trim()) {
+                message.info('没有可执行的 SQL。');
+                setResultSets([]);
+                setActiveResultKey('');
+                return;
+            }
+
+            const startTime = Date.now();
             let queryId: string;
             try {
                 queryId = await GenerateQueryID();
@@ -1168,22 +1301,20 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
             setQueryId(queryId);
 
-            const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
+            const res = await DBQueryMulti(config as any, currentDb, fullSQL, queryId);
             const duration = Date.now() - startTime;
 
             addSqlLog({
-                id: `log-${Date.now()}-query-${idx + 1}`,
+                id: `log-${Date.now()}-query-multi`,
                 timestamp: Date.now(),
-                sql: executedSql,
+                sql: fullSQL,
                 status: res.success ? 'success' : 'error',
                 duration,
                 message: res.success ? '' : res.message,
-                affectedRows: (res.success && !Array.isArray(res.data)) ? (res.data as any).affectedRows : (Array.isArray(res.data) ? res.data.length : undefined),
                 dbName: currentDb
             });
 
             if (!res.success) {
-                // 检查是否为查询取消错误
                 const errorMsg = res.message.toLowerCase();
                 const isCancelledError = errorMsg.includes('context canceled') ||
                                          errorMsg.includes('查询已取消') ||
@@ -1191,72 +1322,49 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                                          errorMsg.includes('cancelled') ||
                                          errorMsg.includes('statement canceled') ||
                                          errorMsg.includes('sql: statement canceled');
-
-                // 确保不是超时错误
                 const isTimeoutError = errorMsg.includes('context deadline exceeded') ||
                                        errorMsg.includes('timeout') ||
                                        errorMsg.includes('超时') ||
                                        errorMsg.includes('deadline exceeded');
 
                 if (isCancelledError && !isTimeoutError) {
-                    // 查询已被用户取消，不显示错误消息，清理状态
                     setResultSets([]);
                     setActiveResultKey('');
-                    // 清除查询ID，与handleCancel保持一致
                     if (currentQueryIdRef.current) {
                         clearQueryId();
                     }
                     return;
                 }
 
-                const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                message.error(prefix + res.message);
+                message.error(res.message);
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
             }
 
-            if (Array.isArray(res.data)) {
-                let rows = (res.data as any[]) || [];
-                let truncated = false;
-                if (limited.applied && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
-                    truncated = true;
-                    anyTruncated = true;
-                    rows = rows.slice(0, maxRows);
-                }
-                const cols = (res.fields && res.fields.length > 0)
-                    ? (res.fields as string[])
-                    : (rows.length > 0 ? Object.keys(rows[0]) : []);
+            // res.data 是 ResultSetData[] 数组
+            const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
+            const nextResultSets: ResultSet[] = [];
+            const maxRows = Number(queryOptions?.maxRows) || 0;
+            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
+            let anyTruncated = false;
+            const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
 
-                rows.forEach((row: any, i: number) => {
-                    if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
-                });
+            // 前端也拆分语句用于匹配原始 SQL（展示和表名检测）
+            const statements = splitSQLStatements(fullSQL);
 
-                let simpleTableName: string | undefined = undefined;
-                const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
-                if (tableMatch) {
-                    simpleTableName = tableMatch[1];
-                    if (!forceReadOnlyResult) {
-                        pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
-                    }
-                }
+            for (let idx = 0; idx < resultSetDataArray.length; idx++) {
+                const rsData = resultSetDataArray[idx];
+                const rawStatement = (idx < statements.length) ? statements[idx] : '';
 
-                nextResultSets.push({
-                    key: `result-${idx + 1}`,
-                    sql: rawStatement,
-                    exportSql: limited.applied ? applyAutoLimit(rawStatement, dbType, Math.max(1, Number(maxRows) || 1)).sql : rawStatement,
-                    rows,
-                    columns: cols,
-                    tableName: simpleTableName,
-                    pkColumns: [],
-                    readOnly: true,
-                    pkLoading: !!simpleTableName,
-                    truncated
-                });
-            } else {
-                const affected = Number((res.data as any)?.affectedRows);
-                if (Number.isFinite(affected)) {
-                    const row = { affectedRows: affected };
+                // 检查是否为 affectedRows 类结果集
+                const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
+                    && rsData.columns && rsData.columns.length === 1
+                    && rsData.columns[0] === 'affectedRows';
+
+                if (isAffectedResult) {
+                    const affected = Number(rsData.rows[0]?.affectedRows);
+                    const row = { affectedRows: Number.isFinite(affected) ? affected : 0 };
                     (row as any)[GONAVI_ROW_KEY] = 0;
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
@@ -1267,37 +1375,80 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                         pkColumns: [],
                         readOnly: true
                     });
+                } else {
+                    let rows = Array.isArray(rsData.rows) ? rsData.rows : [];
+                    let truncated = false;
+                    if (Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                        truncated = true;
+                        anyTruncated = true;
+                        rows = rows.slice(0, maxRows);
+                    }
+                    const cols = (rsData.columns && rsData.columns.length > 0)
+                        ? rsData.columns
+                        : (rows.length > 0 ? Object.keys(rows[0]) : []);
+
+                    rows.forEach((row: any, i: number) => {
+                        if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
+                    });
+
+                    let simpleTableName: string | undefined = undefined;
+                    if (rawStatement) {
+                        const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+[`"]?(\w+)[`"]?\s*(?:WHERE.*)?(?:ORDER BY.*)?(?:LIMIT.*)?$/i);
+                        if (tableMatch) {
+                            simpleTableName = tableMatch[1];
+                            if (!forceReadOnlyResult) {
+                                pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
+                            }
+                        }
+                    }
+
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: rawStatement,
+                        exportSql: rawStatement,
+                        rows,
+                        columns: cols,
+                        tableName: simpleTableName,
+                        pkColumns: [],
+                        readOnly: true,
+                        pkLoading: !!simpleTableName,
+                        truncated
+                    });
                 }
             }
-        }
 
-        setResultSets(nextResultSets);
-        setActiveResultKey(nextResultSets[0]?.key || '');
+            setResultSets(nextResultSets);
+            setActiveResultKey(nextResultSets[0]?.key || '');
 
-        pendingPk.forEach(({ resultKey, tableName }) => {
-            DBGetColumns(config as any, currentDb, tableName)
-                .then((resCols: any) => {
-                    if (runSeqRef.current !== runSeq) return;
-                    if (!resCols?.success) {
+            pendingPk.forEach(({ resultKey, tableName }) => {
+                DBGetColumns(config as any, currentDb, tableName)
+                    .then((resCols: any) => {
+                        if (runSeqRef.current !== runSeq) return;
+                        if (!resCols?.success) {
+                            setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
+                            return;
+                        }
+                        const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
+                        setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
+                    })
+                    .catch(() => {
+                        if (runSeqRef.current !== runSeq) return;
                         setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                        return;
-                    }
-                    const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
-                })
-                .catch(() => {
-                    if (runSeqRef.current !== runSeq) return;
-                    setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                });
-        });
+                    });
+            });
 
-        if (statements.length > 1) {
-            message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
-        } else if (nextResultSets.length === 0) {
-            message.success('执行成功。');
-        }
-        if (anyTruncated && maxRows > 0) {
-            message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            // 后端附带的提示信息（如数据源不支持原生多语句执行的回退提示）
+            if (res.message) {
+                message.info(res.message);
+            }
+            if (resultSetDataArray.length > 1) {
+                message.success(`已执行完成，生成 ${nextResultSets.length} 个结果集。`);
+            } else if (nextResultSets.length === 0) {
+                message.success('执行成功。');
+            }
+            if (anyTruncated && maxRows > 0) {
+                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
+            }
         }
     } catch (e: any) {
         message.error("Error executing query: " + e.message);
@@ -1342,6 +1493,46 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   };
 
   useEffect(() => {
+      const handleSelectAllInEditor = (event: KeyboardEvent) => {
+          if (activeTabId !== tab.id) {
+              return;
+          }
+          if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
+              return;
+          }
+
+          const editor = editorRef.current;
+          if (!editor) {
+              return;
+          }
+
+          const targetNode = event.target instanceof Node ? event.target : null;
+          const editorHasFocus = !!editor.hasTextFocus?.();
+          const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inEditorPane) {
+              return;
+          }
+          if (!editorHasFocus && isEditableElement(event.target) && !inEditorPane) {
+              return;
+          }
+          if (!editorHasFocus && !inQueryEditor) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          editor.focus?.();
+          editor.trigger('keyboard', 'editor.action.selectAll', null);
+      };
+
+      window.addEventListener('keydown', handleSelectAllInEditor, true);
+      return () => {
+          window.removeEventListener('keydown', handleSelectAllInEditor, true);
+      };
+  }, [activeTabId, tab.id]);
+
+  useEffect(() => {
       const binding = shortcutOptions.runQuery;
       if (!binding?.enabled || !binding.combo) {
           return;
@@ -1383,16 +1574,60 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       };
   }, [activeTabId, tab.id, handleRun]);
 
+  const resolveDefaultQueryName = () => {
+      const rawTitle = String(tab.title || '').trim();
+      if (!rawTitle || rawTitle.startsWith('新建查询')) {
+          return '未命名查询';
+      }
+      return rawTitle;
+  };
+
+  const persistQuery = (payload: { id: string; name: string; createdAt?: number }) => {
+      const sql = getCurrentQuery();
+      const saved = {
+          id: payload.id,
+          name: payload.name,
+          sql,
+          connectionId: currentConnectionId,
+          dbName: currentDb || tab.dbName || '',
+          createdAt: payload.createdAt ?? Date.now(),
+      };
+      saveQuery(saved);
+      addTab({
+          ...tab,
+          title: payload.name,
+          query: sql,
+          connectionId: currentConnectionId,
+          dbName: currentDb || tab.dbName || '',
+          savedQueryId: payload.id,
+      });
+      return saved;
+  };
+
+  const handleQuickSave = () => {
+      const existed = currentSavedQuery || null;
+      const fallbackSavedId = String(tab.savedQueryId || '').trim();
+      const saveId = existed?.id || fallbackSavedId || '';
+      if (!saveId) {
+          saveForm.setFieldsValue({ name: resolveDefaultQueryName() });
+          setIsSaveModalOpen(true);
+          return;
+      }
+      const saveName = existed?.name || resolveDefaultQueryName();
+      persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
+      message.success('查询已保存！');
+  };
+
   const handleSave = async () => {
       try {
           const values = await saveForm.validateFields();
-          saveQuery({
-              id: tab.id.startsWith('saved-') ? tab.id : `saved-${Date.now()}`,
-              name: values.name,
-              sql: getCurrentQuery(),
-              connectionId: currentConnectionId,
-              dbName: currentDb || tab.dbName || '',
-              createdAt: Date.now()
+          const existed = currentSavedQuery || null;
+          const fallbackSavedId = String(tab.savedQueryId || '').trim();
+          const nextSavedId = existed?.id || fallbackSavedId || `saved-${Date.now()}`;
+          persistQuery({
+              id: nextSavedId,
+              name: String(values.name || '').trim() || '未命名查询',
+              createdAt: existed?.createdAt,
           });
           message.success('查询已保存！');
           setIsSaveModalOpen(false);
@@ -1408,8 +1643,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
           setActiveResultKey(prevActive => {
               if (prevActive && prevActive !== key) return prevActive;
-              const nextKey = next[idx]?.key || next[idx - 1]?.key || next[0]?.key || '';
-              return nextKey;
+              return next[idx]?.key || next[idx - 1]?.key || next[0]?.key || '';
           });
 
           return next;
@@ -1417,7 +1651,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   };
 
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div ref={queryEditorRootRef} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <style>{`
         .query-result-tabs {
           flex: 1 1 auto;
@@ -1460,6 +1694,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
           transition: none !important;
         }
       `}</style>
+      <div ref={editorPaneRef}>
       <div style={{ padding: '8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
@@ -1512,10 +1747,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             </Button>
           )}
         </Button.Group>
-        <Button icon={<SaveOutlined />} onClick={() => {
-            saveForm.setFieldsValue({ name: tab.title.replace('Query (', '').replace(')', '') });
-            setIsSaveModalOpen(true);
-        }}>
+        <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
           保存
         </Button>
         
@@ -1557,6 +1789,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         }} 
         title="拖动调整高度"
       />
+      </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
         {resultSets.length > 0 ? (

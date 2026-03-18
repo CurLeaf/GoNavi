@@ -9,6 +9,8 @@ export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 
 export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
 
+export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResult>;
+
 export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
 export function CheckForUpdates():Promise<connection.QueryResult>;
@@ -41,6 +43,8 @@ export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string
 
 export function DBQueryIsolated(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function DBQueryMulti(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
@@ -62,6 +66,8 @@ export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -190,3 +196,5 @@ export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function TruncateTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;

@@ -55,7 +55,7 @@ func (d *DuckDB) Close() error {
 
 func (d *DuckDB) Ping() error {
 	if d.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := d.pingTimeout
 	if timeout <= 0 {
@@ -68,7 +68,7 @@ func (d *DuckDB) Ping() error {
 
 func (d *DuckDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if d.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 	rows, err := d.conn.QueryContext(ctx, query)
 	if err != nil {
@@ -80,7 +80,7 @@ func (d *DuckDB) QueryContext(ctx context.Context, query string) ([]map[string]i
 
 func (d *DuckDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if d.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 	rows, err := d.conn.Query(query)
 	if err != nil {
@@ -92,7 +92,7 @@ func (d *DuckDB) Query(query string) ([]map[string]interface{}, []string, error)
 
 func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := d.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -103,7 +103,7 @@ func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 
 func (d *DuckDB) Exec(query string) (int64, error) {
 	if d.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := d.conn.Exec(query)
 	if err != nil {
@@ -174,7 +174,7 @@ ORDER BY table_schema, table_name`
 func (d *DuckDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	schema, pureTable := normalizeDuckDBSchemaAndTable(dbName, tableName)
 	if pureTable == "" {
-		return "", fmt.Errorf("table name required")
+		return "", fmt.Errorf("表名不能为空")
 	}
 
 	escapedTable := escapeDuckDBLiteral(pureTable)
@@ -204,13 +204,13 @@ func (d *DuckDB) GetCreateStatement(dbName, tableName string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("create statement not found")
+	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (d *DuckDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	schema, pureTable := normalizeDuckDBSchemaAndTable(dbName, tableName)
 	if pureTable == "" {
-		return nil, fmt.Errorf("table name required")
+		return nil, fmt.Errorf("表名不能为空")
 	}
 
 	query := fmt.Sprintf(`
@@ -303,7 +303,7 @@ func (d *DuckDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefi
 
 func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if d.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := d.conn.Begin()
@@ -346,7 +346,7 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -367,12 +367,12 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 			args = append(args, v)
 		}
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -392,7 +392,7 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

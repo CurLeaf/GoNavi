@@ -388,6 +388,65 @@ func (r *RedisClientImpl) ScanKeys(pattern string, cursor uint64, count int64) (
 	ctx, cancel := context.WithTimeout(context.Background(), maxDuration+5*time.Second)
 	defer cancel()
 
+	// 集群模式：逐 master 节点 SCAN 后合并去重
+	if r.isCluster && r.clusterClient != nil {
+		keys := make([]string, 0, int(targetCount))
+		seen := make(map[string]struct{}, int(targetCount))
+		var mu sync.Mutex
+
+		err := r.clusterClient.ForEachMaster(ctx, func(nodeCtx context.Context, node *redis.Client) error {
+			var nodeCursor uint64
+			round := 0
+			scanStartedAt := time.Now()
+			for {
+				if time.Since(scanStartedAt) >= maxDuration {
+					break
+				}
+				mu.Lock()
+				enough := len(keys) >= int(targetCount)
+				mu.Unlock()
+				if enough {
+					break
+				}
+
+				batch, nextCursor, err := node.Scan(nodeCtx, nodeCursor, physicalPattern, scanStepCount).Result()
+				if err != nil {
+					return err
+				}
+
+				mu.Lock()
+				for _, key := range batch {
+					if _, ok := seen[key]; ok {
+						continue
+					}
+					seen[key] = struct{}{}
+					keys = append(keys, key)
+					if len(keys) >= int(targetCount) {
+						break
+					}
+				}
+				mu.Unlock()
+
+				nodeCursor = nextCursor
+				round++
+				if nodeCursor == 0 || round >= maxRounds {
+					break
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		// 集群模式 cursor 无意义，始终返回 "0" 表示扫描完成
+		return &RedisScanResult{
+			Keys:   r.loadRedisKeyInfos(ctx, keys),
+			Cursor: "0",
+		}, nil
+	}
+
+	// 非集群模式：原逻辑
 	currentCursor := cursor
 	round := 0
 	scanStartedAt := time.Now()

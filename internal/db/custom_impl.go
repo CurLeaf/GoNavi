@@ -47,7 +47,7 @@ func (c *CustomDB) Close() error {
 
 func (c *CustomDB) Ping() error {
 	if c.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := c.pingTimeout
 	if timeout <= 0 {
@@ -60,7 +60,7 @@ func (c *CustomDB) Ping() error {
 
 func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := c.conn.QueryContext(ctx, query)
@@ -74,7 +74,7 @@ func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string
 
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	rows, err := c.conn.Query(query)
@@ -87,7 +87,7 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 
 func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := c.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -98,7 +98,7 @@ func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error)
 
 func (c *CustomDB) Exec(query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("connection not open")
+		return 0, fmt.Errorf("连接未打开")
 	}
 	res, err := c.conn.Exec(query)
 	if err != nil {
@@ -249,7 +249,7 @@ func (c *CustomDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 
 func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if c.conn == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	tx, err := c.conn.Begin()
@@ -321,7 +321,7 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("delete error: %v", err)
+			return fmt.Errorf("删除失败：%v", err)
 		}
 	}
 
@@ -349,12 +349,12 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -378,7 +378,7 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("insert error: %v", err)
+			return fmt.Errorf("插入失败：%v", err)
 		}
 	}
 

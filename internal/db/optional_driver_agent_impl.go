@@ -510,7 +510,7 @@ func (d *OptionalDriverAgentDB) ApplyChanges(tableName string, changes connectio
 
 func (d *OptionalDriverAgentDB) requireClient() (*optionalDriverAgentClient, error) {
 	if d.client == nil {
-		return nil, fmt.Errorf("connection not open")
+		return nil, fmt.Errorf("连接未打开")
 	}
 	return d.client, nil
 }

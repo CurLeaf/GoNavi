@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
@@ -35,7 +35,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 	import { SavedConnection } from '../types';
-	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 
 const { Search } = Input;
@@ -89,6 +90,7 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const deleteQuery = useStore(state => state.deleteQuery);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -107,6 +109,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const tableSortPreference = useStore(state => state.tableSortPreference);
   const recordTableAccess = useStore(state => state.recordTableAccess);
   const setTableSortPreference = useStore(state => state.setTableSortPreference);
+  const addSqlLog = useStore(state => state.addSqlLog);
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
@@ -1479,7 +1482,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               type: 'query',
               connectionId: q.connectionId,
               dbName: q.dbName,
-              query: q.sql
+              query: q.sql,
+              savedQueryId: q.id,
           });
           return;
       } else if (node.type === 'redis-db') {
@@ -1560,7 +1564,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       hide();
       if (res.success) {
           message.success('导出成功');
-      } else if (res.message !== 'Cancelled') {
+      } else if (res.message !== '已取消') {
           message.error('导出失败: ' + res.message);
       }
   };
@@ -1583,7 +1587,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           hide();
           if (res.success) {
               message.success('导出成功');
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
@@ -1610,7 +1614,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           hide();
           if (res.success) {
               message.success('导出成功');
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
@@ -1799,12 +1803,100 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               } else {
                   message.success('导出成功');
               }
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('导出失败: ' + res.message);
           }
       } catch (e: any) {
           hide();
           message.error('导出失败: ' + (e?.message || String(e)));
+      }
+  };
+
+  const handleBatchClear = async () => {
+      const selectedObjects = batchTables.filter(t => checkedTableKeys.includes(t.key));
+      if (selectedObjects.length === 0) {
+          message.warning('请至少选择一个对象');
+          return;
+      }
+
+      const { conn, dbName } = batchDbContext;
+      const objectNames = selectedObjects.map(t => t.objectName);
+
+      const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+              title: '确认清空选中表',
+              content: `清空选中表会永久删除表中所有数据，操作不可逆，是否继续？\r\n\r\n连接: ${conn.name}\n数据库: ${dbName}`,
+              okText: '继续',
+              cancelText: '取消',
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+          });
+      });
+      if (!ok) return;
+
+      setIsBatchModalOpen(false);
+      const hide = message.loading(`正在清空选中表 (${objectNames.length})...`, 0);
+      const startTime = Date.now();
+      try {
+          const app = (window as any).go.app.App;
+          const res = await app.TruncateTables(normalizeConnConfig(conn.config), dbName, objectNames);
+          hide();
+          const duration = Date.now() - startTime;
+          if (res.success) {
+              message.success('清空成功');
+              // 构造 SQL 日志
+              let logSql = `/* Truncate Tables (${objectNames.length} tables) */\n`;
+              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
+                  logSql += res.data.executedSQLs.join(';\n') + ';';
+              } else {
+                  logSql += objectNames.map(name => name).join('; ');
+              }
+              addSqlLog({
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  sql: logSql,
+                  status: 'success',
+                  duration,
+                  message: res.message,
+                  dbName,
+                  affectedRows: res.data?.count || 0
+              });
+          } else if (res.message !== '已取消') {
+              message.error('清空失败: ' + res.message);
+              // 记录失败的日志
+              let logSql = `/* Truncate Tables (${objectNames.length} tables) - FAILED */\n`;
+              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
+                  logSql += res.data.executedSQLs.join(';\n') + ';';
+              } else {
+                  logSql += objectNames.map(name => name).join('; ');
+              }
+              addSqlLog({
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  sql: logSql,
+                  status: 'error',
+                  duration,
+                  message: res.message,
+                  dbName
+              });
+          }
+      } catch (e: any) {
+          const duration = Date.now() - startTime;
+          hide();
+          const errMsg = e?.message || String(e);
+          message.error('清空失败: ' + errMsg);
+          // 记录异常的日志
+          let logSql = `/* Truncate Tables (${objectNames.length} tables) - ERROR */\n`;
+          logSql += objectNames.map(name => name).join('; ');
+          addSqlLog({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              sql: logSql,
+              status: 'error',
+              duration,
+              message: errMsg,
+              dbName
+          });
       }
   };
 
@@ -1939,7 +2031,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               hide();
               if (res.success) {
                   message.success(`${db.dbName} 导出成功`);
-              } else if (res.message !== 'Cancelled') {
+              } else if (res.message !== '已取消') {
                   message.error(`${db.dbName} 导出失败: ` + res.message);
                   break;
               } else {
@@ -1968,21 +2060,125 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const handleRunSQLFile = async (node: any) => {
-      const res = await (window as any).go.app.App.OpenSQLFile();
+      const res = await OpenSQLFile();
       if (res.success) {
-          const sqlContent = res.data;
+          const data = res.data;
+          // 大文件：后端返回文件路径，走流式执行
+          if (data && typeof data === 'object' && data.isLargeFile) {
+              const connId = node.type === 'connection' ? node.key : node.dataRef?.id;
+              const dbName = node.dataRef?.dbName || '';
+              const conn = connections.find(c => c.id === connId);
+              if (!conn) {
+                  message.error('未找到对应的连接配置');
+                  return;
+              }
+              startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
+              return;
+          }
+          // 小文件：加载到编辑器
+          const sqlContent = data;
           const { dbName, id } = node.dataRef;
           addTab({
               id: `query-${Date.now()}`,
-              title: `Import SQL`,
+              title: `运行外部SQL文件`,
               type: 'query',
               connectionId: node.type === 'connection' ? node.key : node.dataRef.id,
               dbName: dbName,
               query: sqlContent
           });
-      } else if (res.message !== "Cancelled") {
-          message.error("读取文件失败: " + res.message);
+      } else if (res.message !== '已取消') {
+          message.error('读取文件失败: ' + res.message);
       }
+  };
+
+  const handleOpenSQLFileFromToolbar = async () => {
+      const ctx = useStore.getState().activeContext;
+      if (!ctx?.connectionId) {
+          message.warning('请先选择一个连接或数据库');
+          return;
+      }
+      const res = await OpenSQLFile();
+      if (res.success) {
+          const data = res.data;
+          // 大文件：后端流式执行
+          if (data && typeof data === 'object' && data.isLargeFile) {
+              const conn = connections.find(c => c.id === ctx.connectionId);
+              if (!conn) {
+                  message.error('未找到对应的连接配置');
+                  return;
+              }
+              startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB);
+              return;
+          }
+          // 小文件
+          addTab({
+              id: `query-${Date.now()}`,
+              title: `运行外部SQL文件`,
+              type: 'query',
+              connectionId: ctx.connectionId,
+              dbName: ctx.dbName || undefined,
+              query: data
+          });
+      } else if (res.message !== '已取消') {
+          message.error('读取文件失败: ' + res.message);
+      }
+  };
+
+  // SQL 文件流式执行状态
+  const [sqlFileExecState, setSqlFileExecState] = useState<{
+      open: boolean;
+      jobId: string;
+      fileSizeMB: string;
+      status: 'running' | 'done' | 'cancelled' | 'error';
+      executed: number;
+      failed: number;
+      total: number;
+      percent: number;
+      currentSQL: string;
+      resultMessage: string;
+  }>({
+      open: false, jobId: '', fileSizeMB: '', status: 'running',
+      executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
+  });
+
+  const startSQLFileExecution = (config: any, dbName: string, filePath: string, fileSizeMB: string) => {
+      const jobId = `sqlfile-${Date.now()}`;
+      setSqlFileExecState({
+          open: true, jobId, fileSizeMB, status: 'running',
+          executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
+      });
+
+      // 监听进度事件
+      const offProgress = EventsOn('sqlfile:progress', (event: any) => {
+          if (!event || event.jobId !== jobId) return;
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: event.status || prev.status,
+              executed: typeof event.executed === 'number' ? event.executed : prev.executed,
+              failed: typeof event.failed === 'number' ? event.failed : prev.failed,
+              total: typeof event.total === 'number' ? event.total : prev.total,
+              percent: typeof event.percent === 'number' ? Math.min(100, event.percent) : prev.percent,
+              currentSQL: typeof event.currentSQL === 'string' ? event.currentSQL : prev.currentSQL,
+          }));
+      });
+
+      // 异步执行
+      ExecuteSQLFile(config, dbName, filePath, jobId).then(res => {
+          offProgress();
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: res.success ? 'done' : (prev.status === 'cancelled' ? 'cancelled' : 'error'),
+              percent: 100,
+              resultMessage: res.message || '',
+          }));
+      }).catch(err => {
+          offProgress();
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: 'error',
+              resultMessage: String(err?.message || err),
+          }));
+      });
   };
 
   const handleCreateDatabase = async () => {
@@ -2981,6 +3177,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                    });
                }
              },
+             {
+                 key: 'open-sql-file',
+                 label: '运行外部SQL文件',
+                 icon: <FileAddOutlined />,
+                 onClick: () => handleRunSQLFile(node)
+             },
              { type: 'divider' },
              {
                  key: 'edit',
@@ -3167,7 +3369,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
              },
              {
                  key: 'run-sql',
-                 label: '运行 SQL 文件...',
+                 label: '运行外部SQL文件',
                  icon: <FileAddOutlined />,
                  onClick: () => handleRunSQLFile(node)
              }
@@ -3259,13 +3461,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '新建查询',
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
+                   const tableName = String(node.dataRef?.tableName || '').trim();
+                   const queryTemplate = tableName ? `SELECT * FROM ${tableName};` : 'SELECT * FROM ';
                    addTab({
                        id: `query-${Date.now()}`,
                        title: `新建查询`,
                        type: 'query',
                        connectionId: node.dataRef.id,
                        dbName: node.dataRef.dbName,
-                       query: ''
+                       query: queryTemplate
                    });
                 }
             },
@@ -3322,6 +3526,56 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
         ];
     }
+
+    // 已存查询节点的右键菜单
+    if (node.type === 'saved-query') {
+        const q = node.dataRef;
+        return [
+            {
+                key: 'open-query',
+                label: '打开查询',
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: q.id,
+                        title: q.name,
+                        type: 'query',
+                        connectionId: q.connectionId,
+                        dbName: q.dbName,
+                        query: q.sql,
+                        savedQueryId: q.id,
+                    });
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-query',
+                label: '删除查询',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    Modal.confirm({
+                        title: '确认删除',
+                        content: `确定要删除已保存的查询 "${q.name}" 吗？此操作不可恢复。`,
+                        okButtonProps: { danger: true },
+                        onOk: () => {
+                            deleteQuery(q.id);
+                            // 从树中移除节点
+                            setTreeData(origin => {
+                                const removeNode = (list: TreeNode[]): TreeNode[] =>
+                                    list
+                                        .filter(n => n.key !== node.key)
+                                        .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
+                                return removeNode(origin);
+                            });
+                            message.success('查询已删除');
+                        }
+                    });
+                }
+            }
+        ];
+    }
+
     return [];
   };
 
@@ -3534,6 +3788,14 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             >
                 批量操作库
             </Button>
+            <Button
+                size="small"
+                icon={<FileAddOutlined />}
+                onClick={handleOpenSQLFileFromToolbar}
+                style={{ flex: '1 1 auto' }}
+            >
+                运行外部SQL文件
+            </Button>
         </div>
 
         <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
@@ -3714,6 +3976,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         取消
                     </Button>
                     <Space size={8} wrap style={{ marginLeft: 'auto' }}>
+                        <Button
+                            key="clear"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => handleBatchClear()}
+                            disabled={checkedTableKeys.length === 0}
+                        >
+                            清空表
+                        </Button>
                         <Button
                             key="export-schema"
                             icon={<ExportOutlined />}
@@ -3985,6 +4256,60 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         </Checkbox.Group>
                     </div>
                 </>
+            )}
+        </Modal>
+
+        {/* SQL 文件流式执行进度 Modal */}
+        <Modal
+            title="运行外部SQL文件"
+            open={sqlFileExecState.open}
+            centered
+            closable={sqlFileExecState.status !== 'running'}
+            maskClosable={false}
+            footer={sqlFileExecState.status === 'running' ? [
+                <Button key="cancel" danger onClick={() => {
+                    CancelSQLFileExecution(sqlFileExecState.jobId);
+                    setSqlFileExecState(prev => ({ ...prev, status: 'cancelled' }));
+                }}>
+                    取消执行
+                </Button>
+            ] : [
+                <Button key="close" type="primary" onClick={() => setSqlFileExecState(prev => ({ ...prev, open: false }))}>
+                    关闭
+                </Button>
+            ]}
+            onCancel={() => {
+                if (sqlFileExecState.status !== 'running') {
+                    setSqlFileExecState(prev => ({ ...prev, open: false }));
+                }
+            }}
+            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none' }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
+        >
+            <div style={{ marginBottom: 16 }}>
+                <Progress
+                    percent={Math.round(sqlFileExecState.percent)}
+                    status={sqlFileExecState.status === 'error' ? 'exception' : sqlFileExecState.status === 'done' ? 'success' : 'active'}
+                    strokeColor={sqlFileExecState.status === 'cancelled' ? '#faad14' : undefined}
+                />
+            </div>
+            <div style={{ fontSize: 13, lineHeight: '22px', marginBottom: 8 }}>
+                <div>文件大小：<strong>{sqlFileExecState.fileSizeMB} MB</strong></div>
+                <div>状态：<strong>{
+                    sqlFileExecState.status === 'running' ? '执行中...' :
+                    sqlFileExecState.status === 'done' ? '✅ 完成' :
+                    sqlFileExecState.status === 'cancelled' ? '⚠️ 已取消' : '❌ 出错'
+                }</strong></div>
+                <div>已执行：<strong style={{ color: '#52c41a' }}>{sqlFileExecState.executed}</strong> 条 | 失败：<strong style={{ color: sqlFileExecState.failed > 0 ? '#ff4d4f' : undefined }}>{sqlFileExecState.failed}</strong> 条</div>
+            </div>
+            {sqlFileExecState.currentSQL && sqlFileExecState.status === 'running' && (
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
+                    {sqlFileExecState.currentSQL}
+                </div>
+            )}
+            {sqlFileExecState.resultMessage && sqlFileExecState.status !== 'running' && (
+                <div style={{ fontSize: 12, marginTop: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '8px 12px' }}>
+                    {sqlFileExecState.resultMessage}
+                </div>
             )}
         </Modal>
     </div>

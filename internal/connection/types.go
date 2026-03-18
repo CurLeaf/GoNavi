@@ -1,6 +1,6 @@
 package connection
 
-// SSHConfig holds SSH connection details
+// SSHConfig 存储 SSH 隧道连接配置。
 type SSHConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
@@ -9,7 +9,7 @@ type SSHConfig struct {
 	KeyPath  string `json:"keyPath"`
 }
 
-// ProxyConfig holds proxy connection details
+// ProxyConfig 存储代理连接配置。
 type ProxyConfig struct {
 	Type     string `json:"type"` // socks5 | http
 	Host     string `json:"host"`
@@ -18,7 +18,7 @@ type ProxyConfig struct {
 	Password string `json:"password,omitempty"`
 }
 
-// HTTPTunnelConfig holds independent HTTP CONNECT tunnel details
+// HTTPTunnelConfig 存储 HTTP CONNECT 隧道配置。
 type HTTPTunnelConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
@@ -26,7 +26,7 @@ type HTTPTunnelConfig struct {
 	Password string `json:"password,omitempty"`
 }
 
-// ConnectionConfig holds database connection details including SSH
+// ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。
 type ConnectionConfig struct {
 	Type                 string           `json:"type"`
 	Host                 string           `json:"host"`
@@ -63,7 +63,13 @@ type ConnectionConfig struct {
 	MongoReplicaPassword string           `json:"mongoReplicaPassword,omitempty"` // MongoDB replica auth password
 }
 
-// QueryResult is the standard response format for Wails methods
+// ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。
+type ResultSetData struct {
+	Rows    []map[string]interface{} `json:"rows"`
+	Columns []string                 `json:"columns"`
+}
+
+// QueryResult 是 Wails 绑定方法的统一响应格式，前端通过此结构体接收后端结果。
 type QueryResult struct {
 	Success bool        `json:"success"`
 	Message string      `json:"message"`
@@ -72,7 +78,7 @@ type QueryResult struct {
 	QueryID string      `json:"queryId,omitempty"` // Unique ID for query cancellation
 }
 
-// ColumnDefinition represents a table column
+// ColumnDefinition 描述表的一个列定义。
 type ColumnDefinition struct {
 	Name     string  `json:"name"`
 	Type     string  `json:"type"`
@@ -83,7 +89,7 @@ type ColumnDefinition struct {
 	Comment  string  `json:"comment"`
 }
 
-// IndexDefinition represents a table index
+// IndexDefinition 描述表的一个索引定义。
 type IndexDefinition struct {
 	Name       string `json:"name"`
 	ColumnName string `json:"columnName"`
@@ -93,7 +99,7 @@ type IndexDefinition struct {
 	SubPart    int    `json:"subPart,omitempty"`
 }
 
-// ForeignKeyDefinition represents a foreign key
+// ForeignKeyDefinition 描述表的一个外键定义。
 type ForeignKeyDefinition struct {
 	Name           string `json:"name"`
 	ColumnName     string `json:"columnName"`
@@ -102,7 +108,7 @@ type ForeignKeyDefinition struct {
 	ConstraintName string `json:"constraintName"`
 }
 
-// TriggerDefinition represents a trigger
+// TriggerDefinition 描述表的一个触发器定义。
 type TriggerDefinition struct {
 	Name      string `json:"name"`
 	Timing    string `json:"timing"` // BEFORE/AFTER
@@ -110,26 +116,27 @@ type TriggerDefinition struct {
 	Statement string `json:"statement"`
 }
 
-// ColumnDefinitionWithTable represents a column with its table name (for search/autocomplete)
+// ColumnDefinitionWithTable 带有表名标识的列定义，用于跨表搜索和 SQL 自动补全。
 type ColumnDefinitionWithTable struct {
 	TableName string `json:"tableName"`
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 }
 
-// UpdateRow represents a row update with keys (WHERE) and values (SET)
+// UpdateRow 表示一行更新操作，Keys 为 WHERE 条件，Values 为 SET 值。
 type UpdateRow struct {
 	Keys   map[string]interface{} `json:"keys"`
 	Values map[string]interface{} `json:"values"`
 }
 
-// ChangeSet represents a batch of changes
+// ChangeSet 表示一组批量变更，包含新增、修改和删除操作。
 type ChangeSet struct {
 	Inserts []map[string]interface{} `json:"inserts"`
 	Updates []UpdateRow              `json:"updates"`
 	Deletes []map[string]interface{} `json:"deletes"`
 }
 
+// MongoMemberInfo 描述 MongoDB 副本集成员的信息。
 type MongoMemberInfo struct {
 	Host      string `json:"host"`
 	Role      string `json:"role"`

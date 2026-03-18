@@ -10,6 +10,10 @@ export function CancelQuery(arg1) {
   return window['go']['app']['App']['CancelQuery'](arg1);
 }
 
+export function CancelSQLFileExecution(arg1) {
+  return window['go']['app']['App']['CancelSQLFileExecution'](arg1);
+}
+
 export function CheckDriverNetworkStatus() {
   return window['go']['app']['App']['CheckDriverNetworkStatus']();
 }
@@ -74,6 +78,10 @@ export function DBQueryIsolated(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQueryIsolated'](arg1, arg2, arg3);
 }
 
+export function DBQueryMulti(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DBQueryMulti'](arg1, arg2, arg3, arg4);
+}
+
 export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
 }
@@ -116,6 +124,10 @@ export function DropTable(arg1, arg2, arg3) {
 
 export function DropView(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropView'](arg1, arg2, arg3);
+}
+
+export function ExecuteSQLFile(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExecuteSQLFile'](arg1, arg2, arg3, arg4);
 }
 
 export function ExportData(arg1, arg2, arg3, arg4) {
@@ -372,4 +384,8 @@ export function SetWindowTranslucency(arg1, arg2) {
 
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
+}
+
+export function TruncateTables(arg1, arg2, arg3) {
+  return window['go']['app']['App']['TruncateTables'](arg1, arg2, arg3);
 }

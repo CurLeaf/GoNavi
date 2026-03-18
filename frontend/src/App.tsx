@@ -89,6 +89,7 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [sidebarWidth, setSidebarWidth] = useState(330);
   const globalProxyInvalidHintShownRef = React.useRef(false);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
@@ -442,7 +443,6 @@ function App() {
   const floatingLogButtonShadow = darkMode
       ? '0 8px 22px rgba(0,0,0,0.38)'
       : '0 8px 20px rgba(0,0,0,0.16)';
-
   const isOpaqueUtilityMode = resolvedAppearance.opacity >= 0.999 && resolvedAppearance.blur <= 0;
   const utilityButtonBgAlpha = darkMode
       ? Math.max(0.28, Math.min(0.76, effectiveOpacity * 0.72))
@@ -462,10 +462,13 @@ function App() {
       : (darkMode
           ? `0 8px 18px rgba(0,0,0,${Math.max(0.10, Math.min(0.22, effectiveOpacity * 0.24))})`
           : `0 8px 18px rgba(15,23,42,${Math.max(0.04, Math.min(0.12, effectiveOpacity * 0.12))})`);
+  const isSidebarNarrow = sidebarWidth < 360;
+  const isSidebarCompact = sidebarWidth < 320;
+  const isSidebarUltraCompact = sidebarWidth < 260;
   const utilityButtonStyle = useMemo(() => ({
       height: Math.max(30, Math.round(32 * effectiveUiScale)),
       width: '100%',
-      paddingInline: Math.max(10, Math.round(12 * effectiveUiScale)),
+      paddingInline: isSidebarCompact ? Math.max(8, Math.round(9 * effectiveUiScale)) : Math.max(10, Math.round(12 * effectiveUiScale)),
       borderRadius: 10,
       border: `1px solid ${utilityButtonBorderColor}`,
       background: utilityButtonBgColor,
@@ -476,8 +479,13 @@ function App() {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: 6,
-  }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
+      gap: isSidebarCompact ? 4 : 6,
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontSize: isSidebarCompact ? 13 : 14,
+  }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
   const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
 
   const sidebarQuickActionBaseStyle = useMemo(() => ({
@@ -493,6 +501,8 @@ function App() {
       backdropFilter: blurFilter,
       WebkitBackdropFilter: blurFilter,
       minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
     }), [blurFilter, darkMode, effectiveUiScale]);
   const sidebarQueryActionStyle = useMemo(() => ({
@@ -561,7 +571,7 @@ function App() {
       marginTop: 2,
   }), [overlayTheme]);
 
-  const sidebarHorizontalPadding = 10;
+  const sidebarHorizontalPadding = isSidebarCompact ? 8 : 10;
   
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
@@ -943,7 +953,7 @@ function App() {
           } catch (e) {
               void message.error("解析 JSON 失败");
           }
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           void message.error("导入失败: " + res.message);
       }
   };
@@ -956,7 +966,7 @@ function App() {
       const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
-      } else if (res.message !== "Cancelled") {
+      } else if (res.message !== "已取消") {
           void message.error("导出失败: " + res.message);
       }
   };
@@ -1058,7 +1068,6 @@ function App() {
   };
   
   // Sidebar Resizing
-  const [sidebarWidth, setSidebarWidth] = useState(330);
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
@@ -1445,15 +1454,15 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
-                        <Button type="text" icon={<ToolOutlined />} title="工具" style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)}>工具</Button>
-                        <Button type="text" icon={<GlobalOutlined />} title="代理" style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)}>代理</Button>
-                        <Button type="text" icon={<SkinOutlined />} title="主题" style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)}>主题</Button>
-                        <Button type="text" icon={<InfoCircleOutlined />} title="关于" style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)}>关于</Button>
+                    <div style={{ display: 'grid', gridTemplateColumns: isSidebarNarrow ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+                        <Button type="text" icon={<ToolOutlined />} title="工具" style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)}>{isSidebarUltraCompact ? null : '工具'}</Button>
+                        <Button type="text" icon={<GlobalOutlined />} title="代理" style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)}>{isSidebarUltraCompact ? null : '代理'}</Button>
+                        <Button type="text" icon={<SkinOutlined />} title="主题" style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)}>{isSidebarUltraCompact ? null : '主题'}</Button>
+                        <Button type="text" icon={<InfoCircleOutlined />} title="关于" style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)}>{isSidebarUltraCompact ? null : '关于'}</Button>
                     </div>
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: isSidebarCompact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
                         <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
                             新建查询
                         </Button>

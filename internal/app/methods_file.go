@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -48,7 +49,28 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+
+	// 检查文件大小
+	const maxSQLFileSize int64 = 50 * 1024 * 1024 // 50MB
+	fi, err := os.Stat(selection)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+
+	// 大文件：只返回文件路径和大小，不读取内容
+	if fi.Size() > maxSQLFileSize {
+		sizeMB := float64(fi.Size()) / (1024 * 1024)
+		return connection.QueryResult{
+			Success: true,
+			Data: map[string]interface{}{
+				"isLargeFile": true,
+				"filePath":    selection,
+				"fileSize":    fi.Size(),
+				"fileSizeMB":  fmt.Sprintf("%.1f", sizeMB),
+			},
+		}
 	}
 
 	content, err := os.ReadFile(selection)
@@ -57,6 +79,184 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+// ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
+// 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
+func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) connection.QueryResult {
+	if strings.TrimSpace(filePath) == "" {
+		return connection.QueryResult{Success: false, Message: "文件路径为空"}
+	}
+	if strings.TrimSpace(jobID) == "" {
+		jobID = fmt.Sprintf("sqlfile-%d", time.Now().UnixMilli())
+	}
+
+	logger.Warnf("ExecuteSQLFile 开始：file=%s db=%s jobID=%s", filePath, dbName, jobID)
+
+	// 获取数据库连接
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "ExecuteSQLFile 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	// 打开文件
+	f, err := os.Open(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法打开文件: %v", err)}
+	}
+	defer f.Close()
+
+	// 获取文件大小用于计算进度
+	fi, _ := f.Stat()
+	totalSize := fi.Size()
+
+	// 设置取消上下文
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.queryMu.Lock()
+	a.runningQueries[jobID] = queryContext{
+		cancel:  cancel,
+		started: time.Now(),
+	}
+	a.queryMu.Unlock()
+	defer func() {
+		a.queryMu.Lock()
+		delete(a.runningQueries, jobID)
+		a.queryMu.Unlock()
+	}()
+
+	// 发送进度事件的辅助函数
+	emitProgress := func(status string, executed, failed, total int, bytesRead int64, currentSQL string, errMsg string) {
+		percent := 0.0
+		if totalSize > 0 {
+			percent = float64(bytesRead) / float64(totalSize) * 100
+			if percent > 100 {
+				percent = 100
+			}
+		}
+		runtime.EventsEmit(a.ctx, "sqlfile:progress", map[string]interface{}{
+			"jobId":      jobID,
+			"status":     status,
+			"executed":   executed,
+			"failed":     failed,
+			"total":      total,
+			"percent":    percent,
+			"bytesRead":  bytesRead,
+			"totalBytes": totalSize,
+			"currentSQL": currentSQL,
+			"error":      errMsg,
+		})
+	}
+
+	emitProgress("running", 0, 0, 0, 0, "", "")
+
+	// 使用 countingReader 追踪已读取字节数
+	cr := &countingReader{r: f}
+
+	var executedCount int
+	var failedCount int
+	var errorLogs []string
+	startTime := time.Now()
+
+	_, streamErr := streamSQLFile(cr, func(index int, stmt string) error {
+		// 检查是否已取消
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("已取消")
+		default:
+		}
+
+		// 执行语句
+		_, execErr := dbInst.Exec(stmt)
+		if execErr != nil {
+			failedCount++
+			snippet := stmt
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "..."
+			}
+			errLog := fmt.Sprintf("第 %d 条语句执行失败: %v\n  SQL: %s", index+1, execErr, snippet)
+			errorLogs = append(errorLogs, errLog)
+			logger.Warnf("ExecuteSQLFile %s", errLog)
+		} else {
+			executedCount++
+		}
+
+		// 每条语句执行后推送进度（但限频：每 100 条或每秒推一次）
+		total := executedCount + failedCount
+		if total%100 == 0 || total <= 10 {
+			snippet := stmt
+			if len(snippet) > 100 {
+				snippet = snippet[:100] + "..."
+			}
+			emitProgress("running", executedCount, failedCount, total, cr.n, snippet, "")
+		}
+
+		return nil
+	})
+
+	duration := time.Since(startTime)
+
+	if streamErr != nil && streamErr.Error() == "已取消" {
+		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", "用户取消执行")
+		logger.Warnf("ExecuteSQLFile 已取消：executed=%d failed=%d duration=%v", executedCount, failedCount, duration)
+		return connection.QueryResult{
+			Success: false,
+			Message: fmt.Sprintf("执行已取消。已执行 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond)),
+		}
+	}
+
+	if streamErr != nil {
+		emitProgress("error", executedCount, failedCount, executedCount+failedCount, cr.n, "", streamErr.Error())
+		return connection.QueryResult{
+			Success: false,
+			Message: fmt.Sprintf("文件读取错误: %v。已执行 %d 条。", streamErr, executedCount),
+		}
+	}
+
+	emitProgress("done", executedCount, failedCount, executedCount+failedCount, totalSize, "", "")
+
+	summary := fmt.Sprintf("执行完成。成功 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond))
+	if len(errorLogs) > 0 {
+		maxShow := 20
+		if len(errorLogs) < maxShow {
+			maxShow = len(errorLogs)
+		}
+		summary += "\n\n错误详情（前 " + fmt.Sprintf("%d", maxShow) + " 条）：\n" + strings.Join(errorLogs[:maxShow], "\n")
+		if len(errorLogs) > maxShow {
+			summary += fmt.Sprintf("\n...还有 %d 条错误未显示", len(errorLogs)-maxShow)
+		}
+	}
+
+	logger.Warnf("ExecuteSQLFile 完成：executed=%d failed=%d duration=%v", executedCount, failedCount, duration)
+	return connection.QueryResult{Success: failedCount == 0, Message: summary}
+}
+
+// CancelSQLFileExecution 取消正在执行的 SQL 文件任务。
+func (a *App) CancelSQLFileExecution(jobID string) connection.QueryResult {
+	a.queryMu.Lock()
+	defer a.queryMu.Unlock()
+
+	if ctx, exists := a.runningQueries[jobID]; exists {
+		ctx.cancel()
+		delete(a.runningQueries, jobID)
+		return connection.QueryResult{Success: true, Message: "已发送取消请求"}
+	}
+	return connection.QueryResult{Success: false, Message: "未找到该任务"}
+}
+
+// countingReader 包装 io.Reader，追踪已读取的字节数。
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	return n, err
 }
 
 func (a *App) ImportConfigFile() connection.QueryResult {
@@ -75,7 +275,7 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	content, err := os.ReadFile(selection)
@@ -120,7 +320,7 @@ func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -192,7 +392,7 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.TrimSpace(selection) == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -203,7 +403,7 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 // PreviewImportFile 解析导入文件，返回字段列表、总行数、前 5 行预览数据
 func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 	if filePath == "" {
-		return connection.QueryResult{Success: false, Message: "File path required"}
+		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
 	}
 
 	rows, columns, err := parseImportFile(filePath)
@@ -243,7 +443,7 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 	}
 
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	// 返回文件路径供前端预览
@@ -492,7 +692,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 	}
 
 	if len(rows) == 0 {
-		return connection.QueryResult{Success: true, Message: "No data to import"}
+		return connection.QueryResult{Success: true, Message: "无可导入数据"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -584,7 +784,7 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 	})
 
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -616,7 +816,7 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 
-		return connection.QueryResult{Success: true, Message: "Export successful"}
+		return connection.QueryResult{Success: true, Message: "导出完成"}
 	}
 
 	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(runConfig.Type, tableName))
@@ -632,10 +832,10 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 	}
 	defer f.Close()
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func (a *App) ExportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeData bool) connection.QueryResult {
@@ -648,7 +848,7 @@ func (a *App) ExportTablesDataSQL(config connection.ConnectionConfig, dbName str
 
 func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeSchema bool, includeData bool) connection.QueryResult {
 	if !includeSchema && !includeData {
-		return connection.QueryResult{Success: false, Message: "invalid export mode"}
+		return connection.QueryResult{Success: false, Message: "无效的导出模式"}
 	}
 
 	safeDbName := strings.TrimSpace(dbName)
@@ -671,7 +871,7 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 		DefaultFilename: defaultFilename,
 	})
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -717,13 +917,13 @@ func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName string, includeData bool) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "dbName required"}
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
 	suffix := "schema"
 	if includeData {
@@ -735,7 +935,7 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		DefaultFilename: fmt.Sprintf("%s_%s.sql", safeDbName, suffix),
 	})
 	if err != nil || filename == "" {
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -772,7 +972,92 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
+// TruncateTables 清空指定表的数据（针对 MySQL 使用 TRUNCATE，MongoDB 使用 delete，否则使用 DELETE）。
+// 注意：MySQL 的 TRUNCATE TABLE 是 DDL 操作，无法事务回滚；批量清空为逐表执行，
+// 如果中途失败，已清空的表无法恢复。错误结果会附带已执行的 SQL 列表供排查。
+func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+	runConfig := normalizeRunConfig(config, dbName)
+
+	// 参数校验
+	if len(tableNames) == 0 {
+		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
+	}
+
+	objects := make([]string, 0, len(tableNames))
+	seen := make(map[string]struct{}, len(tableNames))
+	for _, t := range tableNames {
+		tt := strings.TrimSpace(t)
+		if tt == "" {
+			continue
+		}
+		if _, ok := seen[tt]; ok {
+			continue
+		}
+		seen[tt] = struct{}{}
+		objects = append(objects, tt)
+	}
+
+	if len(objects) == 0 {
+		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
+	}
+	const maxBatchSize = 200
+	if len(objects) > maxBatchSize {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("单次最多清空 %d 张表，当前选中 %d 张", maxBatchSize, len(objects))}
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	// 审计日志：记录清空操作的发起
+	logger.Warnf("TruncateTables 开始：%s db=%s tables=%v（共 %d 张）", formatConnSummary(runConfig), dbName, objects, len(objects))
+
+	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
+	var executedSQLs []string
+	for i, objectName := range objects {
+		var sql string
+		if dbType == "mysql" || dbType == "mariadb" {
+			sql = fmt.Sprintf("TRUNCATE TABLE %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
+		} else if dbType == "mongodb" {
+			// MongoDB 使用 delete 命令清空集合中的所有文档
+			// deletes 的 limit 为 0 表示删除所有匹配的文档
+			sql = fmt.Sprintf(`{"delete":"%s","deletes":[{"q":{},"limit":0}]}`, objectName)
+		} else {
+			sql = fmt.Sprintf("DELETE FROM %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
+		}
+
+		if _, err := dbInst.Exec(sql); err != nil {
+			logger.Warnf("TruncateTables 第 %d/%d 张表失败：%s table=%s err=%v（已成功清空 %d 张）", i+1, len(objects), formatConnSummary(runConfig), objectName, err, len(executedSQLs))
+			errMsg := fmt.Sprintf("清空 %s 失败: %v", objectName, err)
+			if len(executedSQLs) > 0 {
+				errMsg += fmt.Sprintf("（注意：前 %d 张表已清空且无法恢复）", len(executedSQLs))
+			}
+			return connection.QueryResult{
+				Success: false,
+				Message: errMsg,
+				Data: map[string]interface{}{
+					"executedSQLs": executedSQLs,
+					"count":        len(executedSQLs),
+				},
+			}
+		}
+		executedSQLs = append(executedSQLs, sql)
+	}
+
+	logger.Warnf("TruncateTables 完成：%s db=%s 共清空 %d 张表", formatConnSummary(runConfig), dbName, len(executedSQLs))
+
+	return connection.QueryResult{
+		Success: true,
+		Message: "清空成功",
+		Data: map[string]interface{}{
+			"executedSQLs": executedSQLs,
+			"count":        len(executedSQLs),
+		},
+	}
 }
 
 func quoteIdentByType(dbType string, ident string) string {
@@ -1471,7 +1756,7 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 
 	if err != nil || filename == "" {
 		logger.Infof("ExportData 已取消或未选择文件：err=%v", err)
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
 
@@ -1482,11 +1767,11 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 	defer f.Close()
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
 		logger.Warnf("ExportData 写入失败：file=%s err=%v", filename, err)
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportData 完成：file=%s rows=%d", filename, len(data))
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 // ExportQuery exports by executing the provided SELECT query on backend side.
@@ -1494,7 +1779,7 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, query string, defaultName string, format string) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return connection.QueryResult{Success: false, Message: "query required"}
+		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
 	}
 
 	if defaultName == "" {
@@ -1507,7 +1792,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	})
 	if err != nil || filename == "" {
 		logger.Infof("ExportQuery 已取消或未选择文件：err=%v", err)
-		return connection.QueryResult{Success: false, Message: "Cancelled"}
+		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
 
@@ -1520,7 +1805,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
 	lowerQuery := strings.ToLower(strings.TrimSpace(query))
 	if !(strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "with")) {
-		return connection.QueryResult{Success: false, Message: "Only SELECT/WITH queries are supported"}
+		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
 	}
 
 	data, columns, err := queryDataForExport(dbInst, runConfig, query)
@@ -1537,11 +1822,11 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 
 	if err := writeRowsToFile(f, data, columns, format); err != nil {
 		logger.Warnf("ExportQuery 写入失败：file=%s err=%v", filename, err)
-		return connection.QueryResult{Success: false, Message: "Write error: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, len(data), len(columns))
-	return connection.QueryResult{Success: true, Message: "Export successful"}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 func queryDataForExport(dbInst db.Database, config connection.ConnectionConfig, query string) ([]map[string]interface{}, []string, error) {

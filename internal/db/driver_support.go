@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// coreBuiltinDrivers 是始终内置可用的核心驱动，无需额外安装即可使用。
 var coreBuiltinDrivers = map[string]struct{}{
 	"mysql":    {},
 	"redis":    {},
@@ -91,6 +92,8 @@ func driverDisplayName(driverType string) string {
 	}
 }
 
+// IsOptionalGoDriver 返回指定驱动类型是否为可选的纯 Go 驱动。
+// 可选驱动需要用户在驱动管理界面点击“安装启用”后才能使用。
 func IsOptionalGoDriver(driverType string) bool {
 	_, ok := optionalGoDrivers[normalizeRuntimeDriverType(driverType)]
 	return ok
@@ -100,6 +103,7 @@ func IsOptionalGoDriverBuildIncluded(driverType string) bool {
 	return optionalGoDriverBuildIncluded(normalizeRuntimeDriverType(driverType))
 }
 
+// IsBuiltinDriver 返回指定驱动类型是否为核心内置驱动（始终可用，无需安装）。
 func IsBuiltinDriver(driverType string) bool {
 	_, ok := coreBuiltinDrivers[normalizeRuntimeDriverType(driverType)]
 	return ok
@@ -146,6 +150,8 @@ func currentExternalDriverDownloadDirectory() string {
 	return defaultExternalDriverDownloadDirectory()
 }
 
+// SetExternalDriverDownloadDirectory 设置可选驱动的下载存储目录。
+// 如果路径解析失败，会回退到默认目录（~/.gonavi/drivers）。
 func SetExternalDriverDownloadDirectory(downloadDir string) {
 	root, err := resolveExternalDriverRoot(downloadDir)
 	if err != nil {

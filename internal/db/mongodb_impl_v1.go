@@ -238,9 +238,6 @@ func (m *MongoDBV1) getURI(config connection.ConnectionConfig) string {
 	params.Set("serverSelectionTimeoutMS", strconv.Itoa(timeout*1000))
 
 	authSource := strings.TrimSpace(config.AuthSource)
-	if authSource == "" && strings.TrimSpace(config.Database) != "" {
-		authSource = strings.TrimSpace(config.Database)
-	}
 	if authSource == "" {
 		authSource = "admin"
 	}
@@ -483,7 +480,7 @@ func (m *MongoDBV1) Close() error {
 
 func (m *MongoDBV1) Ping() error {
 	if m.client == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 	timeout := m.pingTimeout
 	if timeout <= 0 {
@@ -687,7 +684,7 @@ func buildMembersFromHello(raw bson.M) []connection.MongoMemberInfo {
 
 func (m *MongoDBV1) DiscoverMembers() (string, []connection.MongoMemberInfo, error) {
 	if m.client == nil {
-		return "", nil, fmt.Errorf("connection not open")
+		return "", nil, fmt.Errorf("连接未打开")
 	}
 
 	timeout := m.pingTimeout
@@ -838,7 +835,7 @@ func extractCollectionFromSQL(sql string) string {
 
 func (m *MongoDBV1) queryWithContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if m.client == nil {
-		return nil, nil, fmt.Errorf("connection not open")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
 
 	query = strings.TrimSpace(query)
@@ -1082,7 +1079,7 @@ func (m *MongoDBV1) ExecContext(ctx context.Context, query string) (int64, error
 
 func (m *MongoDBV1) GetDatabases() ([]string, error) {
 	if m.client == nil {
-		return nil, fmt.Errorf("connection not open")
+		return nil, fmt.Errorf("连接未打开")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1097,7 +1094,7 @@ func (m *MongoDBV1) GetDatabases() ([]string, error) {
 
 func (m *MongoDBV1) GetTables(dbName string) ([]string, error) {
 	if m.client == nil {
-		return nil, fmt.Errorf("connection not open")
+		return nil, fmt.Errorf("连接未打开")
 	}
 
 	targetDB := dbName
@@ -1133,7 +1130,7 @@ func (m *MongoDBV1) GetAllColumns(dbName string) ([]connection.ColumnDefinitionW
 // GetIndexes returns indexes for a MongoDB collection
 func (m *MongoDBV1) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	if m.client == nil {
-		return nil, fmt.Errorf("connection not open")
+		return nil, fmt.Errorf("连接未打开")
 	}
 
 	targetDB := dbName
@@ -1200,7 +1197,7 @@ func (m *MongoDBV1) GetTriggers(dbName, tableName string) ([]connection.TriggerD
 // ApplyChanges implements batch changes for MongoDB
 func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if m.client == nil {
-		return fmt.Errorf("connection not open")
+		return fmt.Errorf("连接未打开")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1216,7 +1213,7 @@ func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet)
 		}
 		if len(filter) > 0 {
 			if _, err := collection.DeleteOne(ctx, filter); err != nil {
-				return fmt.Errorf("delete error: %v", err)
+				return fmt.Errorf("删除失败：%v", err)
 			}
 		}
 	}
@@ -1228,7 +1225,7 @@ func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet)
 			filter[k] = v
 		}
 		if len(filter) == 0 {
-			return fmt.Errorf("update requires keys")
+			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		updateDoc := bson.M{"$set": bson.M{}}
@@ -1237,7 +1234,7 @@ func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet)
 		}
 
 		if _, err := collection.UpdateOne(ctx, filter, updateDoc); err != nil {
-			return fmt.Errorf("update error: %v", err)
+			return fmt.Errorf("更新失败：%v", err)
 		}
 	}
 
@@ -1249,7 +1246,7 @@ func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet)
 		}
 		if len(doc) > 0 {
 			if _, err := collection.InsertOne(ctx, doc); err != nil {
-				return fmt.Errorf("insert error: %v", err)
+				return fmt.Errorf("插入失败：%v", err)
 			}
 		}
 	}

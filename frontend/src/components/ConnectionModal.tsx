@@ -1013,7 +1013,7 @@ const ConnectionModal: React.FC<{
               if (selectedPath) {
                   form.setFieldValue('sshKeyPath', selectedPath);
               }
-          } else if (res?.message !== 'Cancelled') {
+          } else if (res?.message !== '已取消') {
               message.error(`选择私钥文件失败: ${res?.message || '未知错误'}`);
           }
       } catch (e: any) {
@@ -1037,7 +1037,7 @@ const ConnectionModal: React.FC<{
               if (selectedPath) {
                   form.setFieldValue('host', normalizeFileDbPath(selectedPath));
               }
-          } else if (res?.message !== 'Cancelled') {
+          } else if (res?.message !== '已取消') {
               message.error(`选择数据库文件失败: ${res?.message || '未知错误'}`);
           }
       } catch (e: any) {
