@@ -397,6 +397,7 @@ interface SortableHeaderCellProps extends React.HTMLAttributes<HTMLTableCellElem
 const sortableHeaderStaticStyles = `
     .gonavi-sortable-header-cell {
         padding: 0 !important;
+        overflow: hidden;
     }
     .gonavi-sortable-header-cell[data-cursor-grabbing="true"],
     .gonavi-sortable-header-cell[data-cursor-grabbing="true"] *,
@@ -413,6 +414,7 @@ const sortableHeaderStaticStyles = `
         padding: 0 10px;
         user-select: none;
         cursor: inherit;
+        overflow: hidden;
     }
 `;
 
