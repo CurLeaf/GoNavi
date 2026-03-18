@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
@@ -35,7 +35,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 	import { SavedConnection } from '../types';
-	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+  import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 
 const { Search } = Input;
@@ -2059,9 +2060,23 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const handleRunSQLFile = async (node: any) => {
-      const res = await (window as any).go.app.App.OpenSQLFile();
+      const res = await OpenSQLFile();
       if (res.success) {
-          const sqlContent = res.data;
+          const data = res.data;
+          // 大文件：后端返回文件路径，走流式执行
+          if (data && typeof data === 'object' && data.isLargeFile) {
+              const connId = node.type === 'connection' ? node.key : node.dataRef?.id;
+              const dbName = node.dataRef?.dbName || '';
+              const conn = connections.find(c => c.id === connId);
+              if (!conn) {
+                  message.error('未找到对应的连接配置');
+                  return;
+              }
+              startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
+              return;
+          }
+          // 小文件：加载到编辑器
+          const sqlContent = data;
           const { dbName, id } = node.dataRef;
           addTab({
               id: `query-${Date.now()}`,
@@ -2071,8 +2086,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               dbName: dbName,
               query: sqlContent
           });
-      } else if (res.message !== "已取消") {
-          message.error("读取文件失败: " + res.message);
+      } else if (res.message !== '已取消') {
+          message.error('读取文件失败: ' + res.message);
       }
   };
 
@@ -2082,19 +2097,88 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           message.warning('请先选择一个连接或数据库');
           return;
       }
-      const res = await (window as any).go.app.App.OpenSQLFile();
+      const res = await OpenSQLFile();
       if (res.success) {
+          const data = res.data;
+          // 大文件：后端流式执行
+          if (data && typeof data === 'object' && data.isLargeFile) {
+              const conn = connections.find(c => c.id === ctx.connectionId);
+              if (!conn) {
+                  message.error('未找到对应的连接配置');
+                  return;
+              }
+              startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB);
+              return;
+          }
+          // 小文件
           addTab({
               id: `query-${Date.now()}`,
               title: `运行外部SQL文件`,
               type: 'query',
               connectionId: ctx.connectionId,
               dbName: ctx.dbName || undefined,
-              query: res.data
+              query: data
           });
       } else if (res.message !== '已取消') {
           message.error('读取文件失败: ' + res.message);
       }
+  };
+
+  // SQL 文件流式执行状态
+  const [sqlFileExecState, setSqlFileExecState] = useState<{
+      open: boolean;
+      jobId: string;
+      fileSizeMB: string;
+      status: 'running' | 'done' | 'cancelled' | 'error';
+      executed: number;
+      failed: number;
+      total: number;
+      percent: number;
+      currentSQL: string;
+      resultMessage: string;
+  }>({
+      open: false, jobId: '', fileSizeMB: '', status: 'running',
+      executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
+  });
+
+  const startSQLFileExecution = (config: any, dbName: string, filePath: string, fileSizeMB: string) => {
+      const jobId = `sqlfile-${Date.now()}`;
+      setSqlFileExecState({
+          open: true, jobId, fileSizeMB, status: 'running',
+          executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
+      });
+
+      // 监听进度事件
+      const offProgress = EventsOn('sqlfile:progress', (event: any) => {
+          if (!event || event.jobId !== jobId) return;
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: event.status || prev.status,
+              executed: typeof event.executed === 'number' ? event.executed : prev.executed,
+              failed: typeof event.failed === 'number' ? event.failed : prev.failed,
+              total: typeof event.total === 'number' ? event.total : prev.total,
+              percent: typeof event.percent === 'number' ? Math.min(100, event.percent) : prev.percent,
+              currentSQL: typeof event.currentSQL === 'string' ? event.currentSQL : prev.currentSQL,
+          }));
+      });
+
+      // 异步执行
+      ExecuteSQLFile(config, dbName, filePath, jobId).then(res => {
+          offProgress();
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: res.success ? 'done' : (prev.status === 'cancelled' ? 'cancelled' : 'error'),
+              percent: 100,
+              resultMessage: res.message || '',
+          }));
+      }).catch(err => {
+          offProgress();
+          setSqlFileExecState(prev => ({
+              ...prev,
+              status: 'error',
+              resultMessage: String(err?.message || err),
+          }));
+      });
   };
 
   const handleCreateDatabase = async () => {
@@ -4172,6 +4256,60 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         </Checkbox.Group>
                     </div>
                 </>
+            )}
+        </Modal>
+
+        {/* SQL 文件流式执行进度 Modal */}
+        <Modal
+            title="运行外部SQL文件"
+            open={sqlFileExecState.open}
+            centered
+            closable={sqlFileExecState.status !== 'running'}
+            maskClosable={false}
+            footer={sqlFileExecState.status === 'running' ? [
+                <Button key="cancel" danger onClick={() => {
+                    CancelSQLFileExecution(sqlFileExecState.jobId);
+                    setSqlFileExecState(prev => ({ ...prev, status: 'cancelled' }));
+                }}>
+                    取消执行
+                </Button>
+            ] : [
+                <Button key="close" type="primary" onClick={() => setSqlFileExecState(prev => ({ ...prev, open: false }))}>
+                    关闭
+                </Button>
+            ]}
+            onCancel={() => {
+                if (sqlFileExecState.status !== 'running') {
+                    setSqlFileExecState(prev => ({ ...prev, open: false }));
+                }
+            }}
+            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none' }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
+        >
+            <div style={{ marginBottom: 16 }}>
+                <Progress
+                    percent={Math.round(sqlFileExecState.percent)}
+                    status={sqlFileExecState.status === 'error' ? 'exception' : sqlFileExecState.status === 'done' ? 'success' : 'active'}
+                    strokeColor={sqlFileExecState.status === 'cancelled' ? '#faad14' : undefined}
+                />
+            </div>
+            <div style={{ fontSize: 13, lineHeight: '22px', marginBottom: 8 }}>
+                <div>文件大小：<strong>{sqlFileExecState.fileSizeMB} MB</strong></div>
+                <div>状态：<strong>{
+                    sqlFileExecState.status === 'running' ? '执行中...' :
+                    sqlFileExecState.status === 'done' ? '✅ 完成' :
+                    sqlFileExecState.status === 'cancelled' ? '⚠️ 已取消' : '❌ 出错'
+                }</strong></div>
+                <div>已执行：<strong style={{ color: '#52c41a' }}>{sqlFileExecState.executed}</strong> 条 | 失败：<strong style={{ color: sqlFileExecState.failed > 0 ? '#ff4d4f' : undefined }}>{sqlFileExecState.failed}</strong> 条</div>
+            </div>
+            {sqlFileExecState.currentSQL && sqlFileExecState.status === 'running' && (
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
+                    {sqlFileExecState.currentSQL}
+                </div>
+            )}
+            {sqlFileExecState.resultMessage && sqlFileExecState.status !== 'running' && (
+                <div style={{ fontSize: 12, marginTop: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '8px 12px' }}>
+                    {sqlFileExecState.resultMessage}
+                </div>
             )}
         </Modal>
     </div>

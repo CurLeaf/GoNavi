@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -51,12 +52,211 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
+	// 检查文件大小
+	const maxSQLFileSize int64 = 50 * 1024 * 1024 // 50MB
+	fi, err := os.Stat(selection)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+
+	// 大文件：只返回文件路径和大小，不读取内容
+	if fi.Size() > maxSQLFileSize {
+		sizeMB := float64(fi.Size()) / (1024 * 1024)
+		return connection.QueryResult{
+			Success: true,
+			Data: map[string]interface{}{
+				"isLargeFile": true,
+				"filePath":    selection,
+				"fileSize":    fi.Size(),
+				"fileSizeMB":  fmt.Sprintf("%.1f", sizeMB),
+			},
+		}
+	}
+
 	content, err := os.ReadFile(selection)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+// ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
+// 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
+func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) connection.QueryResult {
+	if strings.TrimSpace(filePath) == "" {
+		return connection.QueryResult{Success: false, Message: "文件路径为空"}
+	}
+	if strings.TrimSpace(jobID) == "" {
+		jobID = fmt.Sprintf("sqlfile-%d", time.Now().UnixMilli())
+	}
+
+	logger.Warnf("ExecuteSQLFile 开始：file=%s db=%s jobID=%s", filePath, dbName, jobID)
+
+	// 获取数据库连接
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "ExecuteSQLFile 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	// 打开文件
+	f, err := os.Open(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法打开文件: %v", err)}
+	}
+	defer f.Close()
+
+	// 获取文件大小用于计算进度
+	fi, _ := f.Stat()
+	totalSize := fi.Size()
+
+	// 设置取消上下文
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	a.queryMu.Lock()
+	a.runningQueries[jobID] = queryContext{
+		cancel:  cancel,
+		started: time.Now(),
+	}
+	a.queryMu.Unlock()
+	defer func() {
+		a.queryMu.Lock()
+		delete(a.runningQueries, jobID)
+		a.queryMu.Unlock()
+	}()
+
+	// 发送进度事件的辅助函数
+	emitProgress := func(status string, executed, failed, total int, bytesRead int64, currentSQL string, errMsg string) {
+		percent := 0.0
+		if totalSize > 0 {
+			percent = float64(bytesRead) / float64(totalSize) * 100
+			if percent > 100 {
+				percent = 100
+			}
+		}
+		runtime.EventsEmit(a.ctx, "sqlfile:progress", map[string]interface{}{
+			"jobId":      jobID,
+			"status":     status,
+			"executed":   executed,
+			"failed":     failed,
+			"total":      total,
+			"percent":    percent,
+			"bytesRead":  bytesRead,
+			"totalBytes": totalSize,
+			"currentSQL": currentSQL,
+			"error":      errMsg,
+		})
+	}
+
+	emitProgress("running", 0, 0, 0, 0, "", "")
+
+	// 使用 countingReader 追踪已读取字节数
+	cr := &countingReader{r: f}
+
+	var executedCount int
+	var failedCount int
+	var errorLogs []string
+	startTime := time.Now()
+
+	_, streamErr := streamSQLFile(cr, func(index int, stmt string) error {
+		// 检查是否已取消
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("已取消")
+		default:
+		}
+
+		// 执行语句
+		_, execErr := dbInst.Exec(stmt)
+		if execErr != nil {
+			failedCount++
+			snippet := stmt
+			if len(snippet) > 200 {
+				snippet = snippet[:200] + "..."
+			}
+			errLog := fmt.Sprintf("第 %d 条语句执行失败: %v\n  SQL: %s", index+1, execErr, snippet)
+			errorLogs = append(errorLogs, errLog)
+			logger.Warnf("ExecuteSQLFile %s", errLog)
+		} else {
+			executedCount++
+		}
+
+		// 每条语句执行后推送进度（但限频：每 100 条或每秒推一次）
+		total := executedCount + failedCount
+		if total%100 == 0 || total <= 10 {
+			snippet := stmt
+			if len(snippet) > 100 {
+				snippet = snippet[:100] + "..."
+			}
+			emitProgress("running", executedCount, failedCount, total, cr.n, snippet, "")
+		}
+
+		return nil
+	})
+
+	duration := time.Since(startTime)
+
+	if streamErr != nil && streamErr.Error() == "已取消" {
+		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", "用户取消执行")
+		logger.Warnf("ExecuteSQLFile 已取消：executed=%d failed=%d duration=%v", executedCount, failedCount, duration)
+		return connection.QueryResult{
+			Success: false,
+			Message: fmt.Sprintf("执行已取消。已执行 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond)),
+		}
+	}
+
+	if streamErr != nil {
+		emitProgress("error", executedCount, failedCount, executedCount+failedCount, cr.n, "", streamErr.Error())
+		return connection.QueryResult{
+			Success: false,
+			Message: fmt.Sprintf("文件读取错误: %v。已执行 %d 条。", streamErr, executedCount),
+		}
+	}
+
+	emitProgress("done", executedCount, failedCount, executedCount+failedCount, totalSize, "", "")
+
+	summary := fmt.Sprintf("执行完成。成功 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond))
+	if len(errorLogs) > 0 {
+		maxShow := 20
+		if len(errorLogs) < maxShow {
+			maxShow = len(errorLogs)
+		}
+		summary += "\n\n错误详情（前 " + fmt.Sprintf("%d", maxShow) + " 条）：\n" + strings.Join(errorLogs[:maxShow], "\n")
+		if len(errorLogs) > maxShow {
+			summary += fmt.Sprintf("\n...还有 %d 条错误未显示", len(errorLogs)-maxShow)
+		}
+	}
+
+	logger.Warnf("ExecuteSQLFile 完成：executed=%d failed=%d duration=%v", executedCount, failedCount, duration)
+	return connection.QueryResult{Success: failedCount == 0, Message: summary}
+}
+
+// CancelSQLFileExecution 取消正在执行的 SQL 文件任务。
+func (a *App) CancelSQLFileExecution(jobID string) connection.QueryResult {
+	a.queryMu.Lock()
+	defer a.queryMu.Unlock()
+
+	if ctx, exists := a.runningQueries[jobID]; exists {
+		ctx.cancel()
+		delete(a.runningQueries, jobID)
+		return connection.QueryResult{Success: true, Message: "已发送取消请求"}
+	}
+	return connection.QueryResult{Success: false, Message: "未找到该任务"}
+}
+
+// countingReader 包装 io.Reader，追踪已读取的字节数。
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	return n, err
 }
 
 func (a *App) ImportConfigFile() connection.QueryResult {

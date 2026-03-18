@@ -9,6 +9,8 @@ export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 
 export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
 
+export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResult>;
+
 export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
 export function CheckForUpdates():Promise<connection.QueryResult>;
@@ -64,6 +66,8 @@ export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
