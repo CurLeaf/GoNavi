@@ -911,16 +911,22 @@ function App() {
   }, []);
 
   const handleNewQuery = () => {
-      let connId = activeContext?.connectionId || '';
-      let db = activeContext?.dbName || '';
+      let connId = '';
+      let db = '';
 
-      // Priority: Active Tab Context > Sidebar Selection
+      // Priority: Active Tab Context (if connection still valid) > Sidebar Selection (activeContext)
       if (activeTabId) {
           const currentTab = tabs.find(t => t.id === activeTabId);
-          if (currentTab && currentTab.connectionId) {
+          if (currentTab && currentTab.connectionId && connections.some(c => c.id === currentTab.connectionId)) {
               connId = currentTab.connectionId;
               db = currentTab.dbName || '';
           }
+      }
+
+      // Fallback: Sidebar selection context (only if connection still valid)
+      if (!connId && activeContext?.connectionId && connections.some(c => c.id === activeContext.connectionId)) {
+          connId = activeContext.connectionId;
+          db = activeContext.dbName || '';
       }
 
       addTab({

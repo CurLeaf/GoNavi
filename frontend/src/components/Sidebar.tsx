@@ -38,6 +38,7 @@ import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import FindInDatabaseModal from './FindInDatabaseModal';
 
 const { Search } = Input;
 
@@ -281,6 +282,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [checkedDbKeys, setCheckedDbKeys] = useState<string[]>([]);
   const [batchConnContext, setBatchConnContext] = useState<any>(null);
   const [selectedDbConnection, setSelectedDbConnection] = useState<string>('');
+
+  // Find in Database Modal
+  const [findInDbContext, setFindInDbContext] = useState<{ open: boolean; connectionId: string; dbName: string }>({ open: false, connectionId: '', dbName: '' });
 
   useEffect(() => {
       // Refresh queries for expanded databases
@@ -2189,7 +2193,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               ...conn.config, 
               port: Number(conn.config.port),
               password: conn.config.password || "",
-              database: "", // No db selected
+              database: (conn.config.type === 'oracle' || conn.config.type === 'dameng') ? (conn.config.database || "") : "",
               useSSH: conn.config.useSSH || false,
               ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
           };
@@ -4312,6 +4316,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 </div>
             )}
         </Modal>
+        <FindInDatabaseModal
+            open={findInDbContext.open}
+            onClose={() => setFindInDbContext({ open: false, connectionId: '', dbName: '' })}
+            connectionId={findInDbContext.connectionId}
+            dbName={findInDbContext.dbName}
+        />
     </div>
   );
 };

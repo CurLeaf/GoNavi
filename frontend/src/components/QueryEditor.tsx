@@ -20,6 +20,156 @@ const SQL_KEYWORDS = [
     'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN',
 ];
 
+// SQL 常用内置函数（通用，适用于 MySQL/PostgreSQL/Oracle/SQL Server 等主流数据源）
+const SQL_FUNCTIONS: { name: string; detail: string }[] = [
+    // 聚合函数
+    { name: 'COUNT', detail: '聚合 - 计数' },
+    { name: 'SUM', detail: '聚合 - 求和' },
+    { name: 'AVG', detail: '聚合 - 平均值' },
+    { name: 'MAX', detail: '聚合 - 最大值' },
+    { name: 'MIN', detail: '聚合 - 最小值' },
+    { name: 'GROUP_CONCAT', detail: '聚合 - 拼接分组值' },
+    // 字符串函数
+    { name: 'CONCAT', detail: '字符串 - 拼接' },
+    { name: 'CONCAT_WS', detail: '字符串 - 带分隔符拼接' },
+    { name: 'SUBSTRING', detail: '字符串 - 截取子串' },
+    { name: 'SUBSTR', detail: '字符串 - 截取子串' },
+    { name: 'LEFT', detail: '字符串 - 从左截取' },
+    { name: 'RIGHT', detail: '字符串 - 从右截取' },
+    { name: 'LENGTH', detail: '字符串 - 字节长度' },
+    { name: 'CHAR_LENGTH', detail: '字符串 - 字符长度' },
+    { name: 'UPPER', detail: '字符串 - 转大写' },
+    { name: 'LOWER', detail: '字符串 - 转小写' },
+    { name: 'TRIM', detail: '字符串 - 去空格' },
+    { name: 'LTRIM', detail: '字符串 - 去左空格' },
+    { name: 'RTRIM', detail: '字符串 - 去右空格' },
+    { name: 'REPLACE', detail: '字符串 - 替换' },
+    { name: 'REVERSE', detail: '字符串 - 反转' },
+    { name: 'REPEAT', detail: '字符串 - 重复' },
+    { name: 'LPAD', detail: '字符串 - 左填充' },
+    { name: 'RPAD', detail: '字符串 - 右填充' },
+    { name: 'INSTR', detail: '字符串 - 查找位置' },
+    { name: 'LOCATE', detail: '字符串 - 查找位置' },
+    { name: 'FIND_IN_SET', detail: '字符串 - 在集合中查找' },
+    { name: 'FORMAT', detail: '字符串 - 数字格式化' },
+    { name: 'SPACE', detail: '字符串 - 生成空格' },
+    { name: 'INSERT', detail: '字符串 - 插入替换' },
+    { name: 'FIELD', detail: '字符串 - 返回位置索引' },
+    { name: 'ELT', detail: '字符串 - 按索引返回' },
+    { name: 'HEX', detail: '字符串 - 十六进制编码' },
+    { name: 'UNHEX', detail: '字符串 - 十六进制解码' },
+    // 数学函数
+    { name: 'ABS', detail: '数学 - 绝对值' },
+    { name: 'CEIL', detail: '数学 - 向上取整' },
+    { name: 'CEILING', detail: '数学 - 向上取整' },
+    { name: 'FLOOR', detail: '数学 - 向下取整' },
+    { name: 'ROUND', detail: '数学 - 四舍五入' },
+    { name: 'TRUNCATE', detail: '数学 - 截断小数' },
+    { name: 'MOD', detail: '数学 - 取模' },
+    { name: 'RAND', detail: '数学 - 随机数' },
+    { name: 'SIGN', detail: '数学 - 符号' },
+    { name: 'POWER', detail: '数学 - 幂运算' },
+    { name: 'POW', detail: '数学 - 幂运算' },
+    { name: 'SQRT', detail: '数学 - 平方根' },
+    { name: 'LOG', detail: '数学 - 对数' },
+    { name: 'LOG2', detail: '数学 - 以2为底对数' },
+    { name: 'LOG10', detail: '数学 - 以10为底对数' },
+    { name: 'LN', detail: '数学 - 自然对数' },
+    { name: 'EXP', detail: '数学 - e的次方' },
+    { name: 'PI', detail: '数学 - 圆周率' },
+    { name: 'GREATEST', detail: '数学 - 返回最大值' },
+    { name: 'LEAST', detail: '数学 - 返回最小值' },
+    // 日期时间函数
+    { name: 'NOW', detail: '日期 - 当前日期时间' },
+    { name: 'CURDATE', detail: '日期 - 当前日期' },
+    { name: 'CURRENT_DATE', detail: '日期 - 当前日期' },
+    { name: 'CURTIME', detail: '日期 - 当前时间' },
+    { name: 'CURRENT_TIME', detail: '日期 - 当前时间' },
+    { name: 'CURRENT_TIMESTAMP', detail: '日期 - 当前时间戳' },
+    { name: 'SYSDATE', detail: '日期 - 系统当前时间' },
+    { name: 'DATE', detail: '日期 - 提取日期部分' },
+    { name: 'TIME', detail: '日期 - 提取时间部分' },
+    { name: 'YEAR', detail: '日期 - 提取年份' },
+    { name: 'MONTH', detail: '日期 - 提取月份' },
+    { name: 'DAY', detail: '日期 - 提取天' },
+    { name: 'DAYOFWEEK', detail: '日期 - 星期几(1=周日)' },
+    { name: 'DAYOFYEAR', detail: '日期 - 年中第几天' },
+    { name: 'HOUR', detail: '日期 - 提取小时' },
+    { name: 'MINUTE', detail: '日期 - 提取分钟' },
+    { name: 'SECOND', detail: '日期 - 提取秒' },
+    { name: 'DATE_FORMAT', detail: '日期 - 格式化' },
+    { name: 'DATE_ADD', detail: '日期 - 加日期' },
+    { name: 'DATE_SUB', detail: '日期 - 减日期' },
+    { name: 'DATEDIFF', detail: '日期 - 日期差(天)' },
+    { name: 'TIMEDIFF', detail: '日期 - 时间差' },
+    { name: 'TIMESTAMPDIFF', detail: '日期 - 时间戳差' },
+    { name: 'TIMESTAMPADD', detail: '日期 - 时间戳加' },
+    { name: 'STR_TO_DATE', detail: '日期 - 字符串转日期' },
+    { name: 'UNIX_TIMESTAMP', detail: '日期 - Unix时间戳' },
+    { name: 'FROM_UNIXTIME', detail: '日期 - 从Unix时间戳转换' },
+    { name: 'LAST_DAY', detail: '日期 - 月末日期' },
+    { name: 'WEEK', detail: '日期 - 第几周' },
+    { name: 'QUARTER', detail: '日期 - 第几季度' },
+    { name: 'ADDDATE', detail: '日期 - 加日期' },
+    { name: 'SUBDATE', detail: '日期 - 减日期' },
+    // 条件/流程控制函数
+    { name: 'IF', detail: '条件 - 如果' },
+    { name: 'IFNULL', detail: '条件 - NULL替换' },
+    { name: 'NULLIF', detail: '条件 - 相等返回NULL' },
+    { name: 'COALESCE', detail: '条件 - 返回第一个非NULL' },
+    { name: 'CASE', detail: '条件 - 分支表达式' },
+    // 类型转换
+    { name: 'CAST', detail: '转换 - 类型转换' },
+    { name: 'CONVERT', detail: '转换 - 类型/字符集转换' },
+    // JSON 函数
+    { name: 'JSON_EXTRACT', detail: 'JSON - 提取值' },
+    { name: 'JSON_UNQUOTE', detail: 'JSON - 去引号' },
+    { name: 'JSON_SET', detail: 'JSON - 设置值' },
+    { name: 'JSON_INSERT', detail: 'JSON - 插入值' },
+    { name: 'JSON_REPLACE', detail: 'JSON - 替换值' },
+    { name: 'JSON_REMOVE', detail: 'JSON - 删除值' },
+    { name: 'JSON_CONTAINS', detail: 'JSON - 包含判断' },
+    { name: 'JSON_OBJECT', detail: 'JSON - 构建对象' },
+    { name: 'JSON_ARRAY', detail: 'JSON - 构建数组' },
+    { name: 'JSON_LENGTH', detail: 'JSON - 元素个数' },
+    { name: 'JSON_TYPE', detail: 'JSON - 值类型' },
+    { name: 'JSON_VALID', detail: 'JSON - 验证' },
+    { name: 'JSON_KEYS', detail: 'JSON - 获取键列表' },
+    // 加密/哈希函数
+    { name: 'MD5', detail: '加密 - MD5哈希' },
+    { name: 'SHA1', detail: '加密 - SHA1哈希' },
+    { name: 'SHA2', detail: '加密 - SHA2哈希' },
+    { name: 'UUID', detail: '工具 - 生成UUID' },
+    // 信息函数
+    { name: 'DATABASE', detail: '信息 - 当前数据库' },
+    { name: 'USER', detail: '信息 - 当前用户' },
+    { name: 'VERSION', detail: '信息 - MySQL版本' },
+    { name: 'CONNECTION_ID', detail: '信息 - 连接ID' },
+    { name: 'LAST_INSERT_ID', detail: '信息 - 最后插入ID' },
+    { name: 'ROW_COUNT', detail: '信息 - 影响行数' },
+    { name: 'FOUND_ROWS', detail: '信息 - 匹配总行数' },
+    { name: 'CHARSET', detail: '信息 - 字符集' },
+    { name: 'COLLATION', detail: '信息 - 排序规则' },
+    // 窗口函数
+    { name: 'ROW_NUMBER', detail: '窗口 - 行号' },
+    { name: 'RANK', detail: '窗口 - 排名(有间隔)' },
+    { name: 'DENSE_RANK', detail: '窗口 - 排名(无间隔)' },
+    { name: 'NTILE', detail: '窗口 - 分桶' },
+    { name: 'LAG', detail: '窗口 - 前一行' },
+    { name: 'LEAD', detail: '窗口 - 后一行' },
+    { name: 'FIRST_VALUE', detail: '窗口 - 第一个值' },
+    { name: 'LAST_VALUE', detail: '窗口 - 最后一个值' },
+    { name: 'NTH_VALUE', detail: '窗口 - 第N个值' },
+    // 其他
+    { name: 'DISTINCT', detail: '修饰 - 去重' },
+    { name: 'EXISTS', detail: '修饰 - 存在判断' },
+    { name: 'BETWEEN', detail: '修饰 - 范围判断' },
+    { name: 'LIKE', detail: '修饰 - 模式匹配' },
+    { name: 'REGEXP', detail: '修饰 - 正则匹配' },
+    { name: 'BENCHMARK', detail: '工具 - 性能测试' },
+    { name: 'SLEEP', detail: '工具 - 延时' },
+];
+
 const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
   
@@ -540,10 +690,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   && wordPrefix.length > 0
                   && SQL_KEYWORDS.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
               const sortGroups = shouldBoostKeywords
-                  ? { keyword: '00', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
+                  ? { keyword: '00', func: '05', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
                   : expectsTableName
-                      ? { keyword: '20', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
-                      : { keyword: '30', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
+                      ? { keyword: '20', func: '25', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
+                      : { keyword: '30', func: '25', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
 
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
@@ -610,10 +760,24 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   sortText: sortGroups.keyword + k,
               }));
 
+              // 内置函数提示
+              const funcSuggestions = SQL_FUNCTIONS
+                  .filter((f) => startsWithPrefix(f.name))
+                  .map(f => ({
+                      label: f.name,
+                      kind: monaco.languages.CompletionItemKind.Function,
+                      insertText: f.name + '($0)',
+                      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                      detail: f.detail,
+                      range,
+                      sortText: sortGroups.func + f.name,
+                  }));
+
               const suggestions = [
                   ...relevantColumns,   // FROM 表的列最优先
                   ...tableSuggestions,  // 表次之
                   ...dbSuggestions,     // 数据库
+                  ...funcSuggestions,   // 内置函数
                   ...keywordSuggestions // 关键字最后
               ];
               return { suggestions };
@@ -776,9 +940,6 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     return statements;
   };
 
-  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
-  // 当恢复前端自动行数限制功能时需要启用。
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getLeadingKeyword = (sql: string): string => {
       const text = (sql || '').replace(/\r\n/g, '\n');
       const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
@@ -1071,24 +1232,53 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       return -1;
   };
 
-  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
-  // 当恢复前端自动行数限制功能时需要启用。
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
-      const normalizedType = (dbType || 'mysql').toLowerCase();
-      const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === 'clickhouse' || normalizedType === '';
-      if (!supportsLimit) return { sql, applied: false, maxRows };
       if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
+      const normalizedType = (dbType || 'mysql').toLowerCase();
+
+      // 只对 SELECT 语句自动加限制
+      const keyword = getLeadingKeyword(sql);
+      if (keyword !== 'SELECT') return { sql, applied: false, maxRows };
 
       const { main, tail } = splitSqlTail(sql);
       if (!main.trim()) return { sql, applied: false, maxRows };
 
       const fromPos = findTopLevelKeyword(main, 'from');
       const limitPos = findTopLevelKeyword(main, 'limit');
+      // 已有 LIMIT → 不注入
       if (limitPos >= 0 && (fromPos < 0 || limitPos > fromPos)) return { sql, applied: false, maxRows };
       const fetchPos = findTopLevelKeyword(main, 'fetch');
+      // 已有 FETCH → 不注入
       if (fetchPos >= 0 && (fromPos < 0 || fetchPos > fromPos)) return { sql, applied: false, maxRows };
 
+      // SQL Server / mssql: 检查是否已有 TOP，未有则注入 SELECT TOP N
+      if (normalizedType === 'sqlserver' || normalizedType === 'mssql') {
+          const topPos = findTopLevelKeyword(main, 'top');
+          if (topPos >= 0) return { sql, applied: false, maxRows }; // 已有 TOP
+          // 在 SELECT 关键字之后插入 TOP N
+          const selectPos = findTopLevelKeyword(main, 'select');
+          if (selectPos < 0) return { sql, applied: false, maxRows };
+          const afterSelect = selectPos + 'SELECT'.length;
+          // 处理 SELECT DISTINCT 的情况
+          const restAfterSelect = main.slice(afterSelect);
+          const distinctMatch = restAfterSelect.match(/^(\s+DISTINCT\b)/i);
+          const insertOffset = distinctMatch ? afterSelect + distinctMatch[1].length : afterSelect;
+          const nextMain = main.slice(0, insertOffset) + ` TOP ${maxRows}` + main.slice(insertOffset);
+          return { sql: nextMain + tail, applied: true, maxRows };
+      }
+
+      // Oracle / Dameng: 使用 FETCH FIRST N ROWS ONLY（Oracle 12c+ 标准语法）
+      if (normalizedType === 'oracle' || normalizedType === 'dameng') {
+          // 检查是否已有 ROWNUM 限制
+          const rownumPos = findTopLevelKeyword(main, 'rownum');
+          if (rownumPos >= 0) return { sql, applied: false, maxRows };
+          const offsetPos = findTopLevelKeyword(main, 'offset');
+          if (offsetPos >= 0 && (fromPos < 0 || offsetPos > fromPos)) return { sql, applied: false, maxRows };
+          const nextMain = main.trimEnd() + ` FETCH FIRST ${maxRows} ROWS ONLY`;
+          return { sql: nextMain + tail, applied: true, maxRows };
+      }
+
+      // 通用 LIMIT 语法（MySQL, PostgreSQL, SQLite, ClickHouse, DuckDB 等）
       const offsetPos = findTopLevelKeyword(main, 'offset');
       const forPos = findTopLevelKeyword(main, 'for');
       const lockPos = findTopLevelKeyword(main, 'lock');
@@ -1283,12 +1473,23 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
         } else {
             // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
-            const fullSQL = normalizedRawSQL;
+            let fullSQL = normalizedRawSQL;
             if (!fullSQL.trim()) {
                 message.info('没有可执行的 SQL。');
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
+            }
+
+            // 自动给 SELECT 语句注入行数限制（防止大结果集卡死）
+            const maxRowsForLimit = Number(queryOptions?.maxRows) || 0;
+            if (Number.isFinite(maxRowsForLimit) && maxRowsForLimit > 0) {
+                const stmts = splitSQLStatements(fullSQL);
+                const limitedStmts = stmts.map(s => {
+                    const result = applyAutoLimit(s, normalizedDbType, maxRowsForLimit);
+                    return result.sql;
+                });
+                fullSQL = limitedStmts.join(';\n');
             }
 
             const startTime = Date.now();
