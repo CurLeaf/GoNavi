@@ -566,7 +566,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	var resultSets []connection.ResultSetData
-	for _, stmt := range statements {
+	for idx, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
 		if stmt == "" {
 			continue
@@ -583,8 +583,12 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				data, columns, err = dbInst.Query(stmt)
 			}
 			if err != nil {
-				logger.Error(err, "DBQueryMulti 逐条查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(stmt))
-				return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+				logger.Error(err, "DBQueryMulti 逐条查询失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
+				if len(resultSets) > 0 {
+					errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
+				}
+				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
 			if data == nil {
 				data = make([]map[string]interface{}, 0)
@@ -603,8 +607,12 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				affected, err = dbInst.Exec(stmt)
 			}
 			if err != nil {
-				logger.Error(err, "DBQueryMulti 逐条执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(stmt))
-				return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+				logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
+				if len(resultSets) > 0 {
+					errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
+				}
+				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
 			resultSets = append(resultSets, connection.ResultSetData{
 				Rows:    []map[string]interface{}{{"affectedRows": affected}},

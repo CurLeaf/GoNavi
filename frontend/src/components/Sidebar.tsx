@@ -1838,8 +1838,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       try {
           const app = (window as any).go.app.App;
           const res = await app.TruncateTables(normalizeConnConfig(conn.config), dbName, objectNames);
-          const duration = Date.now() - startTime;
           hide();
+          const duration = Date.now() - startTime;
           if (res.success) {
               message.success('清空成功');
               // 构造 SQL 日志
@@ -1859,10 +1859,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   dbName,
                   affectedRows: res.data?.count || 0
               });
-          } else if (res.message !== 'Cancelled') {
+          } else if (res.message !== '已取消') {
               message.error('清空失败: ' + res.message);
               // 记录失败的日志
-              const duration = Date.now() - startTime;
               let logSql = `/* Truncate Tables (${objectNames.length} tables) - FAILED */\n`;
               if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
                   logSql += res.data.executedSQLs.join(';\n') + ';';

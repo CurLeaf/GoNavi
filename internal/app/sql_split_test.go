@@ -92,3 +92,22 @@ func TestSplitSQLStatements_TrailingSemicolon(t *testing.T) {
 		t.Errorf("splitSQLStatements(%q) = %v, want %v", input, got, want)
 	}
 }
+
+func TestSplitSQLStatements_SQLEscapedQuote(t *testing.T) {
+	input := "SELECT 'it''s a test'; SELECT 2"
+	got := splitSQLStatements(input)
+	want := []string{"SELECT 'it''s a test'", "SELECT 2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %v, want %v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_SQLEscapedQuoteMultiple(t *testing.T) {
+	input := "INSERT INTO t VALUES ('O''Brien', 'it''s OK'); SELECT 1"
+	got := splitSQLStatements(input)
+	want := []string{"INSERT INTO t VALUES ('O''Brien', 'it''s OK')", "SELECT 1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %v, want %v", input, got, want)
+	}
+}
+

@@ -775,13 +775,15 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
-// TruncateTables 清空指定表的数据（针对 MySQL 使用 TRUNCATE，MongoDB 使用 delete，否则使用 DELETE）
+// TruncateTables 清空指定表的数据（针对 MySQL 使用 TRUNCATE，MongoDB 使用 delete，否则使用 DELETE）。
+// 注意：MySQL 的 TRUNCATE TABLE 是 DDL 操作，无法事务回滚；批量清空为逐表执行，
+// 如果中途失败，已清空的表无法恢复。错误结果会附带已执行的 SQL 列表供排查。
 func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
 
-	dbInst, err := a.getDatabase(runConfig)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+	// 参数校验
+	if len(tableNames) == 0 {
+		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
 	}
 
 	objects := make([]string, 0, len(tableNames))
@@ -798,9 +800,25 @@ func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, 
 		objects = append(objects, tt)
 	}
 
+	if len(objects) == 0 {
+		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
+	}
+	const maxBatchSize = 200
+	if len(objects) > maxBatchSize {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("单次最多清空 %d 张表，当前选中 %d 张", maxBatchSize, len(objects))}
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	// 审计日志：记录清空操作的发起
+	logger.Warnf("TruncateTables 开始：%s db=%s tables=%v（共 %d 张）", formatConnSummary(runConfig), dbName, objects, len(objects))
+
 	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
 	var executedSQLs []string
-	for _, objectName := range objects {
+	for i, objectName := range objects {
 		var sql string
 		if dbType == "mysql" || dbType == "mariadb" {
 			sql = fmt.Sprintf("TRUNCATE TABLE %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
@@ -813,10 +831,24 @@ func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, 
 		}
 
 		if _, err := dbInst.Exec(sql); err != nil {
-			return connection.QueryResult{Success: false, Message: fmt.Sprintf("清空 %s 失败: %v", objectName, err)}
+			logger.Warnf("TruncateTables 第 %d/%d 张表失败：%s table=%s err=%v（已成功清空 %d 张）", i+1, len(objects), formatConnSummary(runConfig), objectName, err, len(executedSQLs))
+			errMsg := fmt.Sprintf("清空 %s 失败: %v", objectName, err)
+			if len(executedSQLs) > 0 {
+				errMsg += fmt.Sprintf("（注意：前 %d 张表已清空且无法恢复）", len(executedSQLs))
+			}
+			return connection.QueryResult{
+				Success: false,
+				Message: errMsg,
+				Data: map[string]interface{}{
+					"executedSQLs": executedSQLs,
+					"count":        len(executedSQLs),
+				},
+			}
 		}
 		executedSQLs = append(executedSQLs, sql)
 	}
+
+	logger.Warnf("TruncateTables 完成：%s db=%s 共清空 %d 张表", formatConnSummary(runConfig), dbName, len(executedSQLs))
 
 	return connection.QueryResult{
 		Success: true,
