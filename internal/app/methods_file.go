@@ -775,6 +775,59 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
+// TruncateTables 清空指定表的数据（针对 MySQL 使用 TRUNCATE，MongoDB 使用 delete，否则使用 DELETE）
+func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+	runConfig := normalizeRunConfig(config, dbName)
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	objects := make([]string, 0, len(tableNames))
+	seen := make(map[string]struct{}, len(tableNames))
+	for _, t := range tableNames {
+		tt := strings.TrimSpace(t)
+		if tt == "" {
+			continue
+		}
+		if _, ok := seen[tt]; ok {
+			continue
+		}
+		seen[tt] = struct{}{}
+		objects = append(objects, tt)
+	}
+
+	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
+	var executedSQLs []string
+	for _, objectName := range objects {
+		var sql string
+		if dbType == "mysql" || dbType == "mariadb" {
+			sql = fmt.Sprintf("TRUNCATE TABLE %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
+		} else if dbType == "mongodb" {
+			// MongoDB 使用 delete 命令清空集合中的所有文档
+			// deletes 的 limit 为 0 表示删除所有匹配的文档
+			sql = fmt.Sprintf(`{"delete":"%s","deletes":[{"q":{},"limit":0}]}`, objectName)
+		} else {
+			sql = fmt.Sprintf("DELETE FROM %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
+		}
+
+		if _, err := dbInst.Exec(sql); err != nil {
+			return connection.QueryResult{Success: false, Message: fmt.Sprintf("清空 %s 失败: %v", objectName, err)}
+		}
+		executedSQLs = append(executedSQLs, sql)
+	}
+
+	return connection.QueryResult{
+		Success: true,
+		Message: "清空成功",
+		Data: map[string]interface{}{
+			"executedSQLs": executedSQLs,
+			"count":        len(executedSQLs),
+		},
+	}
+}
+
 func quoteIdentByType(dbType string, ident string) string {
 	if ident == "" {
 		return ident
