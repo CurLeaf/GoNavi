@@ -362,6 +362,11 @@ const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) 
             // Pass the header element reference implicitly via event target
             onResizeStart(e);
         }}
+        onPointerDown={(e) => {
+            // 阻止 pointerdown 冒泡到 @dnd-kit 的 PointerSensor，
+            // 避免调整列宽时意外触发列拖拽排序
+            e.stopPropagation();
+        }}
         onClick={(e) => e.stopPropagation()}
         style={{
             position: 'absolute',
@@ -841,6 +846,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
+    // 防御性检查：若正在调整列宽，忽略拖拽排序事件
+    if (isResizingRef.current) return;
     const { active, over } = event;
     if (active.id !== over?.id && over) {
       setAllOrderedColumnNames((prevAllOrder) => {
