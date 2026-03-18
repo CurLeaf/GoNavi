@@ -940,9 +940,6 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
     return statements;
   };
 
-  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
-  // 当恢复前端自动行数限制功能时需要启用。
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getLeadingKeyword = (sql: string): string => {
       const text = (sql || '').replace(/\r\n/g, '\n');
       const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
@@ -1235,24 +1232,53 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       return -1;
   };
 
-  // DEBT: 改用 DBQueryMulti 后前端不再逐条处理语句，此函数暂时未使用。
-  // 当恢复前端自动行数限制功能时需要启用。
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
-      const normalizedType = (dbType || 'mysql').toLowerCase();
-      const supportsLimit = normalizedType === 'mysql' || normalizedType === 'mariadb' || normalizedType === 'diros' || normalizedType === 'sphinx' || normalizedType === 'postgres' || normalizedType === 'kingbase' || normalizedType === 'sqlite' || normalizedType === 'duckdb' || normalizedType === 'tdengine' || normalizedType === 'clickhouse' || normalizedType === '';
-      if (!supportsLimit) return { sql, applied: false, maxRows };
       if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
+      const normalizedType = (dbType || 'mysql').toLowerCase();
+
+      // 只对 SELECT 语句自动加限制
+      const keyword = getLeadingKeyword(sql);
+      if (keyword !== 'SELECT') return { sql, applied: false, maxRows };
 
       const { main, tail } = splitSqlTail(sql);
       if (!main.trim()) return { sql, applied: false, maxRows };
 
       const fromPos = findTopLevelKeyword(main, 'from');
       const limitPos = findTopLevelKeyword(main, 'limit');
+      // 已有 LIMIT → 不注入
       if (limitPos >= 0 && (fromPos < 0 || limitPos > fromPos)) return { sql, applied: false, maxRows };
       const fetchPos = findTopLevelKeyword(main, 'fetch');
+      // 已有 FETCH → 不注入
       if (fetchPos >= 0 && (fromPos < 0 || fetchPos > fromPos)) return { sql, applied: false, maxRows };
 
+      // SQL Server / mssql: 检查是否已有 TOP，未有则注入 SELECT TOP N
+      if (normalizedType === 'sqlserver' || normalizedType === 'mssql') {
+          const topPos = findTopLevelKeyword(main, 'top');
+          if (topPos >= 0) return { sql, applied: false, maxRows }; // 已有 TOP
+          // 在 SELECT 关键字之后插入 TOP N
+          const selectPos = findTopLevelKeyword(main, 'select');
+          if (selectPos < 0) return { sql, applied: false, maxRows };
+          const afterSelect = selectPos + 'SELECT'.length;
+          // 处理 SELECT DISTINCT 的情况
+          const restAfterSelect = main.slice(afterSelect);
+          const distinctMatch = restAfterSelect.match(/^(\s+DISTINCT\b)/i);
+          const insertOffset = distinctMatch ? afterSelect + distinctMatch[1].length : afterSelect;
+          const nextMain = main.slice(0, insertOffset) + ` TOP ${maxRows}` + main.slice(insertOffset);
+          return { sql: nextMain + tail, applied: true, maxRows };
+      }
+
+      // Oracle / Dameng: 使用 FETCH FIRST N ROWS ONLY（Oracle 12c+ 标准语法）
+      if (normalizedType === 'oracle' || normalizedType === 'dameng') {
+          // 检查是否已有 ROWNUM 限制
+          const rownumPos = findTopLevelKeyword(main, 'rownum');
+          if (rownumPos >= 0) return { sql, applied: false, maxRows };
+          const offsetPos = findTopLevelKeyword(main, 'offset');
+          if (offsetPos >= 0 && (fromPos < 0 || offsetPos > fromPos)) return { sql, applied: false, maxRows };
+          const nextMain = main.trimEnd() + ` FETCH FIRST ${maxRows} ROWS ONLY`;
+          return { sql: nextMain + tail, applied: true, maxRows };
+      }
+
+      // 通用 LIMIT 语法（MySQL, PostgreSQL, SQLite, ClickHouse, DuckDB 等）
       const offsetPos = findTopLevelKeyword(main, 'offset');
       const forPos = findTopLevelKeyword(main, 'for');
       const lockPos = findTopLevelKeyword(main, 'lock');
@@ -1447,12 +1473,23 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
         } else {
             // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
-            const fullSQL = normalizedRawSQL;
+            let fullSQL = normalizedRawSQL;
             if (!fullSQL.trim()) {
                 message.info('没有可执行的 SQL。');
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
+            }
+
+            // 自动给 SELECT 语句注入行数限制（防止大结果集卡死）
+            const maxRowsForLimit = Number(queryOptions?.maxRows) || 0;
+            if (Number.isFinite(maxRowsForLimit) && maxRowsForLimit > 0) {
+                const stmts = splitSQLStatements(fullSQL);
+                const limitedStmts = stmts.map(s => {
+                    const result = applyAutoLimit(s, normalizedDbType, maxRowsForLimit);
+                    return result.sql;
+                });
+                fullSQL = limitedStmts.join(';\n');
             }
 
             const startTime = Date.now();
