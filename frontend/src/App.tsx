@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -89,7 +89,8 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
-  const [sidebarWidth, setSidebarWidth] = useState(330);
+  const sidebarWidth = useStore(state => state.sidebarWidth);
+  const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const globalProxyInvalidHintShownRef = React.useRef(false);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
@@ -285,14 +286,43 @@ function App() {
           }, applyRetryDelayMs);
       };
 
+      const restoreWindowState = async () => {
+          if (cancelled) return;
+          const state = useStore.getState();
+          // startupFullscreen 设置优先
+          if (state.startupFullscreen) {
+              applyStartupWindowPreference(1);
+              return;
+          }
+          // 根据上次保存的窗口状态恢复
+          const savedState = state.windowState;
+          if (savedState === 'fullscreen') {
+              applyStartupWindowPreference(1);
+              return;
+          }
+          if (savedState === 'maximized') {
+              try { await WindowMaximise(); } catch (_) {}
+              return;
+          }
+          // 普通窗口：恢复尺寸和位置
+          const bounds = state.windowBounds;
+          if (!bounds || bounds.width < 400 || bounds.height < 300) return;
+          try {
+              WindowSetSize(bounds.width, bounds.height);
+              WindowSetPosition(bounds.x, bounds.y);
+          } catch (e) {
+              console.warn('Failed to restore window bounds', e);
+          }
+      };
+
       if (useStore.persist.hasHydrated()) {
-          applyStartupWindowPreference(1);
+          void restoreWindowState();
       }
       const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
           if (cancelled) {
               return;
           }
-          applyStartupWindowPreference(1);
+          void restoreWindowState();
       });
 
       return () => {
@@ -302,6 +332,52 @@ function App() {
           }
           unsubscribeHydration();
       };
+  }, []);
+
+  // 定时保存窗口状态、尺寸与位置
+  useEffect(() => {
+      const SAVE_INTERVAL_MS = 2000;
+      let lastSaved = '';
+
+      const saveWindowState = async () => {
+          try {
+              const [isFs, isMax] = await Promise.all([
+                  WindowIsFullscreen().catch(() => false),
+                  WindowIsMaximised().catch(() => false),
+              ]);
+
+              // 保存窗口状态
+              const store = useStore.getState();
+              const newState = isFs ? 'fullscreen' : (isMax ? 'maximized' : 'normal');
+              if (store.windowState !== newState) {
+                  store.setWindowState(newState);
+              }
+
+              // 只在普通窗口模式下保存尺寸和位置
+              if (isFs || isMax) return;
+
+              const [size, pos] = await Promise.all([
+                  WindowGetSize().catch(() => null),
+                  WindowGetPosition().catch(() => null),
+              ]);
+              if (!size || !pos) return;
+              const w = Math.trunc(Number(size.w || 0));
+              const h = Math.trunc(Number(size.h || 0));
+              const x = Math.trunc(Number(pos.x || 0));
+              const y = Math.trunc(Number(pos.y || 0));
+              if (w < 400 || h < 300) return;
+
+              const key = `${w},${h},${x},${y}`;
+              if (key === lastSaved) return;
+              lastSaved = key;
+              store.setWindowBounds({ width: w, height: h, x, y });
+          } catch (e) {
+              // 静默忽略
+          }
+      };
+
+      const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
+      return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
