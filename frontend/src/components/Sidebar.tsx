@@ -1454,6 +1454,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const onDoubleClick = (e: any, node: any) => {
+      if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
+          const { id, dbName, schemaName } = node.dataRef;
+          addTab({
+              id: `table-overview-${id}-${dbName}${schemaName ? `-${schemaName}` : ''}`,
+              title: `表概览 - ${dbName}${schemaName ? ` (${schemaName})` : ''}`,
+              type: 'table-overview' as any,
+              connectionId: id,
+              dbName,
+          });
+          return;
+      }
       if (node.type === 'table') {
           const { tableName, dbName, id } = node.dataRef;
           // 记录表访问
