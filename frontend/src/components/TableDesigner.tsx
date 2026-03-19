@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
-import { Table, Tabs, Button, message, Input, Checkbox, Modal, AutoComplete, Tooltip, Select, Empty, Space, Tag } from 'antd';
+import { Table, Tabs, Button, message, Input, Checkbox, Modal, AutoComplete, Tooltip, Select, Empty, Space, Tag, Radio } from 'antd';
 import { ReloadOutlined, SaveOutlined, PlusOutlined, DeleteOutlined, MenuOutlined, FileTextOutlined, EyeOutlined, EditOutlined, ExclamationCircleOutlined, CopyOutlined } from '@ant-design/icons';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
@@ -225,7 +225,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [tableCommentDraft, setTableCommentDraft] = useState('');
   const [isTableCommentModalOpen, setIsTableCommentModalOpen] = useState(false);
   const [tableCommentSaving, setTableCommentSaving] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState<IndexDisplayRow | null>(null);
+  const [selectedIndexKeys, setSelectedIndexKeys] = useState<string[]>([]);
   const [isIndexModalOpen, setIsIndexModalOpen] = useState(false);
   const [indexModalMode, setIndexModalMode] = useState<'create' | 'edit'>('create');
   const [indexSaving, setIndexSaving] = useState(false);
@@ -270,6 +270,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const [tableHeight, setTableHeight] = useState(500);
   const containerRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const pendingFocusColumnKeyRef = useRef<string | null>(null);
   const focusHighlightTimerRef = useRef<number | null>(null);
   const [focusColumnKey, setFocusColumnKey] = useState('');
@@ -329,7 +330,8 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   // --- Resizable Columns State ---
   const [tableColumns, setTableColumns] = useState<any[]>([]);
-  const resizeDragRef = useRef<{ startX: number; startWidth: number; index: number; containerLeft: number } | null>(null);
+  const [indexColumns, setIndexColumns] = useState<any[]>([]);
+  const resizeDragRef = useRef<{ startX: number; startWidth: number; index: number; containerLeft: number; setter: React.Dispatch<React.SetStateAction<any[]>> } | null>(null);
   const resizeRafRef = useRef<number | null>(null);
   const latestResizeXRef = useRef<number | null>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -548,17 +550,17 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     document.body.style.userSelect = '';
   }, []);
 
-  const handleResizeStart = useCallback((index: number) => (e: React.MouseEvent) => {
+  const createResizeStartHandler = useCallback((columns: any[], setter: React.Dispatch<React.SetStateAction<any[]>>) => (index: number) => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
     const startX = e.clientX;
-    const currentWidth = Number(tableColumns[index]?.width || 200);
-    const containerLeft = containerRef.current?.getBoundingClientRect().left ?? 0;
-    resizeDragRef.current = { startX, startWidth: currentWidth, index, containerLeft };
+    const currentWidth = Number(columns[index]?.width || 200);
+    const containerLeft = shellRef.current?.getBoundingClientRect().left ?? 0;
+    resizeDragRef.current = { startX, startWidth: currentWidth, index, containerLeft, setter };
     latestResizeXRef.current = startX;
 
-    if (ghostRef.current && containerRef.current) {
+    if (ghostRef.current && shellRef.current) {
       const relativeLeft = startX - containerLeft;
       ghostRef.current.style.transform = `translateX(${relativeLeft}px)`;
       ghostRef.current.style.display = 'block';
@@ -575,10 +577,10 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
     const onUp = (event: MouseEvent) => {
       if (resizeDragRef.current) {
-        const { startX: dragStartX, startWidth, index: dragIndex } = resizeDragRef.current;
+        const { startX: dragStartX, startWidth, index: dragIndex, setter: dragSetter } = resizeDragRef.current;
         const deltaX = event.clientX - dragStartX;
         const newWidth = Math.max(50, startWidth + deltaX);
-        setTableColumns((prevColumns) => {
+        dragSetter((prevColumns) => {
           if (!prevColumns[dragIndex]) return prevColumns;
           const nextColumns = [...prevColumns];
           nextColumns[dragIndex] = {
@@ -598,7 +600,10 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     document.addEventListener('mouseup', onUp);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-  }, [cleanupResizeState, detachResizeListeners, flushResizeGhost, tableColumns]);
+  }, [cleanupResizeState, detachResizeListeners, flushResizeGhost]);
+
+  const handleResizeStart = useMemo(() => createResizeStartHandler(tableColumns, setTableColumns), [createResizeStartHandler, tableColumns]);
+  const handleIndexResizeStart = useMemo(() => createResizeStartHandler(indexColumns, setIndexColumns), [createResizeStartHandler, indexColumns]);
 
   useEffect(() => {
     return () => {
@@ -1083,6 +1088,11 @@ ${selectedTrigger.statement}`;
           });
   }, [indexes]);
 
+  const selectedIndex = useMemo(() => {
+      if (selectedIndexKeys.length === 0) return null;
+      return groupedIndexes.find(idx => selectedIndexKeys.includes(idx.key)) || null;
+  }, [selectedIndexKeys, groupedIndexes]);
+
   const groupedIndexFieldCount = useMemo(
       () => groupedIndexes.reduce((total, row) => total + row.columnNames.length, 0),
       [groupedIndexes]
@@ -1161,17 +1171,12 @@ ${selectedTrigger.statement}`;
   );
 
   useEffect(() => {
-      if (!selectedIndex) return;
-      const freshIndex = groupedIndexes.find(idx => idx.key === selectedIndex.key);
-      if (!freshIndex) {
-          setSelectedIndex(null);
-          return;
+      if (selectedIndexKeys.length === 0) return;
+      const validKeys = selectedIndexKeys.filter(key => groupedIndexes.some(idx => idx.key === key));
+      if (validKeys.length !== selectedIndexKeys.length) {
+          setSelectedIndexKeys(validKeys);
       }
-      // 索引仍存在但内容可能已变（如字段列表），同步为最新对象
-      if (freshIndex !== selectedIndex) {
-          setSelectedIndex(freshIndex);
-      }
-  }, [groupedIndexes, selectedIndex]);
+  }, [groupedIndexes, selectedIndexKeys]);
 
   useEffect(() => {
       if (!selectedForeignKey) return;
@@ -2023,6 +2028,109 @@ END;`;
     }),
   }));
 
+  // --- Index Columns Init ---
+  useEffect(() => {
+      setIndexColumns([
+          {
+              title: '索引名',
+              dataIndex: 'name',
+              key: 'name',
+              width: 240,
+              render: (text: string) => (
+                  <Tooltip title={text}>
+                      <span style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {text}
+                      </span>
+                  </Tooltip>
+              ),
+          },
+          {
+              title: '字段',
+              dataIndex: 'columnNames',
+              key: 'columnNames',
+              width: 320,
+              render: (columnNames: string[]) => {
+                  if (!columnNames || columnNames.length === 0) {
+                      return '-';
+                  }
+                  return (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {columnNames.map((columnName: string, idx: number) => (
+                              <Tag key={`${columnName}-${idx}`}>
+                                  {columnName}
+                              </Tag>
+                          ))}
+                      </div>
+                  );
+              }
+          },
+          {
+              title: '索引类型',
+              dataIndex: 'indexType',
+              key: 'indexType',
+              width: 140,
+              render: (text: string) => text || '-',
+          },
+          {
+              title: '唯一性',
+              dataIndex: 'nonUnique',
+              key: 'nonUnique',
+              width: 110,
+              render: (v: number) => (
+                  <Tag color={v === 0 ? 'gold' : 'default'}>
+                      {v === 0 ? '唯一' : '普通'}
+                  </Tag>
+              ),
+          },
+      ]);
+  }, []);
+
+  // Checkbox 选择列（不参与 resize，支持全选）
+  const allIndexKeys = groupedIndexes.map(idx => idx.key);
+  const isAllSelected = allIndexKeys.length > 0 && selectedIndexKeys.length === allIndexKeys.length;
+  const isIndeterminate = selectedIndexKeys.length > 0 && selectedIndexKeys.length < allIndexKeys.length;
+
+  const selectColumn = {
+      title: () => (
+          <Checkbox
+              checked={isAllSelected}
+              indeterminate={isIndeterminate}
+              onChange={(e) => {
+                  setSelectedIndexKeys(e.target.checked ? allIndexKeys : []);
+              }}
+              style={{ margin: 0 }}
+          />
+      ),
+      dataIndex: '_select',
+      key: '_select',
+      width: 48,
+      render: (_: any, record: any) => (
+          <Checkbox
+              checked={selectedIndexKeys.includes(record.key)}
+              onChange={(e) => {
+                  e.stopPropagation();
+                  setSelectedIndexKeys(prev =>
+                      e.target.checked
+                          ? [...prev, record.key]
+                          : prev.filter(k => k !== record.key)
+                  );
+              }}
+              style={{ margin: 0 }}
+          />
+      ),
+  };
+
+  const resizableIndexColumns = [
+      selectColumn,
+      ...indexColumns.map((col, index) => ({
+        ...col,
+        onHeaderCell: (column: any) => ({
+          width: column.width,
+          onResizeStart: handleIndexResizeStart(index),
+        }),
+      })),
+  ];
+
   const columnsTabContent = (
       <div
           ref={containerRef}
@@ -2084,26 +2192,11 @@ END;`;
         </SortableContext>
       </DndContext>
   )}
-        <div
-          ref={ghostRef}
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            left: 0,
-            width: '2px',
-            background: resizeGuideColor,
-            zIndex: 9999,
-            display: 'none',
-            pointerEvents: 'none',
-            willChange: 'transform',
-          }}
-        />
   </div>
   );
 
   return (
-    <div className="table-designer-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: '6px 0' }}>
+    <div ref={shellRef} className="table-designer-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: '6px 0', position: 'relative' }}>
         <style>{`
             .table-designer-shell .ant-table,
             .table-designer-shell .ant-table-wrapper,
@@ -2129,6 +2222,11 @@ END;`;
             .table-designer-shell .ant-table-thead > tr > th::before {
                 display: none !important;
             }
+            .table-designer-shell .ant-table-thead > tr > th {
+                cursor: default !important;
+                user-select: none !important;
+                -webkit-user-select: none !important;
+            }
             .table-designer-shell .ant-table-tbody > tr:hover > td,
             .table-designer-shell .ant-table-tbody .ant-table-row:hover > .ant-table-cell {
                 background: ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.02)'} !important;
@@ -2144,7 +2242,35 @@ END;`;
             .table-designer-shell .ant-tabs-tabpane {
                 height: 100%;
             }
+            .table-designer-shell .react-resizable-handle {
+                position: absolute !important;
+                right: 0 !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                width: 10px !important;
+                height: auto !important;
+                background-position: top right !important;
+                cursor: col-resize !important;
+                z-index: 10;
+                touch-action: none;
+            }
+
         `}</style>
+        <div
+          ref={ghostRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            width: '2px',
+            background: resizeGuideColor,
+            zIndex: 9999,
+            display: 'none',
+            pointerEvents: 'none',
+            willChange: 'transform',
+          }}
+        />
         <div
             style={{
                 padding: '10px 12px 8px 12px',
@@ -2240,20 +2366,20 @@ END;`;
                         key: 'indexes',
                         label: '索引',
                         children: (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className="index-table-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
                                     <div style={{ display: 'flex', gap: 8 }}>
                                         <Button size="small" icon={<PlusOutlined />} disabled={!supportsIndexSchemaOps()} onClick={openCreateIndexModal}>新增</Button>
-                                        <Button size="small" icon={<EditOutlined />} disabled={!supportsIndexSchemaOps() || !selectedIndex} onClick={openEditIndexModal}>修改</Button>
-                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsIndexSchemaOps() || !selectedIndex} onClick={handleDeleteIndex}>删除</Button>
+                                        <Button size="small" icon={<EditOutlined />} disabled={!supportsIndexSchemaOps() || selectedIndexKeys.length !== 1} onClick={openEditIndexModal}>修改</Button>
+                                        <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsIndexSchemaOps() || selectedIndexKeys.length === 0} onClick={handleDeleteIndex}>删除</Button>
                                         {!supportsIndexSchemaOps() && (
                                             <span style={{ marginLeft: 'auto', color: '#faad14', fontSize: 12, alignSelf: 'center' }}>
                                                 当前数据库暂不支持索引编辑，仅支持查看
                                             </span>
                                         )}
-                                        {supportsIndexSchemaOps() && selectedIndex && (
+                                        {supportsIndexSchemaOps() && selectedIndexKeys.length > 0 && (
                                             <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12, alignSelf: 'center' }}>
-                                                已选择：{selectedIndex.name}
+                                                已选择：{selectedIndexKeys.length} 个索引
                                             </span>
                                         )}
                                     </div>
@@ -2263,75 +2389,22 @@ END;`;
                                 </div>
                                 <Table
                                     dataSource={groupedIndexes}
-                                    columns={[
-                                        {
-                                            title: '索引名',
-                                            dataIndex: 'name',
-                                            key: 'name',
-                                            width: 240,
-                                            render: (text: string) => (
-                                                <Tooltip title={text}>
-                                                    <span style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                        {text}
-                                                    </span>
-                                                </Tooltip>
-                                            ),
-                                        },
-                                        {
-                                            title: '字段',
-                                            dataIndex: 'columnNames',
-                                            key: 'columnNames',
-                                            render: (columnNames: string[]) => {
-                                                if (!columnNames || columnNames.length === 0) {
-                                                    return '-';
-                                                }
-                                                return (
-                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                                                        {columnNames.map((columnName, idx) => (
-                                                            <Tag key={`${columnName}-${idx}`}>
-                                                                {columnName}
-                                                            </Tag>
-                                                        ))}
-                                                    </div>
-                                                );
-                                            }
-                                        },
-                                        {
-                                            title: '索引类型',
-                                            dataIndex: 'indexType',
-                                            key: 'indexType',
-                                            width: 140,
-                                            render: (text: string) => text || '-',
-                                        },
-                                        {
-                                            title: '唯一性',
-                                            dataIndex: 'nonUnique',
-                                            key: 'nonUnique',
-                                            width: 110,
-                                            render: (v: number) => (
-                                                <Tag color={v === 0 ? 'gold' : 'default'}>
-                                                    {v === 0 ? '唯一' : '普通'}
-                                                </Tag>
-                                            ),
-                                        },
-                                    ]}
+                                    columns={resizableIndexColumns}
                                     rowKey="key"
                                     size="small"
                                     pagination={false}
                                     loading={loading}
                                     scroll={{ x: 960, y: tableHeight }}
-                                    rowSelection={{
-                                        type: 'radio',
-                                        selectedRowKeys: selectedIndex ? [selectedIndex.key] : [],
-                                        onChange: (_, selectedRows) => setSelectedIndex((selectedRows[0] as IndexDisplayRow) || null),
+                                    components={{
+                                        header: { cell: ResizableTitle },
                                     }}
                                     onRow={(record) => ({
                                         onClick: () => {
-                                            if (selectedIndex?.key === record.key) {
-                                                setSelectedIndex(null);
-                                            } else {
-                                                setSelectedIndex(record);
-                                            }
+                                            setSelectedIndexKeys(prev =>
+                                                prev.includes(record.key)
+                                                    ? prev.filter(k => k !== record.key)
+                                                    : [...prev, record.key]
+                                            );
                                         },
                                         style: { cursor: 'pointer' }
                                     })}
