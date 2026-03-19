@@ -31,7 +31,7 @@ import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
-import { calculateTableBodyBottomPadding } from './dataGridLayout';
+import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -1374,11 +1374,6 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
                 .${gridId} .ant-table-thead > tr > th { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
                 /* 选择列对齐：header TH 无 class（Ant Design 虚拟模式），需用 :first-child 匹配 */
-                .${gridId} .ant-table-selection-col,
-                .${gridId} .ant-table-bordered .ant-table-selection-col,
-                .${gridId} .ant-table-selection-col.ant-table-selection-col-with-dropdown {
-                    width: ${selectionColumnWidth}px !important;
-                }
                 .${gridId} .ant-table-header th:first-child,
                 .${gridId} .ant-table-thead > tr > th:first-child {
                     text-align: center !important;
@@ -1391,6 +1386,17 @@ const DataGrid: React.FC<DataGridProps> = ({
                     text-align: center !important;
                     padding-inline-start: 0 !important;
                     padding-inline-end: 0 !important;
+                }
+                /* 窄表场景下 rc-table 会按视口等比放大选择列宽度，不能再额外锁死 header 宽度；
+                   这里只统一 header/body 的内边距与对齐方式，避免第一列把后续数据列整体顶偏。 */
+                .${gridId} .ant-table-tbody > tr > td.ant-table-selection-column,
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell.ant-table-selection-column,
+                .${gridId} .ant-table-tbody-virtual-holder .ant-table-row > .ant-table-cell.ant-table-selection-column {
+                    text-align: center !important;
+                    padding-inline-start: 0 !important;
+                    padding-inline-end: 0 !important;
+                    padding-left: 0 !important;
+                    padding-right: 0 !important;
                 }
                 .${gridId} .ant-table-thead > tr:first-child > th:first-child,
                 .${gridId} .ant-table-header table > thead > tr:first-child > th:first-child {
@@ -1456,6 +1462,11 @@ const DataGrid: React.FC<DataGridProps> = ({
                 }
                 .${gridId} .ant-table-sticky-scroll {
                     display: none !important;
+                }
+                /* 虚拟表列对齐：阻止 header <table> 通过 min-width:100% 拉伸到视口，
+                   使 header 列宽与虚拟 body 单元格宽度精确一致 */
+                .${gridId} .ant-table-header > table {
+                    min-width: 0 !important;
                 }
                 .${gridId} .ant-table-tbody-virtual-scrollbar.ant-table-tbody-virtual-scrollbar-horizontal {
                     display: none !important;
@@ -3764,10 +3775,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   const totalWidth = columns.reduce((sum: number, col: any) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
   const useContextMenuRow = false;
   const tableScrollX = useMemo(() => {
-      const baseWidth = Math.max(totalWidth, 1000);
-      if (!isMacLike || tableViewportWidth <= 0) return baseWidth;
-      // macOS 在“自动隐藏滚动条”模式下容易误判为无横向滚动，预留 2px 触发稳定滚动轨道。
-      return Math.max(baseWidth, tableViewportWidth + 2);
+      // rc-table 在 scroll.x 小于容器宽度时会把实际列宽按视口补齐。
+      // 这里必须与其使用同一套 scroll.x 口径，否则少字段场景下 header/body 会错位。
+      return calculateVirtualTableScrollX({
+          totalWidth,
+          tableViewportWidth,
+          isMacLike,
+      });
   }, [totalWidth, isMacLike, tableViewportWidth]);
   const horizontalScrollVisible = viewMode === 'table' && tableScrollX > tableViewportWidth + 1;
   const horizontalScrollWidth = Math.max(externalScrollbarMinWidth, tableScrollX);
@@ -3815,6 +3829,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 通过合成 WheelEvent 驱动 rc-virtual-list 内部 offsetLeft state，
       // 让 rc-table onInternalScroll 自动同步 header scrollLeft。
       // 不直接操作 DOM marginLeft，避免 React re-render 覆盖。
+
       holderEl.dispatchEvent(new WheelEvent('wheel', {
           deltaX: deltaX,
           deltaY: 0,
@@ -3987,21 +4002,51 @@ const DataGrid: React.FC<DataGridProps> = ({
       const isTableDataAreaTarget = (target: EventTarget | null) => {
           const element = target instanceof HTMLElement ? target : null;
           if (!element) return false;
+          // 排除外部滚动条与工具栏，其余容器内元素一律视为数据区域
           if (element.closest('.data-grid-external-horizontal-scroll')) return false;
-          return !!element.closest('.ant-table-body, .ant-table-content, .ant-table-cell, .ant-table-row, .ant-table-tbody');
+          if (element.closest('.data-grid-toolbar')) return false;
+          return true;
       };
 
       const handleContainerHorizontalWheel = (event: WheelEvent) => {
+          // applyVirtualHorizontalOffset 分发的合成 WheelEvent（isTrusted=false）
+          // 需要传播到 rc-virtual-list 的内部 handler，此处不拦截。
+          if (!event.isTrusted) return;
+
           const horizontalDelta = resolveHorizontalDelta(event);
           if (!Number.isFinite(horizontalDelta) || Math.abs(horizontalDelta) < 0.5) return;
           if (!isTableDataAreaTarget(event.target)) return;
 
           if (enableVirtual) {
-              // 虚拟模式：不拦截事件，让 rc-virtual-list 原生处理 wheel。
-              // rc-virtual-list 会通过内部 setOffsetLeft → re-render → onVirtualScroll
-              // 自动同步 header scrollLeft。
-              // 仅需在状态更新后同步外部横向滚动条。
+              event.preventDefault();
+              event.stopPropagation();
               horizontalSyncSourceRef.current = 'table';
+
+              // 空数据回退：virtual-holder 不存在时，手动滚动表头
+              const virtualHolder = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLElement | null;
+              if (!virtualHolder) {
+                  const headerEl = container.querySelector('.ant-table-header') as HTMLElement | null;
+                  const contentEl = container.querySelector('.ant-table-content') as HTMLElement | null;
+                  const fallbackTargets = [headerEl, contentEl].filter((el): el is HTMLElement => el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1);
+                  if (fallbackTargets.length > 0) {
+                      fallbackTargets.forEach((target) => {
+                          const max = Math.max(0, target.scrollWidth - target.clientWidth);
+                          target.scrollLeft = Math.max(0, Math.min(max, target.scrollLeft + horizontalDelta));
+                      });
+                      lastTableScrollLeftRef.current = (fallbackTargets[0]).scrollLeft;
+                      const externalScroll = externalHorizontalScrollRef.current;
+                      if (externalScroll && Math.abs(externalScroll.scrollLeft - lastTableScrollLeftRef.current) > 1) {
+                          externalScroll.scrollLeft = lastTableScrollLeftRef.current;
+                          lastExternalScrollLeftRef.current = lastTableScrollLeftRef.current;
+                      }
+                  }
+                  horizontalSyncSourceRef.current = '';
+                  return;
+              }
+
+              // 有数据：通过 applyVirtualHorizontalOffset 合成 WheelEvent 驱动 rc-virtual-list
+              const currentOffset = readVirtualHorizontalOffset(container);
+              applyVirtualHorizontalOffset(container, currentOffset + horizontalDelta);
               requestAnimationFrame(() => {
                   const nextScrollLeft = readVirtualHorizontalOffset(container);
                   lastTableScrollLeftRef.current = nextScrollLeft;
@@ -4051,13 +4096,38 @@ const DataGrid: React.FC<DataGridProps> = ({
       return () => {
           container.removeEventListener('wheel', handleContainerHorizontalWheel, { capture: true } as EventListenerOptions);
       };
-  }, [enableVirtual, pickHorizontalScrollTargets, readVirtualHorizontalOffset, viewMode]);
+  }, [applyVirtualHorizontalOffset, enableVirtual, pickHorizontalScrollTargets, readVirtualHorizontalOffset, viewMode]);
 
   useEffect(() => {
       if (viewMode !== 'table') return;
       const rafId = requestAnimationFrame(() => recalculateTableMetrics(containerRef.current));
       return () => cancelAnimationFrame(rafId);
   }, [viewMode, totalWidth, mergedDisplayData.length, pagination?.total, pagination?.pageSize, recalculateTableMetrics]);
+
+  // 虚拟表列对齐：antd 虚拟表 body 使用 <div>+<td>（非 <table>），
+  // 不会自动拉伸列宽到视口。而 header <table> 会被 antd 的 CSS 或 JS
+  // 设置为 width:100% 自动拉伸。强制 header table 宽度等于 scroll.x，
+  // 使 header 列宽与 body 单元格宽度精确一致。
+  useEffect(() => {
+      if (viewMode !== 'table') return;
+      const container = tableContainerRef.current;
+      if (!container) return;
+      const syncHeaderWidth = () => {
+          const headerTable = container.querySelector('.ant-table-header > table') as HTMLElement;
+          if (headerTable) {
+              headerTable.style.setProperty('width', `${tableScrollX}px`, 'important');
+              headerTable.style.setProperty('min-width', '0px', 'important');
+              headerTable.style.setProperty('max-width', `${tableScrollX}px`, 'important');
+          }
+      };
+      syncHeaderWidth();
+      const rafId = requestAnimationFrame(syncHeaderWidth);
+      // 监听 antd 可能的重渲染覆盖
+      const observer = new MutationObserver(syncHeaderWidth);
+      const headerEl = container.querySelector('.ant-table-header');
+      if (headerEl) observer.observe(headerEl, { attributes: true, childList: true, subtree: true, attributeFilter: ['style'] });
+      return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
+  }, [viewMode, tableScrollX, mergedDisplayData.length]);
 
   useEffect(() => {
       if (viewMode !== 'table' || !onScrollSnapshotChange) return;

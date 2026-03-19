@@ -1,4 +1,4 @@
-import { calculateTableBodyBottomPadding } from './dataGridLayout';
+import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
 
 const assertEqual = (actual: unknown, expected: unknown, message: string) => {
   if (actual !== expected) {
@@ -34,6 +34,36 @@ assertEqual(
   }),
   30,
   '较粗滚动条场景下应同步放大底部安全区'
+);
+
+assertEqual(
+  calculateVirtualTableScrollX({
+    totalWidth: 646,
+    tableViewportWidth: 1200,
+    isMacLike: false,
+  }),
+  1200,
+  '列总宽小于视口时应按视口宽度返回 scroll.x，避免 header/body 走两套宽度'
+);
+
+assertEqual(
+  calculateVirtualTableScrollX({
+    totalWidth: 646,
+    tableViewportWidth: 0,
+    isMacLike: false,
+  }),
+  646,
+  '未拿到视口宽度时应退回列宽总和'
+);
+
+assertEqual(
+  calculateVirtualTableScrollX({
+    totalWidth: 1200,
+    tableViewportWidth: 800,
+    isMacLike: true,
+  }),
+  1202,
+  'macOS 横向溢出时仍需额外预留 2px 以稳定滚动轨道'
 );
 
 console.log('dataGridLayout tests passed');

@@ -420,6 +420,9 @@ interface AppState {
   enableColumnOrderMemory: boolean;
   tableHiddenColumns: Record<string, string[]>;
   enableHiddenColumnMemory: boolean;
+  windowBounds: { width: number; height: number; x: number; y: number } | null;
+  windowState: 'normal' | 'fullscreen' | 'maximized';
+  sidebarWidth: number;
 
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
@@ -469,6 +472,9 @@ interface AppState {
   setTableHiddenColumns: (connectionId: string, dbName: string, tableName: string, hiddenColumns: string[]) => void;
   setEnableHiddenColumnMemory: (enabled: boolean) => void;
   clearTableHiddenColumns: (connectionId: string, dbName: string, tableName: string) => void;
+  setWindowBounds: (bounds: { width: number; height: number; x: number; y: number }) => void;
+  setWindowState: (state: 'normal' | 'fullscreen' | 'maximized') => void;
+  setSidebarWidth: (width: number) => void;
 }
 
 const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
@@ -599,6 +605,29 @@ const sanitizeGlobalProxy = (value: unknown): GlobalProxyConfig => {
   };
 };
 
+const sanitizeWindowState = (value: unknown): 'normal' | 'fullscreen' | 'maximized' => {
+  if (value === 'fullscreen' || value === 'maximized') return value;
+  return 'normal';
+};
+
+const sanitizeSidebarWidth = (value: unknown): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 330;
+  return Math.max(200, Math.min(600, Math.trunc(parsed)));
+};
+
+const sanitizeWindowBounds = (value: unknown): { width: number; height: number; x: number; y: number } | null => {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const width = Number(raw.width);
+  const height = Number(raw.height);
+  const x = Number(raw.x);
+  const y = Number(raw.y);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  if (width < 400 || height < 300) return null;
+  return { width: Math.trunc(width), height: Math.trunc(height), x: Math.trunc(x), y: Math.trunc(y) };
+};
+
 const unwrapPersistedAppState = (persistedState: unknown): Record<string, unknown> => {
   if (!persistedState || typeof persistedState !== 'object') {
     return {};
@@ -635,6 +664,9 @@ export const useStore = create<AppState>()(
       enableColumnOrderMemory: true,
       tableHiddenColumns: {},
       enableHiddenColumnMemory: true,
+      windowBounds: null,
+      windowState: 'normal' as const,
+      sidebarWidth: 330,
 
       addConnection: (conn) => set((state) => ({ connections: [...state.connections, conn] })),
       updateConnection: (conn) => set((state) => ({
@@ -875,6 +907,19 @@ export const useStore = create<AppState>()(
       }),
 
       setEnableHiddenColumnMemory: (enabled) => set({ enableHiddenColumnMemory: !!enabled }),
+
+      setWindowBounds: (bounds) => set({
+        windowBounds: {
+          width: Math.max(400, Math.trunc(bounds.width)),
+          height: Math.max(300, Math.trunc(bounds.height)),
+          x: Math.trunc(bounds.x),
+          y: Math.trunc(bounds.y),
+        }
+      }),
+
+      setWindowState: (state) => set({ windowState: state }),
+
+      setSidebarWidth: (width) => set({ sidebarWidth: Math.max(200, Math.min(600, Math.trunc(width))) }),
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
@@ -906,7 +951,10 @@ export const useStore = create<AppState>()(
         nextState.enableColumnOrderMemory = state.enableColumnOrderMemory !== false; 
         const safeHidden = sanitizeTableHiddenColumns(state.tableHiddenColumns);
         nextState.tableHiddenColumns = safeHidden;
-        nextState.enableHiddenColumnMemory = state.enableHiddenColumnMemory !== false; 
+        nextState.enableHiddenColumnMemory = state.enableHiddenColumnMemory !== false;
+        nextState.windowBounds = sanitizeWindowBounds(state.windowBounds);
+        nextState.windowState = sanitizeWindowState(state.windowState);
+        nextState.sidebarWidth = sanitizeSidebarWidth(state.sidebarWidth);
         return nextState as AppState;
       },
       merge: (persistedState, currentState) => {
@@ -928,6 +976,9 @@ export const useStore = create<AppState>()(
           enableColumnOrderMemory: state.enableColumnOrderMemory !== false,
           tableHiddenColumns: sanitizeTableHiddenColumns(state.tableHiddenColumns),
           enableHiddenColumnMemory: state.enableHiddenColumnMemory !== false,
+          windowBounds: sanitizeWindowBounds(state.windowBounds),
+          windowState: sanitizeWindowState(state.windowState),
+          sidebarWidth: sanitizeSidebarWidth(state.sidebarWidth),
 
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
@@ -953,7 +1004,10 @@ export const useStore = create<AppState>()(
         tableColumnOrders: state.tableColumnOrders,
         enableColumnOrderMemory: state.enableColumnOrderMemory,
         tableHiddenColumns: state.tableHiddenColumns,
-        enableHiddenColumnMemory: state.enableHiddenColumnMemory
+        enableHiddenColumnMemory: state.enableHiddenColumnMemory,
+        windowBounds: state.windowBounds,
+        windowState: state.windowState,
+        sidebarWidth: state.sidebarWidth,
       }), // Don't persist logs
     }
   )
