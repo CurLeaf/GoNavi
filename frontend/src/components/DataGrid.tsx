@@ -3900,12 +3900,28 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 虚拟表格路径：通过合成 WheelEvent 驱动 rc-virtual-list 内部状态，
       // rc-table 自动同步 header scrollLeft。
       if (enableVirtual && tableContainer instanceof HTMLElement) {
-          applyVirtualHorizontalOffset(tableContainer, externalScroll.scrollLeft);
-          // WheelEvent 经 rc-virtual-list 处理后状态异步更新，延迟同步 ref
-          requestAnimationFrame(() => {
-              lastTableScrollLeftRef.current = readVirtualHorizontalOffset(tableContainer);
+          const applied = applyVirtualHorizontalOffset(tableContainer, externalScroll.scrollLeft);
+          if (applied) {
+              // WheelEvent 经 rc-virtual-list 处理后状态异步更新，延迟同步 ref
+              requestAnimationFrame(() => {
+                  lastTableScrollLeftRef.current = readVirtualHorizontalOffset(tableContainer);
+                  horizontalSyncSourceRef.current = '';
+              });
+              return;
+          }
+          // 空数据回退：virtual-holder 不存在时，直接滚动表头
+          const headerEl = tableContainer.querySelector('.ant-table-header') as HTMLElement | null;
+          const contentEl = tableContainer.querySelector('.ant-table-content') as HTMLElement | null;
+          const fallbackTargets = [headerEl, contentEl].filter((el): el is HTMLElement => el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1);
+          if (fallbackTargets.length > 0) {
+              fallbackTargets.forEach((target) => {
+                  target.scrollLeft = externalScroll.scrollLeft;
+              });
+              lastTableScrollLeftRef.current = externalScroll.scrollLeft;
               horizontalSyncSourceRef.current = '';
-          });
+              return;
+          }
+          horizontalSyncSourceRef.current = '';
           return;
       }
       // 非虚拟表格路径：依赖 liveTargets 进行 scrollLeft 同步

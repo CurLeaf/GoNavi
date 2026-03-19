@@ -1162,8 +1162,14 @@ ${selectedTrigger.statement}`;
 
   useEffect(() => {
       if (!selectedIndex) return;
-      if (!groupedIndexes.some(idx => idx.key === selectedIndex.key)) {
+      const freshIndex = groupedIndexes.find(idx => idx.key === selectedIndex.key);
+      if (!freshIndex) {
           setSelectedIndex(null);
+          return;
+      }
+      // 索引仍存在但内容可能已变（如字段列表），同步为最新对象
+      if (freshIndex !== selectedIndex) {
+          setSelectedIndex(freshIndex);
       }
   }, [groupedIndexes, selectedIndex]);
 
