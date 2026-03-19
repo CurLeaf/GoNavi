@@ -525,8 +525,22 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		a.queryMu.Unlock()
 	}()
 
-	// 尝试使用驱动原生多结果集支持
+	// 尝试使用驱动原生多结果集支持。
+	// 注意：原生 conn.Query() 执行写操作（UPDATE/INSERT/DELETE）时，
+	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
+	// 因此仅在全部语句皆为读操作时才使用原生路径。
+	allReadOnly := true
+	for _, stmt := range splitSQLStatements(query) {
+		if strings.TrimSpace(stmt) != "" && !isReadOnlySQLQuery(runConfig.Type, stmt) {
+			allReadOnly = false
+			break
+		}
+	}
+
 	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, error) {
+		if !allReadOnly {
+			return nil, nil // 包含写操作，走逐条执行路径
+		}
 		if q, ok := inst.(db.MultiResultQuerierContext); ok {
 			return q.QueryMultiContext(ctx, query)
 		}

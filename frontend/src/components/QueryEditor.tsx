@@ -2005,7 +2005,11 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   label: (
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <Tooltip title={rs.sql}>
-                              <span>{`结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length}${rs.truncated ? '+' : ''})` : ''}`}</span>
+                          <span>{(() => {
+                              const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
+                              if (isAffected) return `结果 ${idx + 1} ✓`;
+                              return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length}${rs.truncated ? '+' : ''})` : ''}`;
+                          })()}</span>
                           </Tooltip>
                           <Tooltip title="关闭结果">
                               <span
@@ -2021,23 +2025,40 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                           </Tooltip>
                       </div>
                   ),
-                  children: (
-                      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                          <DataGrid
-                              data={rs.rows}
-                              columnNames={rs.columns}
-                              loading={loading}
-                              tableName={rs.tableName}
-                              exportScope="queryResult"
-                              resultSql={rs.exportSql || rs.sql}
-                              dbName={currentDb}
-                              connectionId={currentConnectionId}
-                              pkColumns={rs.pkColumns}
-                              onReload={handleRun}
-                              readOnly={rs.readOnly}
-                          />
-                      </div>
-                  )
+                  children: (() => {
+                      // affectedRows 类型结果集（UPDATE/INSERT/DELETE）：简洁提示
+                      const isAffectedResult = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
+                      if (isAffectedResult) {
+                          const affected = Number(rs.rows[0]?.affectedRows ?? 0);
+                          return (
+                              <div style={{
+                                  flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  flexDirection: 'column', gap: 8, color: '#666', userSelect: 'text',
+                              }}>
+                                  <span style={{ fontSize: 36, color: '#52c41a' }}>✓</span>
+                                  <span style={{ fontSize: 14, fontWeight: 500 }}>执行成功</span>
+                                  <span style={{ fontSize: 13, color: '#999' }}>影响行数：{affected}</span>
+                              </div>
+                          );
+                      }
+                      return (
+                          <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                              <DataGrid
+                                  data={rs.rows}
+                                  columnNames={rs.columns}
+                                  loading={loading}
+                                  tableName={rs.tableName}
+                                  exportScope="queryResult"
+                                  resultSql={rs.exportSql || rs.sql}
+                                  dbName={currentDb}
+                                  connectionId={currentConnectionId}
+                                  pkColumns={rs.pkColumns}
+                                  onReload={handleRun}
+                                  readOnly={rs.readOnly}
+                              />
+                          </div>
+                      );
+                  })()
               }))}
           />
         ) : (

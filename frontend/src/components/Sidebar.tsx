@@ -1462,7 +1462,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               type: 'table-overview' as any,
               connectionId: id,
               dbName,
-          });
+              schemaName,
+          } as any);
           return;
       }
       if (node.type === 'table') {

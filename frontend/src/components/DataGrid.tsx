@@ -3815,6 +3815,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 通过合成 WheelEvent 驱动 rc-virtual-list 内部 offsetLeft state，
       // 让 rc-table onInternalScroll 自动同步 header scrollLeft。
       // 不直接操作 DOM marginLeft，避免 React re-render 覆盖。
+
       holderEl.dispatchEvent(new WheelEvent('wheel', {
           deltaX: deltaX,
           deltaY: 0,
@@ -3987,27 +3988,29 @@ const DataGrid: React.FC<DataGridProps> = ({
       const isTableDataAreaTarget = (target: EventTarget | null) => {
           const element = target instanceof HTMLElement ? target : null;
           if (!element) return false;
+          // 排除外部滚动条与工具栏，其余容器内元素一律视为数据区域
           if (element.closest('.data-grid-external-horizontal-scroll')) return false;
-          return !!element.closest('.ant-table-body, .ant-table-content, .ant-table-cell, .ant-table-row, .ant-table-tbody, .ant-table-placeholder');
+          if (element.closest('.data-grid-toolbar')) return false;
+          return true;
       };
 
       const handleContainerHorizontalWheel = (event: WheelEvent) => {
+          // applyVirtualHorizontalOffset 分发的合成 WheelEvent（isTrusted=false）
+          // 需要传播到 rc-virtual-list 的内部 handler，此处不拦截。
+          if (!event.isTrusted) return;
+
           const horizontalDelta = resolveHorizontalDelta(event);
           if (!Number.isFinite(horizontalDelta) || Math.abs(horizontalDelta) < 0.5) return;
           if (!isTableDataAreaTarget(event.target)) return;
 
           if (enableVirtual) {
-              // 虚拟模式：不拦截事件，让 rc-virtual-list 原生处理 wheel。
-              // rc-virtual-list 会通过内部 setOffsetLeft → re-render → onVirtualScroll
-              // 自动同步 header scrollLeft。
-              // 仅需在状态更新后同步外部横向滚动条。
+              event.preventDefault();
+              event.stopPropagation();
               horizontalSyncSourceRef.current = 'table';
 
               // 空数据回退：virtual-holder 不存在时，手动滚动表头
-              const virtualHolder = container.querySelector('.rc-virtual-list-holder') as HTMLElement | null;
+              const virtualHolder = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLElement | null;
               if (!virtualHolder) {
-                  event.preventDefault();
-                  event.stopPropagation();
                   const headerEl = container.querySelector('.ant-table-header') as HTMLElement | null;
                   const contentEl = container.querySelector('.ant-table-content') as HTMLElement | null;
                   const fallbackTargets = [headerEl, contentEl].filter((el): el is HTMLElement => el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1);
@@ -4027,6 +4030,9 @@ const DataGrid: React.FC<DataGridProps> = ({
                   return;
               }
 
+              // 有数据：通过 applyVirtualHorizontalOffset 合成 WheelEvent 驱动 rc-virtual-list
+              const currentOffset = readVirtualHorizontalOffset(container);
+              applyVirtualHorizontalOffset(container, currentOffset + horizontalDelta);
               requestAnimationFrame(() => {
                   const nextScrollLeft = readVirtualHorizontalOffset(container);
                   lastTableScrollLeftRef.current = nextScrollLeft;
@@ -4076,7 +4082,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return () => {
           container.removeEventListener('wheel', handleContainerHorizontalWheel, { capture: true } as EventListenerOptions);
       };
-  }, [enableVirtual, pickHorizontalScrollTargets, readVirtualHorizontalOffset, viewMode]);
+  }, [applyVirtualHorizontalOffset, enableVirtual, pickHorizontalScrollTargets, readVirtualHorizontalOffset, viewMode]);
 
   useEffect(() => {
       if (viewMode !== 'table') return;
