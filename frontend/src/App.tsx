@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
@@ -986,7 +986,7 @@ function App() {
       setAboutLoading(false);
   }, []);
 
-  const handleNewQuery = () => {
+  const handleNewQuery = useCallback(() => {
       let connId = '';
       let db = '';
 
@@ -1006,14 +1006,14 @@ function App() {
       }
 
       addTab({
-          id: `query-${Date.now()}`,
+          id: `query-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           title: '新建查询',
           type: 'query',
           connectionId: connId,
           dbName: db,
           query: ''
       });
-  };
+  }, [activeTabId, tabs, connections, activeContext, addTab]);
 
   const handleImportConnections = async () => {
       const res = await (window as any).go.app.App.ImportConfigFile();
