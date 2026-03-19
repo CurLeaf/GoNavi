@@ -121,7 +121,7 @@ const ResizableTitle = (props: any) => {
     nextStyle.width = width;
   }
 
-  if (!width) {
+  if (!onResizeStart) {
     return <th {...restProps} style={nextStyle} />;
   }
 
@@ -415,11 +415,6 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   // Initial Columns Definition
   useEffect(() => {
       const initialCols = [
-          ...(readOnly ? [] : [{
-              key: 'sort',
-              width: 40,
-              render: () => <MenuOutlined style={{ cursor: 'grab', color: '#999' }} />,
-          }]),
           { 
               title: '名', 
               dataIndex: 'name', 
@@ -2020,13 +2015,60 @@ END;`;
   };
 
   // Merge columns with resize handler
-  const resizableColumns = tableColumns.map((col, index) => ({
+  const resizableColumns = useMemo(() => tableColumns.map((col, index) => ({
     ...col,
     onHeaderCell: (column: any) => ({
       width: column.width,
       onResizeStart: handleResizeStart(index),
     }),
-  }));
+  })), [tableColumns]);
+
+  // 字段表 Checkbox 选择列（不参与 resize，支持全选）
+  const allColumnKeys = useMemo(() => columns.map(c => c._key), [columns]);
+  const isAllColumnsSelected = allColumnKeys.length > 0 && selectedColumnRowKeys.length === allColumnKeys.length;
+  const isColumnsIndeterminate = selectedColumnRowKeys.length > 0 && selectedColumnRowKeys.length < allColumnKeys.length;
+
+  const columnSelectCol = useMemo(() => ({
+      title: () => (
+          <Checkbox
+              checked={isAllColumnsSelected}
+              indeterminate={isColumnsIndeterminate}
+              onChange={(e: any) => setSelectedColumnRowKeys(e.target.checked ? allColumnKeys : [])}
+              style={{ margin: 0 }}
+          />
+      ),
+      dataIndex: '_select',
+      key: '_select',
+      width: 48,
+      render: (_: any, record: any) => (
+          <Checkbox
+              checked={selectedColumnRowKeys.includes(record._key)}
+              onChange={(e: any) => {
+                  e.stopPropagation();
+                  setSelectedColumnRowKeys((prev: string[]) =>
+                      e.target.checked
+                          ? [...prev, record._key]
+                          : prev.filter((k: string) => k !== record._key)
+                  );
+              }}
+              style={{ margin: 0 }}
+          />
+      ),
+  }), [selectedColumnRowKeys, allColumnKeys, isAllColumnsSelected, isColumnsIndeterminate]);
+
+  // sort 拖拽列（不参与 resize）
+  const sortColumn = useMemo(() => ({
+      key: 'sort',
+      width: 40,
+      render: () => <MenuOutlined style={{ cursor: 'grab', color: '#999' }} />,
+  }), []);
+
+  const columnsWithSelect = useMemo(() =>
+      readOnly
+          ? resizableColumns
+          : [columnSelectCol, sortColumn, ...resizableColumns],
+      [readOnly, columnSelectCol, sortColumn, resizableColumns]
+  );
 
   // --- Index Columns Init ---
   useEffect(() => {
@@ -2153,7 +2195,7 @@ END;`;
         {readOnly ? (
         <Table 
             dataSource={columns} 
-            columns={resizableColumns} 
+            columns={columnsWithSelect} 
             rowKey="_key" 
             rowClassName={(record: EditableColumn) => record._key === focusColumnKey ? 'table-designer-focus-row' : ''}
             size="small" 
@@ -2172,11 +2214,7 @@ END;`;
         <SortableContext items={columns.map(c => c._key)} strategy={verticalListSortingStrategy}>
             <Table 
                 dataSource={columns} 
-                columns={resizableColumns} 
-                rowSelection={{
-                    selectedRowKeys: selectedColumnRowKeys,
-                    onChange: (nextSelectedRowKeys) => setSelectedColumnRowKeys(nextSelectedRowKeys as string[]),
-                }}
+                columns={columnsWithSelect} 
                 rowKey="_key" 
                 rowClassName={(record: EditableColumn) => record._key === focusColumnKey ? 'table-designer-focus-row' : ''}
                 size="small" 
@@ -2203,10 +2241,12 @@ END;`;
             .table-designer-shell .ant-table-container {
                 background: transparent !important;
             }
-            .table-designer-shell .ant-table-wrapper,
-            .table-designer-shell .ant-table-container {
+            .table-designer-shell .ant-table-wrapper {
                 border: none !important;
                 overflow: hidden !important;
+            }
+            .table-designer-shell .ant-table-container {
+                border: none !important;
             }
             .table-designer-shell .ant-table-thead > tr > th {
                 background: transparent !important;
@@ -2218,6 +2258,13 @@ END;`;
                 background: transparent !important;
                 border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important;
                 border-inline-end: 1px solid transparent !important;
+            }
+            .table-designer-shell .ant-table-tbody td .ant-input {
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+            .table-designer-shell .ant-table-tbody td .ant-select .ant-select-selector {
+                padding-left: 0 !important;
             }
             .table-designer-shell .ant-table-thead > tr > th::before {
                 display: none !important;
@@ -2236,6 +2283,13 @@ END;`;
             }
             .table-designer-shell .ant-tabs-nav::before {
                 border-bottom-color: ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'} !important;
+            }
+            .table-designer-shell .ant-tabs-ink-bar {
+                will-change: transform;
+                transition: width 0.15s ease, left 0.15s ease, transform 0.15s ease !important;
+            }
+            .table-designer-shell .ant-tabs-tab {
+                transition: color 0.15s ease !important;
             }
             .table-designer-shell .ant-tabs-content-holder,
             .table-designer-shell .ant-tabs-content,
@@ -2343,7 +2397,7 @@ END;`;
         </div>
         <Tabs 
             activeKey={activeKey}
-            onChange={setActiveKey}
+            onChange={(key) => React.startTransition(() => setActiveKey(key))}
             style={{
                 flex: 1,
                 minHeight: 0,
