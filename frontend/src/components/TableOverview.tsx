@@ -194,7 +194,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
         addTab({
-            id: `${connection.id}-${tab.dbName}-${tableName}`,
+            id: `${connection.id}-${tab.dbName}-table-${tableName}`,
             title: tableName,
             type: 'table',
             connectionId: connection.id,
