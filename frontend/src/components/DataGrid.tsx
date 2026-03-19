@@ -3988,7 +3988,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const element = target instanceof HTMLElement ? target : null;
           if (!element) return false;
           if (element.closest('.data-grid-external-horizontal-scroll')) return false;
-          return !!element.closest('.ant-table-body, .ant-table-content, .ant-table-cell, .ant-table-row, .ant-table-tbody');
+          return !!element.closest('.ant-table-body, .ant-table-content, .ant-table-cell, .ant-table-row, .ant-table-tbody, .ant-table-placeholder');
       };
 
       const handleContainerHorizontalWheel = (event: WheelEvent) => {
@@ -4002,6 +4002,31 @@ const DataGrid: React.FC<DataGridProps> = ({
               // 自动同步 header scrollLeft。
               // 仅需在状态更新后同步外部横向滚动条。
               horizontalSyncSourceRef.current = 'table';
+
+              // 空数据回退：virtual-holder 不存在时，手动滚动表头
+              const virtualHolder = container.querySelector('.rc-virtual-list-holder') as HTMLElement | null;
+              if (!virtualHolder) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const headerEl = container.querySelector('.ant-table-header') as HTMLElement | null;
+                  const contentEl = container.querySelector('.ant-table-content') as HTMLElement | null;
+                  const fallbackTargets = [headerEl, contentEl].filter((el): el is HTMLElement => el instanceof HTMLElement && el.scrollWidth > el.clientWidth + 1);
+                  if (fallbackTargets.length > 0) {
+                      fallbackTargets.forEach((target) => {
+                          const max = Math.max(0, target.scrollWidth - target.clientWidth);
+                          target.scrollLeft = Math.max(0, Math.min(max, target.scrollLeft + horizontalDelta));
+                      });
+                      lastTableScrollLeftRef.current = (fallbackTargets[0]).scrollLeft;
+                      const externalScroll = externalHorizontalScrollRef.current;
+                      if (externalScroll && Math.abs(externalScroll.scrollLeft - lastTableScrollLeftRef.current) > 1) {
+                          externalScroll.scrollLeft = lastTableScrollLeftRef.current;
+                          lastExternalScrollLeftRef.current = lastTableScrollLeftRef.current;
+                      }
+                  }
+                  horizontalSyncSourceRef.current = '';
+                  return;
+              }
+
               requestAnimationFrame(() => {
                   const nextScrollLeft = readVirtualHorizontalOffset(container);
                   lastTableScrollLeftRef.current = nextScrollLeft;
