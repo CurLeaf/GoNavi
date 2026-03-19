@@ -14,6 +14,7 @@ import RedisViewer from './RedisViewer';
 import RedisCommandEditor from './RedisCommandEditor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
+import TableOverview from './TableOverview';
 import type { TabData } from '../types';
 
 const detectConnectionEnvLabel = (connectionName: string): string | null => {
@@ -28,7 +29,7 @@ const detectConnectionEnvLabel = (connectionName: string): string | null => {
 };
 
 const buildTabDisplayTitle = (tab: TabData, connectionName: string | undefined): string => {
-  if (tab.type !== 'table' && tab.type !== 'design') return tab.title;
+  if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') return tab.title;
   if (!connectionName) return tab.title;
   const prefix = detectConnectionEnvLabel(connectionName) || connectionName;
   return `[${prefix}] ${tab.title}`;
@@ -159,6 +160,8 @@ const TabManager: React.FC = () => {
       content = <TriggerViewer tab={tab} />;
     } else if (tab.type === 'view-def' || tab.type === 'routine-def') {
       content = <DefinitionViewer tab={tab} />;
+    } else if (tab.type === 'table-overview') {
+      content = <TableOverview tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [

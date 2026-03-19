@@ -116,7 +116,7 @@ export interface TriggerDefinition {
 export interface TabData {
   id: string;
   title: string;
-  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'trigger' | 'view-def' | 'routine-def';
+  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'trigger' | 'view-def' | 'routine-def' | 'table-overview';
   connectionId: string;
   dbName?: string;
   tableName?: string;
