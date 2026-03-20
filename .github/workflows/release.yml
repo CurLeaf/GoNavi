@@ -613,17 +613,18 @@ jobs:
             sha256sum "${FILES[@]}" > SHA256SUMS
           fi
 
-      - name: Checkout code
+      - name: Checkout code for changelog
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          clean: false
+          path: repo-for-changelog
 
       - name: Generate Changelog
         id: changelog
         shell: bash
         run: |
           set -euo pipefail
+          cd repo-for-changelog
           TAG="${{ github.ref_name }}"
           # 获取上一个 tag
           PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v' | sed -n '2p' || true)
