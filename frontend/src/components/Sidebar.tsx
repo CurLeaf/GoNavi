@@ -35,6 +35,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 	import { SavedConnection } from '../types';
+import { getDbIcon } from './DatabaseIcons';
 	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -329,7 +330,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         return {
           title: conn.name,
           key: conn.id,
-          icon: conn.config.type === 'redis' ? <CloudOutlined style={{ color: '#DC382D' }} /> : <HddOutlined />,
+          icon: getDbIcon(conn.iconType || conn.config.type, conn.iconColor, 22),
           type: 'connection',
           dataRef: conn,
           isLeaf: false,
@@ -3603,7 +3604,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     }
 
     const statusBadge = node.type === 'connection' || node.type === 'database' ? (
-        <Badge status={status} style={{ marginRight: 8 }} />
+        <Badge status={status} style={{ marginLeft: 4, marginRight: 8 }} />
     ) : null;
 
     const displayTitle = String(node.title ?? '');

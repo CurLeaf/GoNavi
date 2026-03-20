@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined, BgColorsOutlined } from '@ant-design/icons';
+import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICON_COLORS } from './DatabaseIcons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -105,7 +106,9 @@ const ConnectionModal: React.FC<{
   const [dbType, setDbType] = useState('mysql');
   const [step, setStep] = useState(1); // 1: Select Type, 2: Configure
   const [activeGroup, setActiveGroup] = useState(0); // Active category index in step 1
-  const [activeConfigSection, setActiveConfigSection] = useState<'basic' | 'network'>('basic');
+  const [activeConfigSection, setActiveConfigSection] = useState<'basic' | 'network' | 'appearance'>('basic');
+  const [customIconType, setCustomIconType] = useState<string | undefined>(undefined);
+  const [customIconColor, setCustomIconColor] = useState<string | undefined>(undefined);
   const [activeNetworkConfig, setActiveNetworkConfig] = useState<'ssl' | 'ssh' | 'proxy' | 'httpTunnel'>('ssl');
   const [testResult, setTestResult] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
@@ -1061,6 +1064,8 @@ const ConnectionModal: React.FC<{
           setRedisDbList([]);
           setMongoMembers([]);
           setUriFeedback(null);
+          setCustomIconType(undefined);
+          setCustomIconColor(undefined);
           setTypeSelectWarning(null);
           setDriverStatusLoaded(false);
           void refreshDriverStatus();
@@ -1146,6 +1151,8 @@ const ConnectionModal: React.FC<{
                   mongoReplicaPassword: config.mongoReplicaPassword || ''
               });
               setUseSSL(!!config.useSSL);
+              setCustomIconType(initialValues.iconType);
+              setCustomIconColor(initialValues.iconColor);
               setUseSSH(config.useSSH || false);
               setUseProxy(hasProxy);
               setUseHttpTunnel(hasHttpTunnel);
@@ -1212,7 +1219,9 @@ const ConnectionModal: React.FC<{
         name: values.name || (isFileDatabaseType(values.type) ? (values.type === 'duckdb' ? 'DuckDB DB' : 'SQLite DB') : (values.type === 'redis' ? `Redis ${displayHost}` : displayHost)),
         config: config,
         includeDatabases: values.includeDatabases,
-        includeRedisDatabases: isRedisType ? values.includeRedisDatabases : undefined
+        includeRedisDatabases: isRedisType ? values.includeRedisDatabases : undefined,
+        iconType: customIconType,
+        iconColor: customIconColor,
       };
 
       if (initialValues) {
@@ -1735,32 +1744,32 @@ const ConnectionModal: React.FC<{
 
   const dbTypeGroups = [
       { label: '关系型数据库', items: [
-          { key: 'mysql', name: 'MySQL', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#00758F' }} /> },
-          { key: 'mariadb', name: 'MariaDB', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#003545' }} /> },
-          { key: 'diros', name: 'Doris', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#0050b3' }} /> },
-          { key: 'sphinx', name: 'Sphinx', icon: <ConsoleSqlOutlined style={{ fontSize: 24, color: '#2F5D62' }} /> },
-          { key: 'clickhouse', name: 'ClickHouse', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#FFCC01' }} /> },
-          { key: 'postgres', name: 'PostgreSQL', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#336791' }} /> },
-          { key: 'sqlserver', name: 'SQL Server', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#CC2927' }} /> },
-          { key: 'sqlite', name: 'SQLite', icon: <FileTextOutlined style={{ fontSize: 24, color: '#003B57' }} /> },
-          { key: 'duckdb', name: 'DuckDB', icon: <FileTextOutlined style={{ fontSize: 24, color: '#f59e0b' }} /> },
-          { key: 'oracle', name: 'Oracle', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#F80000' }} /> },
+          { key: 'mysql', name: 'MySQL', icon: getDbIcon('mysql', undefined, 36) },
+          { key: 'mariadb', name: 'MariaDB', icon: getDbIcon('mariadb', undefined, 36) },
+          { key: 'diros', name: 'Doris', icon: getDbIcon('diros', undefined, 36) },
+          { key: 'sphinx', name: 'Sphinx', icon: getDbIcon('sphinx', undefined, 36) },
+          { key: 'clickhouse', name: 'ClickHouse', icon: getDbIcon('clickhouse', undefined, 36) },
+          { key: 'postgres', name: 'PostgreSQL', icon: getDbIcon('postgres', undefined, 36) },
+          { key: 'sqlserver', name: 'SQL Server', icon: getDbIcon('sqlserver', undefined, 36) },
+          { key: 'sqlite', name: 'SQLite', icon: getDbIcon('sqlite', undefined, 36) },
+          { key: 'duckdb', name: 'DuckDB', icon: getDbIcon('duckdb', undefined, 36) },
+          { key: 'oracle', name: 'Oracle', icon: getDbIcon('oracle', undefined, 36) },
       ]},
       { label: '国产数据库', items: [
-          { key: 'dameng', name: 'Dameng (达梦)', icon: <CloudServerOutlined style={{ fontSize: 24, color: '#1890ff' }} /> },
-          { key: 'kingbase', name: 'Kingbase (人大金仓)', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#faad14' }} /> },
-          { key: 'highgo', name: 'HighGo (瀚高)', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#00a854' }} /> },
-          { key: 'vastbase', name: 'Vastbase (海量)', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#1a6dff' }} /> },
+          { key: 'dameng', name: 'Dameng (达梦)', icon: getDbIcon('dameng', undefined, 36) },
+          { key: 'kingbase', name: 'Kingbase (人大金仓)', icon: getDbIcon('kingbase', undefined, 36) },
+          { key: 'highgo', name: 'HighGo (瀚高)', icon: getDbIcon('highgo', undefined, 36) },
+          { key: 'vastbase', name: 'Vastbase (海量)', icon: getDbIcon('vastbase', undefined, 36) },
       ]},
       { label: 'NoSQL', items: [
-          { key: 'mongodb', name: 'MongoDB', icon: <CloudServerOutlined style={{ fontSize: 24, color: '#47A248' }} /> },
-          { key: 'redis', name: 'Redis', icon: <CloudOutlined style={{ fontSize: 24, color: '#DC382D' }} /> },
+          { key: 'mongodb', name: 'MongoDB', icon: getDbIcon('mongodb', undefined, 36) },
+          { key: 'redis', name: 'Redis', icon: getDbIcon('redis', undefined, 36) },
       ]},
       { label: '时序数据库', items: [
-          { key: 'tdengine', name: 'TDengine', icon: <DatabaseOutlined style={{ fontSize: 24, color: '#2F54EB' }} /> },
+          { key: 'tdengine', name: 'TDengine', icon: getDbIcon('tdengine', undefined, 36) },
       ]},
       { label: '其他', items: [
-          { key: 'custom', name: 'Custom (自定义)', icon: <AppstoreAddOutlined style={{ fontSize: 24, color: '#595959' }} /> },
+          { key: 'custom', name: 'Custom (自定义)', icon: getDbIcon('custom', undefined, 36) },
       ]},
   ];
 
@@ -2512,16 +2521,101 @@ const ConnectionModal: React.FC<{
                   />
               )}
               {(() => {
-                  const sectionItems: Array<{ key: 'basic' | 'network'; title: string; description: string; icon: React.ReactNode }> = [
+                  const sectionItems: Array<{ key: 'basic' | 'network' | 'appearance'; title: string; description: string; icon: React.ReactNode }> = [
                       { key: 'basic', title: '基础信息', description: '名称、地址、认证、URI 与数据库范围', icon: <DatabaseOutlined /> },
                       ...(!isCustom && !isFileDb ? [{ key: 'network' as const, title: '网络与安全', description: 'SSL、SSH、代理与高级连接', icon: <CloudOutlined /> }] : []),
+                      { key: 'appearance', title: '外观', description: '自定义图标与颜色', icon: <BgColorsOutlined /> },
                   ];
                   const resolvedSection = sectionItems.some((item) => item.key === activeConfigSection)
                       ? activeConfigSection
                       : sectionItems[0]?.key || 'basic';
+
+                  const effectiveIconType = customIconType || dbType;
+                  const effectiveIconColor = customIconColor || getDbDefaultColor(effectiveIconType);
+
+                  const appearanceSection = (
+                      <div style={{ display: 'grid', gap: 18 }}>
+                          <div style={{ ...modalInnerSectionStyle, padding: 16 }}>
+                              <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>图标</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                  {DB_ICON_TYPES.map((iconKey) => {
+                                      const isActive = effectiveIconType === iconKey;
+                                      return (
+                                          <button
+                                              key={iconKey}
+                                              type="button"
+                                              title={getDbIconLabel(iconKey)}
+                                              onClick={() => setCustomIconType(iconKey === dbType ? undefined : iconKey)}
+                                              style={{
+                                                  width: 44, height: 44, borderRadius: 10,
+                                                  display: 'grid', placeItems: 'center',
+                                                  border: `2px solid ${isActive ? effectiveIconColor : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)')}`,
+                                                  background: isActive
+                                                      ? (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(24,144,255,0.06)')
+                                                      : 'transparent',
+                                                  cursor: 'pointer',
+                                                  transition: 'all 120ms ease',
+                                              }}
+                                          >
+                                              {getDbIcon(iconKey, isActive ? effectiveIconColor : undefined, 22)}
+                                          </button>
+                                      );
+                                  })}
+                              </div>
+                              <div style={{ marginTop: 6, fontSize: 11, color: darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.35)' }}>
+                                  当前：{getDbIconLabel(effectiveIconType)}
+                              </div>
+                          </div>
+                          <div style={{ ...modalInnerSectionStyle, padding: 16 }}>
+                              <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>颜色</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                                  {PRESET_ICON_COLORS.map((presetColor) => {
+                                      const isActive = effectiveIconColor === presetColor;
+                                      return (
+                                          <button
+                                              key={presetColor}
+                                              type="button"
+                                              onClick={() => setCustomIconColor(presetColor === getDbDefaultColor(effectiveIconType) ? undefined : presetColor)}
+                                              style={{
+                                                  width: 28, height: 28, borderRadius: 8,
+                                                  background: presetColor,
+                                                  border: isActive ? `2.5px solid ${darkMode ? '#fff' : '#162033'}` : '2px solid transparent',
+                                                  cursor: 'pointer',
+                                                  transition: 'all 120ms ease',
+                                                  boxShadow: isActive ? `0 0 0 2px ${presetColor}40` : 'none',
+                                              }}
+                                          />
+                                      );
+                                  })}
+                                  <input
+                                      type="color"
+                                      value={effectiveIconColor}
+                                      onChange={(e) => setCustomIconColor(e.target.value === getDbDefaultColor(effectiveIconType) ? undefined : e.target.value)}
+                                      title="自定义颜色"
+                                      style={{ width: 28, height: 28, border: 'none', padding: 0, cursor: 'pointer', borderRadius: 6, background: 'transparent' }}
+                                  />
+                              </div>
+                          </div>
+                          <div style={{ ...modalInnerSectionStyle, padding: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: darkMode ? '#f5f7ff' : '#162033' }}>预览</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  {getDbIcon(effectiveIconType, effectiveIconColor, 24)}
+                                  <span style={{ fontSize: 14, color: darkMode ? '#e0e0e0' : '#333' }}>{form.getFieldValue('name') || '连接名称'}</span>
+                              </div>
+                              {(customIconType || customIconColor) && (
+                                  <Button size="small" type="link" onClick={() => { setCustomIconType(undefined); setCustomIconColor(undefined); }}>
+                                      重置为默认
+                                  </Button>
+                              )}
+                          </div>
+                      </div>
+                  );
+
                   const currentSectionContent = resolvedSection === 'basic'
                       ? baseInfoSection
-                      : networkSecuritySection;
+                      : resolvedSection === 'appearance'
+                          ? appearanceSection
+                          : networkSecuritySection;
 
                   if (sectionItems.length <= 1) {
                       return currentSectionContent;

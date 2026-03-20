@@ -1,7 +1,8 @@
 // cspell:ignore anticon sqls uuidv uuidv4 hscroll
 import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover } from 'antd';
+import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker } from 'antd';
+import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
@@ -28,7 +29,7 @@ import { useStore } from '../store';
 import type { ColumnDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
-import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
@@ -154,6 +155,43 @@ const isTemporalColumnType = (columnType?: string): boolean => {
     if (raw.includes('datetime') || raw.includes('timestamp')) return true;
     const base = raw.split(/[ (]/)[0];
     return base === 'date' || base === 'time' || base === 'year';
+};
+
+// 根据列类型返回 DatePicker 的 picker 模式
+type TemporalPickerType = 'datetime' | 'date' | 'time' | 'year' | null;
+const getTemporalPickerType = (columnType?: string): TemporalPickerType => {
+    const raw = String(columnType || '').trim().toLowerCase();
+    if (!raw) return null;
+    if (raw.includes('datetime') || raw.includes('timestamp')) return 'datetime';
+    const base = raw.split(/[ (]/)[0];
+    if (base === 'date') return 'date';
+    if (base === 'time') return 'time';
+    if (base === 'year') return 'year';
+    return null;
+};
+
+const TEMPORAL_FORMATS: Record<string, string> = {
+    datetime: 'YYYY-MM-DD HH:mm:ss',
+    date: 'YYYY-MM-DD',
+    time: 'HH:mm:ss',
+    year: 'YYYY',
+};
+
+// 将字符串值转为 dayjs 对象（用于 DatePicker），无效值返回 null
+const parseToDayjs = (val: any, pickerType: TemporalPickerType): dayjs.Dayjs | null => {
+    if (val === null || val === undefined || val === '') return null;
+    const str = String(val).trim();
+    if (!str || /^0{4}-0{2}-0{2}/.test(str)) return null; // 无效日期
+    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
+    const d = dayjs(str, fmt);
+    return d.isValid() ? d : dayjs(str).isValid() ? dayjs(str) : null;
+};
+
+// 将 dayjs 对象格式化为对应格式字符串
+const formatFromDayjs = (val: dayjs.Dayjs | null, pickerType: TemporalPickerType): string => {
+    if (!val || !val.isValid()) return '';
+    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
+    return val.format(fmt);
 };
 
 // --- Helper: Format Value ---
@@ -512,6 +550,7 @@ interface EditableCellProps {
   record: Item;
   handleSave: (record: Item) => void;
   focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
+  columnType?: string;
   as?: any;
   [key: string]: any;
 }
@@ -524,6 +563,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   record,
   handleSave,
   focusCell,
+  columnType,
   as: Component = 'td',
   ...restProps
 }) => {
@@ -541,9 +581,15 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   const toggleEdit = () => {
     setEditing(!editing);
     const raw = record[dataIndex];
-    const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
     const fieldName = getCellFieldName(record, dataIndex);
-    setCellFieldValue(form, fieldName, initialValue);
+    if (isDateTimeField) {
+      // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
+      const dayjsVal = parseToDayjs(raw, pickerType);
+      setCellFieldValue(form, fieldName, dayjsVal);
+    } else {
+      const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
+      setCellFieldValue(form, fieldName, initialValue);
+    }
   };
 
   const save = async () => {
@@ -551,7 +597,13 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
       if (!form) return;
       const fieldName = getCellFieldName(record, dataIndex);
       await form.validateFields([fieldName]);
-      const nextValue = form.getFieldValue(fieldName);
+      let nextValue = form.getFieldValue(fieldName);
+      // 日期时间类型: 将 dayjs 对象转回格式化字符串
+      if (isDateTimeField && nextValue && dayjs.isDayjs(nextValue)) {
+        nextValue = formatFromDayjs(nextValue as dayjs.Dayjs, pickerType);
+      } else if (isDateTimeField && !nextValue) {
+        nextValue = null;
+      }
       toggleEdit();
       // 仅当值发生变化时才标记为修改，避免“双击-失焦”导致整行进入 modified 状态（蓝色高亮不清除）。
       if (!isCellValueEqualForDiff(record?.[dataIndex], nextValue)) {
@@ -567,40 +619,74 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    if (!editable) return;
+    if (!cellContextMenuContext) return;
     e.preventDefault();
     e.stopPropagation(); // 阻止冒泡到行级菜单
-    if (cellContextMenuContext) {
-      cellContextMenuContext.showMenu(e, record, dataIndex, title);
-    }
+    cellContextMenuContext.showMenu(e, record, dataIndex, title);
   };
 
   let childNode = children;
 
+  const pickerType = getTemporalPickerType(columnType);
+  const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
+
   if (editable) {
     childNode = editing ? (
       <Form.Item style={{ margin: 0 }} name={getCellFieldName(record, dataIndex)}>
-        <Input
-          ref={inputRef}
-          onPressEnter={save}
-          onBlur={save}
-          onFocus={(e) => {
-            // Enter 编辑态时直接全选，便于快速替换；同时避免双击在 input 内冒泡导致关闭编辑态。
-            try {
-              (e.target as HTMLInputElement)?.select?.();
-            } catch {
-              // ignore
-            }
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            try {
-              (e.target as HTMLInputElement)?.select?.();
-            } catch {
-              // ignore
-            }
-          }}
-        />
+        {isDateTimeField ? (
+          pickerType === 'time' ? (
+            <TimePicker
+              ref={inputRef}
+              style={{ width: '100%' }}
+              format={TEMPORAL_FORMATS[pickerType]}
+              onChange={() => setTimeout(save, 0)}
+              needConfirm={false}
+            />
+          ) : pickerType === 'datetime' ? (
+            <DatePicker
+              ref={inputRef}
+              style={{ width: '100%' }}
+              showTime
+              format={TEMPORAL_FORMATS[pickerType]}
+              onOk={() => setTimeout(save, 0)}
+              onOpenChange={(open) => {
+                // 面板关闭（点击外部）且非通过"确定"按钮触发时退出编辑，不保存
+                if (!open) setTimeout(() => { if (editing) toggleEdit(); }, 0);
+              }}
+              needConfirm
+            />
+          ) : (
+            <DatePicker
+              ref={inputRef}
+              style={{ width: '100%' }}
+              format={TEMPORAL_FORMATS[pickerType]}
+              picker={pickerType as any}
+              onChange={() => setTimeout(save, 0)}
+              needConfirm={false}
+            />
+          )
+        ) : (
+          <Input
+            ref={inputRef}
+            onPressEnter={save}
+            onBlur={save}
+            onFocus={(e) => {
+              try {
+                (e.target as HTMLInputElement)?.select?.();
+              } catch {
+                // ignore
+              }
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              try {
+                (e.target as HTMLInputElement)?.select?.();
+              } catch {
+                // ignore
+              }
+            }}
+          />
+        )}
       </Form.Item>
     ) : (
       <div
@@ -608,6 +694,13 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
         style={{ paddingRight: 24, minHeight: 20, position: 'relative' }}
         onContextMenu={handleContextMenu}
       >
+        {children}
+      </div>
+    );
+  } else if (cellContextMenuContext) {
+    // 非编辑模式（只读查询结果）也绑定右键菜单，支持复制为 INSERT/JSON/CSV 等操作
+    childNode = (
+      <div onContextMenu={handleContextMenu} style={{ minHeight: 20 }}>
         {children}
       </div>
     );
@@ -668,11 +761,20 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
         { key: 'csv', label: '复制为 CSV', icon: <FileTextOutlined />, onClick: () => handleCopyCsv(record) },
         { key: 'copy', label: '复制为 Markdown', icon: <CopyOutlined />, onClick: () => { 
             const records = getTargets();
-            const lines = records.map((r: any) => {
-                const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-                return `| ${Object.values(vals).join(' | ')} |`;
+            const orderedCols = displayDataRef.current.length > 0
+                ? Object.keys(displayDataRef.current[0]).filter(c => c !== GONAVI_ROW_KEY)
+                : [];
+            const header = `| ${orderedCols.join(' | ')} |`;
+            const separator = `| ${orderedCols.map(() => '---').join(' | ')} |`;
+            const rows = records.map((r: any) => {
+                const values = orderedCols.map(c => {
+                    const v = r[c];
+                    if (v === null || v === undefined) return 'NULL';
+                    return String(v).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                });
+                return `| ${values.join(' | ')} |`;
             });
-            copyToClipboard(lines.join('\n'));
+            copyToClipboard([header, separator, ...rows].join('\n'));
         } },
         { type: 'divider' },
         {
@@ -721,7 +823,7 @@ interface DataGridProps {
     };
     onRequestTotalCount?: () => void;
     onCancelTotalCount?: () => void;
-    sortInfoExternal?: { columnKey: string, order: string } | null;
+    sortInfoExternal?: Array<{ columnKey: string, order: string, enabled?: boolean }>;
     // Filtering
     showFilter?: boolean;
     onToggleFilter?: () => void;
@@ -1010,6 +1112,14 @@ const DataGrid: React.FC<DataGridProps> = ({
   const cellEditorApplyRef = useRef<((val: string) => void) | null>(null);
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonEditorValue, setJsonEditorValue] = useState('');
+
+  // --- Data Preview Panel State ---
+  const [dataPanelOpen, setDataPanelOpen] = useState(false);
+  const dataPanelOpenRef = useRef(false);
+  const [focusedCellInfo, setFocusedCellInfo] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
+  const [dataPanelValue, setDataPanelValue] = useState('');
+  const [dataPanelIsJson, setDataPanelIsJson] = useState(false);
+  const dataPanelDirtyRef = useRef(false);
   const [rowEditorOpen, setRowEditorOpen] = useState(false);
   const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
   const rowEditorBaseRawRef = useRef<Record<string, any>>({});
@@ -1143,25 +1253,18 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   };
   
-  const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(null);
+  const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
   const columnMetaCacheRef = useRef<Record<string, Record<string, ColumnMeta>>>({});
   const columnMetaSeqRef = useRef(0);
 
   useEffect(() => {
-      const nextOrder = sortInfoExternal?.order === 'ascend' || sortInfoExternal?.order === 'descend'
-          ? sortInfoExternal.order
-          : '';
-      const nextColumn = nextOrder ? String(sortInfoExternal?.columnKey || '') : '';
-      const currColumn = String(sortInfo?.columnKey || '');
-      const currOrder = sortInfo?.order === 'ascend' || sortInfo?.order === 'descend' ? sortInfo.order : '';
-      if (nextColumn === currColumn && nextOrder === currOrder) return;
-      if (!nextColumn || !nextOrder) {
-          setSortInfo(null);
-      } else {
-          setSortInfo({ columnKey: nextColumn, order: nextOrder });
-      }
+      const ext = sortInfoExternal || [];
+      const extKey = JSON.stringify(ext);
+      const curKey = JSON.stringify(sortInfo);
+      if (extKey === curKey) return;
+      setSortInfo(ext);
   }, [sortInfoExternal, sortInfo]);
 
   useEffect(() => {
@@ -1324,6 +1427,34 @@ const DataGrid: React.FC<DataGridProps> = ({
       setCellEditorIsJson(false);
       cellEditorApplyRef.current = null;
   }, []);
+
+  // --- Data Preview Panel Helpers ---
+  const updateFocusedCell = useCallback((record: Item, dataIndex: string) => {
+      if (!record || !dataIndex) return;
+      const raw = record?.[dataIndex];
+      const text = toEditableText(raw);
+      const isJson = looksLikeJsonText(text);
+      setFocusedCellInfo({ record, dataIndex, title: dataIndex });
+      // 仅在面板未被用户手动编辑时自动同步值
+      if (!dataPanelDirtyRef.current) {
+          setDataPanelValue(text);
+          setDataPanelIsJson(isJson);
+      }
+  }, []);
+
+  const handleDataPanelFormatJson = useCallback(() => {
+      if (!dataPanelIsJson) return;
+      try {
+          const obj = JSON.parse(dataPanelValue);
+          setDataPanelValue(JSON.stringify(obj, null, 2));
+          dataPanelDirtyRef.current = true;
+      } catch (e: any) {
+          void message.error('JSON 格式无效：' + (e?.message || String(e)));
+      }
+  }, [dataPanelIsJson, dataPanelValue]);
+
+  // 同步 ref 用于 onCell 闭包
+  useEffect(() => { dataPanelOpenRef.current = dataPanelOpen; }, [dataPanelOpen]);
 
   const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode, onApplyValue?: (val: string) => void) => {
       if (!record || !dataIndex) return;
@@ -2563,22 +2694,39 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleTableChange = useCallback((_pag: any, _filtersArg: any, sorter: any) => {
       if (isResizingRef.current) return; // Block sort if resizing
-      if (sorter.field) {
-          const field = String(sorter.field);
-          const order = sorter.order as string;
-          const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
-          if (!normalizedOrder) {
-              setSortInfo(null);
-              if (onSort) onSort('', '');
-              return;
-          }
-          setSortInfo({ columnKey: field, order: normalizedOrder });
-          if (onSort) onSort(field, normalizedOrder);
-      } else {
-          setSortInfo(null);
-          if (onSort) onSort('', '');
+      // Ant Design 多列排序模式下 sorter 可能是数组
+      const sorters = Array.isArray(sorter) ? sorter : (sorter?.field ? [sorter] : []);
+      if (sorters.length === 0) {
+          setSortInfo([]);
+          if (onSort) onSort(JSON.stringify([]), '');
+          return;
       }
-  }, [onSort]);
+      // 在现有排序数组基础上增量更新
+      const next = [...sortInfo];
+      for (const s of sorters) {
+          const field = String(s.field || '');
+          if (!field) continue;
+          const order = s.order as string;
+          const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
+          const existIdx = next.findIndex(item => item.columnKey === field);
+          if (!normalizedOrder) {
+              // Ant Design 第三次点击想取消排序：
+              // 如果该字段已在排序数组中，回转为升序而非移除
+              if (existIdx >= 0) {
+                  next[existIdx] = { ...next[existIdx], order: 'ascend', enabled: true };
+              }
+              // 不在数组中则忽略
+          } else if (existIdx >= 0) {
+              // 已存在：更新排序方向
+              next[existIdx] = { ...next[existIdx], order: normalizedOrder, enabled: true };
+          } else {
+              // 不存在：追加到末尾
+              next.push({ columnKey: field, order: normalizedOrder, enabled: true });
+          }
+      }
+      setSortInfo(next);
+      if (onSort) onSort(JSON.stringify(next), '');
+  }, [onSort, sortInfo]);
 
     // Native Drag State
     const draggingRef = useRef<{
@@ -2705,6 +2853,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           setModifiedRows(prev => ({ ...prev, [rowKeyStr(rowKey)]: row }));
       }
   }, [addedRows]);
+
+  const handleDataPanelSave = useCallback(() => {
+      if (!focusedCellInfo) return;
+      const nextRow: any = { ...focusedCellInfo.record, [focusedCellInfo.dataIndex]: dataPanelValue };
+      handleCellSave(nextRow);
+      dataPanelDirtyRef.current = false;
+      void message.success('已保存');
+  }, [focusedCellInfo, dataPanelValue, handleCellSave]);
 
   const handleCellSetNull = useCallback(() => {
     if (!cellContextMenu.record) return;
@@ -2833,7 +2989,15 @@ const DataGrid: React.FC<DataGridProps> = ({
           const displayVal = (displayRow as any)?.[col];
           baseRawMap[col] = baseVal;
           displayMap[col] = toFormText(displayVal);
-          formMap[col] = displayVal === null || displayVal === undefined ? undefined : toFormText(displayVal);
+          // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
+          const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
+          const rowPickerType = getTemporalPickerType(colMeta?.type);
+          if (rowPickerType && displayVal !== null && displayVal !== undefined) {
+              const dVal = parseToDayjs(displayVal, rowPickerType);
+              formMap[col] = dVal;
+          } else {
+              formMap[col] = displayVal === null || displayVal === undefined ? undefined : toFormText(displayVal);
+          }
           if (baseVal === null || baseVal === undefined) nullCols.add(col);
       });
 
@@ -2844,7 +3008,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       rowEditorForm.setFieldsValue(formMap);
       setRowEditorRowKey(keyStr);
       setRowEditorOpen(true);
-  }, [canModifyData, mergedDisplayData, data, addedRows, displayColumnNames, rowEditorForm, rowKeyStr]);
+  }, [canModifyData, mergedDisplayData, data, addedRows, displayColumnNames, rowEditorForm, rowKeyStr, columnMetaMap, columnMetaMapByLowerName]);
 
   const openRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -3004,15 +3168,32 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const isAdded = addedRows.some(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
       if (isAdded) {
-          setAddedRows(prev => prev.map(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr ? { ...r, ...values } : r));
+          // 日期时间类型: 将 dayjs 对象转回格式化字符串
+          const convertedValues: Record<string, any> = {};
+          Object.entries(values).forEach(([col, val]) => {
+              if (val && dayjs.isDayjs(val)) {
+                  const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
+                  const rowPickerType = getTemporalPickerType(colMeta?.type);
+                  convertedValues[col] = formatFromDayjs(val as dayjs.Dayjs, rowPickerType);
+              } else {
+                  convertedValues[col] = val;
+              }
+          });
+          setAddedRows(prev => prev.map(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr ? { ...r, ...convertedValues } : r));
           closeRowEditor();
           return;
       }
 
       const baseRawMap = rowEditorBaseRawRef.current || {};
       const patch: Record<string, any> = {};
-      displayColumnNames.forEach((col) => {
-          const nextVal = values[col];
+      columnNames.forEach((col) => {
+          let nextVal = values[col];
+          // 日期时间类型: 将 dayjs 对象转回格式化字符串
+          if (nextVal && dayjs.isDayjs(nextVal)) {
+              const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
+              const rowPickerType = getTemporalPickerType(colMeta?.type);
+              nextVal = formatFromDayjs(nextVal as dayjs.Dayjs, rowPickerType);
+          }
           const baseVal = baseRawMap[col];
           if (!isCellValueEqualForDiff(baseVal, nextVal)) patch[col] = nextVal;
       });
@@ -3025,7 +3206,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, displayColumnNames, rowKeyStr, closeRowEditor]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
 
 
   const enableVirtual = viewMode === 'table';
@@ -3038,8 +3219,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           key: key,
           // 不使用 ellipsis，避免 Ant Design 的 Tooltip 展开行为
           width: columnWidths[key] || 200,
-          sorter: !!onSort,
-          sortOrder: (sortInfo?.columnKey === key ? sortInfo.order : null) as SortOrder | undefined,
+          sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
+          sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData, // Only editable if table name known and not readonly
           render: (text: any) => (
               <div style={CELL_ELLIPSIS_STYLE}>
@@ -3081,8 +3262,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
-      if (!col.editable) return col as ColumnType<any>;
       const dataIndex = String(col.dataIndex);
+      // 即使不可编辑，也需要通过 onCell/render 绑定右键菜单
       return {
           ...col,
           onCell: (record: Item) => {
@@ -3091,8 +3272,24 @@ const DataGrid: React.FC<DataGridProps> = ({
                   'data-row-key': rowKey === undefined || rowKey === null ? undefined : String(rowKey),
                   'data-col-name': dataIndex,
               };
+              // 数据预览面板：单击单元格时更新聚焦信息
+              cellProps.onClick = () => {
+                  if (dataPanelOpenRef.current) {
+                      updateFocusedCell(record, dataIndex);
+                  }
+              };
 
-              if (!enableInlineEditableCell) {
+              if (col.editable && enableInlineEditableCell) {
+                  // 可编辑模式（非虚拟）：传递给 EditableCell 的 props
+                  cellProps.record = record;
+                  cellProps.editable = col.editable;
+                  cellProps.dataIndex = col.dataIndex;
+                  cellProps.title = dataIndex;
+                  cellProps.handleSave = handleCellSave;
+                  cellProps.focusCell = openCellEditor;
+                  cellProps.columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
+              } else if (col.editable && !enableInlineEditableCell) {
+                  // 可编辑但非 inline（虚拟模式下）：双击和右键通过 onCell 绑定
                   cellProps.onDoubleClick = () => handleVirtualCellActivate(record, dataIndex, dataIndex);
                   cellProps.onContextMenu = (e: React.MouseEvent) => {
                       e.preventDefault();
@@ -3100,12 +3297,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                       showCellContextMenu(e, record, dataIndex, dataIndex);
                   };
               } else {
-                  cellProps.record = record;
-                  cellProps.editable = col.editable;
-                  cellProps.dataIndex = col.dataIndex;
-                  cellProps.title = dataIndex;
-                  cellProps.handleSave = handleCellSave;
-                  cellProps.focusCell = openCellEditor;
+                  // 不可编辑（只读查询结果）：只绑定右键菜单
+                  cellProps.onContextMenu = (e: React.MouseEvent) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      showCellContextMenu(e, record, dataIndex, dataIndex);
+                  };
               }
               return cellProps;
           },
@@ -3120,6 +3317,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                           record={record}
                           handleSave={handleCellSave}
                           focusCell={openCellEditor}
+                          columnType={(columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type}
                           as="div"
                           style={VIRTUAL_CELL_WRAPPER_STYLE}
                       >
@@ -3144,7 +3342,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return originalRenderContent;
           }
       };
-  }), [columns, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, showCellContextMenu]);
+  }), [columns, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, showCellContextMenu, columnMetaMap, columnMetaMapByLowerName]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -3207,7 +3405,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!hasRowKey) {
               values = { ...(newRow as any) };
           } else {
-              displayColumnNames.forEach((col) => {
+              columnNames.forEach((col) => {
                   const nextVal = (newRow as any)?.[col];
                   const prevVal = (originalRow as any)?.[col];
                   if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
@@ -3300,14 +3498,19 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
       const records = getTargets(record);
+      // 使用 columnNames 保持表定义的字段顺序，而非 Object.keys() 的不确定顺序
+      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
       const sqlList = records.map((r: any) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-          const cols = Object.keys(vals);
-          const values = Object.values(vals).map(v => v === null ? 'NULL' : `'${v}'`);
+          const values = orderedCols.map(c => {
+              const v = r[c];
+              if (v === null || v === undefined) return 'NULL';
+              const escaped = String(v).replace(/'/g, "''");
+              return `'${escaped}'`;
+          });
           const targetTable = tableName || 'table';
-          return `INSERT INTO \`${targetTable}\` (${cols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
+          return `INSERT INTO \`${targetTable}\` (${orderedCols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
       });
-      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, getTargets, copyToClipboard]);
+      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, columnNames, getTargets, copyToClipboard]);
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
@@ -3320,13 +3523,21 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleCopyCsv = useCallback((record: any) => {
       const records = getTargets(record);
+      // 使用 columnNames 保持表定义的字段顺序
+      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const header = orderedCols.map(c => `"${c}"`).join(',');
       const lines = records.map((r: any) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-          const values = Object.values(vals).map(v => v === null ? 'NULL' : `"${v}"`);
+          const values = orderedCols.map(c => {
+              const v = r[c];
+              if (v === null || v === undefined) return 'NULL';
+              // CSV 标准：值中的双引号转义为两个双引号
+              const escaped = String(v).replace(/"/g, '""');
+              return `"${escaped}"`;
+          });
           return values.join(',');
       });
-      copyToClipboard(lines.join('\n'));
-  }, [getTargets, copyToClipboard]);
+      copyToClipboard([header, ...lines].join('\n'));
+  }, [getTargets, columnNames, copyToClipboard]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;
@@ -3388,10 +3599,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
       const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
       const normalizedType = String(dbType || '').trim().toLowerCase();
-      const hasExplicitSort = !!sortInfo?.columnKey && (sortInfo?.order === 'ascend' || sortInfo?.order === 'descend');
+      const hasSortForBuffer = hasExplicitSort(sortInfo);
       const offset = (pagination.current - 1) * pagination.pageSize;
       let sql = buildPaginatedSelectSQL(dbType, baseSql, orderBySQL, pagination.pageSize, offset);
-      if (hasExplicitSort && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+      if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
           sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
       }
       return sql;
@@ -4453,6 +4664,24 @@ const DataGrid: React.FC<DataGridProps> = ({
 
            <div style={{ marginLeft: 'auto' }} />
 	           <div style={{ flexShrink: 0 }}>
+	               <Button
+	                   icon={<EditOutlined />}
+	                   type={dataPanelOpen ? 'primary' : 'default'}
+	                   onClick={() => {
+	                       const next = !dataPanelOpen;
+	                       setDataPanelOpen(next);
+	                       if (!next) {
+	                           setFocusedCellInfo(null);
+	                           setDataPanelValue('');
+	                           setDataPanelIsJson(false);
+	                           dataPanelDirtyRef.current = false;
+	                       }
+	                   }}
+	               >
+	                   数据预览
+	               </Button>
+	           </div>
+	           <div style={{ flexShrink: 0 }}>
 	               <Popover
 	                   trigger="click"
 	                   placement="bottomRight"
@@ -4509,7 +4738,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 	          </div>
 
        {showFilter && (
-           <div style={{ 
+           <div style={{
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
@@ -4596,14 +4825,83 @@ const DataGrid: React.FC<DataGridProps> = ({
                        <Button icon={<CloseOutlined />} onClick={() => removeFilter(cond.id)} type="text" danger />
                    </div>
                ))}
-               <div style={{ display: 'flex', gap: 8 }}>
+                {onSort && (
+                    <div style={{ paddingTop: filterConditions.length > 0 ? 4 : 0, borderTop: filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
+                        {sortInfo.map((s, idx) => (
+                            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', opacity: s.enabled === false ? 0.58 : 1 }}>
+                                <Checkbox
+                                    checked={s.enabled !== false}
+                                    onChange={e => {
+                                        const next = [...sortInfo];
+                                        next[idx] = { ...next[idx], enabled: e.target.checked };
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                    style={{ flex: '0 0 auto' }}
+                                />
+                                <span style={{ fontSize: 12, color: 'inherit', opacity: 0.7, whiteSpace: 'nowrap', minWidth: 32 }}>{idx === 0 ? '排序' : '然后'}</span>
+                                <Select
+                                    style={{ width: 180 }}
+                                    value={s.columnKey || undefined}
+                                    onChange={v => {
+                                        const next = [...sortInfo];
+                                        if (!v) { next.splice(idx, 1); } else { next[idx] = { ...next[idx], columnKey: v }; }
+                                        const filtered = next.filter(si => si.columnKey);
+                                        onSort(JSON.stringify(filtered), '');
+                                    }}
+                                    options={displayColumnNames
+                                        .filter(c => c === s.columnKey || !sortInfo.some(si => si.columnKey === c))
+                                        .map(c => ({ value: c, label: c }))}
+                                    showSearch
+                                    optionFilterProp="label"
+                                    filterOption={(input, option) =>
+                                        String(option?.label ?? '')
+                                            .toLowerCase()
+                                            .includes(String(input || '').trim().toLowerCase())
+                                    }
+                                    placeholder="选择排序字段"
+                                    allowClear
+                                    onClear={() => {
+                                        const next = sortInfo.filter((_, i) => i !== idx);
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                />
+                                <Select
+                                    style={{ width: 110 }}
+                                    value={s.order || 'ascend'}
+                                    onChange={v => {
+                                        const next = [...sortInfo];
+                                        next[idx] = { ...next[idx], order: v };
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                    options={[
+                                        { value: 'ascend', label: '升序 ↑' },
+                                        { value: 'descend', label: '降序 ↓' },
+                                    ]}
+                                    disabled={!s.columnKey}
+                                />
+                                <Button icon={<CloseOutlined />} type="text" danger size="small" onClick={() => {
+                                    const next = sortInfo.filter((_, i) => i !== idx);
+                                    onSort(JSON.stringify(next), '');
+                                }} />
+                            </div>
+                        ))}
+                        <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
+                            const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
+                            onSort(JSON.stringify(next), '');
+                        }} disabled={sortInfo.length >= displayColumnNames.length} style={{ marginBottom: 4 }}>添加排序</Button>
+                    </div>
+                )}
+               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: (onSort && sortInfo.length > 0) ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) ? `1px dashed ${panelFrameColor}` : 'none' }}>
                    <Button type="dashed" onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: true })))}>全启用</Button>
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: false })))}>全停用</Button>
+                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button type="primary" onClick={applyFilters} size="small">应用</Button>
                    <Button size="small" icon={<ClearOutlined />} onClick={() => {
                        setFilterConditions([]);
                        if (onApplyFilter) onApplyFilter([]);
+                       if (onSort) onSort('', '');
                    }}>清除</Button>
                </div>
            </div>
@@ -4635,12 +4933,40 @@ const DataGrid: React.FC<DataGridProps> = ({
                             const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
                             const isJson = looksLikeJsonText(sample);
                             const useArea = isJson || sample.includes('\n') || sample.length >= 160;
+                            const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
+                            const rowPickerType = getTemporalPickerType(colMeta?.type);
+                            const isRowDateTimeField = !!rowPickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
 
                             return (
                                 <Form.Item key={col} label={col} style={{ marginBottom: 12 }}>
                                     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                                         <Form.Item name={col} noStyle>
-                                            {useArea ? (
+                                            {isRowDateTimeField ? (
+                                                rowPickerType === 'time' ? (
+                                                    <TimePicker
+                                                        style={{ flex: 1, width: '100%' }}
+                                                        format={TEMPORAL_FORMATS[rowPickerType]}
+                                                        placeholder={placeholder}
+                                                        needConfirm={false}
+                                                    />
+                                                ) : rowPickerType === 'datetime' ? (
+                                                    <DatePicker
+                                                        style={{ flex: 1, width: '100%' }}
+                                                        showTime
+                                                        format={TEMPORAL_FORMATS[rowPickerType]}
+                                                        placeholder={placeholder}
+                                                        needConfirm
+                                                    />
+                                                ) : (
+                                                    <DatePicker
+                                                        style={{ flex: 1, width: '100%' }}
+                                                        format={TEMPORAL_FORMATS[rowPickerType]}
+                                                        picker={rowPickerType as any}
+                                                        placeholder={placeholder}
+                                                        needConfirm={false}
+                                                    />
+                                                )
+                                            ) : useArea ? (
                                                 <Input.TextArea
                                                     style={{ flex: 1 }}
                                                     autoSize={{ minRows: isJson ? 4 : 1, maxRows: 10 }}
@@ -4878,6 +5204,75 @@ const DataGrid: React.FC<DataGridProps> = ({
                     )) : (
                         <div style={{ fontSize: 12, color: darkMode ? '#999' : '#666', paddingTop: 4 }}>
                             当前结果集无数据
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* Data Preview Panel */}
+        {dataPanelOpen && viewMode === 'table' && (
+            <div style={{
+                height: 200,
+                borderTop: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.12)',
+                display: 'flex',
+                flexDirection: 'column',
+                background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.6)',
+                flexShrink: 0,
+            }}>
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '4px 10px',
+                    fontSize: 12,
+                    borderBottom: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)',
+                    flexShrink: 0,
+                }}>
+                    <span style={{ color: darkMode ? '#aaa' : '#666', fontWeight: 500 }}>
+                        {focusedCellInfo ? focusedCellInfo.dataIndex : '点击单元格查看数据'}
+                    </span>
+                    {focusedCellInfo && (() => {
+                        const meta = columnMetaMap[focusedCellInfo.dataIndex] || columnMetaMapByLowerName[focusedCellInfo.dataIndex.toLowerCase()];
+                        return meta?.type ? <span style={{ color: '#888', fontSize: 11 }}>({meta.type})</span> : null;
+                    })()}
+                    <div style={{ flex: 1 }} />
+                    {dataPanelIsJson && (
+                        <Button size="small" onClick={handleDataPanelFormatJson}>格式化 JSON</Button>
+                    )}
+                    {canModifyData && focusedCellInfo && (
+                        <Button size="small" type="primary" onClick={handleDataPanelSave}>保存</Button>
+                    )}
+                </div>
+                <div style={{ flex: 1, minHeight: 0 }}>
+                    {focusedCellInfo ? (
+                        <Editor
+                            height="100%"
+                            language={dataPanelIsJson ? 'json' : 'plaintext'}
+                            theme={darkMode ? 'transparent-dark' : 'transparent-light'}
+                            value={dataPanelValue}
+                            onChange={(val) => {
+                                setDataPanelValue(val || '');
+                                dataPanelDirtyRef.current = true;
+                            }}
+                            options={{
+                                minimap: { enabled: false },
+                                scrollBeyondLastLine: false,
+                                wordWrap: 'on',
+                                fontSize: 13,
+                                tabSize: 2,
+                                automaticLayout: true,
+                                readOnly: !canModifyData,
+                                lineNumbers: 'off',
+                                glyphMargin: false,
+                                folding: false,
+                                lineDecorationsWidth: 4,
+                                padding: { top: 6, bottom: 6 },
+                            }}
+                        />
+                    ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', fontSize: 13 }}>
+                            点击表格中的单元格以预览完整数据
                         </div>
                     )}
                 </div>

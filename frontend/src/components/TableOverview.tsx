@@ -57,11 +57,12 @@ const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: strin
             return `SHOW TABLE STATUS FROM \`${dbName.replace(/`/g, '``')}\``;
         case 'postgres':
         case 'kingbase':
-        case 'vastbase': {
+        case 'vastbase':
+        case 'highgo': {
             const schema = schemaName || 'public';
             return `
 SELECT
-    c.relname AS table_name,
+    n.nspname || '.' || c.relname AS table_name,
     obj_description(c.oid, 'pg_class') AS table_comment,
     c.reltuples::bigint AS table_rows,
     pg_total_relation_size(c.oid) AS data_length,
@@ -76,18 +77,19 @@ ORDER BY c.relname`;
             const safeDB = `[${dbName.replace(/]/g, ']]')}]`;
             return `
 SELECT
-    t.name AS table_name,
+    s.name + '.' + t.name AS table_name,
     ep.value AS table_comment,
     SUM(p.rows) AS table_rows,
     SUM(a.total_pages) * 8 * 1024 AS data_length,
     SUM(a.used_pages) * 8 * 1024 AS index_length
 FROM ${safeDB}.sys.tables t
+JOIN ${safeDB}.sys.schemas s ON t.schema_id = s.schema_id
 LEFT JOIN ${safeDB}.sys.extended_properties ep ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'
 LEFT JOIN ${safeDB}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)
 LEFT JOIN ${safeDB}.sys.allocation_units a ON p.partition_id = a.container_id
 WHERE t.type = 'U'
-GROUP BY t.name, ep.value
-ORDER BY t.name`;
+GROUP BY s.name, t.name, ep.value
+ORDER BY s.name, t.name`;
         }
         case 'clickhouse':
             return `SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows, total_bytes AS data_length, 0 AS index_length FROM system.tables WHERE database = '${escapeLiteral(dbName)}' AND engine NOT IN ('View', 'MaterializedView') ORDER BY name`;
@@ -194,7 +196,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
         addTab({
-            id: `${connection.id}-${tab.dbName}-table-${tableName}`,
+            id: `${connection.id}-${tab.dbName}-${tableName}`,
             title: tableName,
             type: 'table',
             connectionId: connection.id,

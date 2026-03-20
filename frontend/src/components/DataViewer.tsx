@@ -4,7 +4,7 @@ import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
-import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 
@@ -157,7 +157,7 @@ type ViewerFilterSnapshot = {
   conditions: FilterCondition[];
   currentPage: number;
   pageSize: number;
-  sortInfo: { columnKey: string, order: string } | null;
+  sortInfo: Array<{ columnKey: string, order: string, enabled?: boolean }>;
   scrollTop: number;
   scrollLeft: number;
 };
@@ -185,16 +185,17 @@ const normalizeViewerFilterConditions = (conditions: FilterCondition[] | undefin
 const getViewerFilterSnapshot = (tabId: string): ViewerFilterSnapshot => {
   const cached = viewerFilterSnapshotsByTab.get(String(tabId || '').trim());
   if (!cached) {
-    return { showFilter: false, conditions: [], currentPage: 1, pageSize: 100, sortInfo: null, scrollTop: 0, scrollLeft: 0 };
+    return { showFilter: false, conditions: [], currentPage: 1, pageSize: 100, sortInfo: [], scrollTop: 0, scrollLeft: 0 };
   }
   return {
     showFilter: cached.showFilter === true,
     conditions: normalizeViewerFilterConditions(cached.conditions),
     currentPage: Number.isFinite(Number(cached.currentPage)) && Number(cached.currentPage) > 0 ? Number(cached.currentPage) : 1,
     pageSize: Number.isFinite(Number(cached.pageSize)) && Number(cached.pageSize) > 0 ? Number(cached.pageSize) : 100,
-    sortInfo: cached.sortInfo && cached.sortInfo.columnKey && (cached.sortInfo.order === 'ascend' || cached.sortInfo.order === 'descend')
-      ? { columnKey: String(cached.sortInfo.columnKey), order: cached.sortInfo.order }
-      : null,
+    sortInfo: Array.isArray(cached.sortInfo)
+      ? cached.sortInfo.filter(s => s && s.columnKey && (s.order === 'ascend' || s.order === 'descend'))
+          .map(s => ({ columnKey: String(s.columnKey), order: s.order }))
+      : (cached.sortInfo && (cached.sortInfo as any).columnKey ? [{ columnKey: String((cached.sortInfo as any).columnKey), order: (cached.sortInfo as any).order }] : []),
     scrollTop: Number.isFinite(Number(cached.scrollTop)) ? Number(cached.scrollTop) : 0,
     scrollLeft: Number.isFinite(Number(cached.scrollLeft)) ? Number(cached.scrollLeft) : 0,
   };
@@ -238,7 +239,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
       totalCountCancelled: false,
   });
 
-  const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(initialViewerSnapshot.sortInfo);
+  const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>(initialViewerSnapshot.sortInfo);
   
   const [showFilter, setShowFilter] = useState<boolean>(initialViewerSnapshot.showFilter);
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>(initialViewerSnapshot.conditions);
@@ -511,7 +512,7 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
             }
         };
 
-        const hasSort = !!sortInfo?.columnKey && (sortInfo?.order === 'ascend' || sortInfo?.order === 'descend');
+        const hasSort = hasExplicitSort(sortInfo);
         const isSortMemoryErr = (msg: string) => /error\s*1038|out of sort memory/i.test(String(msg || ''));
         let resData = await executeDataQuery(sql, '主查询');
 
@@ -788,13 +789,21 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
     fetchData(pagination.current, pagination.pageSize);
   }, [fetchData, pagination.current, pagination.pageSize]);
   const handleSort = useCallback((field: string, order: string) => {
+    // 支持多字段排序：field 为 JSON 数组字符串时解析为多字段
+    try {
+      const parsed = JSON.parse(field);
+      if (Array.isArray(parsed)) {
+        setSortInfo(parsed.filter((s: any) => s && s.columnKey && (s.order === 'ascend' || s.order === 'descend')));
+        return;
+      }
+    } catch { /* 单字段模式 */ }
     const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
     const normalizedField = String(field || '').trim();
     if (!normalizedField || !normalizedOrder) {
-      setSortInfo(null);
+      setSortInfo([]);
       return;
     }
-    setSortInfo({ columnKey: normalizedField, order: normalizedOrder });
+    setSortInfo([{ columnKey: normalizedField, order: normalizedOrder, enabled: true }]);
   }, []);
   const handlePageChange = useCallback((page: number, size: number) => fetchData(page, size), [fetchData]);
   const handleToggleFilter = useCallback(() => setShowFilter(prev => !prev), []);
@@ -811,8 +820,8 @@ const DataViewer: React.FC<{ tab: TabData }> = ({ tab }) => {
     let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
     sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
     const normalizedType = dbType.toLowerCase();
-    const hasExplicitSort = !!sortInfo?.columnKey && (sortInfo?.order === 'ascend' || sortInfo?.order === 'descend');
-    if (hasExplicitSort && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+    const hasSortForBuffer = hasExplicitSort(sortInfo);
+    if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
       sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
     }
     return sql;

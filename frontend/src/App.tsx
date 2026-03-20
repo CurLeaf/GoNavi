@@ -657,6 +657,7 @@ function App() {
   const activeTabId = useStore(state => state.activeTabId);
   const updateCheckInFlightRef = React.useRef(false);
   const updateDownloadInFlightRef = React.useRef(false);
+  const updateUserDismissedRef = React.useRef(false);
   const updateDownloadedVersionRef = React.useRef<string | null>(null);
   const updateInstallTriggeredVersionRef = React.useRef<string | null>(null);
   const updateDownloadMetaRef = React.useRef<UpdateDownloadResultData | null>(null);
@@ -745,6 +746,7 @@ function App() {
           return;
       }
       updateDownloadInFlightRef.current = true;
+      updateUserDismissedRef.current = false;
       updateDownloadMetaRef.current = null;
       setUpdateDownloadProgress({
           open: true,
@@ -789,7 +791,18 @@ function App() {
           } else {
               void message.success({ content: '更新下载完成', duration: 2 });
           }
-          setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（已下载，请点击“下载进度”后安装）`);
+          setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（已下载，请点击"下载进度"后安装）`);
+          // macOS：如果用户没有主动隐藏进度弹窗，则下载完成后自动打开下载目录
+          if (isMacRuntime && !updateUserDismissedRef.current) {
+              try {
+                  const openRes = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
+                  if (openRes?.success) {
+                      void message.success(openRes?.message || '已打开安装目录，请手动完成替换');
+                  }
+              } catch (e) {
+                  console.warn('自动打开下载目录失败', e);
+              }
+          }
       } else {
           setUpdateDownloadProgress(prev => ({
               ...prev,
@@ -820,18 +833,34 @@ function App() {
       && updateDownloadProgress.version === lastUpdateInfo?.latestVersion
       && (updateDownloadProgress.status === 'start'
           || updateDownloadProgress.status === 'downloading'
+          || updateDownloadProgress.status === 'done'
           || updateDownloadProgress.status === 'error');
   const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
       && updateInstallTriggeredVersionRef.current !== (lastUpdateInfo?.latestVersion || null);
 
   const handleInstallFromProgress = React.useCallback(async () => {
-      if (updateDownloadProgress.status !== 'done') {
+      // 允许从下载进度弹窗（status=done）或关于弹窗（isLatestUpdateDownloaded=true）触发
+      const canInstall = updateDownloadProgress.status === 'done'
+          || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion));
+      if (!canInstall) {
           return;
       }
       if (isMacRuntime) {
           const res = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
           if (!res?.success) {
               void message.error('打开安装目录失败: ' + (res?.message || '未知错误'));
+              // 文件可能已被用户删除，清除已下载状态以允许重新下载
+              updateDownloadedVersionRef.current = null;
+              updateDownloadMetaRef.current = null;
+              setUpdateDownloadProgress(prev => ({
+                  ...prev,
+                  status: 'idle',
+                  percent: 0,
+                  downloaded: 0,
+                  open: false,
+              }));
+              setLastUpdateInfo(prev => prev ? { ...prev, downloaded: false, downloadPath: undefined } : prev);
+              setAboutUpdateStatus(prev => prev.replace('已下载', '未下载'));
               return;
           }
           updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
@@ -846,7 +875,7 @@ function App() {
       }
       updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
       hideUpdateDownloadProgress();
-  }, [hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo?.latestVersion, updateDownloadProgress.status, updateDownloadProgress.version]);
+  }, [hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo?.latestVersion, lastUpdateInfo?.hasUpdate, lastUpdateInfo?.downloaded, updateDownloadProgress.status, updateDownloadProgress.version]);
 
   const checkForUpdates = React.useCallback(async (silent: boolean) => {
       if (updateCheckInFlightRef.current) return;
@@ -867,6 +896,11 @@ function App() {
       if (!info) return;
       const aboutOpen = isAboutOpenRef.current;
       if (info.hasUpdate) {
+          // 以后端校验为准：如果后端确认文件不存在（downloaded=false），清除本地 ref
+          if (!info.downloaded && updateDownloadedVersionRef.current === info.latestVersion) {
+              updateDownloadedVersionRef.current = null;
+              updateDownloadMetaRef.current = null;
+          }
           const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
           const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
           if (hasDownloaded) {
@@ -1719,17 +1753,22 @@ function App() {
             onCancel={() => setIsAboutOpen(false)}
             styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10, display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' } }}
             footer={[
-                canShowProgressEntry ? (
+                isBackgroundProgressForLatestUpdate && !isLatestUpdateDownloaded ? (
                     <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>下载进度</Button>
                 ) : null,
-                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded ? (
-                    <Button key="download" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>下载更新</Button>
-                ) : null,
-                lastUpdateInfo?.hasUpdate ? (
+                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
                     <Button key="mute" onClick={() => { updateMutedVersionRef.current = lastUpdateInfo.latestVersion; setIsAboutOpen(false); }}>本次不再提示</Button>
                 ) : null,
                 <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>检查更新</Button>,
-                <Button key="close" type="primary" onClick={() => setIsAboutOpen(false)}>关闭</Button>
+                <Button key="close" onClick={() => setIsAboutOpen(false)}>关闭</Button>,
+                lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
+                    <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>下载更新</Button>
+                ) : null,
+                isLatestUpdateDownloaded ? (
+                    <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
+                        {isMacRuntime ? '打开安装目录' : '安装更新'}
+                    </Button>
+                ) : null,
             ].filter(Boolean)}
           >
             {aboutLoading ? (
@@ -2162,7 +2201,10 @@ function App() {
               footer={updateDownloadProgress.status === 'start' || updateDownloadProgress.status === 'downloading' ? [
                   <Button
                       key="background"
-                      onClick={hideUpdateDownloadProgress}
+                      onClick={() => {
+                          updateUserDismissedRef.current = true;
+                          hideUpdateDownloadProgress();
+                      }}
                   >
                       隐藏到后台
                   </Button>

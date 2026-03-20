@@ -48,6 +48,7 @@ interface ForeignKeyFormState {
     refColumnNames: string[];
 }
 
+// 通用兜底类型列表
 const COMMON_TYPES = [
     { value: 'int' },
     { value: 'varchar(255)' },
@@ -58,6 +59,148 @@ const COMMON_TYPES = [
     { value: 'bigint' },
     { value: 'json' },
 ];
+
+// 按数据库方言分组的完整字段类型列表
+const DB_TYPE_OPTIONS: Record<string, { value: string }[]> = {
+    mysql: [
+        // 数值
+        { value: 'tinyint' },
+        { value: 'tinyint(1)' },
+        { value: 'smallint' },
+        { value: 'mediumint' },
+        { value: 'int' },
+        { value: 'bigint' },
+        { value: 'float' },
+        { value: 'double' },
+        { value: 'decimal(10,2)' },
+        // 字符串
+        { value: 'char(50)' },
+        { value: 'varchar(255)' },
+        { value: 'tinytext' },
+        { value: 'text' },
+        { value: 'mediumtext' },
+        { value: 'longtext' },
+        // 二进制
+        { value: 'binary(255)' },
+        { value: 'varbinary(255)' },
+        { value: 'tinyblob' },
+        { value: 'blob' },
+        { value: 'mediumblob' },
+        { value: 'longblob' },
+        // 日期时间
+        { value: 'date' },
+        { value: 'time' },
+        { value: 'datetime' },
+        { value: 'timestamp' },
+        { value: 'year' },
+        // 其他
+        { value: 'json' },
+        { value: 'enum' },
+        { value: 'set' },
+        { value: 'bit(1)' },
+    ],
+    postgres: [
+        // 数值
+        { value: 'smallint' },
+        { value: 'integer' },
+        { value: 'bigint' },
+        { value: 'real' },
+        { value: 'double precision' },
+        { value: 'numeric(10,2)' },
+        { value: 'serial' },
+        { value: 'bigserial' },
+        // 字符串
+        { value: 'char(50)' },
+        { value: 'varchar(255)' },
+        { value: 'text' },
+        // 布尔
+        { value: 'boolean' },
+        // 日期时间
+        { value: 'date' },
+        { value: 'time' },
+        { value: 'timestamp' },
+        { value: 'timestamptz' },
+        { value: 'interval' },
+        // 二进制
+        { value: 'bytea' },
+        // JSON
+        { value: 'json' },
+        { value: 'jsonb' },
+        // 其他
+        { value: 'uuid' },
+        { value: 'inet' },
+        { value: 'cidr' },
+        { value: 'macaddr' },
+        { value: 'xml' },
+        { value: 'int4range' },
+        { value: 'tsquery' },
+        { value: 'tsvector' },
+    ],
+    sqlserver: [
+        // 数值
+        { value: 'tinyint' },
+        { value: 'smallint' },
+        { value: 'int' },
+        { value: 'bigint' },
+        { value: 'float' },
+        { value: 'real' },
+        { value: 'decimal(10,2)' },
+        { value: 'numeric(10,2)' },
+        { value: 'money' },
+        { value: 'smallmoney' },
+        // 字符串
+        { value: 'char(50)' },
+        { value: 'varchar(255)' },
+        { value: 'varchar(max)' },
+        { value: 'nchar(50)' },
+        { value: 'nvarchar(255)' },
+        { value: 'nvarchar(max)' },
+        { value: 'text' },
+        { value: 'ntext' },
+        // 日期时间
+        { value: 'date' },
+        { value: 'time' },
+        { value: 'datetime' },
+        { value: 'datetime2' },
+        { value: 'datetimeoffset' },
+        { value: 'smalldatetime' },
+        // 二进制
+        { value: 'binary(255)' },
+        { value: 'varbinary(255)' },
+        { value: 'varbinary(max)' },
+        { value: 'image' },
+        // 其他
+        { value: 'bit' },
+        { value: 'uniqueidentifier' },
+        { value: 'xml' },
+    ],
+    sqlite: [
+        { value: 'INTEGER' },
+        { value: 'REAL' },
+        { value: 'TEXT' },
+        { value: 'BLOB' },
+        { value: 'NUMERIC' },
+    ],
+    oracle: [
+        { value: 'NUMBER(10)' },
+        { value: 'NUMBER(10,2)' },
+        { value: 'FLOAT' },
+        { value: 'BINARY_FLOAT' },
+        { value: 'BINARY_DOUBLE' },
+        { value: 'CHAR(50)' },
+        { value: 'VARCHAR2(255)' },
+        { value: 'NVARCHAR2(255)' },
+        { value: 'CLOB' },
+        { value: 'NCLOB' },
+        { value: 'BLOB' },
+        { value: 'DATE' },
+        { value: 'TIMESTAMP' },
+        { value: 'TIMESTAMP WITH TIME ZONE' },
+        { value: 'RAW(255)' },
+        { value: 'LONG RAW' },
+        { value: 'XMLTYPE' },
+    ],
+};
 
 const COMMON_DEFAULTS = [
     { value: 'CURRENT_TIMESTAMP' },
@@ -290,43 +433,23 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       setCommentEditorValue('');
   }, []);
 
-  // 初始化透明 Monaco Editor 主题
-  useEffect(() => {
-    loader.init().then(monaco => {
-      monaco.editor.defineTheme('transparent-dark', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [],
-        colors: {
-          'editor.background': '#00000000',
-          'editor.lineHighlightBackground': '#ffffff10',
-          'editorGutter.background': '#00000000',
-        }
-      });
-      monaco.editor.defineTheme('transparent-light', {
-        base: 'vs',
-        inherit: true,
-        rules: [],
-        colors: {
-          'editor.background': '#00000000',
-          'editor.lineHighlightBackground': '#00000010',
-          'editorGutter.background': '#00000000',
-        }
-      });
-    });
-  }, []);
+  // 透明 Monaco Editor 主题已在 main.tsx 全局注册（含 stickyScroll 不透明背景）
 
+  // 监听字段 Tab 容器高度，为所有 Tab 内表格计算 scroll.y
+  // 当 Tab 切换时，字段 Tab 被 display:none 导致 height=0，跳过该次更新保持有效值
   useEffect(() => {
       if (!containerRef.current) return;
       const resizeObserver = new ResizeObserver(entries => {
           for (let entry of entries) {
-              const h = Math.max(200, entry.contentRect.height - 40);
-              setTableHeight(h);
+              const h = entry.contentRect.height;
+              // 跳过零高度观测（Tab 面板被隐藏时）
+              if (h <= 0) return;
+              setTableHeight(Math.max(200, h - 40));
           }
       });
       resizeObserver.observe(containerRef.current);
       return () => resizeObserver.disconnect();
-  }, [activeKey]); // Re-attach when tab switches
+  }, []); // 不依赖 activeKey，仅挂载一次，通过零高度守卫避免 Tab 切换异常
 
   // --- Resizable Columns State ---
   const [tableColumns, setTableColumns] = useState<any[]>([]);
@@ -430,7 +553,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
               key: 'type', 
               width: 150,
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <AutoComplete options={COMMON_TYPES} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />
+                  <AutoComplete options={DB_TYPE_OPTIONS[getDbType()] || COMMON_TYPES} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />
               )
           },
           { 
@@ -1711,28 +1834,44 @@ END;`;
   };
 
   const handleDeleteIndex = () => {
-      if (!selectedIndex) {
-          message.warning('请先选择一个索引');
+      if (selectedIndexKeys.length === 0) {
+          message.warning('请先选择要删除的索引');
           return;
       }
       if (!supportsIndexSchemaOps()) {
           message.warning('当前数据库暂不支持在此维护索引');
           return;
       }
+      // 根据选中的 key 找到对应的索引对象
+      const toDelete = groupedIndexes.filter(idx => selectedIndexKeys.includes(idx.key));
+      if (toDelete.length === 0) {
+          message.warning('请先选择要删除的索引');
+          return;
+      }
+      const names = toDelete.map(idx => `"${idx.name}"`).join('、');
       Modal.confirm({
           title: '确认删除索引',
           icon: <ExclamationCircleOutlined />,
-          content: `确定删除索引 "${selectedIndex.name}" 吗？`,
+          content: toDelete.length === 1
+              ? `确定删除索引 ${names} 吗？`
+              : `确定删除以下 ${toDelete.length} 个索引吗？\n${names}`,
           okText: '删除',
           okType: 'danger',
           cancelText: '取消',
           onOk: async () => {
-              const sql = buildIndexDropSql(selectedIndex.name);
-              if (!sql) {
-                  message.warning('当前数据库暂不支持删除该索引');
-                  return;
+              const sqls: string[] = [];
+              for (const idx of toDelete) {
+                  const sql = buildIndexDropSql(idx.name);
+                  if (!sql) {
+                      message.warning(`当前数据库暂不支持删除索引 "${idx.name}"`);
+                      return;
+                  }
+                  sqls.push(sql);
               }
-              await executeSchemaSql(sql, '索引删除成功');
+              const ok = await executeSchemaSql(sqls.join('\n'), toDelete.length === 1 ? '索引删除成功' : `${toDelete.length} 个索引删除成功`);
+              if (ok) {
+                  setSelectedIndexKeys([]);
+              }
           }
       });
   };
@@ -2562,6 +2701,7 @@ END;`;
                                     size="small"
                                     pagination={false}
                                     loading={loading}
+                                    scroll={{ y: tableHeight }}
                                     locale={{ emptyText: <Empty description="该表暂无触发器" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
                                     rowSelection={{
                                         type: 'radio',

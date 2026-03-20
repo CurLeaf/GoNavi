@@ -69,10 +69,13 @@ export const quoteQualifiedIdent = (dbType: string, ident: string) => {
 
 export const escapeLiteral = (val: string) => (val || '').replace(/'/g, "''");
 
-type SortInfo = {
+type SortInfoItem = {
   columnKey?: string;
   order?: string;
-} | null | undefined;
+  enabled?: boolean;
+};
+
+type SortInfo = SortInfoItem | SortInfoItem[] | null | undefined;
 
 // 为排序查询按库类型注入 sort_buffer 提升参数（仅影响当前语句）。
 // MySQL: 使用 Optimizer Hint `SET_VAR`。
@@ -101,17 +104,50 @@ export const withSortBufferTuningSQL = (
   return rawSql;
 };
 
+/** 将 SortInfo（单字段或多字段）标准化为 SortInfoItem 数组 */
+const normalizeSortInfoItems = (sortInfo: SortInfo): SortInfoItem[] => {
+  if (!sortInfo) return [];
+  if (Array.isArray(sortInfo)) return sortInfo;
+  return [sortInfo];
+};
+
+/** 判断 SortInfo 中是否存在至少一个有效排序 */
+export const hasExplicitSort = (sortInfo: SortInfo): boolean => {
+  const items = normalizeSortInfoItems(sortInfo);
+  return items.some(item => {
+    if (item?.enabled === false) return false;
+    const col = String(item?.columnKey || '').trim();
+    const order = String(item?.order || '');
+    return !!col && (order === 'ascend' || order === 'descend');
+  });
+};
+
 export const buildOrderBySQL = (
   dbType: string,
   sortInfo: SortInfo,
   fallbackColumns: string[] = [],
 ) => {
   const dbTypeLower = String(dbType || '').trim().toLowerCase();
-  const sortColumn = normalizeIdentPart(String(sortInfo?.columnKey || ''));
-  const sortOrder = String(sortInfo?.order || '');
-  const direction = sortOrder === 'ascend' ? 'ASC' : sortOrder === 'descend' ? 'DESC' : '';
-  if (sortColumn && direction) {
-    return ` ORDER BY ${quoteIdentPart(dbType, sortColumn)} ${direction}`;
+  const items = normalizeSortInfoItems(sortInfo);
+  const seen = new Set<string>();
+  const sortParts: string[] = [];
+
+  for (const item of items) {
+    if (item?.enabled === false) continue;
+    const sortColumn = normalizeIdentPart(String(item?.columnKey || ''));
+    const sortOrder = String(item?.order || '');
+    const direction = sortOrder === 'ascend' ? 'ASC' : sortOrder === 'descend' ? 'DESC' : '';
+    if (sortColumn && direction) {
+      const key = sortColumn.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        sortParts.push(`${quoteIdentPart(dbType, sortColumn)} ${direction}`);
+      }
+    }
+  }
+
+  if (sortParts.length > 0) {
+    return ` ORDER BY ${sortParts.join(', ')}`;
   }
 
   // MySQL/MariaDB 大表在无显式排序需求时强制 ORDER BY（即使按主键）可能触发 filesort，
@@ -121,7 +157,6 @@ export const buildOrderBySQL = (
     return '';
   }
 
-  const seen = new Set<string>();
   const stableColumns = (fallbackColumns || [])
     .map((col) => normalizeIdentPart(String(col || '')))
     .filter((col) => {
