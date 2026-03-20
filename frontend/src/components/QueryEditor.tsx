@@ -173,6 +173,16 @@ const SQL_FUNCTIONS: { name: string; detail: string }[] = [
 // 模块级标志：确保 SQL completion provider 全局只注册一次
 let sqlCompletionRegistered = false;
 
+// 模块级共享变量：completion provider 从这些变量读取当前活跃 Tab 的状态。
+// 每个 QueryEditor 实例在成为活跃 Tab 时更新这些变量，确保 provider 始终使用正确的上下文。
+let sharedCurrentDb = '';
+let sharedCurrentConnectionId = '';
+let sharedConnections: any[] = [];
+let sharedTablesData: {dbName: string, tableName: string}[] = [];
+let sharedAllColumnsData: {dbName: string, tableName: string, name: string, type: string}[] = [];
+let sharedVisibleDbs: string[] = [];
+let sharedColumnsCacheData: Record<string, any[]> = {};
+
 const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
   
@@ -269,6 +279,19 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       currentDbRef.current = currentDb;
   }, [currentDb]);
 
+  // 当此 Tab 成为活跃 Tab 时，将本实例的状态同步到模块级共享变量
+  // 确保 completion provider 始终使用当前活跃 Tab 的上下文
+  useEffect(() => {
+      if (activeTabId !== tab.id) return;
+      sharedCurrentDb = currentDb;
+      sharedCurrentConnectionId = currentConnectionId;
+      sharedConnections = connections;
+      sharedTablesData = tablesRef.current;
+      sharedAllColumnsData = allColumnsRef.current;
+      sharedVisibleDbs = visibleDbsRef.current;
+      sharedColumnsCacheData = columnsCacheRef.current;
+  }, [activeTabId, tab.id, currentDb, currentConnectionId, connections]);
+
   useEffect(() => {
       connectionsRef.current = connections;
   }, [connections]);
@@ -325,6 +348,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
               // 存储可见数据库列表用于跨库智能提示
               visibleDbsRef.current = dbs;
+              if (activeTabId === tab.id) {
+                  sharedVisibleDbs = dbs;
+              }
 
               setDbList(dbs);
               if (!currentDbRef.current) {
@@ -333,6 +359,9 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               }
           } else {
               visibleDbsRef.current = [];
+              if (activeTabId === tab.id) {
+                  sharedVisibleDbs = [];
+              }
               setDbList([]);
           }
       };
@@ -387,6 +416,11 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
           tablesRef.current = allTables;
           allColumnsRef.current = allColumns;
+          // 如果当前 Tab 是活跃 Tab，同步更新共享变量
+          if (activeTabId === tab.id) {
+              sharedTablesData = allTables;
+              sharedAllColumnsData = allColumns;
+          }
       };
       void fetchMetadata();
   }, [currentConnectionId, connections, dbList]); // dbList 变化时触发重新加载
@@ -487,8 +521,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               };
 
               const buildConnConfig = () => {
-                  const connId = currentConnectionIdRef.current;
-                  const conn = connectionsRef.current.find(c => c.id === connId);
+                  const connId = sharedCurrentConnectionId;
+                  const conn = sharedConnections.find(c => c.id === connId);
                   if (!conn) return null;
                   return {
                       ...conn.config,
@@ -501,11 +535,11 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               };
 
               const getColumnsByDB = async (tableIdent: string) => {
-                  const connId = currentConnectionIdRef.current;
-                  const dbName = currentDbRef.current;
+                  const connId = sharedCurrentConnectionId;
+                  const dbName = sharedCurrentDb;
                   if (!connId || !dbName) return [] as ColumnDefinition[];
                   const key = `${connId}|${dbName}|${tableIdent}`;
-                  const cached = columnsCacheRef.current[key];
+                  const cached = sharedColumnsCacheData[key];
                   if (cached) return cached;
 
                   const config = buildConnConfig();
@@ -514,7 +548,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   const res = await DBGetColumns(config as any, dbName, tableIdent);
                   if (res?.success && Array.isArray(res.data)) {
                       const cols = res.data as ColumnDefinition[];
-                      columnsCacheRef.current[key] = cols;
+                      sharedColumnsCacheData[key] = cols;
                       return cols;
                   }
                   return [] as ColumnDefinition[];
@@ -533,7 +567,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   const colPrefix = (threePartMatch[3] || '').toLowerCase();
 
                   // 在 allColumnsRef 中查找匹配的列
-                  const cols = allColumnsRef.current.filter(c =>
+                  const cols = sharedAllColumnsData.filter(c =>
                       (c.dbName || '').toLowerCase() === dbPart.toLowerCase() &&
                       (c.tableName || '').toLowerCase() === tablePart.toLowerCase()
                   );
@@ -561,10 +595,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   const qualifierLower = qualifier.toLowerCase();
 
                   // 首先检查 qualifier 是否是数据库名（跨库表提示）
-                  const visibleDbs = visibleDbsRef.current;
+                  const visibleDbs = sharedVisibleDbs;
                   if (visibleDbs.some(db => db.toLowerCase() === qualifierLower)) {
                       // qualifier 是数据库名，提示该库的表
-                      const tables = tablesRef.current.filter(t =>
+                      const tables = sharedTablesData.filter(t =>
                           (t.dbName || '').toLowerCase() === qualifierLower
                       );
                       const filtered = prefix
@@ -583,7 +617,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   }
 
                   // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
-                  const schemaTables = tablesRef.current
+                  const schemaTables = sharedTablesData
                       .map(t => {
                           const parsed = splitSchemaAndTable(t.tableName || '');
                           return {
@@ -627,7 +661,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                       // 解析 db.table 或 table 格式
                       const parts = tableIdent.split('.');
-                      let dbName = currentDbRef.current || '';
+                      let dbName = sharedCurrentDb || '';
                       let tableName = tableIdent;
                       if (parts.length === 2) {
                           dbName = parts[0];
@@ -649,8 +683,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   if (tableInfo) {
                       // Prefer preloaded MySQL all-columns cache
                       let cols: { name: string, type?: string, tableName?: string, dbName?: string }[];
-                      if (allColumnsRef.current.length > 0) {
-                          cols = allColumnsRef.current
+                      if (sharedAllColumnsData.length > 0) {
+                          cols = sharedAllColumnsData
                               .filter(c =>
                                   (c.dbName || '').toLowerCase() === (tableInfo.dbName || '').toLowerCase() &&
                                   (c.tableName || '').toLowerCase() === (tableInfo.tableName || '').toLowerCase()
@@ -688,7 +722,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   foundTables.add(t.toLowerCase());
               }
 
-              const currentDatabase = currentDbRef.current || '';
+              const currentDatabase = sharedCurrentDb || '';
               const wordPrefix = (word.word || '').toLowerCase();
               const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
               const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
@@ -703,7 +737,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
-              const relevantColumns = allColumnsRef.current
+              const relevantColumns = sharedAllColumnsData
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
@@ -723,7 +757,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   });
 
               // 表提示：当前库显示表名，其他库显示 db.table 格式
-              const tableSuggestions = tablesRef.current
+              const tableSuggestions = sharedTablesData
                 .filter(t => {
                     const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
                     const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
@@ -744,7 +778,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               });
 
               // 数据库提示
-              const dbSuggestions = visibleDbsRef.current
+              const dbSuggestions = sharedVisibleDbs
                   .filter((db) => startsWithPrefix(db))
                   .map(db => ({
                       label: db,
