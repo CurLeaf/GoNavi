@@ -673,11 +673,20 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
         { key: 'csv', label: '复制为 CSV', icon: <FileTextOutlined />, onClick: () => handleCopyCsv(record) },
         { key: 'copy', label: '复制为 Markdown', icon: <CopyOutlined />, onClick: () => { 
             const records = getTargets();
-            const lines = records.map((r: any) => {
-                const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-                return `| ${Object.values(vals).join(' | ')} |`;
+            const orderedCols = displayDataRef.current.length > 0
+                ? Object.keys(displayDataRef.current[0]).filter(c => c !== GONAVI_ROW_KEY)
+                : [];
+            const header = `| ${orderedCols.join(' | ')} |`;
+            const separator = `| ${orderedCols.map(() => '---').join(' | ')} |`;
+            const rows = records.map((r: any) => {
+                const values = orderedCols.map(c => {
+                    const v = r[c];
+                    if (v === null || v === undefined) return 'NULL';
+                    return String(v).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                });
+                return `| ${values.join(' | ')} |`;
             });
-            copyToClipboard(lines.join('\n'));
+            copyToClipboard([header, separator, ...rows].join('\n'));
         } },
         { type: 'divider' },
         {
@@ -3324,14 +3333,19 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
       const records = getTargets(record);
+      // 使用 columnNames 保持表定义的字段顺序，而非 Object.keys() 的不确定顺序
+      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
       const sqlList = records.map((r: any) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-          const cols = Object.keys(vals);
-          const values = Object.values(vals).map(v => v === null ? 'NULL' : `'${v}'`);
+          const values = orderedCols.map(c => {
+              const v = r[c];
+              if (v === null || v === undefined) return 'NULL';
+              const escaped = String(v).replace(/'/g, "''");
+              return `'${escaped}'`;
+          });
           const targetTable = tableName || 'table';
-          return `INSERT INTO \`${targetTable}\` (${cols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
+          return `INSERT INTO \`${targetTable}\` (${orderedCols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
       });
-      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, getTargets, copyToClipboard]);
+      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, columnNames, getTargets, copyToClipboard]);
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
@@ -3344,13 +3358,21 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleCopyCsv = useCallback((record: any) => {
       const records = getTargets(record);
+      // 使用 columnNames 保持表定义的字段顺序
+      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const header = orderedCols.map(c => `"${c}"`).join(',');
       const lines = records.map((r: any) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-          const values = Object.values(vals).map(v => v === null ? 'NULL' : `"${v}"`);
+          const values = orderedCols.map(c => {
+              const v = r[c];
+              if (v === null || v === undefined) return 'NULL';
+              // CSV 标准：值中的双引号转义为两个双引号
+              const escaped = String(v).replace(/"/g, '""');
+              return `"${escaped}"`;
+          });
           return values.join(',');
       });
-      copyToClipboard(lines.join('\n'));
-  }, [getTargets, copyToClipboard]);
+      copyToClipboard([header, ...lines].join('\n'));
+  }, [getTargets, columnNames, copyToClipboard]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;
