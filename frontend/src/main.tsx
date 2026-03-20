@@ -5,6 +5,8 @@ import App from './App'
 
 // 全局配置 Monaco Editor 使用本地打包的文件，避免从 CDN (jsdelivr) 加载。
 // Windows WebView2 环境下访问外部 CDN 可能失败，导致编辑器一直显示 Loading。
+// 中文语言包必须在 monaco-editor 主包之前导入，否则右键菜单等 UI 仍为英文。
+import 'monaco-editor/esm/nls.messages.zh-cn'
 import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 loader.config({ monaco })
