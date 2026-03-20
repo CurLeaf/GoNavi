@@ -72,6 +72,8 @@ export interface SavedConnection {
   config: ConnectionConfig;
   includeDatabases?: string[];
   includeRedisDatabases?: number[]; // Redis databases to show (0-15)
+  iconType?: string;   // 自定义图标类型（如 'mysql','postgres'），不填则取 config.type
+  iconColor?: string;  // 自定义图标颜色（十六进制），不填则取类型默认色
 }
 
 export interface ConnectionTag {

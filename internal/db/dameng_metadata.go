@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"GoNavi-Wails/internal/logger"
 )
 
 var damengDatabaseQueries = []string{
+	// 优先使用达梦原生系统表
+	"SELECT DISTINCT OBJECT_NAME AS DATABASE_NAME FROM SYS.SYSOBJECTS WHERE TYPE$ = 'SCH' AND OBJECT_NAME NOT IN ('SYS','SYSDBA','SYSAUDITOR','SYSSSO','CTISYS','__RECYCLE_USER__') ORDER BY OBJECT_NAME",
+	"SELECT SCHEMA_NAME AS DATABASE_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME NOT IN ('SYS','SYSDBA','SYSAUDITOR','SYSSSO','CTISYS','INFORMATION_SCHEMA') ORDER BY SCHEMA_NAME",
+	// Oracle 兼容层
 	"SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS DATABASE_NAME FROM DUAL",
 	"SELECT SYS_CONTEXT('USERENV', 'CURRENT_USER') AS DATABASE_NAME FROM DUAL",
 	"SELECT USERNAME AS DATABASE_NAME FROM USER_USERS",
@@ -24,12 +30,14 @@ func collectDamengDatabaseNames(query damengQueryFunc) ([]string, error) {
 	dbs := make([]string, 0, 64)
 	var lastErr error
 
-	for _, q := range damengDatabaseQueries {
+	for idx, q := range damengDatabaseQueries {
 		data, _, err := query(q)
 		if err != nil {
+			logger.Warnf("达梦 GetDatabases 查询[%d]失败：%v（SQL: %.80s…）", idx, err, q)
 			lastErr = err
 			continue
 		}
+		newCount := 0
 		for _, row := range data {
 			name := getDamengRowString(row,
 				"DATABASE_NAME",
@@ -58,10 +66,14 @@ func collectDamengDatabaseNames(query damengQueryFunc) ([]string, error) {
 			}
 			seen[key] = struct{}{}
 			dbs = append(dbs, name)
+			newCount++
 		}
+		logger.Infof("达梦 GetDatabases 查询[%d]成功：返回 %d 行，新增 %d 条（SQL: %.80s…）", idx, len(data), newCount, q)
 	}
 
+	logger.Infof("达梦 GetDatabases 最终结果：共 %d 条数据库/schema", len(dbs))
 	if len(dbs) == 0 && lastErr != nil {
+		logger.Warnf("达梦 GetDatabases 所有查询均失败，返回最后错误：%v", lastErr)
 		return nil, lastErr
 	}
 
