@@ -2207,7 +2207,12 @@ func formatExportCellText(val interface{}) string {
 		}
 		return text
 	default:
-		return fmt.Sprintf("%v", val)
+		text := fmt.Sprintf("%v", val)
+		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）格式化为本地时区 yyyy-MM-dd HH:mm:ss
+		if parsed, ok := parseTemporalString(text); ok {
+			return parsed.Local().Format("2006-01-02 15:04:05")
+		}
+		return text
 	}
 }
 
@@ -2217,6 +2222,18 @@ func normalizeExportJSONValue(val interface{}) interface{} {
 	}
 
 	switch v := val.(type) {
+	case time.Time:
+		return v.Local().Format("2006-01-02 15:04:05")
+	case *time.Time:
+		if v == nil {
+			return nil
+		}
+		return v.Local().Format("2006-01-02 15:04:05")
+	case string:
+		if parsed, ok := parseTemporalString(v); ok {
+			return parsed.Local().Format("2006-01-02 15:04:05")
+		}
+		return v
 	case float32:
 		f := float64(v)
 		if math.IsNaN(f) || math.IsInf(f, 0) {
