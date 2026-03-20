@@ -28,7 +28,7 @@ import { useStore } from '../store';
 import type { ColumnDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
-import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
@@ -726,7 +726,7 @@ interface DataGridProps {
     };
     onRequestTotalCount?: () => void;
     onCancelTotalCount?: () => void;
-    sortInfoExternal?: { columnKey: string, order: string } | null;
+    sortInfoExternal?: Array<{ columnKey: string, order: string, enabled?: boolean }>;
     // Filtering
     showFilter?: boolean;
     onToggleFilter?: () => void;
@@ -1148,25 +1148,18 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   };
   
-  const [sortInfo, setSortInfo] = useState<{ columnKey: string, order: string } | null>(null);
+  const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
   const columnMetaCacheRef = useRef<Record<string, Record<string, ColumnMeta>>>({});
   const columnMetaSeqRef = useRef(0);
 
   useEffect(() => {
-      const nextOrder = sortInfoExternal?.order === 'ascend' || sortInfoExternal?.order === 'descend'
-          ? sortInfoExternal.order
-          : '';
-      const nextColumn = nextOrder ? String(sortInfoExternal?.columnKey || '') : '';
-      const currColumn = String(sortInfo?.columnKey || '');
-      const currOrder = sortInfo?.order === 'ascend' || sortInfo?.order === 'descend' ? sortInfo.order : '';
-      if (nextColumn === currColumn && nextOrder === currOrder) return;
-      if (!nextColumn || !nextOrder) {
-          setSortInfo(null);
-      } else {
-          setSortInfo({ columnKey: nextColumn, order: nextOrder });
-      }
+      const ext = sortInfoExternal || [];
+      const extKey = JSON.stringify(ext);
+      const curKey = JSON.stringify(sortInfo);
+      if (extKey === curKey) return;
+      setSortInfo(ext);
   }, [sortInfoExternal, sortInfo]);
 
   useEffect(() => {
@@ -2568,22 +2561,39 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleTableChange = useCallback((_pag: any, _filtersArg: any, sorter: any) => {
       if (isResizingRef.current) return; // Block sort if resizing
-      if (sorter.field) {
-          const field = String(sorter.field);
-          const order = sorter.order as string;
-          const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
-          if (!normalizedOrder) {
-              setSortInfo(null);
-              if (onSort) onSort('', '');
-              return;
-          }
-          setSortInfo({ columnKey: field, order: normalizedOrder });
-          if (onSort) onSort(field, normalizedOrder);
-      } else {
-          setSortInfo(null);
-          if (onSort) onSort('', '');
+      // Ant Design 多列排序模式下 sorter 可能是数组
+      const sorters = Array.isArray(sorter) ? sorter : (sorter?.field ? [sorter] : []);
+      if (sorters.length === 0) {
+          setSortInfo([]);
+          if (onSort) onSort(JSON.stringify([]), '');
+          return;
       }
-  }, [onSort]);
+      // 在现有排序数组基础上增量更新
+      const next = [...sortInfo];
+      for (const s of sorters) {
+          const field = String(s.field || '');
+          if (!field) continue;
+          const order = s.order as string;
+          const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
+          const existIdx = next.findIndex(item => item.columnKey === field);
+          if (!normalizedOrder) {
+              // Ant Design 第三次点击想取消排序：
+              // 如果该字段已在排序数组中，回转为升序而非移除
+              if (existIdx >= 0) {
+                  next[existIdx] = { ...next[existIdx], order: 'ascend', enabled: true };
+              }
+              // 不在数组中则忽略
+          } else if (existIdx >= 0) {
+              // 已存在：更新排序方向
+              next[existIdx] = { ...next[existIdx], order: normalizedOrder, enabled: true };
+          } else {
+              // 不存在：追加到末尾
+              next.push({ columnKey: field, order: normalizedOrder, enabled: true });
+          }
+      }
+      setSortInfo(next);
+      if (onSort) onSort(JSON.stringify(next), '');
+  }, [onSort, sortInfo]);
 
     // Native Drag State
     const draggingRef = useRef<{
@@ -3043,8 +3053,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           key: key,
           // 不使用 ellipsis，避免 Ant Design 的 Tooltip 展开行为
           width: columnWidths[key] || 200,
-          sorter: !!onSort,
-          sortOrder: (sortInfo?.columnKey === key ? sortInfo.order : null) as SortOrder | undefined,
+          sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
+          sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData, // Only editable if table name known and not readonly
           render: (text: any) => (
               <div style={CELL_ELLIPSIS_STYLE}>
@@ -3402,10 +3412,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
       const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
       const normalizedType = String(dbType || '').trim().toLowerCase();
-      const hasExplicitSort = !!sortInfo?.columnKey && (sortInfo?.order === 'ascend' || sortInfo?.order === 'descend');
+      const hasSortForBuffer = hasExplicitSort(sortInfo);
       const offset = (pagination.current - 1) * pagination.pageSize;
       let sql = buildPaginatedSelectSQL(dbType, baseSql, orderBySQL, pagination.pageSize, offset);
-      if (hasExplicitSort && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+      if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
           sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
       }
       return sql;
@@ -4523,7 +4533,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 	          </div>
 
        {showFilter && (
-           <div style={{ 
+           <div style={{
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
@@ -4610,14 +4620,83 @@ const DataGrid: React.FC<DataGridProps> = ({
                        <Button icon={<CloseOutlined />} onClick={() => removeFilter(cond.id)} type="text" danger />
                    </div>
                ))}
-               <div style={{ display: 'flex', gap: 8 }}>
+                {onSort && (
+                    <div style={{ paddingTop: filterConditions.length > 0 ? 4 : 0, borderTop: filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
+                        {sortInfo.map((s, idx) => (
+                            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', opacity: s.enabled === false ? 0.58 : 1 }}>
+                                <Checkbox
+                                    checked={s.enabled !== false}
+                                    onChange={e => {
+                                        const next = [...sortInfo];
+                                        next[idx] = { ...next[idx], enabled: e.target.checked };
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                    style={{ flex: '0 0 auto' }}
+                                />
+                                <span style={{ fontSize: 12, color: 'inherit', opacity: 0.7, whiteSpace: 'nowrap', minWidth: 32 }}>{idx === 0 ? '排序' : '然后'}</span>
+                                <Select
+                                    style={{ width: 180 }}
+                                    value={s.columnKey || undefined}
+                                    onChange={v => {
+                                        const next = [...sortInfo];
+                                        if (!v) { next.splice(idx, 1); } else { next[idx] = { ...next[idx], columnKey: v }; }
+                                        const filtered = next.filter(si => si.columnKey);
+                                        onSort(JSON.stringify(filtered), '');
+                                    }}
+                                    options={displayColumnNames
+                                        .filter(c => c === s.columnKey || !sortInfo.some(si => si.columnKey === c))
+                                        .map(c => ({ value: c, label: c }))}
+                                    showSearch
+                                    optionFilterProp="label"
+                                    filterOption={(input, option) =>
+                                        String(option?.label ?? '')
+                                            .toLowerCase()
+                                            .includes(String(input || '').trim().toLowerCase())
+                                    }
+                                    placeholder="选择排序字段"
+                                    allowClear
+                                    onClear={() => {
+                                        const next = sortInfo.filter((_, i) => i !== idx);
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                />
+                                <Select
+                                    style={{ width: 110 }}
+                                    value={s.order || 'ascend'}
+                                    onChange={v => {
+                                        const next = [...sortInfo];
+                                        next[idx] = { ...next[idx], order: v };
+                                        onSort(JSON.stringify(next), '');
+                                    }}
+                                    options={[
+                                        { value: 'ascend', label: '升序 ↑' },
+                                        { value: 'descend', label: '降序 ↓' },
+                                    ]}
+                                    disabled={!s.columnKey}
+                                />
+                                <Button icon={<CloseOutlined />} type="text" danger size="small" onClick={() => {
+                                    const next = sortInfo.filter((_, i) => i !== idx);
+                                    onSort(JSON.stringify(next), '');
+                                }} />
+                            </div>
+                        ))}
+                        <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
+                            const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
+                            onSort(JSON.stringify(next), '');
+                        }} disabled={sortInfo.length >= displayColumnNames.length} style={{ marginBottom: 4 }}>添加排序</Button>
+                    </div>
+                )}
+               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: (onSort && sortInfo.length > 0) ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) ? `1px dashed ${panelFrameColor}` : 'none' }}>
                    <Button type="dashed" onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: true })))}>全启用</Button>
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: false })))}>全停用</Button>
+                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button type="primary" onClick={applyFilters} size="small">应用</Button>
                    <Button size="small" icon={<ClearOutlined />} onClick={() => {
                        setFilterConditions([]);
                        if (onApplyFilter) onApplyFilter([]);
+                       if (onSort) onSort('', '');
                    }}>清除</Button>
                </div>
            </div>

@@ -1,10 +1,13 @@
 import type { FilterCondition } from './sql';
 import { parseListValues } from './sql';
 
-type SortInfo = {
+type SortInfoItem = {
   columnKey?: string;
   order?: string;
-} | null | undefined;
+  enabled?: boolean;
+};
+
+type SortInfo = SortInfoItem | SortInfoItem[] | null | undefined;
 
 type ShellConvertResult = {
   recognized: boolean;
@@ -607,14 +610,24 @@ export const buildMongoSort = (
   sortInfo: SortInfo,
   fallbackColumns: string[] = [],
 ): Record<string, 1 | -1> | undefined => {
-  const sortColumn = String(sortInfo?.columnKey || '').trim();
-  const sortOrder = String(sortInfo?.order || '');
-  if (sortColumn && (sortOrder === 'ascend' || sortOrder === 'descend')) {
-    return { [sortColumn]: sortOrder === 'ascend' ? 1 : -1 };
+  const items = Array.isArray(sortInfo) ? sortInfo : (sortInfo ? [sortInfo] : []);
+  const sort: Record<string, 1 | -1> = {};
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (item?.enabled === false) continue;
+    const col = String(item?.columnKey || '').trim();
+    const order = String(item?.order || '');
+    if (col && (order === 'ascend' || order === 'descend')) {
+      const key = col.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        sort[col] = order === 'ascend' ? 1 : -1;
+      }
+    }
   }
+  if (Object.keys(sort).length > 0) return sort;
 
   const uniqueColumns: string[] = [];
-  const seen = new Set<string>();
   (fallbackColumns || []).forEach((col) => {
     const key = String(col || '').trim();
     if (!key) return;
@@ -625,7 +638,6 @@ export const buildMongoSort = (
   });
   if (uniqueColumns.length === 0) return undefined;
 
-  const sort: Record<string, 1 | -1> = {};
   uniqueColumns.forEach((col) => {
     sort[col] = 1;
   });
