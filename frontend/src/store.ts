@@ -721,6 +721,21 @@ export const useStore = create<AppState>()(
             newTabs[index] = { ...newTabs[index], ...tab };
             return { tabs: newTabs, activeTabId: tab.id };
         }
+        // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
+        if ((tab.type === 'table' || tab.type === 'design') && tab.tableName && tab.connectionId && tab.dbName) {
+            const semanticIndex = state.tabs.findIndex(t =>
+                t.type === tab.type &&
+                t.connectionId === tab.connectionId &&
+                t.dbName === tab.dbName &&
+                t.tableName === tab.tableName
+            );
+            if (semanticIndex !== -1) {
+                const existingTab = state.tabs[semanticIndex];
+                const newTabs = [...state.tabs];
+                newTabs[semanticIndex] = { ...existingTab, ...tab, id: existingTab.id };
+                return { tabs: newTabs, activeTabId: existingTab.id };
+            }
+        }
         return { tabs: [...state.tabs, tab], activeTabId: tab.id };
       }),
       

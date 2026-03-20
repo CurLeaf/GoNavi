@@ -3011,7 +3011,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const baseRawMap = rowEditorBaseRawRef.current || {};
       const patch: Record<string, any> = {};
-      displayColumnNames.forEach((col) => {
+      columnNames.forEach((col) => {
           const nextVal = values[col];
           const baseVal = baseRawMap[col];
           if (!isCellValueEqualForDiff(baseVal, nextVal)) patch[col] = nextVal;
@@ -3025,7 +3025,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, displayColumnNames, rowKeyStr, closeRowEditor]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
 
 
   const enableVirtual = viewMode === 'table';
@@ -3207,7 +3207,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!hasRowKey) {
               values = { ...(newRow as any) };
           } else {
-              displayColumnNames.forEach((col) => {
+              columnNames.forEach((col) => {
                   const nextVal = (newRow as any)?.[col];
                   const prevVal = (originalRow as any)?.[col];
                   if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
