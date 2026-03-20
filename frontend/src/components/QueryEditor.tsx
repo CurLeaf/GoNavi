@@ -1575,9 +1575,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             } else if (nextResultSets.length === 0) {
                 message.success('执行成功。');
             }
-            if (anyTruncated && maxRows > 0) {
-                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
-            }
+
         } else {
             // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
             let fullSQL = normalizedRawSQL;
@@ -1590,10 +1588,12 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
             // 自动给 SELECT 语句注入行数限制（防止大结果集卡死）
             const maxRowsForLimit = Number(queryOptions?.maxRows) || 0;
+            let anyLimitApplied = false;
             if (Number.isFinite(maxRowsForLimit) && maxRowsForLimit > 0) {
                 const stmts = splitSQLStatements(fullSQL);
                 const limitedStmts = stmts.map(s => {
                     const result = applyAutoLimit(s, normalizedDbType, maxRowsForLimit);
+                    if (result.applied) anyLimitApplied = true;
                     return result.sql;
                 });
                 fullSQL = limitedStmts.join(';\n');
@@ -1686,7 +1686,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 } else {
                     let rows = Array.isArray(rsData.rows) ? rsData.rows : [];
                     let truncated = false;
-                    if (Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
+                    // 仅当前端自动注入了 LIMIT 时才做兜底截断；用户手写 LIMIT 时尊重原始结果
+                    if (anyLimitApplied && Number.isFinite(maxRows) && maxRows > 0 && rows.length > maxRows) {
                         truncated = true;
                         anyTruncated = true;
                         rows = rows.slice(0, maxRows);
@@ -1755,9 +1756,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
             } else if (nextResultSets.length === 0) {
                 message.success('执行成功。');
             }
-            if (anyTruncated && maxRows > 0) {
-                message.warning(`结果集已自动限制为最多 ${maxRows} 行（可在工具栏调整）。`);
-            }
+
         }
     } catch (e: any) {
         message.error("Error executing query: " + e.message);
@@ -2116,7 +2115,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                           <span>{(() => {
                               const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
                               if (isAffected) return `结果 ${idx + 1} ✓`;
-                              return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length}${rs.truncated ? '+' : ''})` : ''}`;
+                              return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length})` : ''}`;
                           })()}</span>
                           </Tooltip>
                           <Tooltip title="关闭结果">
