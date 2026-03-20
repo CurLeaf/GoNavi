@@ -6,7 +6,8 @@ export type ShortcutAction =
   | 'newQueryTab'
   | 'toggleLogPanel'
   | 'toggleTheme'
-  | 'openShortcutManager';
+  | 'openShortcutManager'
+  | 'toggleMacFullscreen';
 
 export interface ShortcutBinding {
   combo: string;
@@ -19,6 +20,7 @@ export interface ShortcutActionMeta {
   label: string;
   description: string;
   allowInEditable?: boolean;
+  platformOnly?: 'mac';
 }
 
 const MODIFIER_ORDER = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const;
@@ -76,6 +78,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleLogPanel',
   'toggleTheme',
   'openShortcutManager',
+  'toggleMacFullscreen',
 ];
 
 export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = {
@@ -105,6 +108,11 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     description: '打开快捷键设置面板',
     allowInEditable: true,
   },
+  toggleMacFullscreen: {
+    label: '切换原生全屏',
+    description: 'macOS 原生窗口控制模式下的全屏切换（⌃⌘F）',
+    platformOnly: 'mac',
+  },
 };
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
@@ -114,6 +122,7 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   toggleLogPanel: { combo: 'Ctrl+Shift+L', enabled: true },
   toggleTheme: { combo: 'Ctrl+Shift+D', enabled: true },
   openShortcutManager: { combo: 'Ctrl+,', enabled: true },
+  toggleMacFullscreen: { combo: 'Ctrl+Meta+F', enabled: true },
 };
 
 const normalizeKeyToken = (value: string): string => {

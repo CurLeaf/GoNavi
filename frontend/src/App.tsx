@@ -1372,13 +1372,6 @@ function App() {
 
   useEffect(() => {
       const handleGlobalShortcut = (event: KeyboardEvent) => {
-          if (shouldHandleMacNativeFullscreenShortcut(isMacRuntime, useNativeMacWindowControls, event)) {
-              event.preventDefault();
-              event.stopPropagation();
-              void handleTitleBarWindowToggle();
-              return;
-          }
-
           const matchedAction = SHORTCUT_ACTION_ORDER.find((action) => {
               const binding = shortcutOptions[action];
               if (!binding?.enabled) {
@@ -1415,6 +1408,11 @@ function App() {
                   break;
               case 'openShortcutManager':
                   setIsShortcutModalOpen(true);
+                  break;
+              case 'toggleMacFullscreen':
+                  if (isMacRuntime && useNativeMacWindowControls) {
+                      void handleTitleBarWindowToggle();
+                  }
                   break;
           }
       };
@@ -2145,6 +2143,9 @@ function App() {
                   </div>
                   {SHORTCUT_ACTION_ORDER.map((action) => {
                       const meta = SHORTCUT_ACTION_META[action];
+                      if (meta.platformOnly === 'mac' && !isMacRuntime) {
+                          return null;
+                      }
                       const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
                       const isCapturing = capturingShortcutAction === action;
                       return (
