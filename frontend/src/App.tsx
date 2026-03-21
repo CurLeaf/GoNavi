@@ -14,6 +14,7 @@ import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
+import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -90,9 +91,11 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const globalProxyInvalidHintShownRef = React.useRef(false);
+  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -198,8 +201,16 @@ function App() {
                       content: '全局代理配置失败: ' + errMsg,
                       key: 'global-proxy-sync-error',
                   });
+              })
+              .finally(() => {
+                  if (!cancelled) {
+                      setHasAppliedInitialGlobalProxy(true);
+                  }
               });
       } catch (e) {
+          if (!cancelled) {
+              setHasAppliedInitialGlobalProxy(true);
+          }
           console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
       }
 
@@ -1638,8 +1649,44 @@ function App() {
                     </div>
                 </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58 }}>
-                    <Sidebar onEditConnection={handleEditConnection} />
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, position: 'relative' }}>
+                    <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
+                        <Sidebar onEditConnection={handleEditConnection} />
+                    </div>
+                    {!connectionWorkbenchState.ready && (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                inset: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: 16,
+                                background: darkMode ? 'rgba(7, 12, 20, 0.42)' : 'rgba(255, 255, 255, 0.58)',
+                                backdropFilter: 'blur(4px)',
+                                zIndex: 1,
+                            }}
+                        >
+                            <div
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    padding: '10px 14px',
+                                    borderRadius: 999,
+                                    background: darkMode ? 'rgba(15, 23, 36, 0.86)' : 'rgba(255, 255, 255, 0.94)',
+                                    border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(22,32,51,0.08)',
+                                    boxShadow: darkMode ? '0 12px 24px rgba(0,0,0,0.26)' : '0 12px 24px rgba(15,23,42,0.08)',
+                                    color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+                                    fontSize: 12,
+                                    fontWeight: 500,
+                                }}
+                            >
+                                <Spin size="small" />
+                                <span>{connectionWorkbenchState.message}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Floating SQL Log Toggle */}
