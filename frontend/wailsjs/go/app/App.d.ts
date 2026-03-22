@@ -4,6 +4,7 @@ import {connection} from '../models';
 import {time} from '../models';
 import {sync} from '../models';
 import {redis} from '../models';
+import {context} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
@@ -196,6 +197,8 @@ export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
+
+export function Startup(arg1:context.Context):Promise<void>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 

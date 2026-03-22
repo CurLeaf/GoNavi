@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
+import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -9,6 +9,8 @@ import ConnectionModal from './components/ConnectionModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
+import AIChatPanel from './components/AIChatPanel';
+import AISettingsModal from './components/AISettingsModal';
 import { useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
@@ -94,6 +96,9 @@ function App() {
   const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
+  const aiPanelVisible = useStore(state => state.aiPanelVisible);
+  const toggleAIPanel = useStore(state => state.toggleAIPanel);
+  const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
 
@@ -1119,6 +1124,7 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -1631,11 +1637,24 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: isSidebarNarrow ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
-                        <Button type="text" icon={<ToolOutlined />} title="工具" style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)}>{isSidebarUltraCompact ? null : '工具'}</Button>
-                        <Button type="text" icon={<GlobalOutlined />} title="代理" style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)}>{isSidebarUltraCompact ? null : '代理'}</Button>
-                        <Button type="text" icon={<SkinOutlined />} title="主题" style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)}>{isSidebarUltraCompact ? null : '主题'}</Button>
-                        <Button type="text" icon={<InfoCircleOutlined />} title="关于" style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)}>{isSidebarUltraCompact ? null : '关于'}</Button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <Tooltip title="工具"><Button type="text" icon={<ToolOutlined />} style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)} /></Tooltip>
+                        <Tooltip title="代理"><Button type="text" icon={<GlobalOutlined />} style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)} /></Tooltip>
+                        <Tooltip title="主题"><Button type="text" icon={<SkinOutlined />} style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)} /></Tooltip>
+                        <Tooltip title="关于"><Button type="text" icon={<InfoCircleOutlined />} style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)} /></Tooltip>
+                        <div style={{ width: 1, height: 16, background: 'rgba(128,128,128,0.2)', margin: '0 4px' }} />
+                        <Tooltip title="AI 助手">
+                            <Button
+                                type="text"
+                                icon={<RobotOutlined />}
+                                onClick={toggleAIPanel}
+                                style={{
+                                    ...utilityButtonStyle,
+                                    color: aiPanelVisible ? (darkMode ? '#ffd666' : '#1677ff') : utilityButtonStyle.color,
+                                    background: aiPanelVisible ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)') : 'transparent'
+                                }}
+                            />
+                        </Tooltip>
                     </div>
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -1743,9 +1762,14 @@ function App() {
                 title="拖动调整宽度"
             />
           </Sider>
-           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
-                 <TabManager />
+           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
+                  <TabManager />
+               </div>
+               {aiPanelVisible && (
+                  <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => setIsAISettingsOpen(true)} overlayTheme={overlayTheme} />
+               )}
              </div>
              {isLogPanelOpen && (
                  <LogPanel 
@@ -1843,6 +1867,12 @@ function App() {
             open={isDriverModalOpen}
             onClose={() => setIsDriverModalOpen(false)}
             onOpenGlobalProxySettings={() => setIsProxyModalOpen(true)}
+          />
+          <AISettingsModal
+            open={isAISettingsOpen}
+            onClose={() => setIsAISettingsOpen(false)}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
           />
           <Modal
             title={renderUtilityModalTitle(<InfoCircleOutlined />, '关于 GoNavi', '查看版本信息、仓库地址、更新状态与下载入口。')}

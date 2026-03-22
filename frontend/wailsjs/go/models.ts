@@ -1,3 +1,58 @@
+export namespace ai {
+	
+	export class ProviderConfig {
+	    id: string;
+	    type: string;
+	    name: string;
+	    apiKey: string;
+	    baseUrl: string;
+	    model: string;
+	    models?: string[];
+	    apiFormat?: string;
+	    headers?: Record<string, string>;
+	    maxTokens: number;
+	    temperature: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.name = source["name"];
+	        this.apiKey = source["apiKey"];
+	        this.baseUrl = source["baseUrl"];
+	        this.model = source["model"];
+	        this.models = source["models"];
+	        this.apiFormat = source["apiFormat"];
+	        this.headers = source["headers"];
+	        this.maxTokens = source["maxTokens"];
+	        this.temperature = source["temperature"];
+	    }
+	}
+	export class SafetyResult {
+	    allowed: boolean;
+	    operationType: string;
+	    requiresConfirm: boolean;
+	    warningMessage?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SafetyResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.allowed = source["allowed"];
+	        this.operationType = source["operationType"];
+	        this.requiresConfirm = source["requiresConfirm"];
+	        this.warningMessage = source["warningMessage"];
+	    }
+	}
+
+}
+
 export namespace connection {
 	
 	export class UpdateRow {

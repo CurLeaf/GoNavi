@@ -138,6 +138,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
     const addTab = useStore(state => state.addTab);
+    const setActiveContext = useStore(state => state.setActiveContext);
     const darkMode = theme === 'dark';
 
     const [tables, setTables] = useState<TableStatRow[]>([]);
@@ -195,6 +196,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
+        setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
         addTab({
             id: `${connection.id}-${tab.dbName}-${tableName}`,
             title: tableName,
@@ -203,10 +205,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             dbName: tab.dbName,
             tableName,
         });
-    }, [connection, tab.dbName, addTab]);
+    }, [connection, tab.dbName, addTab, setActiveContext]);
 
     const openDesign = useCallback((tableName: string) => {
         if (!connection) return;
+        setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
         addTab({
             id: `design-${connection.id}-${tab.dbName}-${tableName}`,
             title: `设计表 (${tableName})`,
@@ -217,7 +220,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             initialTab: 'columns',
             readOnly: false,
         });
-    }, [connection, tab.dbName, addTab]);
+    }, [connection, tab.dbName, addTab, setActiveContext]);
 
     const buildConfig = useCallback(() => {
         if (!connection) return null;
@@ -383,6 +386,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                 menu={{
                                     items: [
                                         { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
+                                            setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
                                             addTab({
                                                 id: `query-${Date.now()}`,
                                                 title: '新建查询',
