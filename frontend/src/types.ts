@@ -183,3 +183,39 @@ export interface StreamEntry {
   id: string;
   fields: Record<string, string>;
 }
+
+// --- AI Types ---
+
+export type AIProviderType = 'openai' | 'anthropic' | 'gemini' | 'custom';
+export type AISafetyLevel = 'readonly' | 'readwrite' | 'full';
+export type AIContextLevel = 'schema_only' | 'with_samples' | 'with_results';
+
+export interface AIProviderConfig {
+  id: string;
+  type: AIProviderType;
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  models?: string[];
+  apiFormat?: string; // custom 专用: openai | anthropic | gemini
+  headers?: Record<string, string>;
+  maxTokens: number;
+  temperature: number;
+}
+
+export interface AIChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+  loading?: boolean;
+}
+
+export interface AISafetyResult {
+  allowed: boolean;
+  operationType: 'query' | 'dml' | 'ddl' | 'other';
+  requiresConfirm: boolean;
+  warningMessage?: string;
+}
+

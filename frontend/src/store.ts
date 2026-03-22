@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage } from './types';
 import {
   ShortcutAction,
   ShortcutBinding,
@@ -424,6 +424,12 @@ interface AppState {
   windowState: 'normal' | 'fullscreen' | 'maximized';
   sidebarWidth: number;
 
+  // AI 运行时与持久化状态
+  aiPanelVisible: boolean;
+  aiChatHistory: Record<string, AIChatMessage[]>; // sessionId -> messages
+  aiChatSessions: { id: string; title: string; updatedAt: number }[]; // 历史会话列表
+  aiActiveSessionId: string | null;
+
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
   removeConnection: (id: string) => void;
@@ -475,6 +481,18 @@ interface AppState {
   setWindowBounds: (bounds: { width: number; height: number; x: number; y: number }) => void;
   setWindowState: (state: 'normal' | 'fullscreen' | 'maximized') => void;
   setSidebarWidth: (width: number) => void;
+
+  // AI actions
+  toggleAIPanel: () => void;
+  setAIPanelVisible: (visible: boolean) => void;
+  addAIChatMessage: (sessionId: string, message: AIChatMessage) => void;
+  updateAIChatMessage: (sessionId: string, messageId: string, updates: Partial<AIChatMessage>) => void;
+  deleteAIChatMessage: (sessionId: string, messageId: string) => void;
+  truncateAIChatMessages: (sessionId: string, upToMessageId: string) => void;
+  clearAIChatHistory: (sessionId: string) => void;
+  deleteAISession: (sessionId: string) => void;
+  createNewAISession: () => void;
+  setAIActiveSessionId: (sessionId: string | null) => void;
 }
 
 const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
@@ -670,6 +688,12 @@ export const useStore = create<AppState>()(
       windowBounds: null,
       windowState: 'normal' as const,
       sidebarWidth: 330,
+
+      // AI 运行状态
+      aiPanelVisible: false,
+      aiChatHistory: {},
+      aiChatSessions: [],
+      aiActiveSessionId: null,
 
       addConnection: (conn) => set((state) => ({ connections: [...state.connections, conn] })),
       updateConnection: (conn) => set((state) => ({
@@ -950,6 +974,83 @@ export const useStore = create<AppState>()(
       setWindowState: (state) => set({ windowState: state }),
 
       setSidebarWidth: (width) => set({ sidebarWidth: Math.max(200, Math.min(600, Math.trunc(width))) }),
+
+      // AI actions
+      toggleAIPanel: () => set((state) => ({ aiPanelVisible: !state.aiPanelVisible })),
+      setAIPanelVisible: (visible) => set({ aiPanelVisible: visible }),
+      addAIChatMessage: (sessionId, message) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        const messages = history[sessionId] || [];
+        history[sessionId] = [...messages, message];
+        
+        let newSessions = [...state.aiChatSessions];
+        const existingSession = newSessions.find(s => s.id === sessionId);
+        
+        if (!existingSession) {
+            // 生成标题（首个 user message 内容前 20 字符）
+            let title = message.role === 'user' ? message.content : '新的对话';
+            if (title.length > 20) {
+                title = title.substring(0, 20) + '...';
+            }
+            newSessions.unshift({ id: sessionId, title, updatedAt: Date.now() });
+        } else {
+            // 提至最新
+            newSessions = newSessions.filter(s => s.id !== sessionId);
+            newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+        }
+        
+        return { aiChatHistory: history, aiChatSessions: newSessions };
+      }),
+      updateAIChatMessage: (sessionId, messageId, updates) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        const messages = history[sessionId];
+        if (!messages) return state;
+        history[sessionId] = messages.map(m =>
+          m.id === messageId ? { ...m, ...updates } : m
+        );
+        let newSessions = [...state.aiChatSessions];
+        const existingSession = newSessions.find(s => s.id === sessionId);
+        if (existingSession) {
+            newSessions = newSessions.filter(s => s.id !== sessionId);
+            newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+        }
+        return { aiChatHistory: history, aiChatSessions: newSessions };
+      }),
+      deleteAIChatMessage: (sessionId, messageId) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        if (history[sessionId]) {
+            history[sessionId] = history[sessionId].filter(m => m.id !== messageId);
+        }
+        return { aiChatHistory: history };
+      }),
+      truncateAIChatMessages: (sessionId, upToMessageId) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        const messages = history[sessionId];
+        if (messages) {
+            const idx = messages.findIndex(m => m.id === upToMessageId);
+            if (idx >= 0) {
+                history[sessionId] = messages.slice(0, idx + 1);
+            }
+        }
+        return { aiChatHistory: history };
+      }),
+      clearAIChatHistory: (sessionId) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        delete history[sessionId];
+        return { aiChatHistory: history };
+      }),
+      deleteAISession: (sessionId) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        delete history[sessionId];
+        const newSessions = state.aiChatSessions.filter(s => s.id !== sessionId);
+        const newActive = state.aiActiveSessionId === sessionId ? null : state.aiActiveSessionId;
+        return { aiChatHistory: history, aiChatSessions: newSessions, aiActiveSessionId: newActive };
+      }),
+      createNewAISession: () => set(() => {
+         const newId = `session-${Date.now()}`;
+         return { aiActiveSessionId: newId };
+      }),
+      setAIActiveSessionId: (sessionId) => set({ aiActiveSessionId: sessionId }),
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
@@ -985,6 +1086,10 @@ export const useStore = create<AppState>()(
         nextState.windowBounds = sanitizeWindowBounds(state.windowBounds);
         nextState.windowState = sanitizeWindowState(state.windowState);
         nextState.sidebarWidth = sanitizeSidebarWidth(state.sidebarWidth);
+        
+        // 保留原有的 AI 持久化记录，或者为空（版本兼容）
+        nextState.aiChatHistory = (state.aiChatHistory && typeof state.aiChatHistory === 'object') ? state.aiChatHistory : {};
+        nextState.aiChatSessions = Array.isArray(state.aiChatSessions) ? state.aiChatSessions : [];
         return nextState as AppState;
       },
       merge: (persistedState, currentState) => {
@@ -1014,6 +1119,9 @@ export const useStore = create<AppState>()(
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
+
+          aiChatHistory: (state.aiChatHistory && typeof state.aiChatHistory === 'object') ? state.aiChatHistory : {},
+          aiChatSessions: Array.isArray(state.aiChatSessions) ? state.aiChatSessions : [],
         };
       },
       partialize: (state) => ({
@@ -1038,6 +1146,9 @@ export const useStore = create<AppState>()(
         windowBounds: state.windowBounds,
         windowState: state.windowState,
         sidebarWidth: state.sidebarWidth,
+
+        aiChatHistory: state.aiChatHistory,
+        aiChatSessions: state.aiChatSessions,
       }), // Don't persist logs
     }
   )

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
@@ -202,8 +202,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   // Result Sets
   const [resultSets, setResultSets] = useState<ResultSet[]>([]);
   const [activeResultKey, setActiveResultKey] = useState<string>('');
-  
   const [loading, setLoading] = useState(false);
+  const [executionError, setExecutionError] = useState<string>('');
   const [, setCurrentQueryId] = useState<string>('');
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
@@ -464,6 +464,36 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
       // 应用透明主题（主题已在 main.tsx 全局注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
+
+      // 注册 AI 右键菜单操作
+      const aiActions = [
+          { id: 'ai.generateSQL', label: '🤖 AI 生成 SQL', prompt: '请根据当前数据库表结构生成查询语句：' },
+          { id: 'ai.explainSQL', label: '🤖 AI 解释 SQL', useSelection: true, prompt: '请解释以下 SQL 语句的执行逻辑：\n```sql\n{SQL}\n```' },
+          { id: 'ai.optimizeSQL', label: '🤖 AI 优化 SQL', useSelection: true, prompt: '请分析以下 SQL 语句的性能并给出优化建议：\n```sql\n{SQL}\n```' },
+      ];
+
+      aiActions.forEach(action => {
+          editor.addAction({
+              id: action.id,
+              label: action.label,
+              contextMenuGroupId: '9_ai',
+              contextMenuOrder: 1,
+              run: (ed: any) => {
+                  const selection = ed.getModel()?.getValueInRange(ed.getSelection());
+                  let prompt = action.prompt;
+                  if (action.useSelection && selection) {
+                      prompt = prompt.replace('{SQL}', selection);
+                  }
+                  // 打开 AI 面板并填入 prompt
+                  const store = useStore.getState();
+                  if (!store.aiPanelVisible) {
+                      store.setAIPanelVisible(true);
+                  }
+                  // 通过自定义事件将 prompt 发送到 AI 面板
+                  window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+              },
+          });
+      });
 
       // 全局只注册一次 SQL completion provider，避免多 tab 重复注册导致补全项重复
       if (!sqlCompletionRegistered) {
@@ -833,6 +863,25 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       } catch (e) {
           void message.error("格式化失败: SQL 语法可能有误");
       }
+  };
+
+  const handleAIAction = (action: 'generate' | 'explain' | 'optimize' | 'schema') => {
+      const editor = editorRef.current;
+      const selection = editor?.getModel()?.getValueInRange(editor.getSelection()) || '';
+      const fullSQL = getCurrentQuery();
+
+      const prompts: Record<string, string> = {
+          generate: '请根据当前数据库表结构生成查询语句：',
+          explain: `请解释以下 SQL 语句的执行逻辑：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
+          optimize: `请分析以下 SQL 语句的性能并给出优化建议：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
+          schema: '请分析当前数据库的表结构并给出优化建议。',
+      };
+
+      const store = useStore.getState();
+      if (!store.aiPanelVisible) {
+          store.setAIPanelVisible(true);
+      }
+      window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt: prompts[action] } }));
   };
 
   const formatSettingsMenu: MenuProps['items'] = [
@@ -1430,9 +1479,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         // 清除旧查询ID
         clearQueryId();
     }
-    const runSeq = ++runSeqRef.current;
-    setLoading(true);
-    const runStartTime = Date.now();
+      const runSeq = ++runSeqRef.current;
+      setLoading(true);
+      setExecutionError('');
+      const runStartTime = Date.now();
     const conn = connections.find(c => c.id === currentConnectionId);
     if (!conn) {
         message.error("Connection not found");
@@ -1489,7 +1539,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
                         const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                        message.error(prefix + shellConvert.error);
+                        setExecutionError(prefix + shellConvert.error);
                         setResultSets([]);
                         setActiveResultKey('');
                         return;
@@ -1522,7 +1572,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 });
                 if (!res.success) {
                     const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                    message.error(prefix + res.message);
+                    setExecutionError(prefix + res.message);
                     setResultSets([]);
                     setActiveResultKey('');
                     return;
@@ -1644,7 +1694,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                     return;
                 }
 
-                message.error(res.message);
+                setExecutionError(res.message);
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -1882,6 +1932,42 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       };
   }, [activeTabId, tab.id, handleRun]);
 
+  // 监听并处理外部注入的 SQL 代码 (如 AI 面板)
+  useEffect(() => {
+      const handleInsertSql = (e: CustomEvent) => {
+          if (activeTabId !== tab.id || !e.detail?.sql) return;
+          const sqlText = e.detail.sql;
+          const editor = editorRef.current;
+          if (editor && (window as any).monaco) {
+              const position = editor.getPosition();
+              if (position) {
+                  const mText = (sqlText.endsWith('\n') ? sqlText : sqlText + '\n');
+                  const startRange = new (window as any).monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
+                  
+                  editor.executeEdits('ai-insert', [{
+                      range: startRange,
+                      text: '\n' + mText,
+                      forceMoveMarkers: true
+                  }]);
+                  editor.focus();
+
+                  if (e.detail.runImmediately) {
+                      const endPosition = editor.getPosition();
+                      editor.setSelection(new (window as any).monaco.Range(
+                          position.lineNumber + 1, 1,
+                          endPosition.lineNumber, endPosition.column
+                      ));
+                      setTimeout(() => handleRun(), 50);
+                  }
+              }
+          } else {
+              setQuery((prev: string) => prev ? prev + '\n' + sqlText : sqlText);
+          }
+      };
+      window.addEventListener('gonavi:insert-sql', handleInsertSql as EventListener);
+      return () => window.removeEventListener('gonavi:insert-sql', handleInsertSql as EventListener);
+  }, [activeTabId, tab.id, handleRun]);
+
   const resolveDefaultQueryName = () => {
       const rawTitle = String(tab.title || '').trim();
       if (!rawTitle || rawTitle.startsWith('新建查询')) {
@@ -2067,6 +2153,16 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 <Button icon={<SettingOutlined />} />
             </Dropdown>
         </Button.Group>
+
+        <Dropdown menu={{ items: [
+            { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
+            { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
+            { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
+            { type: 'divider' as const },
+            { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
+        ] }} placement="bottomRight">
+            <Button icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
+        </Dropdown>
       </div>
       
       <div style={{ height: editorHeight, minHeight: '100px' }}>
@@ -2168,6 +2264,35 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   })()
               }))}
           />
+        ) : executionError ? (
+          <div style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
+              <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CloseOutlined />
+                  <span>执行失败</span>
+              </div>
+              <div className="custom-scrollbar" style={{ padding: 16, background: darkMode ? '#2d1a1a' : '#fff2f0', border: `1px solid ${darkMode ? '#5c2020' : '#ffccc7'}`, borderRadius: 6, color: darkMode ? '#ffa39e' : '#cf1322', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '40vh', overflow: 'auto' }}>
+                  {executionError}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                  <Button
+                      type="primary"
+                      icon={<RobotOutlined />}
+                      style={{ background: '#818cf8', borderColor: '#818cf8', boxShadow: '0 2px 0 rgba(129, 140, 248, 0.2)' }}
+                      onClick={() => {
+                          const errSql = getCurrentQuery();
+                          const prompt = `我在执行以下 SQL 时遇到了错误：\n\`\`\`sql\n${errSql}\n\`\`\`\n\n数据库报错信息如下：\n\`\`\`text\n${executionError}\n\`\`\`\n\n请帮我分析错误原因，并给出修改建议。`;
+                          const store = useStore.getState();
+                          const wasClosed = !store.aiPanelVisible;
+                          if (wasClosed) store.setAIPanelVisible(true);
+                          setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+                          }, wasClosed ? 350 : 0);
+                      }}
+                  >
+                      一键 AI 诊断
+                  </Button>
+              </div>
+          </div>
         ) : (
           <div style={{ flex: 1, minHeight: 0 }} />
         )}
