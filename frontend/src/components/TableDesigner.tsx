@@ -8,6 +8,7 @@ import Editor, { loader } from '@monaco-editor/react';
 import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, TriggerDefinition } from '../types';
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -46,6 +47,13 @@ interface ForeignKeyFormState {
     columnNames: string[];
     refTableName: string;
     refColumnNames: string[];
+}
+
+interface SchemaExecutionResult {
+    ok: boolean;
+    message?: string;
+    failedStatementIndex?: number;
+    statementCount: number;
 }
 
 // 通用兜底类型列表
@@ -1511,11 +1519,10 @@ ${selectedTrigger.statement}`;
       }
   };
 
-  const executeSchemaSql = async (sql: string, successMessage: string): Promise<boolean> => {
+  const executeSchemaStatements = async (sqlText: string): Promise<SchemaExecutionResult> => {
       const conn = connections.find(c => c.id === tab.connectionId);
       if (!conn) {
-          message.error('未找到连接');
-          return false;
+          return { ok: false, message: '未找到连接', statementCount: 0 };
       }
       const config = {
           ...conn.config,
@@ -1525,20 +1532,68 @@ ${selectedTrigger.statement}`;
           useSSH: conn.config.useSSH || false,
           ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
       };
+      const statements = sqlText.split(/;\s*\n/).map(s => s.trim()).filter(Boolean);
+      for (let i = 0; i < statements.length; i++) {
+          let stmt = statements[i];
+          if (!stmt.endsWith(';')) stmt += ';';
+          const res = await DBQuery(config as any, tab.dbName || '', stmt);
+          if (!res.success) {
+              const prefix = statements.length > 1 ? `第 ${i + 1}/${statements.length} 条语句执行失败: ` : '执行失败: ';
+              return {
+                  ok: false,
+                  message: prefix + res.message,
+                  failedStatementIndex: i,
+                  statementCount: statements.length,
+              };
+          }
+      }
+      return { ok: true, statementCount: statements.length };
+  };
+
+  const buildIndexFormFromRow = (row: IndexDisplayRow): IndexFormState => {
+      return normalizeIndexFormFromRow(
+          row as IndexDisplaySnapshot,
+          getIndexKindOptions().map(item => item.value as IndexKind),
+      );
+  };
+
+  const executeIndexEditSql = async (dropSql: string, addSql: string, previousIndex: IndexDisplayRow): Promise<boolean> => {
+      const result = await executeSchemaStatements(`${dropSql}\n${addSql}`);
+      if (result.ok) {
+          message.success('索引修改成功');
+          await fetchData();
+          return true;
+      }
+
+      const oldCreateSql = buildIndexCreateSql(buildIndexFormFromRow(previousIndex));
+      if (!oldCreateSql) {
+          message.error((result.message || '执行失败') + '；且无法自动恢复原索引，请尽快检查');
+          await fetchData();
+          return false;
+      }
+
+      if (!shouldRestoreOriginalIndex(result)) {
+          message.error(result.message || '执行失败');
+          return false;
+      }
+
+      const restoreResult = await executeSchemaStatements(oldCreateSql);
+      if (restoreResult.ok) {
+          message.error((result.message || '执行失败') + '；已自动恢复原索引');
+      } else {
+          message.error((result.message || '执行失败') + `；恢复原索引失败: ${restoreResult.message || '未知错误'}`);
+      }
+      await fetchData();
+      return false;
+  };
+
+  const executeSchemaSql = async (sql: string, successMessage: string): Promise<boolean> => {
       try {
-          // 多条 DDL 语句（如 DROP INDEX + CREATE INDEX）需要逐条执行，
-          // 因为 Go MySQL 驱动默认不支持多语句 Exec。
-          const statements = sql.split(/;\s*\n/).map(s => s.trim()).filter(Boolean);
-          for (let i = 0; i < statements.length; i++) {
-              let stmt = statements[i];
-              if (!stmt.endsWith(';')) stmt += ';';
-              const res = await DBQuery(config as any, tab.dbName || '', stmt);
-              if (!res.success) {
-                  const prefix = statements.length > 1 ? `第 ${i + 1}/${statements.length} 条语句执行失败: ` : '执行失败: ';
-                  message.error(prefix + res.message);
-                  if (i > 0) await fetchData();
-                  return false;
-              }
+          const result = await executeSchemaStatements(sql);
+          if (!result.ok) {
+              message.error(result.message || '执行失败');
+              if ((result.failedStatementIndex ?? 0) > 0) await fetchData();
+              return false;
           }
           message.success(successMessage);
           await fetchData();
@@ -1633,32 +1688,7 @@ END;`;
           return;
       }
       setIndexModalMode('edit');
-      const selectedName = String(selectedIndex.name || '').trim();
-      const selectedNameUpper = selectedName.toUpperCase();
-      const selectedTypeUpper = String(selectedIndex.indexType || '').trim().toUpperCase();
-      let kind: IndexKind = 'NORMAL';
-      if (selectedNameUpper === 'PRIMARY') {
-          kind = 'PRIMARY';
-      } else if (selectedTypeUpper === 'FULLTEXT') {
-          kind = 'FULLTEXT';
-      } else if (selectedTypeUpper === 'SPATIAL') {
-          kind = 'SPATIAL';
-      } else if (selectedIndex.nonUnique === 0) {
-          kind = 'UNIQUE';
-      }
-      const supportedKinds = new Set(getIndexKindOptions().map(item => item.value));
-      if (!supportedKinds.has(kind)) {
-          kind = selectedIndex.nonUnique === 0 ? 'UNIQUE' : 'NORMAL';
-      }
-
-      setIndexForm({
-          name: kind === 'PRIMARY' ? 'PRIMARY' : selectedName,
-          columnNames: [...selectedIndex.columnNames],
-          kind,
-          indexType: kind === 'NORMAL' || kind === 'UNIQUE'
-              ? (selectedTypeUpper || 'DEFAULT')
-              : 'DEFAULT',
-      });
+      setIndexForm(buildIndexFormFromRow(selectedIndex));
       setIsIndexModalOpen(true);
   };
 
@@ -1817,13 +1847,32 @@ END;`;
       let sql = addSql;
 
       if (indexModalMode === 'edit' && selectedIndex) {
+          const previousForm = buildIndexFormFromRow(selectedIndex);
+          const nextForm: IndexFormState = {
+              name: indexForm.kind === 'PRIMARY' ? 'PRIMARY' : nextName,
+              columnNames: [...indexForm.columnNames],
+              kind: indexForm.kind,
+              indexType: indexForm.kind === 'NORMAL' || indexForm.kind === 'UNIQUE'
+                  ? (String(indexForm.indexType || '').trim().toUpperCase() || 'DEFAULT')
+                  : 'DEFAULT',
+          };
+          if (!hasIndexFormChanged(previousForm, nextForm)) {
+              setIndexSaving(false);
+              message.info('没有检测到索引变更');
+              return;
+          }
           const dropSql = buildIndexDropSql(selectedIndex.name);
           if (!dropSql) {
               setIndexSaving(false);
               message.warning('当前数据库暂不支持删除该索引');
               return;
           }
-          sql = `${dropSql}\n${addSql}`;
+          const ok = await executeIndexEditSql(dropSql, addSql, selectedIndex);
+          setIndexSaving(false);
+          if (ok) {
+              setIsIndexModalOpen(false);
+          }
+          return;
       }
 
       const ok = await executeSchemaSql(sql, indexModalMode === 'create' ? '索引新增成功' : '索引修改成功');
@@ -2270,12 +2319,16 @@ END;`;
   const allIndexKeys = groupedIndexes.map(idx => idx.key);
   const isAllSelected = allIndexKeys.length > 0 && selectedIndexKeys.length === allIndexKeys.length;
   const isIndeterminate = selectedIndexKeys.length > 0 && selectedIndexKeys.length < allIndexKeys.length;
+  const toggleIndexSelection = (key: string, checked?: boolean) => {
+      setSelectedIndexKeys(prev => getNextIndexSelection(prev, key, checked));
+  };
 
   const selectColumn = {
       title: () => (
           <Checkbox
               checked={isAllSelected}
               indeterminate={isIndeterminate}
+              onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                   setSelectedIndexKeys(e.target.checked ? allIndexKeys : []);
               }}
@@ -2286,18 +2339,19 @@ END;`;
       key: '_select',
       width: 48,
       render: (_: any, record: any) => (
-          <Checkbox
-              checked={selectedIndexKeys.includes(record.key)}
-              onChange={(e) => {
+          <span
+              onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedIndexKeys(prev =>
-                      e.target.checked
-                          ? [...prev, record.key]
-                          : prev.filter(k => k !== record.key)
-                  );
+                  toggleIndexSelection(record.key);
               }}
-              style={{ margin: 0 }}
-          />
+              style={{ display: 'inline-flex' }}
+          >
+              <Checkbox
+                  checked={selectedIndexKeys.includes(record.key)}
+                  onChange={() => undefined}
+                  style={{ margin: 0, pointerEvents: 'none' }}
+              />
+          </span>
       ),
   };
 
@@ -2593,11 +2647,7 @@ END;`;
                                     }}
                                     onRow={(record) => ({
                                         onClick: () => {
-                                            setSelectedIndexKeys(prev =>
-                                                prev.includes(record.key)
-                                                    ? prev.filter(k => k !== record.key)
-                                                    : [...prev, record.key]
-                                            );
+                                            toggleIndexSelection(record.key);
                                         },
                                         style: { cursor: 'pointer' }
                                     })}
@@ -2897,7 +2947,7 @@ END;`;
                     />
                 </Space>
                 <div style={{ color: '#888', fontSize: 12 }}>
-                    修改索引会执行“先删除旧索引，再创建新索引”。
+                    修改索引时若新索引创建失败，系统会尝试自动恢复原索引。
                 </div>
             </Space>
         </Modal>
