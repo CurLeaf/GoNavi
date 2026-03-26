@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage, AIContextItem } from './types';
 import {
   ShortcutAction,
   ShortcutBinding,
@@ -427,8 +427,15 @@ interface AppState {
   // AI 运行时与持久化状态
   aiPanelVisible: boolean;
   aiChatHistory: Record<string, AIChatMessage[]>; // sessionId -> messages
+  replaceAIChatHistory: (sessionId: string, messages: AIChatMessage[]) => void;
   aiChatSessions: { id: string; title: string; updatedAt: number }[]; // 历史会话列表
   aiActiveSessionId: string | null;
+  updateAISessionTitle: (sessionId: string, title: string) => void;
+
+  aiContexts: Record<string, AIContextItem[]>;
+  addAIContext: (connectionKey: string, context: AIContextItem) => void;
+  removeAIContext: (connectionKey: string, dbName: string, tableName: string) => void;
+  clearAIContexts: (connectionKey: string) => void;
 
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
@@ -694,6 +701,7 @@ export const useStore = create<AppState>()(
       aiChatHistory: {},
       aiChatSessions: [],
       aiActiveSessionId: null,
+      aiContexts: {},
 
       addConnection: (conn) => set((state) => ({ connections: [...state.connections, conn] })),
       updateConnection: (conn) => set((state) => ({
@@ -1002,19 +1010,26 @@ export const useStore = create<AppState>()(
         return { aiChatHistory: history, aiChatSessions: newSessions };
       }),
       updateAIChatMessage: (sessionId, messageId, updates) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        const messages = history[sessionId];
+        const messages = state.aiChatHistory[sessionId];
         if (!messages) return state;
-        history[sessionId] = messages.map(m =>
-          m.id === messageId ? { ...m, ...updates } : m
-        );
-        let newSessions = [...state.aiChatSessions];
-        const existingSession = newSessions.find(s => s.id === sessionId);
-        if (existingSession) {
-            newSessions = newSessions.filter(s => s.id !== sessionId);
-            newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+        // 🔧 性能优化：用 findIndex + 定点替换代替全量 map，长对话场景下从 O(n) 降至 O(1)
+        const idx = messages.findIndex(m => m.id === messageId);
+        if (idx < 0) return state;
+        const newMessages = [...messages];
+        newMessages[idx] = { ...newMessages[idx], ...updates };
+        const history = { ...state.aiChatHistory, [sessionId]: newMessages };
+        // 仅当非纯 content 追加时才重排 session 顺序（性能优化：流式打字时跳过）
+        const isContentOnlyUpdate = Object.keys(updates).length === 1 && 'content' in updates;
+        if (!isContentOnlyUpdate) {
+            let newSessions = [...state.aiChatSessions];
+            const existingSession = newSessions.find(s => s.id === sessionId);
+            if (existingSession) {
+                newSessions = newSessions.filter(s => s.id !== sessionId);
+                newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+            }
+            return { aiChatHistory: history, aiChatSessions: newSessions };
         }
-        return { aiChatHistory: history, aiChatSessions: newSessions };
+        return { aiChatHistory: history };
       }),
       deleteAIChatMessage: (sessionId, messageId) => set((state) => {
         const history = { ...state.aiChatHistory };
@@ -1039,6 +1054,11 @@ export const useStore = create<AppState>()(
         delete history[sessionId];
         return { aiChatHistory: history };
       }),
+      replaceAIChatHistory: (sessionId, messages) => set((state) => {
+        const history = { ...state.aiChatHistory };
+        history[sessionId] = messages;
+        return { aiChatHistory: history };
+      }),
       deleteAISession: (sessionId) => set((state) => {
         const history = { ...state.aiChatHistory };
         delete history[sessionId];
@@ -1051,6 +1071,39 @@ export const useStore = create<AppState>()(
          return { aiActiveSessionId: newId };
       }),
       setAIActiveSessionId: (sessionId) => set({ aiActiveSessionId: sessionId }),
+      updateAISessionTitle: (sessionId, title) => set((state) => {
+          const newSessions = [...state.aiChatSessions];
+          const session = newSessions.find(s => s.id === sessionId);
+          if (session) {
+              session.title = title;
+          }
+          return { aiChatSessions: newSessions };
+      }),
+      addAIContext: (connectionKey, context) => set((state) => {
+        const contexts = state.aiContexts[connectionKey] || [];
+        if (contexts.find(c => c.dbName === context.dbName && c.tableName === context.tableName)) {
+           return state;
+        }
+        return {
+          aiContexts: {
+            ...state.aiContexts,
+            [connectionKey]: [...contexts, context]
+          }
+        };
+      }),
+      removeAIContext: (connectionKey, dbName, tableName) => set((state) => {
+        const contexts = state.aiContexts[connectionKey] || [];
+        return {
+          aiContexts: {
+            ...state.aiContexts,
+            [connectionKey]: contexts.filter(c => !(c.dbName === dbName && c.tableName === tableName))
+          }
+        };
+      }),
+      clearAIContexts: (connectionKey) => set((state) => {
+        const { [connectionKey]: _, ...rest } = state.aiContexts;
+        return { aiContexts: rest };
+      }),
     }),
     {
       name: 'lite-db-storage', // name of the item in the storage (must be unique)
@@ -1147,8 +1200,17 @@ export const useStore = create<AppState>()(
         windowState: state.windowState,
         sidebarWidth: state.sidebarWidth,
 
-        aiChatHistory: state.aiChatHistory,
-        aiChatSessions: state.aiChatSessions,
+        // 只持久化最近 20 个会话的聊天记录，防止 localStorage 膨胀
+        aiChatHistory: (() => {
+          const MAX_PERSIST_SESSIONS = 20;
+          const recentIds = new Set(state.aiChatSessions.slice(0, MAX_PERSIST_SESSIONS).map(s => s.id));
+          const trimmed: Record<string, any> = {};
+          for (const id of recentIds) {
+            if (state.aiChatHistory[id]) trimmed[id] = state.aiChatHistory[id];
+          }
+          return trimmed;
+        })(),
+        aiChatSessions: state.aiChatSessions.slice(0, 50),
       }), // Don't persist logs
     }
   )

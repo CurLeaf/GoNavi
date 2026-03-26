@@ -114,7 +114,7 @@ func (s *Service) AIDeleteProvider(id string) error {
 	return s.saveConfig()
 }
 
-// AITestProvider 测试 Provider 配置是否可用
+// AITestProvider 测试 Provider 配置是否可用，仅测试端点连通性与密钥，不实际调用对话
 func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{} {
 	// 如果传入脱敏的 key，使用已保存的 key
 	s.mu.RLock()
@@ -128,30 +128,84 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	}
 	s.mu.RUnlock()
 
-	p, err := provider.NewProvider(config)
-	if err != nil {
-		return map[string]interface{}{"success": false, "message": err.Error()}
-	}
-	if err := p.Validate(); err != nil {
-		return map[string]interface{}{"success": false, "message": err.Error()}
+	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	providerType := config.Type
+	if providerType == "custom" && config.APIFormat != "" {
+		providerType = config.APIFormat
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1000*1000*1000) // 30s
-	defer cancel()
+	client := &http.Client{Timeout: 10 * time.Second}
+	var err error
 
-	resp, err := p.Chat(ctx, ai.ChatRequest{
-		Messages: []ai.Message{
-			{Role: "user", Content: "Hi, please respond with 'OK' to confirm the connection is working."},
-		},
-		MaxTokens: 10,
-	})
+	switch providerType {
+	case "openai":
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
+			baseURL = baseURL + "/v1"
+		}
+		// 使用 /models 端点验证连通性和鉴权
+		req, _ := http.NewRequest("GET", baseURL+"/models", nil)
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		for k, v := range config.Headers {
+			req.Header.Set(k, v)
+		}
+		resp, reqErr := client.Do(req)
+		if reqErr != nil {
+			err = reqErr
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized {
+				err = fmt.Errorf("API Key 验证失败 (HTTP %d)", resp.StatusCode)
+			} else if resp.StatusCode >= 500 {
+				err = fmt.Errorf("上游服务器内部错误 (HTTP %d)", resp.StatusCode)
+			}
+		}
+	case "anthropic":
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com"
+		}
+		req, _ := http.NewRequest("GET", baseURL, nil)
+		resp, reqErr := client.Do(req)
+		if reqErr != nil {
+			err = reqErr
+		} else {
+			resp.Body.Close()
+		}
+	case "gemini":
+		if baseURL == "" {
+			baseURL = "https://generativelanguage.googleapis.com"
+		}
+		req, _ := http.NewRequest("GET", baseURL+"/v1beta/models?key="+config.APIKey, nil)
+		resp, reqErr := client.Do(req)
+		if reqErr != nil {
+			err = reqErr
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusBadRequest {
+				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
+			}
+		}
+	default:
+		if baseURL != "" {
+			req, _ := http.NewRequest("GET", baseURL, nil)
+			resp, reqErr := client.Do(req)
+			if reqErr != nil {
+				err = reqErr
+			} else {
+				resp.Body.Close()
+			}
+		}
+	}
+
 	if err != nil {
 		return map[string]interface{}{"success": false, "message": fmt.Sprintf("连接测试失败: %s", err.Error())}
 	}
 
 	return map[string]interface{}{
 		"success": true,
-		"message": fmt.Sprintf("连接成功！模型响应: %s", truncateString(resp.Content, 100)),
+		"message": "端点连通性测试成功！",
 	}
 }
 
@@ -364,19 +418,14 @@ func (s *Service) AISetContextLevel(level string) {
 
 // --- AI 对话 ---
 
-// AIChatSend 同步发送 AI 对话（非流式）
-func (s *Service) AIChatSend(messages []map[string]string) map[string]interface{} {
+// AIChatSend 非流式发送 AI 对话
+func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]interface{} {
 	p, err := s.getActiveProvider()
 	if err != nil {
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 
-	var aiMessages []ai.Message
-	for _, m := range messages {
-		aiMessages = append(aiMessages, ai.Message{Role: m["role"], Content: m["content"]})
-	}
-
-	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: aiMessages})
+	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: messages, Tools: tools})
 	if err != nil {
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
@@ -384,6 +433,7 @@ func (s *Service) AIChatSend(messages []map[string]string) map[string]interface{
 	return map[string]interface{}{
 		"success": true,
 		"content": resp.Content,
+		"tool_calls": resp.ToolCalls,
 		"tokensUsed": map[string]int{
 			"promptTokens":     resp.TokensUsed.PromptTokens,
 			"completionTokens": resp.TokensUsed.CompletionTokens,
@@ -393,7 +443,7 @@ func (s *Service) AIChatSend(messages []map[string]string) map[string]interface{
 }
 
 // AIChatStream 流式发送 AI 对话（通过 EventsEmit 推送）
-func (s *Service) AIChatStream(sessionID string, messages []map[string]string) {
+func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []ai.Tool) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	s.cancelFuncs[sessionID] = cancel
@@ -416,16 +466,13 @@ func (s *Service) AIChatStream(sessionID string, messages []map[string]string) {
 			return
 		}
 
-		var aiMessages []ai.Message
-		for _, m := range messages {
-			aiMessages = append(aiMessages, ai.Message{Role: m["role"], Content: m["content"]})
-		}
-
-		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: aiMessages}, func(chunk ai.StreamChunk) {
+		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
-				"content": chunk.Content,
-				"done":    chunk.Done,
-				"error":   chunk.Error,
+				"content":    chunk.Content,
+				"thinking":   chunk.Thinking,
+				"tool_calls": chunk.ToolCalls,
+				"done":       chunk.Done,
+				"error":      chunk.Error,
 			})
 		})
 

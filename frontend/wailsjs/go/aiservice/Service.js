@@ -6,12 +6,12 @@ export function AIChatCancel(arg1) {
   return window['go']['aiservice']['Service']['AIChatCancel'](arg1);
 }
 
-export function AIChatSend(arg1) {
-  return window['go']['aiservice']['Service']['AIChatSend'](arg1);
+export function AIChatSend(arg1, arg2) {
+  return window['go']['aiservice']['Service']['AIChatSend'](arg1, arg2);
 }
 
-export function AIChatStream(arg1, arg2) {
-  return window['go']['aiservice']['Service']['AIChatStream'](arg1, arg2);
+export function AIChatStream(arg1, arg2, arg3) {
+  return window['go']['aiservice']['Service']['AIChatStream'](arg1, arg2, arg3);
 }
 
 export function AICheckSQL(arg1) {

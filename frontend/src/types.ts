@@ -190,6 +190,12 @@ export type AIProviderType = 'openai' | 'anthropic' | 'gemini' | 'custom';
 export type AISafetyLevel = 'readonly' | 'readwrite' | 'full';
 export type AIContextLevel = 'schema_only' | 'with_samples' | 'with_results';
 
+export interface AIContextItem {
+  dbName: string;
+  tableName: string;
+  ddl: string;
+}
+
 export interface AIProviderConfig {
   id: string;
   type: AIProviderType;
@@ -204,12 +210,31 @@ export interface AIProviderConfig {
   temperature: number;
 }
 
+export interface AIToolCall {
+  id: string;
+  type: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export type ChatPhase = 'idle' | 'connecting' | 'thinking' | 'generating' | 'tool_calling';
+
 export interface AIChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  phase?: ChatPhase;
   content: string;
+  thinking?: string;
   timestamp: number;
   loading?: boolean;
+  images?: string[]; // base64 encoded images with data URI prefix
+  tool_calls?: AIToolCall[];
+  tool_call_id?: string;
+  tool_name?: string; // used for UI display
+  rawError?: string; // 存储未清洗的原始错误信息，用于用户复制排查
+  success?: boolean; // 标记探针执行是否成功
 }
 
 export interface AISafetyResult {

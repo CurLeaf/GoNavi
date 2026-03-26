@@ -1,9 +1,35 @@
 package ai
 
+// ToolCall 表示 AI 发出的工具调用
+type ToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// ToolFunction 表示可使用的函数定义
+type ToolFunction struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"` // JSON Schema definitions
+}
+
+// Tool 工具申明
+type Tool struct {
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
 // Message 表示一条对话消息
 type Message struct {
-	Role    string `json:"role"`    // "system" | "user" | "assistant"
-	Content string `json:"content"`
+	Role       string     `json:"role"`    // "system" | "user" | "assistant" | "tool"
+	Content    string     `json:"content"`
+	Images     []string   `json:"images,omitempty"`       // base64 encoded images with data:image/png;base64,... prefix
+	ToolCallID string     `json:"tool_call_id,omitempty"` // 当 role 为 "tool" 时必须传递
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 当 role 为 "assistant" 并试图调工具时传递
 }
 
 // ChatRequest AI 对话请求
@@ -11,12 +37,14 @@ type ChatRequest struct {
 	Messages    []Message `json:"messages"`
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"maxTokens"`
+	Tools       []Tool    `json:"tools,omitempty"`
 }
 
 // ChatResponse AI 对话响应
 type ChatResponse struct {
 	Content    string     `json:"content"`
 	TokensUsed TokenUsage `json:"tokensUsed"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // TokenUsage token 用量统计
@@ -28,9 +56,11 @@ type TokenUsage struct {
 
 // StreamChunk 流式响应片段
 type StreamChunk struct {
-	Content string `json:"content"`
-	Done    bool   `json:"done"`
-	Error   string `json:"error,omitempty"`
+	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
+	Done      bool       `json:"done"`
+	Error     string     `json:"error,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // ProviderConfig AI Provider 配置

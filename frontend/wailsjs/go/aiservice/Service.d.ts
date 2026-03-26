@@ -5,9 +5,9 @@ import {context} from '../models';
 
 export function AIChatCancel(arg1:string):Promise<void>;
 
-export function AIChatSend(arg1:Array<Record<string, string>>):Promise<Record<string, any>>;
+export function AIChatSend(arg1:Array<ai.Message>,arg2:Array<ai.Tool>):Promise<Record<string, any>>;
 
-export function AIChatStream(arg1:string,arg2:Array<Record<string, string>>):Promise<void>;
+export function AIChatStream(arg1:string,arg2:Array<ai.Message>,arg3:Array<ai.Tool>):Promise<void>;
 
 export function AICheckSQL(arg1:string):Promise<ai.SafetyResult>;
 

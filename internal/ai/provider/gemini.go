@@ -83,7 +83,13 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text string `json:"text"`
+	Text       string      `json:"text,omitempty"`
+	InlineData *geminiBlob `json:"inlineData,omitempty"`
+}
+
+type geminiBlob struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type geminiGenConfig struct {
@@ -205,10 +211,6 @@ func (p *GeminiProvider) buildRequest(req ai.ChatRequest) geminiRequest {
 	if temperature <= 0 {
 		temperature = p.config.Temperature
 	}
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = p.config.MaxTokens
-	}
 
 	var systemInstruction *geminiContent
 	var contents []geminiContent
@@ -224,9 +226,29 @@ func (p *GeminiProvider) buildRequest(req ai.ChatRequest) geminiRequest {
 		if role == "assistant" {
 			role = "model"
 		}
+		var parts []geminiPart
+		text := m.Content
+		if text == "" && len(m.Images) > 0 {
+			text = "请描述和分析这张图片。" // 同样避免 Gemini 认为意图不明确
+		}
+		if text != "" {
+			parts = append(parts, geminiPart{Text: text})
+		}
+		for _, img := range m.Images {
+			mimeType, rawBase64, err := ParseDataURI(img)
+			if err == nil {
+				parts = append(parts, geminiPart{
+					InlineData: &geminiBlob{
+						MimeType: mimeType,
+						Data:     rawBase64,
+					},
+				})
+			}
+		}
+
 		contents = append(contents, geminiContent{
 			Role:  role,
-			Parts: []geminiPart{{Text: m.Content}},
+			Parts: parts,
 		})
 	}
 
@@ -235,7 +257,6 @@ func (p *GeminiProvider) buildRequest(req ai.ChatRequest) geminiRequest {
 		SystemInstruction: systemInstruction,
 		GenerationConfig: geminiGenConfig{
 			Temperature:     temperature,
-			MaxOutputTokens: maxTokens,
 		},
 	}
 }
@@ -251,6 +272,12 @@ func (p *GeminiProvider) doRequest(ctx context.Context, url string, body interfa
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+
+	if strings.Contains(url, "alt=sse") {
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("Cache-Control", "no-cache")
+		httpReq.Header.Set("Connection", "keep-alive")
+	}
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {

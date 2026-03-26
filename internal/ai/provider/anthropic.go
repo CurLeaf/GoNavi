@@ -82,8 +82,42 @@ type anthropicRequest struct {
 }
 
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+func buildAnthropicMessages(reqMessages []ai.Message) []anthropicMessage {
+	messages := make([]anthropicMessage, 0, len(reqMessages))
+	for _, m := range reqMessages {
+		if len(m.Images) > 0 {
+			var contentParts []map[string]interface{}
+			for _, img := range m.Images {
+				mimeType, rawBase64, err := ParseDataURI(img)
+				if err == nil {
+					contentParts = append(contentParts, map[string]interface{}{
+						"type": "image",
+						"source": map[string]interface{}{
+							"type":       "base64",
+							"media_type": mimeType,
+							"data":       rawBase64,
+						},
+					})
+				}
+			}
+			text := m.Content
+			if text == "" {
+				text = "请描述和分析这张图片。" // 防止强 System Prompt 下模型仅看到空文本且忽略图片直接回复打招呼
+			}
+			contentParts = append(contentParts, map[string]interface{}{
+				"type": "text",
+				"text": text,
+			})
+			messages = append(messages, anthropicMessage{Role: m.Role, Content: contentParts})
+		} else {
+			messages = append(messages, anthropicMessage{Role: m.Role, Content: m.Content})
+		}
+	}
+	return messages
 }
 
 type anthropicResponse struct {
@@ -112,10 +146,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 	}
 
 	systemMsg, messages := extractSystemMessage(req.Messages)
-	anthropicMsgs := make([]anthropicMessage, len(messages))
-	for i, m := range messages {
-		anthropicMsgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
-	}
+	anthropicMsgs := buildAnthropicMessages(messages)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
@@ -167,10 +198,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	}
 
 	systemMsg, messages := extractSystemMessage(req.Messages)
-	anthropicMsgs := make([]anthropicMessage, len(messages))
-	for i, m := range messages {
-		anthropicMsgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
-	}
+	anthropicMsgs := buildAnthropicMessages(messages)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
@@ -252,6 +280,12 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.config.APIKey)
 	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+
+	if strings.Contains(string(jsonBody), `"stream":true`) || strings.Contains(string(jsonBody), `"stream": true`) {
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("Cache-Control", "no-cache")
+		httpReq.Header.Set("Connection", "keep-alive")
+	}
 
 	// 仅官方 API 发 beta 特性头（代理不发，避免触发 Claude Code 验证）
 	isOfficialAPI := p.baseURL == defaultAnthropicBaseURL || strings.Contains(p.baseURL, "anthropic.com")

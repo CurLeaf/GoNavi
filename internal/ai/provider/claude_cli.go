@@ -105,8 +105,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	fmt.Printf("[ClaudeCLI DEBUG] Process started, PID: %d\n", cmd.Process.Pid)
 
-	// 立即通知前端：AI 正在思考（避免用户以为卡死）
-	callback(ai.StreamChunk{Content: "💭 *正在思考...*\n\n"})
+	// 前端已有 loading 动画，无需在 content 中注入"正在思考"
 
 	// 逐行读取流式 JSON 输出
 	scanner := bufio.NewScanner(stdout)
@@ -131,14 +130,18 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 			// 助手消息开始或文本内容
 			if event.Message.Content != nil {
 				for _, block := range event.Message.Content {
-					if block.Type == "text" && block.Text != "" {
+					if block.Type == "thinking" && block.Thinking != "" {
+						callback(ai.StreamChunk{Thinking: block.Thinking})
+					} else if block.Type == "text" && block.Text != "" {
 						callback(ai.StreamChunk{Content: block.Text})
 					}
 				}
 			}
 		case "content_block_delta":
-			// 增量文本
-			if event.Delta.Text != "" {
+			// 增量文本或增量思考
+			if event.Delta.Type == "thinking_delta" && event.Delta.Thinking != "" {
+				callback(ai.StreamChunk{Thinking: event.Delta.Thinking})
+			} else if event.Delta.Text != "" {
 				callback(ai.StreamChunk{Content: event.Delta.Text})
 			}
 		case "result":
@@ -213,12 +216,15 @@ type cliStreamEvent struct {
 	Type    string `json:"type"`
 	Message struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Thinking string `json:"thinking"`
 		} `json:"content"`
 	} `json:"message,omitempty"`
 	Delta struct {
-		Text string `json:"text"`
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Thinking string `json:"thinking"`
 	} `json:"delta,omitempty"`
 	Result string `json:"result,omitempty"`
 	Error  struct {

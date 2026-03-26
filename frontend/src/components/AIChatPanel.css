@@ -157,9 +157,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     text-transform: uppercase;
     letter-spacing: 0.02em;
 }
@@ -363,4 +363,123 @@
 
 .ai-ide-message:hover .ai-message-actions {
     opacity: 1 !important;
+}
+
+/* Markdown 额外样式增强: Table & Blockquote */
+.ai-markdown-content table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+/* 让消息内容区域成为表格的滚动约束容器 */
+.ai-ide-message-content {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* 表格滚动容器 - 不限定直接子元素 */
+.ai-markdown-content table {
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.ai-markdown-content table::-webkit-scrollbar {
+  height: 4px;
+}
+
+.ai-markdown-content table::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+  border-radius: 2px;
+}
+
+.ai-markdown-content th,
+.ai-markdown-content td {
+  border: 1px solid rgba(125, 125, 125, 0.2);
+  padding: 6px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ai-markdown-content th {
+  background: rgba(125, 125, 125, 0.1);
+  font-weight: 600;
+}
+
+.ai-markdown-content blockquote {
+  margin: 12px 0;
+  padding: 8px 14px;
+  border-left: 4px solid rgba(125, 125, 125, 0.4);
+  background: rgba(125, 125, 125, 0.05);
+  color: inherit;
+  opacity: 0.85;
+  border-radius: 0 6px 6px 0;
+  font-style: italic;
+}
+
+/* 覆盖 code 块容器样式避免和 syntax highlighter 冲突 */
+.ai-markdown-content > pre {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* ===== 新版 AI 状态流转动画 ===== */
+
+/* 1. 连接脉冲动画 (connecting) */
+.ai-wave-pulse {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.ai-wave-pulse span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: currentColor;
+    animation: wave-pulse-anim 1.2s ease-in-out infinite;
+}
+.ai-wave-pulse span:nth-child(1) { animation-delay: 0s; }
+.ai-wave-pulse span:nth-child(2) { animation-delay: 0.15s; }
+.ai-wave-pulse span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes wave-pulse-anim {
+    0%, 100% { transform: translateY(0) scale(0.8); opacity: 0.4; }
+    50% { transform: translateY(-4px) scale(1.1); opacity: 1; }
+}
+
+/* 2. 平滑高度与透明度过渡 (针对 ThinkingBlock 和 面板折叠) */
+.ai-expand-transition {
+    display: grid;
+    transition: grid-template-rows 0.3s ease-out, opacity 0.3s ease-out;
+}
+.ai-expand-transition.expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+.ai-expand-transition.collapsed {
+    grid-template-rows: 0fr;
+    opacity: 0;
+}
+.ai-expand-transition > div {
+    overflow: hidden;
+}
+
+/* 3. Agent风格旋转Loading环 */
+.ai-spinning-ring {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(22, 119, 255, 0.2);
+    border-top-color: #1677ff;
+    border-radius: 50%;
+    animation: ai-spin-anim 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes ai-spin-anim {
+    to { transform: rotate(360deg); }
 }

@@ -1432,7 +1432,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'connection') {
           setActiveContext({ connectionId: key, dbName: '' });
       } else if (type === 'database') {
-          setActiveContext({ connectionId: dataRef.id, dbName: title });
+          setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'table') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'view' || type === 'db-trigger' || type === 'routine') {
@@ -1456,9 +1456,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
   const onDoubleClick = (e: any, node: any) => {
       // 保证用户直接双击节点未触发 onClick/onSelect 时也能强行拿到选中状态
-      const { type, dataRef, key: nodeKey, title } = node;
+      const { type, dataRef, key: nodeKey } = node;
       if (type === 'connection') setActiveContext({ connectionId: nodeKey, dbName: '' });
-      else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: title });
+      else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'table' || type === 'view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });

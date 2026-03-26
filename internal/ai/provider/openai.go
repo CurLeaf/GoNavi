@@ -88,18 +88,67 @@ type openAIChatRequest struct {
 	Temperature float64             `json:"temperature,omitempty"`
 	MaxTokens   int                 `json:"max_tokens,omitempty"`
 	Stream      bool                `json:"stream,omitempty"`
+	Tools       []ai.Tool           `json:"tools,omitempty"`
 }
 
 type openAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string        `json:"role"`
+	Content    interface{}   `json:"content,omitempty"`
+	ToolCalls  []ai.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+func buildOpenAIMessages(reqMessages []ai.Message, modelName string, baseURL string) []openAIChatMessage {
+	messages := make([]openAIChatMessage, len(reqMessages))
+	for i, m := range reqMessages {
+		if m.Role == "tool" {
+			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+			continue
+		}
+		if len(m.ToolCalls) > 0 {
+			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls}
+			continue
+		}
+
+		if len(m.Images) > 0 {
+			var contentParts []map[string]interface{}
+			text := m.Content
+			if text == "" {
+				text = "请描述和分析这张图片。" // 兼容部分模型（如 ZhipuAI/GLM-4V）强制要求图片必须伴随有效文本块，同时防止强 System Prompt 下模型当成空消息处理
+			}
+			contentParts = append(contentParts, map[string]interface{}{
+				"type": "text",
+				"text": text,
+			})
+			for _, img := range m.Images {
+				imgURL := img
+				// 仅当直接请求智谱官方 API 域名时（它原生不接受 data 协议前缀），才截取裸 Base64
+				if strings.Contains(strings.ToLower(baseURL), "bigmodel") {
+					if _, raw, err := ParseDataURI(img); err == nil {
+						imgURL = raw
+					}
+				}
+				contentParts = append(contentParts, map[string]interface{}{
+					"type": "image_url",
+					"image_url": map[string]interface{}{
+						"url": imgURL,
+					},
+				})
+			}
+			messages[i] = openAIChatMessage{Role: m.Role, Content: contentParts}
+		} else {
+			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content}
+		}
+	}
+	return messages
 }
 
 // openAIChatResponse OpenAI API 响应体
 type openAIChatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string        `json:"content"`
+			ToolCalls []ai.ToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -114,10 +163,22 @@ type openAIChatResponse struct {
 }
 
 // openAIStreamChunk SSE 流式响应片段
+type openAIToolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function *struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function,omitempty"`
+}
+
 type openAIStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string                `json:"content"`
+			ReasoningContent string                `json:"reasoning_content"`
+			ToolCalls        []openAIToolCallDelta `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -131,26 +192,19 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 		return nil, err
 	}
 
-	messages := make([]openAIChatMessage, len(req.Messages))
-	for i, m := range req.Messages {
-		messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content}
-	}
+	messages := buildOpenAIMessages(req.Messages, p.config.Model, p.baseURL)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
 		temperature = p.config.Temperature
-	}
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = p.config.MaxTokens
 	}
 
 	body := openAIChatRequest{
 		Model:       p.config.Model,
 		Messages:    messages,
 		Temperature: temperature,
-		MaxTokens:   maxTokens,
 		Stream:      false,
+		Tools:       req.Tools,
 	}
 
 	respBody, err := p.doRequest(ctx, body)
@@ -177,6 +231,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 			CompletionTokens: result.Usage.CompletionTokens,
 			TotalTokens:      result.Usage.TotalTokens,
 		},
+		ToolCalls: result.Choices[0].Message.ToolCalls,
 	}, nil
 }
 
@@ -185,26 +240,19 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 		return err
 	}
 
-	messages := make([]openAIChatMessage, len(req.Messages))
-	for i, m := range req.Messages {
-		messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content}
-	}
+	messages := buildOpenAIMessages(req.Messages, p.config.Model, p.baseURL)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
 		temperature = p.config.Temperature
-	}
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = p.config.MaxTokens
 	}
 
 	body := openAIChatRequest{
 		Model:       p.config.Model,
 		Messages:    messages,
 		Temperature: temperature,
-		MaxTokens:   maxTokens,
 		Stream:      true,
+		Tools:       req.Tools,
 	}
 
 	respBody, err := p.doRequest(ctx, body)
@@ -214,6 +262,8 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 	defer respBody.Close()
 
 	receivedContent := false
+	var activeToolCalls []ai.ToolCall
+
 	scanner := bufio.NewScanner(respBody)
 	// 增大 scanner buffer，防止长行被截断
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -245,12 +295,49 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 			return nil
 		}
 		if len(chunk.Choices) > 0 {
-			content := chunk.Choices[0].Delta.Content
+			choice := chunk.Choices[0]
+			
+			// Handle ToolCalls delta
+			if len(choice.Delta.ToolCalls) > 0 {
+				receivedContent = true
+				for _, tcDelta := range choice.Delta.ToolCalls {
+					// Expand activeToolCalls slice if index is larger
+					for len(activeToolCalls) <= tcDelta.Index {
+						activeToolCalls = append(activeToolCalls, ai.ToolCall{Type: "function"})
+					}
+					if tcDelta.ID != "" {
+						activeToolCalls[tcDelta.Index].ID = tcDelta.ID
+					}
+					if tcDelta.Function != nil {
+						if tcDelta.Function.Name != "" {
+							activeToolCalls[tcDelta.Index].Function.Name += tcDelta.Function.Name
+						}
+						if tcDelta.Function.Arguments != "" {
+							activeToolCalls[tcDelta.Index].Function.Arguments += tcDelta.Function.Arguments
+						}
+					}
+				}
+				// 实时推送目前已解析的 ToolCalls 状态
+				callback(ai.StreamChunk{ToolCalls: activeToolCalls})
+			}
+
+			content := choice.Delta.Content
 			if content != "" {
 				receivedContent = true
 				callback(ai.StreamChunk{Content: content})
 			}
-			if chunk.Choices[0].FinishReason != nil {
+
+			// 支持 DeepSeek/千问等模型的 reasoning_content 字段
+			if choice.Delta.ReasoningContent != "" {
+				receivedContent = true
+				callback(ai.StreamChunk{Thinking: choice.Delta.ReasoningContent})
+			}
+
+			if choice.FinishReason != nil {
+				if *choice.FinishReason == "tool_calls" {
+					callback(ai.StreamChunk{ToolCalls: activeToolCalls, Done: true})
+					return nil
+				}
 				callback(ai.StreamChunk{Done: true})
 				return nil
 			}
@@ -295,6 +382,13 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
+
+	// 仅在流式请求时明确声明 SSE，防止代理缓冲
+	if strings.Contains(string(jsonBody), `"stream":true`) || strings.Contains(string(jsonBody), `"stream": true`) {
+		httpReq.Header.Set("Accept", "text/event-stream")
+		httpReq.Header.Set("Cache-Control", "no-cache")
+		httpReq.Header.Set("Connection", "keep-alive")
+	}
 
 	// 自定义 headers（用于兼容各类 OpenAI 兼容服务）
 	for k, v := range p.config.Headers {
