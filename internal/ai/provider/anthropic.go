@@ -72,13 +72,23 @@ func (p *AnthropicProvider) Validate() error {
 	return nil
 }
 
+// --- 请求体类型 ---
+
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	Messages    []anthropicMessage `json:"messages"`
-	System      string             `json:"system,omitempty"`
-	MaxTokens   int                `json:"max_tokens"`
-	Temperature float64            `json:"temperature,omitempty"`
-	Stream      bool               `json:"stream,omitempty"`
+	Model       string              `json:"model"`
+	Messages    []anthropicMessage  `json:"messages"`
+	System      string              `json:"system,omitempty"`
+	MaxTokens   int                 `json:"max_tokens"`
+	Temperature float64             `json:"temperature,omitempty"`
+	Stream      bool                `json:"stream,omitempty"`
+	Tools       []anthropicTool     `json:"tools,omitempty"`
+}
+
+// anthropicTool Anthropic 格式的工具定义
+type anthropicTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	InputSchema any    `json:"input_schema"`
 }
 
 type anthropicMessage struct {
@@ -86,9 +96,66 @@ type anthropicMessage struct {
 	Content interface{} `json:"content"`
 }
 
+// convertToolsToAnthropic 将 OpenAI 格式的 tools 转换为 Anthropic 格式
+func convertToolsToAnthropic(tools []ai.Tool) []anthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+	result := make([]anthropicTool, 0, len(tools))
+	for _, t := range tools {
+		result = append(result, anthropicTool{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
+		})
+	}
+	return result
+}
+
 func buildAnthropicMessages(reqMessages []ai.Message) []anthropicMessage {
 	messages := make([]anthropicMessage, 0, len(reqMessages))
 	for _, m := range reqMessages {
+		// tool result 消息：转换为 Anthropic 的 tool_result content block
+		if m.Role == "tool" {
+			messages = append(messages, anthropicMessage{
+				Role: "user",
+				Content: []map[string]interface{}{
+					{
+						"type":        "tool_result",
+						"tool_use_id": m.ToolCallID,
+						"content":     m.Content,
+					},
+				},
+			})
+			continue
+		}
+
+		// assistant 带 tool_calls：转换为 Anthropic 的 tool_use content block
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			var contentParts []map[string]interface{}
+			if m.Content != "" {
+				contentParts = append(contentParts, map[string]interface{}{
+					"type": "text",
+					"text": m.Content,
+				})
+			}
+			for _, tc := range m.ToolCalls {
+				var input interface{}
+				if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+					input = map[string]interface{}{}
+				}
+				contentParts = append(contentParts, map[string]interface{}{
+					"type":  "tool_use",
+					"id":    tc.ID,
+					"name":  tc.Function.Name,
+					"input": input,
+				})
+			}
+			messages = append(messages, anthropicMessage{Role: "assistant", Content: contentParts})
+			continue
+		}
+
+		// 图片消息
 		if len(m.Images) > 0 {
 			var contentParts []map[string]interface{}
 			for _, img := range m.Images {
@@ -106,7 +173,7 @@ func buildAnthropicMessages(reqMessages []ai.Message) []anthropicMessage {
 			}
 			text := m.Content
 			if text == "" {
-				text = "请描述和分析这张图片。" // 防止强 System Prompt 下模型仅看到空文本且忽略图片直接回复打招呼
+				text = "请描述和分析这张图片。"
 			}
 			contentParts = append(contentParts, map[string]interface{}{
 				"type": "text",
@@ -120,11 +187,19 @@ func buildAnthropicMessages(reqMessages []ai.Message) []anthropicMessage {
 	return messages
 }
 
+// --- 响应体类型 ---
+
+type anthropicContentBlock struct {
+	Type  string          `json:"type"` // "text" | "tool_use"
+	Text  string          `json:"text,omitempty"`
+	ID    string          `json:"id,omitempty"`    // tool_use
+	Name  string          `json:"name,omitempty"`  // tool_use
+	Input json.RawMessage `json:"input,omitempty"` // tool_use
+}
+
 type anthropicResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
-	Usage struct {
+	Content []anthropicContentBlock `json:"content"`
+	Usage   struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
@@ -133,12 +208,19 @@ type anthropicResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// 流式事件类型
 type anthropicStreamEvent struct {
-	Type  string `json:"type"`
-	Delta *struct {
-		Text string `json:"text"`
+	Type         string                 `json:"type"`
+	Index        int                    `json:"index,omitempty"`
+	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
+	Delta        *struct {
+		Type        string `json:"type,omitempty"`
+		Text        string `json:"text,omitempty"`
+		PartialJSON string `json:"partial_json,omitempty"`
 	} `json:"delta,omitempty"`
 }
+
+// --- Chat 非流式 ---
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.ChatResponse, error) {
 	if err := p.Validate(); err != nil {
@@ -163,6 +245,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		System:      systemMsg,
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
+		Tools:       convertToolsToAnthropic(req.Tools),
 	}
 
 	respBody, err := p.doRequest(ctx, body)
@@ -182,8 +265,35 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return nil, fmt.Errorf("Anthropic 返回空响应")
 	}
 
+	// 解析响应中的 text 和 tool_use content blocks
+	var textContent string
+	var toolCalls []ai.ToolCall
+	for _, block := range result.Content {
+		switch block.Type {
+		case "text":
+			textContent += block.Text
+		case "tool_use":
+			argsStr := "{}"
+			if len(block.Input) > 0 {
+				argsStr = string(block.Input)
+			}
+			toolCalls = append(toolCalls, ai.ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      block.Name,
+					Arguments: argsStr,
+				},
+			})
+		}
+	}
+
 	return &ai.ChatResponse{
-		Content: result.Content[0].Text,
+		Content:   textContent,
+		ToolCalls: toolCalls,
 		TokensUsed: ai.TokenUsage{
 			PromptTokens:     result.Usage.InputTokens,
 			CompletionTokens: result.Usage.OutputTokens,
@@ -191,6 +301,8 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		},
 	}, nil
 }
+
+// --- ChatStream 流式 ---
 
 func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, callback func(ai.StreamChunk)) error {
 	if err := p.Validate(); err != nil {
@@ -216,6 +328,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
 		Stream:      true,
+		Tools:       convertToolsToAnthropic(req.Tools),
 	}
 
 	respBody, err := p.doRequest(ctx, body)
@@ -223,6 +336,14 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		return err
 	}
 	defer respBody.Close()
+
+	// 跟踪当前活跃的 tool_use blocks
+	type activeToolUse struct {
+		id        string
+		name      string
+		argsJSON  strings.Builder
+	}
+	activeBlocks := make(map[int]*activeToolUse) // index -> block
 
 	scanner := bufio.NewScanner(respBody)
 	for scanner.Scan() {
@@ -238,10 +359,54 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		}
 
 		switch event.Type {
-		case "content_block_delta":
-			if event.Delta != nil && event.Delta.Text != "" {
-				callback(ai.StreamChunk{Content: event.Delta.Text})
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				activeBlocks[event.Index] = &activeToolUse{
+					id:   event.ContentBlock.ID,
+					name: event.ContentBlock.Name,
+				}
 			}
+
+		case "content_block_delta":
+			if event.Delta == nil {
+				continue
+			}
+			switch event.Delta.Type {
+			case "text_delta":
+				if event.Delta.Text != "" {
+					callback(ai.StreamChunk{Content: event.Delta.Text})
+				}
+			case "input_json_delta":
+				if block, ok := activeBlocks[event.Index]; ok {
+					block.argsJSON.WriteString(event.Delta.PartialJSON)
+				}
+			}
+
+		case "content_block_stop":
+			if block, ok := activeBlocks[event.Index]; ok {
+				argsStr := block.argsJSON.String()
+				if argsStr == "" {
+					argsStr = "{}"
+				}
+				// 产出完整的 tool call
+				callback(ai.StreamChunk{
+					ToolCalls: []ai.ToolCall{
+						{
+							ID:   block.id,
+							Type: "function",
+							Function: struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							}{
+								Name:      block.name,
+								Arguments: argsStr,
+							},
+						},
+					},
+				})
+				delete(activeBlocks, event.Index)
+			}
+
 		case "message_stop":
 			callback(ai.StreamChunk{Done: true})
 			return nil
@@ -251,6 +416,8 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	callback(ai.StreamChunk{Done: true})
 	return scanner.Err()
 }
+
+// --- HTTP 请求 ---
 
 func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io.ReadCloser, error) {
 	jsonBody, err := json.Marshal(body)
@@ -262,15 +429,6 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io
 	if strings.HasSuffix(p.baseURL, "/v1") {
 		url = p.baseURL + "/messages"
 	}
-
-	// 调试日志：打印实际请求信息
-	bodyStr := string(jsonBody)
-	if len(bodyStr) > 500 {
-		bodyStr = bodyStr[:500] + "..."
-	}
-	fmt.Printf("[Anthropic DEBUG] URL: %s\n", url)
-	fmt.Printf("[Anthropic DEBUG] BaseURL: %s\n", p.baseURL)
-	fmt.Printf("[Anthropic DEBUG] Body: %s\n", bodyStr)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {

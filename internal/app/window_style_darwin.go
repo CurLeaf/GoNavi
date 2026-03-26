@@ -8,6 +8,9 @@ package app
 #import <Cocoa/Cocoa.h>
 #import <dispatch/dispatch.h>
 
+static inline BOOL gonaviBoolYES() { return YES; }
+static inline BOOL gonaviBoolNO()  { return NO; }
+
 static void gonaviSetWindowButtonsVisible(NSWindow *window, BOOL visible) {
 	if (window == nil) {
 		return;
@@ -62,9 +65,9 @@ import "C"
 
 func setMacNativeWindowControls(enabled bool) {
 	state := resolveMacNativeWindowControlState(enabled)
-	flag := C.BOOL(false)
 	if state.ShowNativeButtons {
-		flag = C.BOOL(true)
+		C.gonaviApplyMacWindowStyle(C.gonaviBoolYES())
+	} else {
+		C.gonaviApplyMacWindowStyle(C.gonaviBoolNO())
 	}
-	C.gonaviApplyMacWindowStyle(flag)
 }

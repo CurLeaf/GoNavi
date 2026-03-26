@@ -1215,9 +1215,6 @@ function App() {
       if (target?.closest('[data-no-titlebar-toggle="true"]')) {
           return;
       }
-      if (useNativeMacWindowControls) {
-          return;
-      }
       void handleTitleBarWindowToggle();
   };
   

@@ -209,7 +209,17 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		return nil, err
+		// 当带 tools 的请求返回 400 时，自动降级为不带 tools 的纯文本请求
+		if len(req.Tools) > 0 && isHTTP400Error(err) {
+			fmt.Println("[OpenAI] 模型不支持 Function Calling，自动降级为纯文本模式")
+			body.Tools = nil
+			respBody, err = p.doRequest(ctx, body)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	defer respBody.Close()
 
@@ -257,7 +267,17 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		return err
+		// 当带 tools 的请求返回 400 时，自动降级为不带 tools 的纯文本请求
+		if len(req.Tools) > 0 && isHTTP400Error(err) {
+			fmt.Println("[OpenAI] 模型不支持 Function Calling，自动降级为纯文本模式")
+			body.Tools = nil
+			respBody, err = p.doRequest(ctx, body)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 	defer respBody.Close()
 
@@ -366,14 +386,7 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 
 	url := p.baseURL + "/chat/completions"
 
-	// 调试日志
-	bodyStr := string(jsonBody)
-	if len(bodyStr) > 500 {
-		bodyStr = bodyStr[:500] + "..."
-	}
-	fmt.Printf("[OpenAI DEBUG] URL: %s\n", url)
-	fmt.Printf("[OpenAI DEBUG] BaseURL: %s\n", p.baseURL)
-	fmt.Printf("[OpenAI DEBUG] Body: %s\n", bodyStr)
+
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
@@ -407,4 +420,16 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 	}
 
 	return resp.Body, nil
+}
+
+// isHTTP400Error 检查错误是否为 HTTP 4xx 客户端错误（400/422 等），
+// 通常表示模型不支持请求中的某些参数（如 tools/functions）。
+func isHTTP400Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "(HTTP 400)") ||
+		strings.Contains(msg, "(HTTP 422)") ||
+		strings.Contains(msg, "(HTTP 404)")
 }

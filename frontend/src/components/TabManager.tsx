@@ -151,7 +151,7 @@ const TabManager: React.FC = () => {
             id: newTabId,
             type: 'query',
             title: '新建查询',
-            query: '',
+            query: sql,
             connectionId: resolvedConnId,
             dbName: resolvedDbName
         });

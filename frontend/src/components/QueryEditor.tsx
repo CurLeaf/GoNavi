@@ -2040,11 +2040,25 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               setCurrentDb(dbName);
           }
 
+
           const editor = editorRef.current;
           const monaco = monacoRef.current;
           if (editor && monaco) {
-              let position = editor.getPosition();
               const model = editor.getModel();
+              const existingContent = editor.getValue?.() || '';
+
+              // runImmediately 模式下，如果编辑器内容已是待注入的 SQL（TabManager 创建时已传入），
+              // 跳过追加，直接选中全部内容并执行
+              if (e.detail.runImmediately && existingContent.trim() === sqlText.trim()) {
+                  if (model) {
+                      const lineCount = model.getLineCount();
+                      const maxCol = model.getLineMaxColumn(lineCount);
+                      editor.setSelection(new monaco.Range(1, 1, lineCount, maxCol));
+                      editor.focus();
+                      setTimeout(() => handleRun(), 500);
+                  }
+              } else {
+              let position = editor.getPosition();
               if (!position && model) {
                   const lineCount = model.getLineCount();
                   const maxCol = model.getLineMaxColumn(lineCount);
@@ -2080,6 +2094,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                       // 🔧 延迟 500ms 等待连接/数据库切换的 setState 生效后再执行
                       setTimeout(() => handleRun(), 500);
                   }
+              }
               }
           } else {
               setQuery((prev: string) => prev ? prev + '\n' + sqlText : sqlText);

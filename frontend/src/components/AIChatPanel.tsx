@@ -333,21 +333,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
     }, [activeProvider?.id]);
 
-    useEffect(() => {
-        if (activeProvider && dynamicModels.length > 0) {
-            const currentModels = activeProvider.models || [];
-            if (JSON.stringify(currentModels) !== JSON.stringify(dynamicModels)) {
-                try {
-                    const Service = (window as any).go?.aiservice?.Service;
-                    const payload = { ...activeProvider, models: dynamicModels };
-                    Service?.AISaveProvider?.(payload);
-                    setActiveProvider(payload);
-                } catch (e) {
-                    console.warn('Failed to cache models', e);
-                }
-            }
-        }
-    }, [activeProvider, dynamicModels]);
+
+    // dynamicModels 仅在内存中使用，不再写回供应商配置，避免污染静态 models 列表
 
     const fetchDynamicModels = useCallback(async () => {
         try {
