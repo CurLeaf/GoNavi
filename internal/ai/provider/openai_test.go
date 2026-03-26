@@ -28,18 +28,24 @@ func TestOpenAIProvider_Validate_Valid(t *testing.T) {
 }
 
 func TestOpenAIProvider_Name_Custom(t *testing.T) {
-	p, _ := NewOpenAIProvider(ai.ProviderConfig{
-		Type: "openai", Name: "My OpenAI", APIKey: "sk-test",
+	p, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type: "openai", Name: "My OpenAI", APIKey: "sk-test", Model: "gpt-4o",
 	})
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
 	if p.Name() != "My OpenAI" {
 		t.Fatalf("expected name 'My OpenAI', got '%s'", p.Name())
 	}
 }
 
 func TestOpenAIProvider_Name_Default(t *testing.T) {
-	p, _ := NewOpenAIProvider(ai.ProviderConfig{
-		Type: "openai", APIKey: "sk-test",
+	p, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type: "openai", APIKey: "sk-test", Model: "gpt-4o",
 	})
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
 	if p.Name() != "OpenAI" {
 		t.Fatalf("expected default name 'OpenAI', got '%s'", p.Name())
 	}
@@ -56,29 +62,34 @@ func TestOpenAIProvider_DefaultBaseURL(t *testing.T) {
 }
 
 func TestOpenAIProvider_CustomBaseURL(t *testing.T) {
-	p, _ := NewOpenAIProvider(ai.ProviderConfig{
-		Type: "openai", APIKey: "sk-test", BaseURL: "https://my-proxy.com/v1",
+	p, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type: "openai", APIKey: "sk-test", BaseURL: "https://my-proxy.com/v1", Model: "gpt-4o",
 	})
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
 	op := p.(*OpenAIProvider)
 	if op.baseURL != "https://my-proxy.com/v1" {
 		t.Fatalf("expected custom base URL, got '%s'", op.baseURL)
 	}
 }
 
-func TestOpenAIProvider_DefaultModel(t *testing.T) {
-	p, _ := NewOpenAIProvider(ai.ProviderConfig{
+func TestOpenAIProvider_RejectsMissingModel(t *testing.T) {
+	_, err := NewOpenAIProvider(ai.ProviderConfig{
 		Type: "openai", APIKey: "sk-test",
 	})
-	op := p.(*OpenAIProvider)
-	if op.config.Model != "gpt-4o" {
-		t.Fatalf("expected default model 'gpt-4o', got '%s'", op.config.Model)
+	if err == nil {
+		t.Fatal("expected constructor error for missing model")
 	}
 }
 
 func TestOpenAIProvider_DefaultMaxTokens(t *testing.T) {
-	p, _ := NewOpenAIProvider(ai.ProviderConfig{
-		Type: "openai", APIKey: "sk-test",
+	p, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type: "openai", APIKey: "sk-test", Model: "gpt-4o",
 	})
+	if err != nil {
+		t.Fatalf("unexpected constructor error: %v", err)
+	}
 	op := p.(*OpenAIProvider)
 	if op.config.MaxTokens != 4096 {
 		t.Fatalf("expected default max tokens 4096, got %d", op.config.MaxTokens)

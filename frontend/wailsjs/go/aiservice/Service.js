@@ -22,6 +22,10 @@ export function AIDeleteProvider(arg1) {
   return window['go']['aiservice']['Service']['AIDeleteProvider'](arg1);
 }
 
+export function AIDeleteSession(arg1) {
+  return window['go']['aiservice']['Service']['AIDeleteSession'](arg1);
+}
+
 export function AIGetActiveProvider() {
   return window['go']['aiservice']['Service']['AIGetActiveProvider']();
 }
@@ -42,12 +46,24 @@ export function AIGetSafetyLevel() {
   return window['go']['aiservice']['Service']['AIGetSafetyLevel']();
 }
 
+export function AIGetSessions() {
+  return window['go']['aiservice']['Service']['AIGetSessions']();
+}
+
 export function AIListModels() {
   return window['go']['aiservice']['Service']['AIListModels']();
 }
 
+export function AILoadSession(arg1) {
+  return window['go']['aiservice']['Service']['AILoadSession'](arg1);
+}
+
 export function AISaveProvider(arg1) {
   return window['go']['aiservice']['Service']['AISaveProvider'](arg1);
+}
+
+export function AISaveSession(arg1, arg2, arg3, arg4) {
+  return window['go']['aiservice']['Service']['AISaveSession'](arg1, arg2, arg3, arg4);
 }
 
 export function AISetActiveProvider(arg1) {

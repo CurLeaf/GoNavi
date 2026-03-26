@@ -13,6 +13,8 @@ export function AICheckSQL(arg1:string):Promise<ai.SafetyResult>;
 
 export function AIDeleteProvider(arg1:string):Promise<void>;
 
+export function AIDeleteSession(arg1:string):Promise<void>;
+
 export function AIGetActiveProvider():Promise<string>;
 
 export function AIGetBuiltinPrompts():Promise<Record<string, string>>;
@@ -23,9 +25,15 @@ export function AIGetProviders():Promise<Array<ai.ProviderConfig>>;
 
 export function AIGetSafetyLevel():Promise<string>;
 
+export function AIGetSessions():Promise<Array<Record<string, any>>>;
+
 export function AIListModels():Promise<Record<string, any>>;
 
+export function AILoadSession(arg1:string):Promise<Record<string, any>>;
+
 export function AISaveProvider(arg1:ai.ProviderConfig):Promise<void>;
+
+export function AISaveSession(arg1:string,arg2:string,arg3:number,arg4:string):Promise<void>;
 
 export function AISetActiveProvider(arg1:string):Promise<void>;
 

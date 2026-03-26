@@ -483,3 +483,15 @@
 @keyframes ai-spin-anim {
     to { transform: rotate(360deg); }
 }
+
+/* 面板/弹窗内部 toast 定位覆盖：从 fixed（视口顶部）改为 absolute（容器内部顶部） */
+.ai-chat-panel .ant-message,
+.ai-settings-body .ant-message {
+    position: absolute !important;
+    top: 16px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    right: auto !important;
+    width: max-content;
+    z-index: 100;
+}

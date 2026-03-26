@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Modal, Button, Input, Select, Form, message, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
 
@@ -26,20 +26,39 @@ interface ProviderPreset {
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
-    { key: 'openai', label: 'OpenAI', icon: <ThunderboltOutlined />, desc: 'GPT-5.4 / 5.3 系列', color: '#10b981', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.4', models: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3'] },
-    { key: 'deepseek', label: 'DeepSeek', icon: <ThunderboltOutlined />, desc: 'DeepSeek-V4 / R1', color: '#3b82f6', backendType: 'openai', defaultBaseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', models: ['deepseek-chat', 'deepseek-reasoner'] },
-    { key: 'qwen', label: '通义千问', icon: <CloudOutlined />, desc: 'Qwen3.5 / Qwen3 系列', color: '#6366f1', backendType: 'openai', defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen3.5-max', models: ['qwen3.5-max', 'qwen3-plus', 'qwen3-turbo'] },
-    { key: 'zhipu', label: '智谱 GLM', icon: <ExperimentOutlined />, desc: 'GLM-5 / GLM-5-Turbo', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-5', models: ['glm-5', 'glm-5-turbo', 'glm-4.7-flash'] },
-    { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 系列', color: '#0d9488', backendType: 'openai', defaultBaseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'kimi-k2.5', models: ['kimi-k2.5', 'kimi-k2-turbo-preview', 'kimi-k2-thinking'] },
-    { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet 4.6', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-6', models: ['claude-opus-4-6', 'claude-sonnet-4-6'] },
-    { key: 'gemini', label: 'Gemini', icon: <CloudOutlined />, desc: 'Gemini 3.1 / 2.5 系列', color: '#059669', backendType: 'gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com', defaultModel: 'gemini-2.5-flash', models: ['gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-2.5-pro'] },
+    { key: 'openai', label: 'OpenAI', icon: <ApiOutlined />, desc: 'GPT-5.4 / 5.3 系列', color: '#10b981', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o', models: [] },
+    { key: 'deepseek', label: 'DeepSeek', icon: <ThunderboltOutlined />, desc: 'DeepSeek-V4 / R1', color: '#3b82f6', backendType: 'openai', defaultBaseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', models: [] },
+    { key: 'qwen', label: '通义千问', icon: <CloudOutlined />, desc: 'Qwen3.5 / Qwen3 系列', color: '#6366f1', backendType: 'openai', defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max', models: [] },
+    { key: 'zhipu', label: '智谱 GLM', icon: <ExperimentOutlined />, desc: 'GLM-5 / GLM-5-Turbo', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4', models: [] },
+    { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 (Anthropic 兼容)', color: '#0d9488', backendType: 'anthropic', defaultBaseUrl: 'https://api.moonshot.cn/anthropic', defaultModel: 'moonshot-v1-8k', models: [] },
+    { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-20241022', models: [] },
+    { key: 'gemini', label: 'Gemini', icon: <CloudOutlined />, desc: 'Gemini 3.1 / 2.5 系列', color: '#059669', backendType: 'gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com', defaultModel: 'gemini-2.5-flash', models: [] },
     { key: 'volcengine', label: '火山引擎', icon: <CloudOutlined />, desc: '火山方舟 / 豆包大模型', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModel: 'ep-xxxxxx', models: [] },
-    { key: 'minimax', label: 'MiniMax', icon: <ExperimentOutlined />, desc: 'abab6.5 / abab7 系列', color: '#e11d48', backendType: 'anthropic', defaultBaseUrl: 'https://api.minimaxi.com/anthropic', defaultModel: 'MiniMax-Text-01', models: ['MiniMax-Text-01', 'MiniMax-Text-01-vision', 'MiniMax-Text-01-search', 'MiniMax-Text-01-code', 'MiniMax-Text-01-web', 'MiniMax-Text-01-sql', 'MiniMax-Text-01-python', 'MiniMax-Text-01-math', 'MiniMax-Text-01-doc'] },
+    { key: 'minimax', label: 'MiniMax', icon: <ExperimentOutlined />, desc: 'M2.7 / M2.5 系列 (Anthropic 兼容)', color: '#e11d48', backendType: 'anthropic', defaultBaseUrl: 'https://api.minimaxi.com/anthropic', defaultModel: 'MiniMax-M2.7', models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'] },
     { key: 'ollama', label: 'Ollama', icon: <AppstoreOutlined />, desc: '本地部署开源模型', color: '#78716c', backendType: 'openai', defaultBaseUrl: 'http://localhost:11434/v1', defaultModel: 'llama3', models: [] },
     { key: 'custom', label: '自定义', icon: <AppstoreOutlined />, desc: '自定义 API 端点', color: '#64748b', backendType: 'custom', defaultBaseUrl: '', defaultModel: '', models: [] },
 ];
 
 const findPreset = (key: string): ProviderPreset => PROVIDER_PRESETS.find(p => p.key === key) || PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
+
+const getProviderHostname = (raw?: string): string => {
+    if (!raw) return '';
+    try {
+        return new URL(raw).hostname.toLowerCase();
+    } catch {
+        return '';
+    }
+};
+
+const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'>): ProviderPreset => {
+    const host = getProviderHostname(provider.baseUrl);
+    if (host.endsWith('moonshot.cn')) {
+        return findPreset('moonshot');
+    }
+    return PROVIDER_PRESETS.find(pr => pr.backendType === provider.type && host !== '' && host === getProviderHostname(pr.defaultBaseUrl))
+        || PROVIDER_PRESETS.find(pr => pr.backendType === provider.type)
+        || findPreset('custom');
+};
 
 const SAFETY_OPTIONS: { label: string; value: AISafetyLevel; desc: string; color: string; icon: string }[] = [
     { label: '只读模式', value: 'readonly', desc: 'AI 仅可执行 SELECT 等查询操作，最安全', color: '#22c55e', icon: '🔒' },
@@ -65,6 +84,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [builtinPrompts, setBuiltinPrompts] = useState<Record<string, string>>({});
     const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'prompts' | 'tools'>('providers');
     const [form] = Form.useForm();
+    const modalBodyRef = useRef<HTMLDivElement>(null);
+
+    // Modal 内部 toast 通知
+    const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body });
 
     // 主题色
     const cardBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
@@ -108,31 +131,45 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         const newProvider: AIProviderConfig = {
             id: '', type: preset.backendType, name: '', apiKey: '',
             baseUrl: preset.defaultBaseUrl, model: preset.defaultModel,
-            maxTokens: 4096, temperature: 0.7,
+            models: [], maxTokens: 4096, temperature: 0.7,
         };
         setEditingProvider({ ...newProvider, presetKey: 'openai' } as any);
         setIsEditing(true);
         setTestStatus('idle');
+        form.resetFields();
         form.setFieldsValue({ ...newProvider, presetKey: 'openai', apiFormat: 'openai' });
     };
 
     const handleEditProvider = (p: AIProviderConfig) => {
         // 尝试根据 baseUrl 和 type 推断 preset
-        const matchedPreset = PROVIDER_PRESETS.find(pr => pr.backendType === p.type && p.baseUrl?.includes(new URL(pr.defaultBaseUrl || 'http://x').hostname))
-            || PROVIDER_PRESETS.find(pr => pr.backendType === p.type)
-            || findPreset('custom');
+        const matchedPreset = matchProviderPreset(p);
         setEditingProvider(p);
         setIsEditing(true);
         setTestStatus('idle');
-        form.setFieldsValue({ ...p, presetKey: matchedPreset.key, apiFormat: p.apiFormat || 'openai' });
+        form.resetFields();
+        form.setFieldsValue({ ...p, type: matchedPreset.backendType, models: p.models || [], presetKey: matchedPreset.key, apiFormat: p.apiFormat || 'openai' });
     };
 
     const handleDeleteProvider = async (id: string) => {
         try {
             const Service = (window as any).go?.aiservice?.Service;
+            const wasActive = id === activeProviderId;
             await Service?.AIDeleteProvider?.(id);
-            void message.success('已删除'); void loadConfig();
-        } catch (e: any) { void message.error(e?.message || '删除失败'); }
+            await loadConfig();
+            // 合并提示：删除的是当前激活的供应商时，附带自动切换信息
+            if (wasActive) {
+                const newProviders: any[] = await Service?.AIGetProviders?.() || [];
+                if (newProviders.length > 0) {
+                    const newActiveName = newProviders[0]?.name || '下一个供应商';
+                    void messageApi.success(`已删除，自动切换到「${newActiveName}」`);
+                } else {
+                    void messageApi.success('已删除');
+                }
+            } else {
+                void messageApi.success('已删除');
+            }
+            window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
+        } catch (e: any) { void messageApi.error(e?.message || '删除失败'); }
     };
 
     const handleSaveProvider = async () => {
@@ -150,20 +187,24 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             // 内置供应商自动使用 preset label 作为名称
             const finalName = isCustomLike ? (values.name || preset.label) : preset.label;
             
+            const finalBaseUrl = values.baseUrl || preset.defaultBaseUrl;
+            
             const payload = { 
                 ...editingProvider, 
                 ...values, 
                 name: finalName,
                 model: finalModel,
                 models: resolvedModels,
+                baseUrl: finalBaseUrl,
                 apiFormat: values.apiFormat || 'openai',
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
-            void message.success('已保存'); setIsEditing(false); setEditingProvider(null); void loadConfig();
+            void messageApi.success('已保存'); setIsEditing(false); setEditingProvider(null); void loadConfig();
+            window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
         } catch (e: any) {
             if (e?.errorFields) { /* antd form validation error, ignore */ }
-            else void message.error(e?.message || '保存失败');
+            else void messageApi.error(e?.message || '保存失败');
         } finally { setLoading(false); }
     };
 
@@ -171,8 +212,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         try {
             const Service = (window as any).go?.aiservice?.Service;
             await Service?.AISetActiveProvider?.(id);
-            setActiveProviderId(id); void message.success('已切换');
-        } catch (e: any) { void message.error(e?.message || '切换失败'); }
+            setActiveProviderId(id); void messageApi.success('已切换');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
+        } catch (e: any) { void messageApi.error(e?.message || '切换失败'); }
     };
 
     const handleSafetyChange = async (level: AISafetyLevel) => {
@@ -197,10 +239,12 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             setLoading(true);
             setTestStatus('idle');
             const Service = (window as any).go?.aiservice?.Service;
-            const res = await Service?.AITestProvider?.({ ...values, maxTokens: Number(values.maxTokens) || 4096, temperature: Number(values.temperature) ?? 0.7 });
-            if (res?.success) { setTestStatus('success'); void message.success('连接成功'); }
-            else { setTestStatus('error'); void message.error(`测试失败: ${res?.message || '未知错误'}`); }
-        } catch (e: any) { setTestStatus('error'); void message.error(e?.message || '测试失败'); }
+            const preset = findPreset(values.presetKey || 'openai');
+            const finalBaseUrl = values.baseUrl || preset.defaultBaseUrl;
+            const res = await Service?.AITestProvider?.({ ...values, baseUrl: finalBaseUrl, maxTokens: Number(values.maxTokens) || 4096, temperature: Number(values.temperature) ?? 0.7 });
+            if (res?.success) { setTestStatus('success'); void messageApi.success('连接成功'); }
+            else { setTestStatus('error'); void messageApi.error(`测试失败: ${res?.message || '未知错误'}`); }
+        } catch (e: any) { setTestStatus('error'); void messageApi.error(e?.message || '测试失败'); }
         finally { setLoading(false); }
     };
 
@@ -238,9 +282,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 </div>
             )}
             {providers.map(p => {
-                const matchedPreset = PROVIDER_PRESETS.find(pr => pr.backendType === p.type && p.baseUrl?.includes(new URL(pr.defaultBaseUrl || 'http://x').hostname))
-                    || PROVIDER_PRESETS.find(pr => pr.backendType === p.type)
-                    || findPreset('custom');
+                const matchedPreset = matchProviderPreset(p);
                 const isActive = p.id === activeProviderId;
                 return (
                     <div key={p.id} onClick={() => handleSetActive(p.id)} style={{
@@ -605,7 +647,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 body: { paddingTop: 8, height: 620, overflow: 'hidden' },
             }}
         >
-              <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
+              <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative' }}>
+                  {messageContextHolder}
                   <div style={{ padding: '0 12px', height: 'fit-content' }}>
                       <div style={{ marginBottom: 12, fontWeight: 600, color: overlayTheme.titleText }}>设置导航</div>
                       <div style={{ display: 'grid', gap: 10 }}>

@@ -35,6 +35,16 @@ type Service struct {
 	cancelFuncs    map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 }
 
+var miniMaxAnthropicModels = []string{
+	"MiniMax-M2.7",
+	"MiniMax-M2.7-highspeed",
+	"MiniMax-M2.5",
+	"MiniMax-M2.5-highspeed",
+	"MiniMax-M2.1",
+	"MiniMax-M2.1-highspeed",
+	"MiniMax-M2",
+}
+
 // NewService 创建 AI Service 实例
 func NewService() *Service {
 	return &Service{
@@ -63,6 +73,9 @@ func (s *Service) AIGetProviders() []ai.ProviderConfig {
 
 	result := make([]ai.ProviderConfig, len(s.providers))
 	copy(result, s.providers)
+	for i := range result {
+		result[i] = normalizeProviderConfig(result[i])
+	}
 	return result
 }
 
@@ -71,6 +84,8 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 	fmt.Printf("[AISaveProvider DEBUG] ID: %s, Model: %s\n", config.ID, config.Model)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	config = normalizeProviderConfig(config)
 
 	if strings.TrimSpace(config.ID) == "" {
 		config.ID = "provider-" + uuid.New().String()[:8]
@@ -128,63 +143,34 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	}
 	s.mu.RUnlock()
 
+	config = normalizeProviderConfig(config)
 	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	providerType := config.Type
-	if providerType == "custom" && config.APIFormat != "" {
-		providerType = config.APIFormat
-	}
+	providerType := normalizedProviderType(config)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	var err error
 
 	switch providerType {
-	case "openai":
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
-			baseURL = baseURL + "/v1"
-		}
-		// 使用 /models 端点验证连通性和鉴权
-		req, _ := http.NewRequest("GET", baseURL+"/models", nil)
-		req.Header.Set("Authorization", "Bearer "+config.APIKey)
-		for k, v := range config.Headers {
-			req.Header.Set(k, v)
+	case "openai", "anthropic", "gemini":
+		req, reqErr := newProviderHealthCheckRequest(config)
+		if reqErr != nil {
+			err = reqErr
+			break
 		}
 		resp, reqErr := client.Do(req)
 		if reqErr != nil {
 			err = reqErr
 		} else {
 			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusUnauthorized {
-				err = fmt.Errorf("API Key 验证失败 (HTTP %d)", resp.StatusCode)
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
+			} else if providerType == "gemini" && resp.StatusCode == http.StatusBadRequest {
+				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
+			} else if resp.StatusCode >= 400 {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				err = fmt.Errorf("接口返回异常 (HTTP %d): %s", resp.StatusCode, string(body))
 			} else if resp.StatusCode >= 500 {
 				err = fmt.Errorf("上游服务器内部错误 (HTTP %d)", resp.StatusCode)
-			}
-		}
-	case "anthropic":
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com"
-		}
-		req, _ := http.NewRequest("GET", baseURL, nil)
-		resp, reqErr := client.Do(req)
-		if reqErr != nil {
-			err = reqErr
-		} else {
-			resp.Body.Close()
-		}
-	case "gemini":
-		if baseURL == "" {
-			baseURL = "https://generativelanguage.googleapis.com"
-		}
-		req, _ := http.NewRequest("GET", baseURL+"/v1beta/models?key="+config.APIKey, nil)
-		resp, reqErr := client.Do(req)
-		if reqErr != nil {
-			err = reqErr
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusBadRequest {
-				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
 			}
 		}
 	default:
@@ -207,6 +193,153 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 		"success": true,
 		"message": "端点连通性测试成功！",
 	}
+}
+
+func normalizedProviderType(config ai.ProviderConfig) string {
+	providerType := strings.ToLower(strings.TrimSpace(config.Type))
+	if providerType == "custom" && strings.TrimSpace(config.APIFormat) != "" {
+		return strings.ToLower(strings.TrimSpace(config.APIFormat))
+	}
+	return providerType
+}
+
+func isMiniMaxAnthropicProvider(config ai.ProviderConfig) bool {
+	if normalizedProviderType(config) != "anthropic" {
+		return false
+	}
+	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(config.BaseURL), "/"))
+	return strings.Contains(baseURL, "api.minimax.io") || strings.Contains(baseURL, "api.minimaxi.com")
+}
+
+func isMoonshotAnthropicProvider(config ai.ProviderConfig) bool {
+	if normalizedProviderType(config) != "anthropic" {
+		return false
+	}
+	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(config.BaseURL), "/"))
+	return strings.Contains(baseURL, "api.moonshot.cn")
+}
+
+func defaultStaticModelsForProvider(config ai.ProviderConfig) []string {
+	if isMiniMaxAnthropicProvider(config) {
+		return append([]string(nil), miniMaxAnthropicModels...)
+	}
+	return nil
+}
+
+func normalizeProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
+	staticModels := defaultStaticModelsForProvider(config)
+	if len(staticModels) > 0 && len(config.Models) == 0 {
+		config.Models = staticModels
+	}
+	model := strings.TrimSpace(config.Model)
+	if isMiniMaxAnthropicProvider(config) && (model == "" || strings.HasPrefix(strings.ToLower(model), "minimax-text-")) {
+		config.Model = miniMaxAnthropicModels[0]
+	}
+	return config
+}
+
+func resolveModelsURL(config ai.ProviderConfig) string {
+	config = normalizeProviderConfig(config)
+	providerType := normalizedProviderType(config)
+	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+
+	switch providerType {
+	case "anthropic":
+		if isMoonshotAnthropicProvider(config) {
+			return "https://api.moonshot.cn/v1/models"
+		}
+		if baseURL == "" {
+			baseURL = "https://api.anthropic.com"
+		}
+		if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
+			baseURL = baseURL + "/v1"
+		}
+		return baseURL + "/models"
+	case "gemini":
+		if baseURL == "" {
+			baseURL = "https://generativelanguage.googleapis.com"
+		}
+		return baseURL + "/v1beta/models?key=" + config.APIKey
+	case "openai":
+		fallthrough
+	default:
+		if baseURL == "" {
+			baseURL = "https://api.openai.com/v1"
+		}
+		if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
+			baseURL = baseURL + "/v1"
+		}
+		return baseURL + "/models"
+	}
+}
+
+func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
+	config = normalizeProviderConfig(config)
+	url := resolveModelsURL(config)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	switch normalizedProviderType(config) {
+	case "anthropic":
+		req.Header.Set("x-api-key", config.APIKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	case "gemini":
+		// Gemini 使用 query string 传递 key，无需额外鉴权头
+	default:
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	}
+
+	for k, v := range config.Headers {
+		req.Header.Set(k, v)
+	}
+
+	return req, nil
+}
+
+func resolveAnthropicMessagesURL(baseURL string) string {
+	url := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if url == "" {
+		url = "https://api.anthropic.com"
+	}
+	if strings.HasSuffix(url, "/messages") {
+		return url
+	}
+	if strings.HasSuffix(url, "/v1") {
+		return url + "/messages"
+	}
+	return url + "/v1/messages"
+}
+
+func newProviderHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {
+	config = normalizeProviderConfig(config)
+	if isMiniMaxAnthropicProvider(config) {
+		body := map[string]interface{}{
+			"model":      config.Model,
+			"max_tokens": 1,
+			"messages": []map[string]string{
+				{"role": "user", "content": "ping"},
+			},
+		}
+		bodyBytes, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("序列化请求失败: %w", err)
+		}
+		req, err := http.NewRequest("POST", resolveAnthropicMessagesURL(config.BaseURL), strings.NewReader(string(bodyBytes)))
+		if err != nil {
+			return nil, fmt.Errorf("创建请求失败: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-api-key", config.APIKey)
+		req.Header.Set("anthropic-version", "2023-06-01")
+		for k, v := range config.Headers {
+			req.Header.Set(k, v)
+		}
+		return req, nil
+	}
+	return newModelsRequest(config)
 }
 
 // AISetActiveProvider 设置活动 Provider
@@ -261,17 +394,16 @@ func (s *Service) AIListModels() map[string]interface{} {
 
 // fetchModels 从供应商 API 获取可用模型列表
 func fetchModels(config ai.ProviderConfig) ([]string, error) {
-	providerType := config.Type
-	if providerType == "custom" && config.APIFormat != "" {
-		providerType = config.APIFormat
+	providerType := normalizedProviderType(config)
+	if staticModels := defaultStaticModelsForProvider(config); len(staticModels) > 0 {
+		return staticModels, nil
 	}
 
 	switch providerType {
 	case "openai":
 		return fetchOpenAIModels(config)
 	case "anthropic":
-		// Anthropic 没有公开的 /models 端点，返回硬编码列表
-		return []string{"claude-opus-4-6", "claude-sonnet-4-6"}, nil
+		return fetchAnthropicModels(config)
 	case "gemini":
 		return fetchGeminiModels(config)
 	default:
@@ -281,20 +413,45 @@ func fetchModels(config ai.ProviderConfig) ([]string, error) {
 
 // fetchOpenAIModels 获取 OpenAI 兼容 API 的模型列表
 func fetchOpenAIModels(config ai.ProviderConfig) ([]string, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
-	}
-	// 确保 baseURL 以 /v1 结尾
-	if !strings.HasSuffix(baseURL, "/v1") {
-		baseURL = baseURL + "/v1"
+	req, err := newModelsRequest(config)
+	if err != nil {
+		return nil, err
 	}
 
-	req, err := http.NewRequest("GET", baseURL+"/models", nil)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, fmt.Errorf("请求模型列表失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		models = append(models, m.ID)
+	}
+	return models, nil
+}
+
+// fetchAnthropicModels 获取 Anthropic API 的模型列表
+func fetchAnthropicModels(config ai.ProviderConfig) ([]string, error) {
+	req, err := newModelsRequest(config)
+	if err != nil {
+		return nil, err
+	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
@@ -515,7 +672,7 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 
 	for _, cfg := range s.providers {
 		if cfg.ID == s.activeProvider {
-			return provider.NewProvider(cfg)
+			return provider.NewProvider(normalizeProviderConfig(cfg))
 		}
 	}
 
@@ -547,6 +704,9 @@ func (s *Service) loadConfig() {
 	s.providers = cfg.Providers
 	if s.providers == nil {
 		s.providers = make([]ai.ProviderConfig, 0)
+	}
+	for i := range s.providers {
+		s.providers[i] = normalizeProviderConfig(s.providers[i])
 	}
 	s.activeProvider = cfg.ActiveProvider
 
@@ -591,14 +751,122 @@ func (s *Service) saveConfig() error {
 	return nil
 }
 
+// --- 会话文件持久化 ---
+
+// sessionFileData 会话文件的 JSON 结构
+type sessionFileData struct {
+	ID        string          `json:"id"`
+	Title     string          `json:"title"`
+	UpdatedAt int64           `json:"updatedAt"`
+	Messages  json.RawMessage `json:"messages"` // 透传前端格式，后端不解析消息体
+}
+
+func (s *Service) sessionsDir() string {
+	return filepath.Join(s.configDir, "sessions")
+}
+
+// AIGetSessions 获取所有会话的元数据列表（不含消息体）
+func (s *Service) AIGetSessions() []map[string]interface{} {
+	dir := s.sessionsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return []map[string]interface{}{}
+	}
+
+	var sessions []map[string]interface{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var sfd sessionFileData
+		if err := json.Unmarshal(data, &sfd); err != nil {
+			continue
+		}
+		sessions = append(sessions, map[string]interface{}{
+			"id":        sfd.ID,
+			"title":     sfd.Title,
+			"updatedAt": sfd.UpdatedAt,
+		})
+	}
+
+	// 按 updatedAt 降序排列
+	for i := 0; i < len(sessions); i++ {
+		for j := i + 1; j < len(sessions); j++ {
+			ti, _ := sessions[i]["updatedAt"].(int64)
+			tj, _ := sessions[j]["updatedAt"].(int64)
+			if tj > ti {
+				sessions[i], sessions[j] = sessions[j], sessions[i]
+			}
+		}
+	}
+
+	return sessions
+}
+
+// AILoadSession 加载指定会话的完整数据（含消息）
+func (s *Service) AILoadSession(sessionID string) map[string]interface{} {
+	path := filepath.Join(s.sessionsDir(), sessionID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]interface{}{"success": false, "error": "会话不存在"}
+	}
+	var sfd sessionFileData
+	if err := json.Unmarshal(data, &sfd); err != nil {
+		return map[string]interface{}{"success": false, "error": "会话数据损坏"}
+	}
+	return map[string]interface{}{
+		"success":   true,
+		"id":        sfd.ID,
+		"title":     sfd.Title,
+		"updatedAt": sfd.UpdatedAt,
+		"messages":  sfd.Messages,
+	}
+}
+
+// AISaveSession 保存会话数据到文件
+func (s *Service) AISaveSession(sessionID string, title string, updatedAt float64, messagesJSON string) error {
+	dir := s.sessionsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建 sessions 目录失败: %w", err)
+	}
+
+	sfd := sessionFileData{
+		ID:        sessionID,
+		Title:     title,
+		UpdatedAt: int64(updatedAt),
+		Messages:  json.RawMessage(messagesJSON),
+	}
+
+	data, err := json.MarshalIndent(sfd, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化会话数据失败: %w", err)
+	}
+
+	path := filepath.Join(dir, sessionID+".json")
+	return os.WriteFile(path, data, 0o644)
+}
+
+// AIDeleteSession 删除会话文件
+func (s *Service) AIDeleteSession(sessionID string) error {
+	path := filepath.Join(s.sessionsDir(), sessionID+".json")
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("删除会话失败: %w", err)
+	}
+	return nil
+}
+
 // --- 工具函数 ---
 
 func resolveConfigDir() string {
-	configDir, err := os.UserConfigDir()
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		configDir = "."
+		homeDir = "."
 	}
-	return filepath.Join(configDir, "GoNavi")
+	return filepath.Join(homeDir, ".gonavi")
 }
 
 func maskAPIKey(apiKey string) string {

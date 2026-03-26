@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useStore } from '../store';
+import { useStore, loadAISessionsFromBackend, loadAISessionFromBackend } from '../store';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime';
 import { DBGetDatabases, DBGetTables } from '../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { AIChatMessage, AIToolCall } from '../types';
 import { DownOutlined } from '@ant-design/icons';
-import { message } from 'antd';
+import { message as antdMessage } from 'antd';
 import './AIChatPanel.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
@@ -224,6 +224,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
     const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
 
+    // 面板内部 toast 通知（不在屏幕顶部，而在面板容器内显示）
+    const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => panelRef.current || document.body });
+
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
     const createNewAISession = useStore(state => state.createNewAISession);
@@ -280,6 +283,21 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }, [aiActiveSessionId, createNewAISession]);
 
     const sid = aiActiveSessionId || 'session-fallback';
+
+    // 面板首次可见时从后端加载会话列表
+    const sessionsLoadedRef = useRef(false);
+    useEffect(() => {
+        if (!aiPanelVisible || sessionsLoadedRef.current) return;
+        sessionsLoadedRef.current = true;
+        loadAISessionsFromBackend();
+    }, [aiPanelVisible]);
+
+    // 切换会话时按需从后端加载消息
+    useEffect(() => {
+        if (sid && sid !== 'session-fallback') {
+            loadAISessionFromBackend(sid);
+        }
+    }, [sid]);
     const messages = aiChatHistory[sid] || [];
 
     const getConnectionName = useCallback(() => {
@@ -314,6 +332,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     useEffect(() => { loadActiveProvider(); }, [loadActiveProvider]);
 
+    // 监听供应商配置变更（来自设置面板的删除/新增/切换操作），重新加载 active provider 并清空已缓存的模型
+    useEffect(() => {
+        const handler = () => {
+            setDynamicModels([]);
+            activeProviderIdRef.current = null;
+            loadActiveProvider();
+        };
+        window.addEventListener('gonavi:ai:provider-changed', handler);
+        return () => window.removeEventListener('gonavi:ai:provider-changed', handler);
+    }, [loadActiveProvider]);
+
     const handleModelChange = async (val: string) => {
         if (!activeProvider) return;
         try {
@@ -331,7 +360,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             setDynamicModels([]);
             activeProviderIdRef.current = activeProvider.id;
         }
-    }, [activeProvider?.id]);
+        // 供应商被删除后 activeProvider 变为 null，此时也必须清空残留模型
+        if (!activeProvider) {
+            setDynamicModels([]);
+            activeProviderIdRef.current = null;
+        }
+    }, [activeProvider?.id, activeProvider]);
 
 
     // dynamicModels 仅在内存中使用，不再写回供应商配置，避免污染静态 models 列表
@@ -346,11 +380,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 const sortedModels = [...result.models].sort((a, b) => a.localeCompare(b));
                 setDynamicModels(sortedModels);
             } else if (result && !result.success) {
-                message.warning(result.error || '获取模型列表失败，可手动输入模型名称');
+                messageApi.warning(result.error || '获取模型列表失败，可手动输入模型名称');
             }
         } catch (e: any) {
             console.warn('Failed to fetch models', e);
-            message.warning('获取模型列表失败: ' + (e?.message || '未知错误'));
+            messageApi.warning('获取模型列表失败: ' + (e?.message || '未知错误'));
         } finally {
             setLoadingModels(false);
         }
@@ -993,6 +1027,17 @@ SELECT * FROM users WHERE status = 1;
     const handleSend = useCallback(async () => {
         const text = input.trim();
         if ((!text && draftImages.length === 0) || sending) return;
+
+        // 前置校验：必须配置供应商且选择模型后才能发送
+        if (!activeProvider) {
+            messageApi.warning('请先在 AI 设置中配置供应商');
+            return;
+        }
+        if (!activeProvider.model || !activeProvider.model.trim()) {
+            messageApi.warning('请先选择模型 ID（点击工具栏的模型下拉框选择）');
+            return;
+        }
+
         toolCallRoundRef.current = 0; // 重置工具调用轮次计数
         nudgeCountRef.current = 0;     // 重置催促计数
 
@@ -1083,7 +1128,7 @@ SELECT * FROM users WHERE status = 1;
             addAIChatMessage(sid, { id: genId(), role: 'assistant', content: `❌ 发送失败: ${cleanE2}`, rawError: cleanE2 !== rawE2 ? rawE2 : undefined, timestamp: Date.now() });
             setSending(false);
         }
-    }, [input, draftImages, sending, messages, addAIChatMessage, sid]);
+    }, [input, draftImages, sending, messages, addAIChatMessage, sid, activeProvider]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1213,6 +1258,7 @@ SELECT * FROM users WHERE status = 1;
 
     return (
         <div ref={panelRef} className="ai-chat-panel" style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
+            {messageContextHolder}
             <div className={`ai-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={handleResizeStart} />
             
             {isResizing && panelRect.current && createPortal(

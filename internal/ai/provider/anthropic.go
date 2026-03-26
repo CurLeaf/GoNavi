@@ -15,9 +15,22 @@ import (
 
 const (
 	defaultAnthropicBaseURL = "https://api.anthropic.com"
-	defaultAnthropicModel   = "claude-3-5-sonnet-20241022"
 	anthropicAPIVersion     = "2023-06-01"
 )
+
+func normalizeAnthropicMessagesURL(baseURL string) string {
+	url := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if url == "" {
+		url = defaultAnthropicBaseURL
+	}
+	if strings.HasSuffix(url, "/messages") {
+		return url
+	}
+	if strings.HasSuffix(url, "/v1") {
+		return url + "/messages"
+	}
+	return url + "/v1/messages"
+}
 
 // AnthropicProvider 实现 Anthropic Claude API 的 Provider
 type AnthropicProvider struct {
@@ -34,7 +47,7 @@ func NewAnthropicProvider(config ai.ProviderConfig) (Provider, error) {
 	}
 	model := strings.TrimSpace(config.Model)
 	if model == "" {
-		model = defaultAnthropicModel
+		return nil, fmt.Errorf("模型 ID 不能为空，请在设置中选择或输入模型")
 	}
 	maxTokens := config.MaxTokens
 	if maxTokens <= 0 {
@@ -425,10 +438,7 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	url := p.baseURL + "/v1/messages"
-	if strings.HasSuffix(p.baseURL, "/v1") {
-		url = p.baseURL + "/messages"
-	}
+	url := normalizeAnthropicMessagesURL(p.baseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {

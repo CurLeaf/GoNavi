@@ -667,6 +667,74 @@ const unwrapPersistedAppState = (persistedState: unknown): Record<string, unknow
   return raw;
 };
 
+// --- AI 会话文件持久化辅助函数 ---
+
+/** 每个 session 独立防抖定时器（2秒） */
+const _persistTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+
+function _debouncedPersistSession(sessionId: string) {
+  if (_persistTimers[sessionId]) clearTimeout(_persistTimers[sessionId]);
+  _persistTimers[sessionId] = setTimeout(() => {
+    delete _persistTimers[sessionId];
+    const state = useStore.getState();
+    const messages = state.aiChatHistory[sessionId];
+    const sessionMeta = state.aiChatSessions.find(s => s.id === sessionId);
+    if (!messages && !sessionMeta) return; // session 已被删除，跳过
+    const title = sessionMeta?.title || '新的对话';
+    const updatedAt = sessionMeta?.updatedAt || Date.now();
+    const messagesJSON = JSON.stringify(messages || []);
+    const Service = (window as any).go?.aiservice?.Service;
+    Service?.AISaveSession?.(sessionId, title, updatedAt, messagesJSON).catch((e: any) => {
+      console.error('[AI Session Persist] 持久化失败:', sessionId, e);
+    });
+  }, 2000);
+}
+
+/** 从后端加载会话列表（仅元数据，不含消息体） */
+export async function loadAISessionsFromBackend(): Promise<{ id: string; title: string; updatedAt: number }[]> {
+  const Service = (window as any).go?.aiservice?.Service;
+  if (!Service?.AIGetSessions) return [];
+  try {
+    const sessions = await Service.AIGetSessions();
+    if (Array.isArray(sessions)) {
+      useStore.setState({ aiChatSessions: sessions });
+      return sessions;
+    }
+  } catch (e) {
+    console.error('[AI Session] 加载会话列表失败:', e);
+  }
+  return [];
+}
+
+/** 从后端加载指定会话的消息数据到内存 */
+export async function loadAISessionFromBackend(sessionId: string): Promise<boolean> {
+  const state = useStore.getState();
+  // 如果内存中已有消息，跳过重复加载
+  if (state.aiChatHistory[sessionId]?.length > 0) return true;
+
+  const Service = (window as any).go?.aiservice?.Service;
+  if (!Service?.AILoadSession) return false;
+  try {
+    const result = await Service.AILoadSession(sessionId);
+    if (result?.success) {
+      let messages = result.messages;
+      // messages 可能是 JSON string 或已解析的数组
+      if (typeof messages === 'string') {
+        try { messages = JSON.parse(messages); } catch { messages = []; }
+      }
+      if (Array.isArray(messages)) {
+        useStore.setState((prev) => ({
+          aiChatHistory: { ...prev.aiChatHistory, [sessionId]: messages },
+        }));
+        return true;
+      }
+    }
+  } catch (e) {
+    console.error('[AI Session] 加载会话消息失败:', sessionId, e);
+  }
+  return false;
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
@@ -986,99 +1054,123 @@ export const useStore = create<AppState>()(
       // AI actions
       toggleAIPanel: () => set((state) => ({ aiPanelVisible: !state.aiPanelVisible })),
       setAIPanelVisible: (visible) => set({ aiPanelVisible: visible }),
-      addAIChatMessage: (sessionId, message) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        const messages = history[sessionId] || [];
-        history[sessionId] = [...messages, message];
-        
-        let newSessions = [...state.aiChatSessions];
-        const existingSession = newSessions.find(s => s.id === sessionId);
-        
-        if (!existingSession) {
-            // 生成标题（首个 user message 内容前 20 字符）
-            let title = message.role === 'user' ? message.content : '新的对话';
-            if (title.length > 20) {
-                title = title.substring(0, 20) + '...';
-            }
-            newSessions.unshift({ id: sessionId, title, updatedAt: Date.now() });
-        } else {
-            // 提至最新
-            newSessions = newSessions.filter(s => s.id !== sessionId);
-            newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
-        }
-        
-        return { aiChatHistory: history, aiChatSessions: newSessions };
-      }),
-      updateAIChatMessage: (sessionId, messageId, updates) => set((state) => {
-        const messages = state.aiChatHistory[sessionId];
-        if (!messages) return state;
-        // 🔧 性能优化：用 findIndex + 定点替换代替全量 map，长对话场景下从 O(n) 降至 O(1)
-        const idx = messages.findIndex(m => m.id === messageId);
-        if (idx < 0) return state;
-        const newMessages = [...messages];
-        newMessages[idx] = { ...newMessages[idx], ...updates };
-        const history = { ...state.aiChatHistory, [sessionId]: newMessages };
-        // 仅当非纯 content 追加时才重排 session 顺序（性能优化：流式打字时跳过）
-        const isContentOnlyUpdate = Object.keys(updates).length === 1 && 'content' in updates;
-        if (!isContentOnlyUpdate) {
-            let newSessions = [...state.aiChatSessions];
-            const existingSession = newSessions.find(s => s.id === sessionId);
-            if (existingSession) {
-                newSessions = newSessions.filter(s => s.id !== sessionId);
-                newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
-            }
-            return { aiChatHistory: history, aiChatSessions: newSessions };
-        }
-        return { aiChatHistory: history };
-      }),
-      deleteAIChatMessage: (sessionId, messageId) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        if (history[sessionId]) {
-            history[sessionId] = history[sessionId].filter(m => m.id !== messageId);
-        }
-        return { aiChatHistory: history };
-      }),
-      truncateAIChatMessages: (sessionId, upToMessageId) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        const messages = history[sessionId];
-        if (messages) {
-            const idx = messages.findIndex(m => m.id === upToMessageId);
-            if (idx >= 0) {
-                history[sessionId] = messages.slice(0, idx + 1);
-            }
-        }
-        return { aiChatHistory: history };
-      }),
-      clearAIChatHistory: (sessionId) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        delete history[sessionId];
-        return { aiChatHistory: history };
-      }),
-      replaceAIChatHistory: (sessionId, messages) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        history[sessionId] = messages;
-        return { aiChatHistory: history };
-      }),
-      deleteAISession: (sessionId) => set((state) => {
-        const history = { ...state.aiChatHistory };
-        delete history[sessionId];
-        const newSessions = state.aiChatSessions.filter(s => s.id !== sessionId);
-        const newActive = state.aiActiveSessionId === sessionId ? null : state.aiActiveSessionId;
-        return { aiChatHistory: history, aiChatSessions: newSessions, aiActiveSessionId: newActive };
-      }),
+      addAIChatMessage: (sessionId, message) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          const messages = history[sessionId] || [];
+          history[sessionId] = [...messages, message];
+          
+          let newSessions = [...state.aiChatSessions];
+          const existingSession = newSessions.find(s => s.id === sessionId);
+          
+          if (!existingSession) {
+              let title = message.role === 'user' ? message.content : '新的对话';
+              if (title.length > 20) {
+                  title = title.substring(0, 20) + '...';
+              }
+              newSessions.unshift({ id: sessionId, title, updatedAt: Date.now() });
+          } else {
+              newSessions = newSessions.filter(s => s.id !== sessionId);
+              newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+          }
+          
+          return { aiChatHistory: history, aiChatSessions: newSessions };
+        });
+        // 异步持久化到文件（fire-and-forget，防抖由外层控制）
+        _debouncedPersistSession(sessionId);
+      },
+      updateAIChatMessage: (sessionId, messageId, updates) => {
+        set((state) => {
+          const messages = state.aiChatHistory[sessionId];
+          if (!messages) return state;
+          const idx = messages.findIndex(m => m.id === messageId);
+          if (idx < 0) return state;
+          const newMessages = [...messages];
+          newMessages[idx] = { ...newMessages[idx], ...updates };
+          const history = { ...state.aiChatHistory, [sessionId]: newMessages };
+          const isContentOnlyUpdate = Object.keys(updates).length === 1 && 'content' in updates;
+          if (!isContentOnlyUpdate) {
+              let newSessions = [...state.aiChatSessions];
+              const existingSession = newSessions.find(s => s.id === sessionId);
+              if (existingSession) {
+                  newSessions = newSessions.filter(s => s.id !== sessionId);
+                  newSessions.unshift({ ...existingSession, updatedAt: Date.now() });
+              }
+              return { aiChatHistory: history, aiChatSessions: newSessions };
+          }
+          return { aiChatHistory: history };
+        });
+        // 流式打字高频调用，防抖 2 秒后才写磁盘
+        _debouncedPersistSession(sessionId);
+      },
+      deleteAIChatMessage: (sessionId, messageId) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          if (history[sessionId]) {
+              history[sessionId] = history[sessionId].filter(m => m.id !== messageId);
+          }
+          return { aiChatHistory: history };
+        });
+        _debouncedPersistSession(sessionId);
+      },
+      truncateAIChatMessages: (sessionId, upToMessageId) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          const messages = history[sessionId];
+          if (messages) {
+              const idx = messages.findIndex(m => m.id === upToMessageId);
+              if (idx >= 0) {
+                  history[sessionId] = messages.slice(0, idx + 1);
+              }
+          }
+          return { aiChatHistory: history };
+        });
+        _debouncedPersistSession(sessionId);
+      },
+      clearAIChatHistory: (sessionId) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          delete history[sessionId];
+          return { aiChatHistory: history };
+        });
+        _debouncedPersistSession(sessionId);
+      },
+      replaceAIChatHistory: (sessionId, messages) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          history[sessionId] = messages;
+          return { aiChatHistory: history };
+        });
+        _debouncedPersistSession(sessionId);
+      },
+      deleteAISession: (sessionId) => {
+        set((state) => {
+          const history = { ...state.aiChatHistory };
+          delete history[sessionId];
+          const newSessions = state.aiChatSessions.filter(s => s.id !== sessionId);
+          const newActive = state.aiActiveSessionId === sessionId ? null : state.aiActiveSessionId;
+          return { aiChatHistory: history, aiChatSessions: newSessions, aiActiveSessionId: newActive };
+        });
+        // 删除文件
+        const Service = (window as any).go?.aiservice?.Service;
+        Service?.AIDeleteSession?.(sessionId).catch(() => {});
+      },
       createNewAISession: () => set(() => {
          const newId = `session-${Date.now()}`;
          return { aiActiveSessionId: newId };
       }),
       setAIActiveSessionId: (sessionId) => set({ aiActiveSessionId: sessionId }),
-      updateAISessionTitle: (sessionId, title) => set((state) => {
-          const newSessions = [...state.aiChatSessions];
-          const session = newSessions.find(s => s.id === sessionId);
-          if (session) {
-              session.title = title;
-          }
-          return { aiChatSessions: newSessions };
-      }),
+      updateAISessionTitle: (sessionId, title) => {
+          set((state) => {
+              const newSessions = [...state.aiChatSessions];
+              const session = newSessions.find(s => s.id === sessionId);
+              if (session) {
+                  session.title = title;
+              }
+              return { aiChatSessions: newSessions };
+          });
+          _debouncedPersistSession(sessionId);
+      },
       addAIContext: (connectionKey, context) => set((state) => {
         const contexts = state.aiContexts[connectionKey] || [];
         if (contexts.find(c => c.dbName === context.dbName && c.tableName === context.tableName)) {
@@ -1173,8 +1265,9 @@ export const useStore = create<AppState>()(
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
-          aiChatHistory: (state.aiChatHistory && typeof state.aiChatHistory === 'object') ? state.aiChatHistory : {},
-          aiChatSessions: Array.isArray(state.aiChatSessions) ? state.aiChatSessions : [],
+          // AI 会话数据不再从 localStorage 恢复，改为从后端文件加载
+          aiChatHistory: {},
+          aiChatSessions: [],
         };
       },
       partialize: (state) => ({
@@ -1200,17 +1293,7 @@ export const useStore = create<AppState>()(
         windowState: state.windowState,
         sidebarWidth: state.sidebarWidth,
 
-        // 只持久化最近 20 个会话的聊天记录，防止 localStorage 膨胀
-        aiChatHistory: (() => {
-          const MAX_PERSIST_SESSIONS = 20;
-          const recentIds = new Set(state.aiChatSessions.slice(0, MAX_PERSIST_SESSIONS).map(s => s.id));
-          const trimmed: Record<string, any> = {};
-          for (const id of recentIds) {
-            if (state.aiChatHistory[id]) trimmed[id] = state.aiChatHistory[id];
-          }
-          return trimmed;
-        })(),
-        aiChatSessions: state.aiChatSessions.slice(0, 50),
+        // AI 会话数据已迁移到后端文件持久化（~/.gonavi/sessions/），不再写入 localStorage
       }), // Don't persist logs
     }
   )

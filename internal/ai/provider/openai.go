@@ -16,7 +16,6 @@ import (
 
 const (
 	defaultOpenAIBaseURL     = "https://api.openai.com/v1"
-	defaultOpenAIModel       = "gpt-4o"
 	defaultOpenAIMaxTokens   = 4096
 	defaultOpenAITemperature = 0.7
 	openAIHTTPTimeout        = 120 * time.Second
@@ -41,7 +40,7 @@ func NewOpenAIProvider(config ai.ProviderConfig) (Provider, error) {
 	}
 	model := strings.TrimSpace(config.Model)
 	if model == "" {
-		model = defaultOpenAIModel
+		return nil, fmt.Errorf("模型 ID 不能为空，请在设置中选择或输入模型")
 	}
 	maxTokens := config.MaxTokens
 	if maxTokens <= 0 {

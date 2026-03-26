@@ -544,7 +544,28 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
     const [isCopied, setIsCopied] = useState(false);
     const isUser = msg.role === 'user';
     
-    const displayContent = msg.content;
+    // 从 content 中提取 <think>...</think> 标签内容（部分模型如 MiniMax、DeepSeek 会以文本形式返回思考过程）
+    const { displayContent, parsedThinking } = React.useMemo(() => {
+        const content = msg.content || '';
+        // 优先使用后端已结构化的 thinking 字段（如 Claude API 原生 thinking）
+        if (msg.thinking) {
+            return { displayContent: content, parsedThinking: msg.thinking };
+        }
+        // 尝试从 content 中提取 <think>...</think> 标签
+        const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
+        let thinkParts: string[] = [];
+        let cleanContent = content;
+        let match;
+        while ((match = thinkRegex.exec(content)) !== null) {
+            thinkParts.push(match[1].trim());
+        }
+        if (thinkParts.length > 0) {
+            // 移除所有 <think>...</think> 标签（含未闭合的）
+            cleanContent = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '').trim();
+            return { displayContent: cleanContent, parsedThinking: thinkParts.join('\n\n') };
+        }
+        return { displayContent: content, parsedThinking: '' };
+    }, [msg.content, msg.thinking]);
     const isTypingThinking = !!(msg.loading && msg.phase === 'thinking');
     
     if (msg.role === 'tool') return null;
@@ -568,11 +589,11 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
                     </div>
 
                     {/* 即使在波纹过渡态，如果有 thinking / tool_calls 也要显示出来，只是把它们压在波纹下面 */}
-                    <div style={{ marginTop: msg.thinking || (msg.tool_calls && msg.tool_calls.length > 0) ? 12 : 0 }}>
-                        {!isUser && msg.thinking && (
+                    <div style={{ marginTop: parsedThinking || (msg.tool_calls && msg.tool_calls.length > 0) ? 12 : 0 }}>
+                        {!isUser && parsedThinking && (
                             <ThinkingBlock 
-                                displayThinking={msg.thinking}
-                                totalLen={msg.thinking.length}
+                                displayThinking={parsedThinking}
+                                totalLen={parsedThinking.length}
                                 isTyping={isTypingThinking}
                                 isGlobalLoading={!!msg.loading}
                                 darkMode={darkMode} 
@@ -649,10 +670,10 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
                         </div>
                     )}
                     {/* 可折叠思考过程 */}
-                    {!isUser && msg.thinking && (
+                    {!isUser && parsedThinking && (
                         <ThinkingBlock 
-                            displayThinking={msg.thinking}
-                            totalLen={msg.thinking.length}
+                            displayThinking={parsedThinking}
+                            totalLen={parsedThinking.length}
                             isTyping={isTypingThinking}
                             isGlobalLoading={!!msg.loading}
                             darkMode={darkMode} 

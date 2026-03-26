@@ -15,7 +15,6 @@ import (
 
 const (
 	defaultGeminiBaseURL = "https://generativelanguage.googleapis.com"
-	defaultGeminiModel   = "gemini-2.0-flash"
 )
 
 // GeminiProvider 实现 Google Gemini API 的 Provider
@@ -33,7 +32,7 @@ func NewGeminiProvider(config ai.ProviderConfig) (Provider, error) {
 	}
 	model := strings.TrimSpace(config.Model)
 	if model == "" {
-		model = defaultGeminiModel
+		return nil, fmt.Errorf("模型 ID 不能为空，请在设置中选择或输入模型")
 	}
 	maxTokens := config.MaxTokens
 	if maxTokens <= 0 {
