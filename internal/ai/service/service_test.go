@@ -93,6 +93,16 @@ func TestDefaultStaticModelsForProvider_ReturnsMiniMaxAnthropicModels(t *testing
 	}
 }
 
+func TestDefaultStaticModelsForProvider_DoesNotReturnDashScopeBailianStaticModels(t *testing.T) {
+	models := defaultStaticModelsForProvider(ai.ProviderConfig{
+		Type:    "anthropic",
+		BaseURL: "https://dashscope.aliyuncs.com/apps/anthropic",
+	})
+	if len(models) != 0 {
+		t.Fatalf("expected Bailian provider to fetch models remotely, got %v", models)
+	}
+}
+
 func TestNewProviderHealthCheckRequest_UsesMessagesEndpointForMiniMaxAnthropic(t *testing.T) {
 	req, err := newProviderHealthCheckRequest(ai.ProviderConfig{
 		Type:    "anthropic",
@@ -111,5 +121,32 @@ func TestNewProviderHealthCheckRequest_UsesMessagesEndpointForMiniMaxAnthropic(t
 	}
 	if got := req.Header.Get("x-api-key"); got != "sk-test" {
 		t.Fatalf("expected x-api-key header to be set, got %q", got)
+	}
+}
+
+func TestNewProviderHealthCheckRequest_UsesMessagesEndpointForDashScopeAnthropic(t *testing.T) {
+	req, err := newProviderHealthCheckRequest(ai.ProviderConfig{
+		Type:    "anthropic",
+		BaseURL: "https://dashscope.aliyuncs.com/apps/anthropic",
+		Model:   "qwen3.5-plus",
+		APIKey:  "sk-test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Method != "POST" {
+		t.Fatalf("expected POST request, got %s", req.Method)
+	}
+	if req.URL.String() != "https://dashscope.aliyuncs.com/apps/anthropic/v1/messages" {
+		t.Fatalf("expected DashScope messages endpoint, got %q", req.URL.String())
+	}
+	if got := req.Header.Get("x-api-key"); got != "sk-test" {
+		t.Fatalf("expected x-api-key header to be set, got %q", got)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
+		t.Fatalf("expected bearer authorization header, got %q", got)
+	}
+	if got := req.Header.Get("anthropic-version"); got != "" {
+		t.Fatalf("expected no anthropic-version header for DashScope, got %q", got)
 	}
 }

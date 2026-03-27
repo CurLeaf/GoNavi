@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,24 @@ var miniMaxAnthropicModels = []string{
 	"MiniMax-M2.1-highspeed",
 	"MiniMax-M2",
 }
+
+var dashScopeCodingPlanModels = []string{
+	"qwen3-coder-plus",
+	"qwen3-coder-480b-a35b-instruct",
+	"qwen3-coder-30b-a3b-instruct",
+	"qwen3-coder-flash",
+	"qwen-plus",
+	"qwen-turbo",
+}
+
+var volcengineCodingPlanAllowedModelFamilies = []string{
+	"doubao-seed-code",
+	"glm-4.7",
+	"deepseek-v3.2",
+	"kimi-k2",
+}
+
+const volcengineCodingPlanEmptyModelsError = `当前接口未返回可用的火山 Coding Plan 模型，请检查账号权限或切换到"火山方舟"供应商`
 
 // NewService 创建 AI Service 实例
 func NewService() *Service {
@@ -224,18 +243,86 @@ func isMoonshotAnthropicProvider(config ai.ProviderConfig) bool {
 	return strings.Contains(baseURL, "api.moonshot.cn")
 }
 
+func parseProviderBaseURL(raw string) (string, string) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", ""
+	}
+	return strings.ToLower(parsed.Hostname()), strings.TrimRight(strings.ToLower(parsed.Path), "/")
+}
+
+func isDashScopeBailianAnthropicProvider(config ai.ProviderConfig) bool {
+	if normalizedProviderType(config) != "anthropic" {
+		return false
+	}
+	host, path := parseProviderBaseURL(config.BaseURL)
+	return host == "dashscope.aliyuncs.com" && strings.HasPrefix(path, "/apps/anthropic")
+}
+
+func isDashScopeCodingPlanAnthropicProvider(config ai.ProviderConfig) bool {
+	if normalizedProviderType(config) != "anthropic" {
+		return false
+	}
+	host, path := parseProviderBaseURL(config.BaseURL)
+	return host == "coding.dashscope.aliyuncs.com" && strings.HasPrefix(path, "/apps/anthropic")
+}
+
+func isVolcengineCodingPlanProvider(config ai.ProviderConfig) bool {
+	if normalizedProviderType(config) != "openai" {
+		return false
+	}
+	host, path := parseProviderBaseURL(provider.NormalizeOpenAICompatibleBaseURL(config.BaseURL))
+	return host == "ark.cn-beijing.volces.com" && path == "/api/coding/v3"
+}
+
+func filterVolcengineCodingPlanModels(models []string) []string {
+	filtered := make([]string, 0, len(models))
+	for _, model := range models {
+		lowerModel := strings.ToLower(strings.TrimSpace(model))
+		for _, family := range volcengineCodingPlanAllowedModelFamilies {
+			if strings.Contains(lowerModel, family) {
+				filtered = append(filtered, model)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func filterFetchedModelsForProvider(config ai.ProviderConfig, models []string) ([]string, error) {
+	if !isVolcengineCodingPlanProvider(config) {
+		return models, nil
+	}
+	filtered := filterVolcengineCodingPlanModels(models)
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf(volcengineCodingPlanEmptyModelsError)
+	}
+	return filtered, nil
+}
+
 func defaultStaticModelsForProvider(config ai.ProviderConfig) []string {
 	if isMiniMaxAnthropicProvider(config) {
 		return append([]string(nil), miniMaxAnthropicModels...)
+	}
+	if isDashScopeCodingPlanAnthropicProvider(config) {
+		return append([]string(nil), dashScopeCodingPlanModels...)
 	}
 	return nil
 }
 
 func normalizeProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
-	staticModels := defaultStaticModelsForProvider(config)
-	if len(staticModels) > 0 && len(config.Models) == 0 {
-		config.Models = staticModels
+	switch {
+	case isDashScopeBailianAnthropicProvider(config):
+		config.Models = nil
+	case isDashScopeCodingPlanAnthropicProvider(config):
+		config.Models = append([]string(nil), dashScopeCodingPlanModels...)
+	default:
+		staticModels := defaultStaticModelsForProvider(config)
+		if len(staticModels) > 0 && len(config.Models) == 0 {
+			config.Models = staticModels
+		}
 	}
+
 	model := strings.TrimSpace(config.Model)
 	if isMiniMaxAnthropicProvider(config) && (model == "" || strings.HasPrefix(strings.ToLower(model), "minimax-text-")) {
 		config.Model = miniMaxAnthropicModels[0]
@@ -252,6 +339,9 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 	case "anthropic":
 		if isMoonshotAnthropicProvider(config) {
 			return "https://api.moonshot.cn/v1/models"
+		}
+		if isDashScopeBailianAnthropicProvider(config) {
+			return "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
 		}
 		if baseURL == "" {
 			baseURL = "https://api.anthropic.com"
@@ -282,9 +372,11 @@ func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
 
 	switch normalizedProviderType(config) {
 	case "anthropic":
-		req.Header.Set("x-api-key", config.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		if isDashScopeBailianAnthropicProvider(config) {
+			req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		} else {
+			provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
+		}
 	case "gemini":
 		// Gemini 使用 query string 传递 key，无需额外鉴权头
 	default:
@@ -314,31 +406,34 @@ func resolveAnthropicMessagesURL(baseURL string) string {
 
 func newProviderHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {
 	config = normalizeProviderConfig(config)
-	if isMiniMaxAnthropicProvider(config) {
-		body := map[string]interface{}{
-			"model":      config.Model,
-			"max_tokens": 1,
-			"messages": []map[string]string{
-				{"role": "user", "content": "ping"},
-			},
-		}
-		bodyBytes, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("序列化请求失败: %w", err)
-		}
-		req, err := http.NewRequest("POST", resolveAnthropicMessagesURL(config.BaseURL), strings.NewReader(string(bodyBytes)))
-		if err != nil {
-			return nil, fmt.Errorf("创建请求失败: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-api-key", config.APIKey)
-		req.Header.Set("anthropic-version", "2023-06-01")
-		for k, v := range config.Headers {
-			req.Header.Set(k, v)
-		}
-		return req, nil
+	if isMiniMaxAnthropicProvider(config) || isDashScopeBailianAnthropicProvider(config) || isDashScopeCodingPlanAnthropicProvider(config) {
+		return newAnthropicMessagesHealthCheckRequest(config)
 	}
 	return newModelsRequest(config)
+}
+
+func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {
+	body := map[string]interface{}{
+		"model":      config.Model,
+		"max_tokens": 1,
+		"messages": []map[string]string{
+			{"role": "user", "content": "ping"},
+		},
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("序列化请求失败: %w", err)
+	}
+	req, err := http.NewRequest("POST", resolveAnthropicMessagesURL(config.BaseURL), strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
+	for k, v := range config.Headers {
+		req.Header.Set(k, v)
+	}
+	return req, nil
 }
 
 // AISetActiveProvider 设置活动 Provider
@@ -379,7 +474,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 		return map[string]interface{}{"success": false, "models": []string{}, "error": "未找到活跃 Provider"}
 	}
 
-	models, err := fetchModels(config)
+	models, err := fetchModelsFunc(config)
 	if err != nil {
 		// 回退到配置中的静态模型列表
 		if len(config.Models) > 0 {
@@ -388,10 +483,17 @@ func (s *Service) AIListModels() map[string]interface{} {
 		return map[string]interface{}{"success": false, "models": []string{}, "error": err.Error()}
 	}
 
+	models, err = filterFetchedModelsForProvider(config, models)
+	if err != nil {
+		return map[string]interface{}{"success": false, "models": []string{}, "error": err.Error()}
+	}
+
 	return map[string]interface{}{"success": true, "models": models, "source": "api"}
 }
 
 // fetchModels 从供应商 API 获取可用模型列表
+var fetchModelsFunc = fetchModels
+
 func fetchModels(config ai.ProviderConfig) ([]string, error) {
 	providerType := normalizedProviderType(config)
 	if staticModels := defaultStaticModelsForProvider(config); len(staticModels) > 0 {

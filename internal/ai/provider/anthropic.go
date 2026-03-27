@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"GoNavi-Wails/internal/ai"
@@ -30,6 +31,25 @@ func normalizeAnthropicMessagesURL(baseURL string) string {
 		return url + "/messages"
 	}
 	return url + "/v1/messages"
+}
+
+func IsDashScopeAnthropicCompatibleBaseURL(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "dashscope.aliyuncs.com" || host == "coding.dashscope.aliyuncs.com"
+}
+
+func ApplyAnthropicAuthHeaders(headers http.Header, baseURL string, apiKey string) {
+	headers.Set("x-api-key", apiKey)
+	if IsDashScopeAnthropicCompatibleBaseURL(baseURL) {
+		headers.Set("Authorization", "Bearer "+apiKey)
+		headers.Del("anthropic-version")
+		return
+	}
+	headers.Set("anthropic-version", anthropicAPIVersion)
 }
 
 // AnthropicProvider 实现 Anthropic Claude API 的 Provider
@@ -446,8 +466,7 @@ func (p *AnthropicProvider) doRequest(ctx context.Context, body interface{}) (io
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", p.config.APIKey)
-	httpReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	ApplyAnthropicAuthHeaders(httpReq.Header, p.baseURL, p.config.APIKey)
 
 	if strings.Contains(string(jsonBody), `"stream":true`) || strings.Contains(string(jsonBody), `"stream": true`) {
 		httpReq.Header.Set("Accept", "text/event-stream")

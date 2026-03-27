@@ -1,9 +1,10 @@
 import React from 'react';
 import { Input, Select, AutoComplete, Tooltip, Modal, Checkbox, Spin, message, Button, Tag } from 'antd';
-import { DatabaseOutlined, SendOutlined, TableOutlined, SearchOutlined, PictureOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, SendOutlined, TableOutlined, SearchOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import type { AIComposerNotice } from '../../utils/aiComposerNotice';
 
 interface AIChatInputProps {
     input: string;
@@ -19,6 +20,7 @@ interface AIChatInputProps {
     activeProvider: any;
     dynamicModels: string[];
     loadingModels: boolean;
+    composerNotice?: AIComposerNotice | null;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>;
@@ -33,6 +35,7 @@ interface AIChatInputProps {
 export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
+    composerNotice,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars
 }) => {
@@ -67,6 +70,33 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
     const filteredTables = contextTables.filter(t => t.name.toLowerCase().includes(searchText.toLowerCase()));
     const [contextExpanded, setContextExpanded] = React.useState(false);
+    const composerNoticePalette = React.useMemo(() => {
+        if (composerNotice?.tone === 'error') {
+            return darkMode
+                ? {
+                    background: 'rgba(255,120,117,0.12)',
+                    borderColor: 'rgba(255,120,117,0.24)',
+                    iconColor: '#ff7875',
+                }
+                : {
+                    background: 'rgba(255,77,79,0.08)',
+                    borderColor: 'rgba(255,77,79,0.16)',
+                    iconColor: '#ff4d4f',
+                };
+        }
+
+        return darkMode
+            ? {
+                background: 'rgba(250,173,20,0.12)',
+                borderColor: 'rgba(250,173,20,0.22)',
+                iconColor: '#ffd666',
+            }
+            : {
+                background: 'rgba(250,173,20,0.08)',
+                borderColor: 'rgba(250,173,20,0.18)',
+                iconColor: '#d48806',
+            };
+    }, [composerNotice, darkMode]);
 
     // Slash commands
     const [showSlashMenu, setShowSlashMenu] = React.useState(false);
@@ -258,7 +288,31 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         </div>
                     ))}
                 </div>
-                <div style={{ position: 'relative' }}>
+                {composerNotice && (
+                    <div
+                        data-ai-chat-composer-notice="true"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 8,
+                            padding: '8px 10px',
+                            borderRadius: 12,
+                            background: composerNoticePalette.background,
+                            border: `1px solid ${composerNoticePalette.borderColor}`,
+                        }}
+                    >
+                        <ExclamationCircleFilled style={{ color: composerNoticePalette.iconColor, fontSize: 14, marginTop: 1, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: textColor, lineHeight: 1.4 }}>
+                                {composerNotice.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
+                                {composerNotice.description}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                     {showSlashMenu && filteredSlashCmds.length > 0 && (
                         <div style={{
                             position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
@@ -356,7 +410,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                 variant="filled"
                                 value={activeProvider.model || undefined}
                                 onChange={onModelChange}
-                                onDropdownVisibleChange={(open) => { if (open && dynamicModels.length === 0) onFetchModels(); }}
+                                onDropdownVisibleChange={(open) => {
+                                    if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
+                                        onFetchModels();
+                                    }
+                                }}
                                 loading={loadingModels}
                                 options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
                                 style={{ width: 130, fontSize: 11, background: 'transparent' }}

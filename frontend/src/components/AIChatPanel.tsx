@@ -6,7 +6,6 @@ import { DBGetDatabases, DBGetTables } from '../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { AIChatMessage, AIToolCall } from '../types';
 import { DownOutlined } from '@ant-design/icons';
-import { message as antdMessage } from 'antd';
 import './AIChatPanel.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
@@ -14,6 +13,12 @@ import { AIChatWelcome } from './ai/AIChatWelcome';
 import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
+import type { AIComposerNotice } from '../utils/aiComposerNotice';
+import {
+    buildMissingModelNotice,
+    buildMissingProviderNotice,
+    buildModelFetchFailedNotice,
+} from '../utils/aiComposerNotice';
 
 interface AIChatPanelProps {
     width?: number;
@@ -211,6 +216,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const [dynamicModels, setDynamicModels] = useState<string[]>([]);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
     const [loadingModels, setLoadingModels] = useState(false);
+    const [composerNotice, setComposerNotice] = useState<AIComposerNotice | null>(null);
     const [panelWidth, setPanelWidth] = useState(width);
     const [isResizing, setIsResizing] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -223,9 +229,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
     const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
     const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
-
-    // 面板内部 toast 通知（不在屏幕顶部，而在面板容器内显示）
-    const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => panelRef.current || document.body });
 
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
@@ -336,6 +339,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     useEffect(() => {
         const handler = () => {
             setDynamicModels([]);
+            setComposerNotice(null);
             activeProviderIdRef.current = null;
             loadActiveProvider();
         };
@@ -350,6 +354,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             const payload = { ...activeProvider, model: val };
             await Service?.AISaveProvider?.(payload);
             setActiveProvider(payload);
+            setComposerNotice(null);
         } catch (e) { console.warn('Failed to update provider model', e); }
     };
 
@@ -358,14 +363,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     useEffect(() => {
         if (activeProvider?.id && activeProvider.id !== activeProviderIdRef.current) {
             setDynamicModels([]);
+            setComposerNotice(null);
             activeProviderIdRef.current = activeProvider.id;
         }
         // 供应商被删除后 activeProvider 变为 null，此时也必须清空残留模型
         if (!activeProvider) {
             setDynamicModels([]);
+            setComposerNotice(null);
             activeProviderIdRef.current = null;
         }
     }, [activeProvider?.id, activeProvider]);
+
+    useEffect(() => {
+        if (activeProvider?.model && String(activeProvider.model).trim()) {
+            setComposerNotice(null);
+        }
+    }, [activeProvider?.model]);
 
 
     // dynamicModels 仅在内存中使用，不再写回供应商配置，避免污染静态 models 列表
@@ -373,18 +386,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const fetchDynamicModels = useCallback(async () => {
         try {
             setLoadingModels(true);
+            setComposerNotice(null);
             const Service = (window as any).go?.aiservice?.Service;
             if (!Service) return;
             const result = await Service.AIListModels?.();
             if (result?.success && Array.isArray(result.models) && result.models.length > 0) {
                 const sortedModels = [...result.models].sort((a, b) => a.localeCompare(b));
                 setDynamicModels(sortedModels);
+                setComposerNotice(null);
             } else if (result && !result.success) {
-                messageApi.warning(result.error || '获取模型列表失败，可手动输入模型名称');
+                setDynamicModels([]);
+                setComposerNotice(buildModelFetchFailedNotice(result.error));
             }
         } catch (e: any) {
             console.warn('Failed to fetch models', e);
-            messageApi.warning('获取模型列表失败: ' + (e?.message || '未知错误'));
+            setDynamicModels([]);
+            setComposerNotice(buildModelFetchFailedNotice('获取模型列表失败：' + (e?.message || '未知错误')));
         } finally {
             setLoadingModels(false);
         }
@@ -1030,13 +1047,14 @@ SELECT * FROM users WHERE status = 1;
 
         // 前置校验：必须配置供应商且选择模型后才能发送
         if (!activeProvider) {
-            messageApi.warning('请先在 AI 设置中配置供应商');
+            setComposerNotice(buildMissingProviderNotice());
             return;
         }
         if (!activeProvider.model || !activeProvider.model.trim()) {
-            messageApi.warning('请先选择模型 ID（点击工具栏的模型下拉框选择）');
+            setComposerNotice(buildMissingModelNotice());
             return;
         }
+        setComposerNotice(null);
 
         toolCallRoundRef.current = 0; // 重置工具调用轮次计数
         nudgeCountRef.current = 0;     // 重置催促计数
@@ -1258,7 +1276,6 @@ SELECT * FROM users WHERE status = 1;
 
     return (
         <div ref={panelRef} className="ai-chat-panel" style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
-            {messageContextHolder}
             <div className={`ai-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={handleResizeStart} />
             
             {isResizing && panelRect.current && createPortal(
@@ -1366,6 +1383,7 @@ SELECT * FROM users WHERE status = 1;
                 activeProvider={activeProvider}
                 dynamicModels={dynamicModels}
                 loadingModels={loadingModels}
+                composerNotice={composerNotice}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}
                 textareaRef={textareaRef}

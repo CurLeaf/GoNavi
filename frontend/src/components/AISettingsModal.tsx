@@ -2,6 +2,23 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
+import {
+    getProviderFingerprint,
+    getProviderHostname,
+    matchQwenPresetKey,
+    QWEN_BAILIAN_ANTHROPIC_BASE_URL,
+    QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
+    QWEN_CODING_PLAN_MODELS,
+    resolvePresetBaseURL,
+    resolvePresetModelSelection,
+} from '../utils/aiProviderPresets';
+import {
+    PROVIDER_PRESET_CARD_BASE_STYLE,
+    PROVIDER_PRESET_CARD_CONTENT_STYLE,
+    PROVIDER_PRESET_CARD_DESCRIPTION_STYLE,
+    PROVIDER_PRESET_GRID_STYLE,
+    PROVIDER_PRESET_CARD_TITLE_STYLE,
+} from '../utils/aiSettingsPresetLayout';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 
@@ -28,7 +45,8 @@ interface ProviderPreset {
 const PROVIDER_PRESETS: ProviderPreset[] = [
     { key: 'openai', label: 'OpenAI', icon: <ApiOutlined />, desc: 'GPT-5.4 / 5.3 系列', color: '#10b981', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o', models: [] },
     { key: 'deepseek', label: 'DeepSeek', icon: <ThunderboltOutlined />, desc: 'DeepSeek-V4 / R1', color: '#3b82f6', backendType: 'openai', defaultBaseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', models: [] },
-    { key: 'qwen', label: '通义千问', icon: <CloudOutlined />, desc: 'Qwen3.5 / Qwen3 系列', color: '#6366f1', backendType: 'openai', defaultBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max', models: [] },
+    { key: 'qwen-bailian', label: '通义千问（百炼通用）', icon: <CloudOutlined />, desc: '百炼 Anthropic 兼容 / 模型从远端拉取', color: '#6366f1', backendType: 'anthropic', defaultBaseUrl: QWEN_BAILIAN_ANTHROPIC_BASE_URL, defaultModel: '', models: [] },
+    { key: 'qwen-coding-plan', label: '通义千问（Coding Plan）', icon: <CloudOutlined />, desc: 'Coding Plan 专属入口 / 使用官方支持模型清单', color: '#4f46e5', backendType: 'anthropic', defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL, defaultModel: '', models: QWEN_CODING_PLAN_MODELS },
     { key: 'zhipu', label: '智谱 GLM', icon: <ExperimentOutlined />, desc: 'GLM-5 / GLM-5-Turbo', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4', models: [] },
     { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 (Anthropic 兼容)', color: '#0d9488', backendType: 'anthropic', defaultBaseUrl: 'https://api.moonshot.cn/anthropic', defaultModel: 'moonshot-v1-8k', models: [] },
     { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-20241022', models: [] },
@@ -42,27 +60,11 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 
 const findPreset = (key: string): ProviderPreset => PROVIDER_PRESETS.find(p => p.key === key) || PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
 
-const getProviderHostname = (raw?: string): string => {
-    if (!raw) return '';
-    try {
-        return new URL(raw).hostname.toLowerCase();
-    } catch {
-        return '';
-    }
-};
-
-const getProviderFingerprint = (raw?: string): string => {
-    if (!raw) return '';
-    try {
-        const url = new URL(raw);
-        const normalizedPath = url.pathname.replace(/\/+$/, '').toLowerCase();
-        return `${url.hostname.toLowerCase()}${normalizedPath}`;
-    } catch {
-        return '';
-    }
-};
-
 const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'>): ProviderPreset => {
+    const qwenPresetKey = matchQwenPresetKey(provider);
+    if (qwenPresetKey) {
+        return findPreset(qwenPresetKey);
+    }
     const fingerprint = getProviderFingerprint(provider.baseUrl);
     const exactPreset = PROVIDER_PRESETS.find(pr =>
         pr.backendType === provider.type
@@ -201,15 +203,23 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             const Service = (window as any).go?.aiservice?.Service;
             
             // 构建 payload，处理 model/models 逻辑
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama';
             const preset = findPreset(values.presetKey);
-            const resolvedModels = isCustomLike ? (values.models || []) : preset.models;
-            const fallbackModel = resolvedModels.length > 0 ? resolvedModels[0] : '';
-            const finalModel = isCustomLike ? fallbackModel : (values.model || fallbackModel);
+            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama';
+            const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
+                presetKey: values.presetKey,
+                presetDefaultModel: preset.defaultModel,
+                presetModels: preset.models,
+                valuesModel: values.model,
+                customModels: values.models,
+            });
             // 内置供应商自动使用 preset label 作为名称
             const finalName = isCustomLike ? (values.name || preset.label) : preset.label;
             
-            const finalBaseUrl = values.baseUrl || preset.defaultBaseUrl;
+            const finalBaseUrl = resolvePresetBaseURL({
+                presetKey: values.presetKey,
+                presetDefaultBaseUrl: preset.defaultBaseUrl,
+                valuesBaseUrl: values.baseUrl,
+            });
             
             const payload = { 
                 ...editingProvider, 
@@ -262,7 +272,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             setTestStatus('idle');
             const Service = (window as any).go?.aiservice?.Service;
             const preset = findPreset(values.presetKey || 'openai');
-            const finalBaseUrl = values.baseUrl || preset.defaultBaseUrl;
+            const finalBaseUrl = resolvePresetBaseURL({
+                presetKey: values.presetKey || 'openai',
+                presetDefaultBaseUrl: preset.defaultBaseUrl,
+                valuesBaseUrl: values.baseUrl,
+            });
             const res = await Service?.AITestProvider?.({ ...values, baseUrl: finalBaseUrl, maxTokens: Number(values.maxTokens) || 4096, temperature: Number(values.temperature) ?? 0.7 });
             if (res?.success) { setTestStatus('success'); void messageApi.success('连接成功'); }
             else { setTestStatus('error'); void messageApi.error(`测试失败: ${res?.message || '未知错误'}`); }
@@ -329,7 +343,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                             <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span>{matchedPreset.label}</span>
                                 <span style={{ opacity: 0.4 }}>·</span>
-                                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{p.model}</span>
+                                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{p.model || '未选择模型'}</span>
                             </div>
                         </div>
                         <Space size={2}>
@@ -375,25 +389,24 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                             <AppstoreOutlined style={{ fontSize: 14 }} /> 服务类型
                         </div>
                         <Form.Item name="presetKey" noStyle>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                            <div style={PROVIDER_PRESET_GRID_STYLE}>
                                 {PROVIDER_PRESETS.map(pt => (
                                     <div key={pt.key} onClick={() => { form.setFieldValue('presetKey', pt.key); handlePresetChange(pt.key); }}
                                         style={{
-                                            padding: '12px 14px', borderRadius: 12, cursor: 'pointer', transition: 'all 0.2s ease',
+                                            ...PROVIDER_PRESET_CARD_BASE_STYLE,
                                             border: `1.5px solid ${presetKeyFromForm === pt.key ? overlayTheme.selectedText : 'transparent'}`,
                                             background: presetKeyFromForm === pt.key ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
                                             boxShadow: presetKeyFromForm === pt.key ? 'none' : (darkMode ? 'inset 0 0 0 1px rgba(255,255,255,0.028)' : 'inset 0 0 0 1px rgba(16,24,40,0.03)'),
-                                            display: 'flex', alignItems: 'flex-start', gap: 10,
                                         }}>
                                         <div style={{
                                             color: presetKeyFromForm === pt.key ? overlayTheme.iconColor : overlayTheme.mutedText,
-                                            fontSize: 18, marginTop: 2, transition: 'all 0.2s ease',
+                                            fontSize: 18, marginTop: 2, transition: 'all 0.2s ease', flexShrink: 0,
                                         }}>
                                             {pt.icon}
                                         </div>
-                                        <div>
-                                            <div style={{ fontSize: 13, fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{pt.label}</div>
-                                            <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, lineHeight: 1.4 }}>{pt.desc}</div>
+                                        <div style={PROVIDER_PRESET_CARD_CONTENT_STYLE}>
+                                            <div style={{ ...PROVIDER_PRESET_CARD_TITLE_STYLE, fontSize: 13, fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{pt.label}</div>
+                                            <div style={{ ...PROVIDER_PRESET_CARD_DESCRIPTION_STYLE, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.4 }}>{pt.desc}</div>
                                         </div>
                                     </div>
                                 ))}
