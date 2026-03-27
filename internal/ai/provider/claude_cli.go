@@ -6,11 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	ai "GoNavi-Wails/internal/ai"
 )
+
+var claudeLookPath = exec.LookPath
 
 // ClaudeCLIProvider 通过 Claude Code CLI 发送聊天请求
 // 适用于 anyrouter/newapi 等只支持 Claude Code 协议的代理服务
@@ -28,9 +32,12 @@ func (p *ClaudeCLIProvider) Name() string {
 }
 
 func (p *ClaudeCLIProvider) Validate() error {
-	_, err := exec.LookPath("claude")
+	_, err := claudeLookPath("claude")
 	if err != nil {
 		return fmt.Errorf("未找到 claude 命令，请先安装 Claude Code CLI: npm install -g @anthropic-ai/claude-code")
+	}
+	if _, err := resolveClaudeCodeGitBashPath(os.Environ(), runtime.GOOS, claudeLookPath, fileExists); err != nil {
+		return err
 	}
 	return nil
 }
@@ -48,7 +55,9 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
-	p.setEnv(cmd)
+	if err := p.setEnv(cmd); err != nil {
+		return nil, err
+	}
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -85,7 +94,9 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	fmt.Printf("[ClaudeCLI DEBUG] Running: claude %v\n", args)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
-	p.setEnv(cmd)
+	if err := p.setEnv(cmd); err != nil {
+		return err
+	}
 
 	// 关闭 stdin，防止 claude CLI 等待输入
 	cmd.Stdin = nil
@@ -174,16 +185,146 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 }
 
 // setEnv 设置 Claude CLI 的环境变量
-func (p *ClaudeCLIProvider) setEnv(cmd *exec.Cmd) {
-	env := cmd.Environ()
-	if p.config.BaseURL != "" {
-		baseURL := strings.TrimRight(p.config.BaseURL, "/")
-		env = append(env, "ANTHROPIC_BASE_URL="+baseURL)
-	}
-	if p.config.APIKey != "" {
-		env = append(env, "ANTHROPIC_API_KEY="+p.config.APIKey)
+func (p *ClaudeCLIProvider) setEnv(cmd *exec.Cmd) error {
+	env, err := buildClaudeCLIEnv(p.config, cmd.Environ(), runtime.GOOS, claudeLookPath, fileExists)
+	if err != nil {
+		return err
 	}
 	cmd.Env = env
+	return nil
+}
+
+func buildClaudeCLIEnv(config ai.ProviderConfig, baseEnv []string, goos string, lookPath func(string) (string, error), exists func(string) bool) ([]string, error) {
+	env := append([]string(nil), baseEnv...)
+	if config.BaseURL != "" {
+		env = upsertEnv(env, "ANTHROPIC_BASE_URL", strings.TrimRight(config.BaseURL, "/"))
+	}
+	if config.APIKey != "" {
+		env = upsertEnv(env, "ANTHROPIC_API_KEY", config.APIKey)
+	}
+
+	gitBashPath, err := resolveClaudeCodeGitBashPath(env, goos, lookPath, exists)
+	if err != nil {
+		return nil, err
+	}
+	if gitBashPath != "" {
+		env = upsertEnv(env, "CLAUDE_CODE_GIT_BASH_PATH", gitBashPath)
+	}
+	return env, nil
+}
+
+func resolveClaudeCodeGitBashPath(env []string, goos string, lookPath func(string) (string, error), exists func(string) bool) (string, error) {
+	if goos != "windows" {
+		return "", nil
+	}
+
+	if configured := strings.TrimSpace(envValue(env, "CLAUDE_CODE_GIT_BASH_PATH")); configured != "" {
+		if exists(configured) {
+			return configured, nil
+		}
+		return "", fmt.Errorf("Claude Code CLI 在 Windows 下需要 git-bash，但 CLAUDE_CODE_GIT_BASH_PATH 指向的 bash.exe 不存在: %s", configured)
+	}
+
+	for _, command := range []string{"bash.exe", "bash"} {
+		if bashPath, err := lookPath(command); err == nil && exists(bashPath) {
+			return bashPath, nil
+		}
+	}
+
+	if gitPath, err := lookPath("git.exe"); err == nil {
+		gitDir := parentWindowsPath(gitPath)
+		for _, candidate := range []string{
+			joinWindowsPath(parentWindowsPath(gitDir), "bin", "bash.exe"),
+			joinWindowsPath(gitDir, "bash.exe"),
+		} {
+			if candidate != "" && exists(candidate) {
+				return candidate, nil
+			}
+		}
+	}
+
+	for _, candidate := range windowsGitBashCandidates(env) {
+		if exists(candidate) {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("Claude Code CLI 在 Windows 下需要 git-bash。请安装 Git for Windows（https://git-scm.com/downloads/win）；如果已安装但未加入 PATH，请设置环境变量 CLAUDE_CODE_GIT_BASH_PATH 指向 bash.exe，例如 C:\\Program Files\\Git\\bin\\bash.exe")
+}
+
+func windowsGitBashCandidates(env []string) []string {
+	candidates := make([]string, 0, 3)
+	for _, base := range []string{
+		envValue(env, "ProgramFiles"),
+		envValue(env, "ProgramFiles(x86)"),
+		envValue(env, "LocalAppData"),
+	} {
+		base = strings.TrimSpace(base)
+		if base == "" {
+			continue
+		}
+		if strings.EqualFold(base, envValue(env, "LocalAppData")) {
+			candidates = append(candidates, joinWindowsPath(base, "Programs", "Git", "bin", "bash.exe"))
+			continue
+		}
+		candidates = append(candidates, joinWindowsPath(base, "Git", "bin", "bash.exe"))
+	}
+	return candidates
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
+func upsertEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(strings.TrimSpace(path))
+	return err == nil && !info.IsDir()
+}
+
+func joinWindowsPath(base string, parts ...string) string {
+	result := strings.TrimSpace(strings.ReplaceAll(base, "/", `\`))
+	if result != "" {
+		result = strings.TrimRight(result, `\`)
+	}
+
+	for _, part := range parts {
+		part = strings.Trim(strings.ReplaceAll(strings.TrimSpace(part), "/", `\`), `\`)
+		if part == "" {
+			continue
+		}
+		if result == "" {
+			result = part
+			continue
+		}
+		result += `\` + part
+	}
+	return result
+}
+
+func parentWindowsPath(path string) string {
+	path = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(path), "/", `\`), `\`)
+	idx := strings.LastIndex(path, `\`)
+	if idx <= 0 {
+		return ""
+	}
+	return path[:idx]
 }
 
 // buildPrompt 将消息列表拼接为适合 claude -p 的提示文本
