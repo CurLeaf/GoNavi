@@ -608,7 +608,7 @@ func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionCon
 
 		if err := dbInst.Connect(connectConfig); err == nil {
 			if attempt > 1 {
-				logger.Warnf("数据库连接在启动保护重试后成功：%s 缓存Key=%s 尝试=%d/%d", formatConnSummary(effectiveConfig), cacheKey, attempt, startupConnectRetryAttempts)
+				logger.Warnf("数据库连接在重试后成功：%s 缓存Key=%s 尝试=%d/%d", formatConnSummary(effectiveConfig), cacheKey, attempt, startupConnectRetryAttempts)
 			}
 			return dbInst, effectiveConfig, nil
 		} else {
@@ -616,10 +616,10 @@ func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionCon
 			wrapped := wrapConnectError(effectiveConfig, err)
 			lastErr = wrapped
 			logger.Error(wrapped, "建立数据库连接失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), cacheKey)
-			if !a.shouldRetryStartupConnect(err, attempt) {
+			if !a.shouldRetryConnect(err, attempt) {
 				return nil, effectiveConfig, wrapped
 			}
-			logger.Warnf("检测到启动期瞬时网络失败，准备重试连接：%s 缓存Key=%s 尝试=%d/%d 延迟=%s 原因=%s",
+			logger.Warnf("检测到瞬时网络失败，准备重试连接：%s 缓存Key=%s 尝试=%d/%d 延迟=%s 原因=%s",
 				formatConnSummary(effectiveConfig), cacheKey, attempt, startupConnectRetryAttempts, startupConnectRetryDelay, normalizeErrorMessage(err))
 			time.Sleep(startupConnectRetryDelay)
 		}
@@ -650,18 +650,21 @@ func (a *App) startupPhaseLabel() string {
 	return fmt.Sprintf("稳定期(age=%s)", age)
 }
 
-func (a *App) shouldRetryStartupConnect(err error, attempt int) bool {
+func (a *App) shouldRetryConnect(err error, attempt int) bool {
 	if attempt >= startupConnectRetryAttempts {
 		return false
 	}
-	if a == nil || a.startedAt.IsZero() {
+	if !isTransientStartupConnectError(err) {
 		return false
 	}
-	age := time.Since(a.startedAt)
-	if age < 0 || age > startupConnectRetryWindow {
-		return false
+	if a != nil && !a.startedAt.IsZero() {
+		age := time.Since(a.startedAt)
+		if age >= 0 && age <= startupConnectRetryWindow {
+			return true
+		}
 	}
-	return isTransientStartupConnectError(err)
+	// Outside startup window, still grant one retry for transient network glitches.
+	return attempt == 1
 }
 
 func isTransientStartupConnectError(err error) bool {
