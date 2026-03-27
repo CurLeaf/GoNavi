@@ -7,6 +7,7 @@ import {
   QWEN_CODING_PLAN_MODELS,
   resolvePresetBaseURL,
   resolvePresetModelSelection,
+  resolvePresetTransport,
 } from './aiProviderPresets';
 
 describe('ai provider preset helpers', () => {
@@ -22,6 +23,27 @@ describe('ai provider preset helpers', () => {
       type: 'anthropic',
       baseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
     })).toBe('qwen-coding-plan');
+  });
+
+  it('maps Coding Plan Claude CLI config back to the dedicated Coding Plan preset', () => {
+    expect(matchQwenPresetKey({
+      type: 'custom',
+      apiFormat: 'claude-cli',
+      baseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
+    })).toBe('qwen-coding-plan');
+  });
+
+  it('does not keep a baked-in model list for the Coding Plan preset', () => {
+    expect(QWEN_CODING_PLAN_MODELS).toEqual([
+      'qwen3.5-plus',
+      'kimi-k2.5',
+      'glm-5',
+      'MiniMax-M2.5',
+      'qwen3-max-2026-01-23',
+      'qwen3-coder-next',
+      'qwen3-coder-plus',
+      'glm-4.7',
+    ]);
   });
 
   it('keeps built-in preset model empty when the preset intentionally requires an explicit selection', () => {
@@ -64,5 +86,26 @@ describe('ai provider preset helpers', () => {
       presetDefaultBaseUrl: '',
       valuesBaseUrl: 'https://example-proxy.internal/v1',
     })).toBe('https://example-proxy.internal/v1');
+  });
+
+  it('forces qwen coding plan to save as custom plus claude-cli', () => {
+    expect(resolvePresetTransport({
+      presetBackendType: 'custom',
+      presetFixedApiFormat: 'claude-cli',
+      valuesApiFormat: 'anthropic',
+    })).toEqual({
+      type: 'custom',
+      apiFormat: 'claude-cli',
+    });
+  });
+
+  it('keeps custom preset transport editable', () => {
+    expect(resolvePresetTransport({
+      presetBackendType: 'custom',
+      valuesApiFormat: 'gemini',
+    })).toEqual({
+      type: 'custom',
+      apiFormat: 'gemini',
+    });
   });
 });

@@ -204,7 +204,7 @@ export interface AIProviderConfig {
   baseUrl: string;
   model: string;
   models?: string[];
-  apiFormat?: string; // custom 专用: openai | anthropic | gemini
+  apiFormat?: string; // custom 专用: openai | anthropic | gemini | claude-cli
   headers?: Record<string, string>;
   maxTokens: number;
   temperature: number;
@@ -243,4 +243,3 @@ export interface AISafetyResult {
   requiresConfirm: boolean;
   warningMessage?: string;
 }
-

@@ -1,4 +1,4 @@
-import type { AIProviderConfig } from '../types';
+import type { AIProviderConfig, AIProviderType } from '../types';
 
 export const LEGACY_QWEN_BAILIAN_OPENAI_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 export const LEGACY_QWEN_CODING_PLAN_OPENAI_BASE_URL = 'https://coding.dashscope.aliyuncs.com/v1';
@@ -7,12 +7,14 @@ export const QWEN_CODING_PLAN_ANTHROPIC_BASE_URL = 'https://coding.dashscope.ali
 export const QWEN_BAILIAN_MODELS_BASE_URL = LEGACY_QWEN_BAILIAN_OPENAI_BASE_URL;
 
 export const QWEN_CODING_PLAN_MODELS = [
+  'qwen3.5-plus',
+  'kimi-k2.5',
+  'glm-5',
+  'MiniMax-M2.5',
+  'qwen3-max-2026-01-23',
+  'qwen3-coder-next',
   'qwen3-coder-plus',
-  'qwen3-coder-480b-a35b-instruct',
-  'qwen3-coder-30b-a3b-instruct',
-  'qwen3-coder-flash',
-  'qwen-plus',
-  'qwen-turbo',
+  'glm-4.7',
 ];
 
 const CUSTOM_LIKE_PRESET_KEYS = new Set(['custom', 'ollama']);
@@ -36,6 +38,17 @@ export interface ResolvePresetBaseURLInput {
   valuesBaseUrl?: string;
 }
 
+export interface ResolvePresetTransportInput {
+  presetBackendType: AIProviderType;
+  presetFixedApiFormat?: string;
+  valuesApiFormat?: string;
+}
+
+export interface ResolvePresetTransportResult {
+  type: AIProviderType;
+  apiFormat?: string;
+}
+
 export const getProviderHostname = (raw?: string): string => {
   if (!raw) return '';
   try {
@@ -56,7 +69,7 @@ export const getProviderFingerprint = (raw?: string): string => {
   }
 };
 
-export const matchQwenPresetKey = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'>): string | null => {
+export const matchQwenPresetKey = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>): string | null => {
   const fingerprint = getProviderFingerprint(provider.baseUrl);
   const bailianFingerprints = new Set([
     getProviderFingerprint(LEGACY_QWEN_BAILIAN_OPENAI_BASE_URL),
@@ -102,4 +115,29 @@ export const resolvePresetBaseURL = ({
     return valuesBaseUrl || presetDefaultBaseUrl;
   }
   return presetDefaultBaseUrl;
+};
+
+export const resolvePresetTransport = ({
+  presetBackendType,
+  presetFixedApiFormat,
+  valuesApiFormat,
+}: ResolvePresetTransportInput): ResolvePresetTransportResult => {
+  if (presetFixedApiFormat) {
+    return {
+      type: presetBackendType,
+      apiFormat: presetFixedApiFormat,
+    };
+  }
+
+  if (presetBackendType === 'custom') {
+    return {
+      type: presetBackendType,
+      apiFormat: valuesApiFormat || 'openai',
+    };
+  }
+
+  return {
+    type: presetBackendType,
+    apiFormat: undefined,
+  };
 };

@@ -5,16 +5,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	ai "GoNavi-Wails/internal/ai"
 )
 
 var claudeLookPath = exec.LookPath
+var claudeCommandContext = exec.CommandContext
+var claudeCLIRequestTimeout = 90 * time.Second
 
 // ClaudeCLIProvider 通过 Claude Code CLI 发送聊天请求
 // 适用于 anyrouter/newapi 等只支持 Claude Code 协议的代理服务
@@ -48,19 +52,25 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return nil, err
 	}
 
+	ctx, cancel := ensureClaudeCLITimeout(ctx, claudeCLIRequestTimeout)
+	defer cancel()
+
 	prompt := buildPrompt(req.Messages)
 	args := []string{"-p", prompt, "--output-format", "json", "--no-session-persistence"}
 	if p.config.Model != "" {
 		args = append(args, "--model", p.config.Model)
 	}
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd := claudeCommandContext(ctx, "claude", args...)
 	if err := p.setEnv(cmd); err != nil {
 		return nil, err
 	}
 
 	output, err := cmd.Output()
 	if err != nil {
+		if isClaudeCLITimeout(ctx, err) {
+			return nil, fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("claude CLI 执行失败: %s", string(exitErr.Stderr))
 		}
@@ -68,12 +78,13 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 	}
 
 	// 解析 JSON 输出
-	var result struct {
-		Result string `json:"result"`
-	}
+	var result cliStreamEvent
 	if err := json.Unmarshal(output, &result); err != nil {
 		// 如果 JSON 解析失败，直接返回原始文本
 		return &ai.ChatResponse{Content: strings.TrimSpace(string(output))}, nil
+	}
+	if errMsg, hasError := extractClaudeCLIEventError(result); hasError {
+		return nil, fmt.Errorf("claude CLI 返回错误: %s", errMsg)
 	}
 
 	return &ai.ChatResponse{Content: result.Result}, nil
@@ -85,6 +96,9 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		return err
 	}
 
+	ctx, cancel := ensureClaudeCLITimeout(ctx, claudeCLIRequestTimeout)
+	defer cancel()
+
 	prompt := buildPrompt(req.Messages)
 	args := []string{"-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence"}
 	if p.config.Model != "" {
@@ -93,7 +107,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	fmt.Printf("[ClaudeCLI DEBUG] Running: claude %v\n", args)
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd := claudeCommandContext(ctx, "claude", args...)
 	if err := p.setEnv(cmd); err != nil {
 		return err
 	}
@@ -137,7 +151,23 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		}
 
 		switch event.Type {
+		case "system":
+			if isClaudeCLISystemRetryEvent(event) {
+				if errMsg, hasError := extractClaudeCLISystemRetryError(event); hasError {
+					callback(ai.StreamChunk{Error: errMsg, Done: true})
+					if cmd.Process != nil {
+						_ = cmd.Process.Kill()
+					}
+					_ = cmd.Wait()
+					return nil
+				}
+			}
 		case "assistant":
+			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
+				callback(ai.StreamChunk{Error: errMsg, Done: true})
+				_ = cmd.Wait()
+				return nil
+			}
 			// 助手消息开始或文本内容
 			if event.Message.Content != nil {
 				for _, block := range event.Message.Content {
@@ -156,12 +186,18 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 				callback(ai.StreamChunk{Content: event.Delta.Text})
 			}
 		case "result":
+			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
+				callback(ai.StreamChunk{Error: errMsg, Done: true})
+				_ = cmd.Wait()
+				return nil
+			}
 			// 最终结果事件 — 不发送 content（assistant 事件已包含），只标记完成
 			callback(ai.StreamChunk{Done: true})
 			_ = cmd.Wait()
 			return nil
 		case "error":
-			callback(ai.StreamChunk{Error: event.Error.Message, Done: true})
+			errMsg, _ := extractClaudeCLIEventError(event)
+			callback(ai.StreamChunk{Error: errMsg, Done: true})
 			_ = cmd.Wait()
 			return nil
 		}
@@ -170,6 +206,14 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	waitErr := cmd.Wait()
 	stderrStr := strings.TrimSpace(stderrBuf.String())
 	fmt.Printf("[ClaudeCLI DEBUG] Process exited. stderr: %s\n", stderrStr)
+
+	if isClaudeCLITimeout(ctx, waitErr) {
+		callback(ai.StreamChunk{
+			Error: fmt.Sprintf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout),
+			Done:  true,
+		})
+		return nil
+	}
 
 	if waitErr != nil {
 		errMsg := fmt.Sprintf("claude CLI 异常退出: %v", waitErr)
@@ -182,6 +226,20 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	callback(ai.StreamChunk{Done: true})
 	return nil
+}
+
+func ensureClaudeCLITimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline || timeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func isClaudeCLITimeout(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // setEnv 设置 Claude CLI 的环境变量
@@ -200,6 +258,7 @@ func buildClaudeCLIEnv(config ai.ProviderConfig, baseEnv []string, goos string, 
 		env = upsertEnv(env, "ANTHROPIC_BASE_URL", strings.TrimRight(config.BaseURL, "/"))
 	}
 	if config.APIKey != "" {
+		env = upsertEnv(env, "ANTHROPIC_AUTH_TOKEN", config.APIKey)
 		env = upsertEnv(env, "ANTHROPIC_API_KEY", config.APIKey)
 	}
 
@@ -354,8 +413,15 @@ func buildPrompt(messages []ai.Message) string {
 
 // cliStreamEvent Claude CLI stream-json 输出的事件结构
 type cliStreamEvent struct {
-	Type    string `json:"type"`
-	Message struct {
+	Type         string  `json:"type"`
+	Subtype      string  `json:"subtype,omitempty"`
+	IsError      bool    `json:"is_error,omitempty"`
+	Attempt      int     `json:"attempt,omitempty"`
+	MaxRetries   int     `json:"max_retries,omitempty"`
+	RetryDelayMS float64 `json:"retry_delay_ms,omitempty"`
+	ErrorStatus  int     `json:"error_status,omitempty"`
+	SessionID    string  `json:"session_id,omitempty"`
+	Message      struct {
 		Content []struct {
 			Type     string `json:"type"`
 			Text     string `json:"text"`
@@ -367,8 +433,79 @@ type cliStreamEvent struct {
 		Text     string `json:"text"`
 		Thinking string `json:"thinking"`
 	} `json:"delta,omitempty"`
-	Result string `json:"result,omitempty"`
-	Error  struct {
+	Result string              `json:"result,omitempty"`
+	Error  cliStreamEventError `json:"error,omitempty"`
+}
+
+type cliStreamEventError struct {
+	Message string
+}
+
+func (e *cliStreamEventError) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		e.Message = ""
+		return nil
+	}
+
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		e.Message = strings.TrimSpace(text)
+		return nil
+	}
+
+	var payload struct {
 		Message string `json:"message"`
-	} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.Message = strings.TrimSpace(payload.Message)
+	return nil
+}
+
+func extractClaudeCLIEventError(event cliStreamEvent) (string, bool) {
+	if event.Type != "error" && !event.IsError {
+		return "", false
+	}
+
+	if msg := strings.TrimSpace(event.Result); msg != "" {
+		return msg, true
+	}
+
+	for _, block := range event.Message.Content {
+		if block.Type == "text" && strings.TrimSpace(block.Text) != "" {
+			return strings.TrimSpace(block.Text), true
+		}
+	}
+
+	if msg := strings.TrimSpace(event.Error.Message); msg != "" {
+		return msg, true
+	}
+
+	return "claude CLI 返回未知错误", true
+}
+
+func isClaudeCLISystemRetryEvent(event cliStreamEvent) bool {
+	return event.Type == "system" && event.Subtype == "api_retry"
+}
+
+func extractClaudeCLISystemRetryError(event cliStreamEvent) (string, bool) {
+	if !isClaudeCLISystemRetryEvent(event) {
+		return "", false
+	}
+
+	errText := strings.TrimSpace(event.Error.Message)
+	if event.ErrorStatus != 401 && event.ErrorStatus != 403 && !strings.EqualFold(errText, "authentication_failed") {
+		return "", false
+	}
+
+	if errText == "" {
+		errText = "authentication_failed"
+	}
+
+	if event.ErrorStatus > 0 {
+		return fmt.Sprintf("claude CLI 鉴权失败 (HTTP %d): %s", event.ErrorStatus, errText), true
+	}
+	return fmt.Sprintf("claude CLI 鉴权失败: %s", errText), true
 }

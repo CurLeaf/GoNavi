@@ -47,22 +47,53 @@ var miniMaxAnthropicModels = []string{
 }
 
 var dashScopeCodingPlanModels = []string{
+	"qwen3.5-plus",
+	"kimi-k2.5",
+	"glm-5",
+	"MiniMax-M2.5",
+	"qwen3-max-2026-01-23",
+	"qwen3-coder-next",
 	"qwen3-coder-plus",
-	"qwen3-coder-480b-a35b-instruct",
-	"qwen3-coder-30b-a3b-instruct",
-	"qwen3-coder-flash",
-	"qwen-plus",
-	"qwen-turbo",
+	"glm-4.7",
+}
+
+const dashScopeCodingPlanAnthropicBaseURL = "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+
+var volcengineCodingPlanAllowedExactModels = []string{
+	"auto",
 }
 
 var volcengineCodingPlanAllowedModelFamilies = []string{
+	"doubao-seed-2.0-code",
+	"doubao-seed-2.0-pro",
+	"doubao-seed-2.0-lite",
 	"doubao-seed-code",
+	"minimax-m2.5",
 	"glm-4.7",
 	"deepseek-v3.2",
 	"kimi-k2",
 }
 
 const volcengineCodingPlanEmptyModelsError = `当前接口未返回可用的火山 Coding Plan 模型，请检查账号权限或切换到"火山方舟"供应商`
+
+var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cliProvider, err := provider.NewProvider(config)
+	if err != nil {
+		return err
+	}
+
+	_, err = cliProvider.Chat(ctx, ai.ChatRequest{
+		Messages: []ai.Message{
+			{Role: "user", Content: "ping"},
+		},
+		MaxTokens:   1,
+		Temperature: 0,
+	})
+	return err
+}
 
 // NewService 创建 AI Service 实例
 func NewService() *Service {
@@ -197,6 +228,12 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 				err = fmt.Errorf("上游服务器内部错误 (HTTP %d)", resp.StatusCode)
 			}
 		}
+	case "claude-cli":
+		testConfig := config
+		if strings.TrimSpace(testConfig.Model) == "" && isDashScopeCodingPlanProvider(testConfig) && len(dashScopeCodingPlanModels) > 0 {
+			testConfig.Model = dashScopeCodingPlanModels[0]
+		}
+		err = claudeCLIHealthCheckFunc(testConfig)
 	default:
 		if baseURL != "" {
 			req, _ := http.NewRequest("GET", baseURL, nil)
@@ -263,8 +300,12 @@ func isDashScopeCodingPlanAnthropicProvider(config ai.ProviderConfig) bool {
 	if normalizedProviderType(config) != "anthropic" {
 		return false
 	}
+	return isDashScopeCodingPlanProvider(config)
+}
+
+func isDashScopeCodingPlanProvider(config ai.ProviderConfig) bool {
 	host, path := parseProviderBaseURL(config.BaseURL)
-	return host == "coding.dashscope.aliyuncs.com" && strings.HasPrefix(path, "/apps/anthropic")
+	return host == "coding.dashscope.aliyuncs.com" && (strings.HasPrefix(path, "/apps/anthropic") || strings.HasPrefix(path, "/v1"))
 }
 
 func isVolcengineCodingPlanProvider(config ai.ProviderConfig) bool {
@@ -279,6 +320,17 @@ func filterVolcengineCodingPlanModels(models []string) []string {
 	filtered := make([]string, 0, len(models))
 	for _, model := range models {
 		lowerModel := strings.ToLower(strings.TrimSpace(model))
+		matched := false
+		for _, exactModel := range volcengineCodingPlanAllowedExactModels {
+			if lowerModel == exactModel {
+				filtered = append(filtered, model)
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
 		for _, family := range volcengineCodingPlanAllowedModelFamilies {
 			if strings.Contains(lowerModel, family) {
 				filtered = append(filtered, model)
@@ -304,7 +356,7 @@ func defaultStaticModelsForProvider(config ai.ProviderConfig) []string {
 	if isMiniMaxAnthropicProvider(config) {
 		return append([]string(nil), miniMaxAnthropicModels...)
 	}
-	if isDashScopeCodingPlanAnthropicProvider(config) {
+	if isDashScopeCodingPlanProvider(config) {
 		return append([]string(nil), dashScopeCodingPlanModels...)
 	}
 	return nil
@@ -314,7 +366,10 @@ func normalizeProviderConfig(config ai.ProviderConfig) ai.ProviderConfig {
 	switch {
 	case isDashScopeBailianAnthropicProvider(config):
 		config.Models = nil
-	case isDashScopeCodingPlanAnthropicProvider(config):
+	case isDashScopeCodingPlanProvider(config):
+		config.Type = "custom"
+		config.APIFormat = "claude-cli"
+		config.BaseURL = dashScopeCodingPlanAnthropicBaseURL
 		config.Models = append([]string(nil), dashScopeCodingPlanModels...)
 	default:
 		staticModels := defaultStaticModelsForProvider(config)
@@ -472,6 +527,11 @@ func (s *Service) AIListModels() map[string]interface{} {
 
 	if !found {
 		return map[string]interface{}{"success": false, "models": []string{}, "error": "未找到活跃 Provider"}
+	}
+
+	config = normalizeProviderConfig(config)
+	if staticModels := defaultStaticModelsForProvider(config); len(staticModels) > 0 {
+		return map[string]interface{}{"success": true, "models": staticModels, "source": "static"}
 	}
 
 	models, err := fetchModelsFunc(config)

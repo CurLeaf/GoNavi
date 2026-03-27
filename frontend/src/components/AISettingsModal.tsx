@@ -11,6 +11,7 @@ import {
     QWEN_CODING_PLAN_MODELS,
     resolvePresetBaseURL,
     resolvePresetModelSelection,
+    resolvePresetTransport,
 } from '../utils/aiProviderPresets';
 import {
     PROVIDER_PRESET_CARD_BASE_STYLE,
@@ -37,6 +38,7 @@ interface ProviderPreset {
     desc: string;
     color: string;
     backendType: AIProviderType;
+    fixedApiFormat?: string;
     defaultBaseUrl: string;
     defaultModel: string;
     models: string[];
@@ -46,7 +48,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     { key: 'openai', label: 'OpenAI', icon: <ApiOutlined />, desc: 'GPT-5.4 / 5.3 系列', color: '#10b981', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o', models: [] },
     { key: 'deepseek', label: 'DeepSeek', icon: <ThunderboltOutlined />, desc: 'DeepSeek-V4 / R1', color: '#3b82f6', backendType: 'openai', defaultBaseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', models: [] },
     { key: 'qwen-bailian', label: '通义千问（百炼通用）', icon: <CloudOutlined />, desc: '百炼 Anthropic 兼容 / 模型从远端拉取', color: '#6366f1', backendType: 'anthropic', defaultBaseUrl: QWEN_BAILIAN_ANTHROPIC_BASE_URL, defaultModel: '', models: [] },
-    { key: 'qwen-coding-plan', label: '通义千问（Coding Plan）', icon: <CloudOutlined />, desc: 'Coding Plan 专属入口 / 使用官方支持模型清单', color: '#4f46e5', backendType: 'anthropic', defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL, defaultModel: '', models: QWEN_CODING_PLAN_MODELS },
+    { key: 'qwen-coding-plan', label: '通义千问（Coding Plan）', icon: <CloudOutlined />, desc: 'Claude Code CLI 代理链路 / 使用官方支持模型清单', color: '#4f46e5', backendType: 'custom', fixedApiFormat: 'claude-cli', defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL, defaultModel: '', models: QWEN_CODING_PLAN_MODELS },
     { key: 'zhipu', label: '智谱 GLM', icon: <ExperimentOutlined />, desc: 'GLM-5 / GLM-5-Turbo', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4', models: [] },
     { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 (Anthropic 兼容)', color: '#0d9488', backendType: 'anthropic', defaultBaseUrl: 'https://api.moonshot.cn/anthropic', defaultModel: 'moonshot-v1-8k', models: [] },
     { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-20241022', models: [] },
@@ -167,11 +169,22 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const handleEditProvider = (p: AIProviderConfig) => {
         // 尝试根据 baseUrl 和 type 推断 preset
         const matchedPreset = matchProviderPreset(p);
+        const resolvedTransport = resolvePresetTransport({
+            presetBackendType: matchedPreset.backendType,
+            presetFixedApiFormat: matchedPreset.fixedApiFormat,
+            valuesApiFormat: p.apiFormat,
+        });
         setEditingProvider(p);
         setIsEditing(true);
         setTestStatus('idle');
         form.resetFields();
-        form.setFieldsValue({ ...p, type: matchedPreset.backendType, models: p.models || [], presetKey: matchedPreset.key, apiFormat: p.apiFormat || 'openai' });
+        form.setFieldsValue({
+            ...p,
+            type: resolvedTransport.type,
+            models: p.models || [],
+            presetKey: matchedPreset.key,
+            apiFormat: resolvedTransport.apiFormat || p.apiFormat || 'openai',
+        });
     };
 
     const handleDeleteProvider = async (id: string) => {
@@ -220,15 +233,21 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetDefaultBaseUrl: preset.defaultBaseUrl,
                 valuesBaseUrl: values.baseUrl,
             });
+            const resolvedTransport = resolvePresetTransport({
+                presetBackendType: preset.backendType,
+                presetFixedApiFormat: preset.fixedApiFormat,
+                valuesApiFormat: values.apiFormat,
+            });
             
             const payload = { 
                 ...editingProvider, 
                 ...values, 
+                ...resolvedTransport,
                 name: finalName,
                 model: finalModel,
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
-                apiFormat: values.apiFormat || 'openai',
+                apiFormat: resolvedTransport.apiFormat,
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
@@ -277,7 +296,29 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetDefaultBaseUrl: preset.defaultBaseUrl,
                 valuesBaseUrl: values.baseUrl,
             });
-            const res = await Service?.AITestProvider?.({ ...values, baseUrl: finalBaseUrl, maxTokens: Number(values.maxTokens) || 4096, temperature: Number(values.temperature) ?? 0.7 });
+            const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
+                presetKey: values.presetKey || 'openai',
+                presetDefaultModel: preset.defaultModel,
+                presetModels: preset.models,
+                valuesModel: values.model,
+                customModels: values.models,
+            });
+            const resolvedTransport = resolvePresetTransport({
+                presetBackendType: preset.backendType,
+                presetFixedApiFormat: preset.fixedApiFormat,
+                valuesApiFormat: values.apiFormat,
+            });
+            const res = await Service?.AITestProvider?.({
+                ...editingProvider,
+                ...values,
+                ...resolvedTransport,
+                baseUrl: finalBaseUrl,
+                model: finalModel,
+                models: resolvedModels,
+                maxTokens: Number(values.maxTokens) || 4096,
+                temperature: Number(values.temperature) ?? 0.7,
+                apiFormat: resolvedTransport.apiFormat,
+            });
             if (res?.success) { setTestStatus('success'); void messageApi.success('连接成功'); }
             else { setTestStatus('error'); void messageApi.error(`测试失败: ${res?.message || '未知错误'}`); }
         } catch (e: any) { setTestStatus('error'); void messageApi.error(e?.message || '测试失败'); }
@@ -286,9 +327,15 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 
     const handlePresetChange = (presetKey: string) => {
         const preset = findPreset(presetKey);
+        const resolvedTransport = resolvePresetTransport({
+            presetBackendType: preset.backendType,
+            presetFixedApiFormat: preset.fixedApiFormat,
+            valuesApiFormat: form.getFieldValue('apiFormat'),
+        });
         form.setFieldsValue({
             presetKey,
-            type: preset.backendType,
+            type: resolvedTransport.type,
+            apiFormat: resolvedTransport.apiFormat || 'openai',
             baseUrl: preset.defaultBaseUrl,
             model: preset.defaultModel,
         });

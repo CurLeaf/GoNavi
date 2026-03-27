@@ -25,7 +25,7 @@ type Tool struct {
 
 // Message 表示一条对话消息
 type Message struct {
-	Role       string     `json:"role"`    // "system" | "user" | "assistant" | "tool"
+	Role       string     `json:"role"` // "system" | "user" | "assistant" | "tool"
 	Content    string     `json:"content"`
 	Images     []string   `json:"images,omitempty"`       // base64 encoded images with data:image/png;base64,... prefix
 	ToolCallID string     `json:"tool_call_id,omitempty"` // 当 role 为 "tool" 时必须传递
@@ -66,13 +66,13 @@ type StreamChunk struct {
 // ProviderConfig AI Provider 配置
 type ProviderConfig struct {
 	ID          string            `json:"id"`
-	Type        string            `json:"type"`        // openai | anthropic | gemini | custom
+	Type        string            `json:"type"` // openai | anthropic | gemini | custom
 	Name        string            `json:"name"`
 	APIKey      string            `json:"apiKey"`
 	BaseURL     string            `json:"baseUrl"`
 	Model       string            `json:"model"`
 	Models      []string          `json:"models,omitempty"`
-	APIFormat   string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini
+	APIFormat   string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | claude-cli
 	Headers     map[string]string `json:"headers,omitempty"`
 	MaxTokens   int               `json:"maxTokens"`
 	Temperature float64           `json:"temperature"`
