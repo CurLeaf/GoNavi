@@ -37,6 +37,43 @@ func TestResolveModelsURL_UsesOpenAIModelsEndpointForOpenAICompatibleProvider(t 
 	}
 }
 
+func TestResolveModelsURL_UsesVersionedVolcengineCodingPlanPath(t *testing.T) {
+	url := resolveModelsURL(ai.ProviderConfig{
+		Type:    "openai",
+		BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
+	})
+	if url != "https://ark.cn-beijing.volces.com/api/coding/v3/models" {
+		t.Fatalf("expected volcengine coding plan models endpoint, got %q", url)
+	}
+}
+
+func TestResolveModelsURL_UsesVersionedZhipuPath(t *testing.T) {
+	url := resolveModelsURL(ai.ProviderConfig{
+		Type:    "openai",
+		BaseURL: "https://open.bigmodel.cn/api/paas/v4",
+	})
+	if url != "https://open.bigmodel.cn/api/paas/v4/models" {
+		t.Fatalf("expected zhipu models endpoint, got %q", url)
+	}
+}
+
+func TestNewModelsRequest_StripsChatCompletionsSuffixForOpenAICompatibleProvider(t *testing.T) {
+	req, err := newModelsRequest(ai.ProviderConfig{
+		Type:    "openai",
+		BaseURL: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+		APIKey:  "sk-test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.URL.String() != "https://ark.cn-beijing.volces.com/api/v3/models" {
+		t.Fatalf("expected normalized models endpoint, got %q", req.URL.String())
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
+		t.Fatalf("expected bearer auth header, got %q", got)
+	}
+}
+
 func TestDefaultStaticModelsForProvider_ReturnsMiniMaxAnthropicModels(t *testing.T) {
 	models := defaultStaticModelsForProvider(ai.ProviderConfig{
 		Type:    "anthropic",

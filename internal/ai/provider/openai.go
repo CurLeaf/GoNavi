@@ -30,14 +30,7 @@ type OpenAIProvider struct {
 
 // NewOpenAIProvider 创建 OpenAI Provider 实例
 func NewOpenAIProvider(config ai.ProviderConfig) (Provider, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	if baseURL == "" {
-		baseURL = defaultOpenAIBaseURL
-	}
-	// 确保 baseURL 包含 /v1 路径（兼容用户只填域名的情况，如 https://anyrouter.top）
-	if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
-		baseURL = baseURL + "/v1"
-	}
+	baseURL := NormalizeOpenAICompatibleBaseURL(config.BaseURL)
 	model := strings.TrimSpace(config.Model)
 	if model == "" {
 		return nil, fmt.Errorf("模型 ID 不能为空，请在设置中选择或输入模型")
@@ -315,7 +308,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 		}
 		if len(chunk.Choices) > 0 {
 			choice := chunk.Choices[0]
-			
+
 			// Handle ToolCalls delta
 			if len(choice.Delta.ToolCalls) > 0 {
 				receivedContent = true
@@ -383,10 +376,7 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	url := p.baseURL + "/chat/completions"
-
-
-
+	url := ResolveOpenAICompatibleEndpoint(p.baseURL, "chat/completions")
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)

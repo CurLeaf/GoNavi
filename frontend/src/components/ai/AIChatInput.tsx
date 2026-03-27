@@ -354,7 +354,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             <Select
                                 size="small"
                                 variant="filled"
-                                value={activeProvider.model || (dynamicModels.length > 0 ? dynamicModels[0] : activeProvider.models?.[0])}
+                                value={activeProvider.model || undefined}
                                 onChange={onModelChange}
                                 onDropdownVisibleChange={(open) => { if (open && dynamicModels.length === 0) onFetchModels(); }}
                                 loading={loadingModels}

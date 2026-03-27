@@ -33,7 +33,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 (Anthropic 兼容)', color: '#0d9488', backendType: 'anthropic', defaultBaseUrl: 'https://api.moonshot.cn/anthropic', defaultModel: 'moonshot-v1-8k', models: [] },
     { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-20241022', models: [] },
     { key: 'gemini', label: 'Gemini', icon: <CloudOutlined />, desc: 'Gemini 3.1 / 2.5 系列', color: '#059669', backendType: 'gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com', defaultModel: 'gemini-2.5-flash', models: [] },
-    { key: 'volcengine', label: '火山引擎', icon: <CloudOutlined />, desc: '火山方舟 / 豆包大模型', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModel: 'ep-xxxxxx', models: [] },
+    { key: 'volcengine-ark', label: '火山方舟', icon: <CloudOutlined />, desc: 'Ark 通用推理 / 豆包模型', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModel: '', models: [] },
+    { key: 'volcengine-coding', label: '火山 Coding Plan', icon: <CloudOutlined />, desc: 'Ark Code / Coding Plan', color: '#0284c7', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', defaultModel: '', models: [] },
     { key: 'minimax', label: 'MiniMax', icon: <ExperimentOutlined />, desc: 'M2.7 / M2.5 系列 (Anthropic 兼容)', color: '#e11d48', backendType: 'anthropic', defaultBaseUrl: 'https://api.minimaxi.com/anthropic', defaultModel: 'MiniMax-M2.7', models: ['MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'] },
     { key: 'ollama', label: 'Ollama', icon: <AppstoreOutlined />, desc: '本地部署开源模型', color: '#78716c', backendType: 'openai', defaultBaseUrl: 'http://localhost:11434/v1', defaultModel: 'llama3', models: [] },
     { key: 'custom', label: '自定义', icon: <AppstoreOutlined />, desc: '自定义 API 端点', color: '#64748b', backendType: 'custom', defaultBaseUrl: '', defaultModel: '', models: [] },
@@ -50,7 +51,28 @@ const getProviderHostname = (raw?: string): string => {
     }
 };
 
+const getProviderFingerprint = (raw?: string): string => {
+    if (!raw) return '';
+    try {
+        const url = new URL(raw);
+        const normalizedPath = url.pathname.replace(/\/+$/, '').toLowerCase();
+        return `${url.hostname.toLowerCase()}${normalizedPath}`;
+    } catch {
+        return '';
+    }
+};
+
 const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'>): ProviderPreset => {
+    const fingerprint = getProviderFingerprint(provider.baseUrl);
+    const exactPreset = PROVIDER_PRESETS.find(pr =>
+        pr.backendType === provider.type
+        && fingerprint !== ''
+        && fingerprint === getProviderFingerprint(pr.defaultBaseUrl)
+    );
+    if (exactPreset) {
+        return exactPreset;
+    }
+
     const host = getProviderHostname(provider.baseUrl);
     if (host.endsWith('moonshot.cn')) {
         return findPreset('moonshot');

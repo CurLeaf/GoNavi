@@ -268,13 +268,7 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 	case "openai":
 		fallthrough
 	default:
-		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
-		}
-		if !strings.HasSuffix(baseURL, "/v1") && !strings.Contains(baseURL, "/v1/") {
-			baseURL = baseURL + "/v1"
-		}
-		return baseURL + "/models"
+		return provider.ResolveOpenAICompatibleEndpoint(baseURL, "models")
 	}
 }
 
