@@ -3504,7 +3504,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           const values = orderedCols.map(c => {
               const v = r[c];
               if (v === null || v === undefined) return 'NULL';
-              const escaped = String(v).replace(/'/g, "''");
+              const str = typeof v === 'string' ? normalizeDateTimeString(v) : String(v);
+              const escaped = str.replace(/'/g, "''");
               return `'${escaped}'`;
           });
           const targetTable = tableName || 'table';

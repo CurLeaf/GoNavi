@@ -1586,13 +1586,14 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         return;
     }
 
-    const config = { 
-        ...conn.config, 
+    const config = {
+        ...conn.config,
         port: Number(conn.config.port),
         password: conn.config.password || "",
         database: conn.config.database || "",
         useSSH: conn.config.useSSH || false,
-        ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+        ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" },
+        timeout: Math.max(Number(conn.config.timeout) || 30, 120),
     };
 
     try {
@@ -1842,8 +1843,12 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                     let simpleTableName: string | undefined = undefined;
                     if (rawStatement) {
-                        // 支持多行 SQL：SELECT * FROM [schema.]table [WHERE...] [ORDER BY...] [LIMIT...] 等
-                        const tableMatch = rawStatement.match(/^\s*SELECT\s+\*\s+FROM\s+(?:[\w`"]+\.)?[`"]?(\w+)[`"]?\s*(?:$|[\s;])/im);
+                        // 支持多行 SQL：SELECT [cols] FROM [schema.]table [WHERE...] [ORDER BY...] [LIMIT...] 等
+                        // JOIN 查询表名歧义，不提取
+                        const hasJoin = /\bJOIN\b/i.test(rawStatement);
+                        const tableMatch = !hasJoin
+                            ? rawStatement.match(/^\s*SELECT\s+.+?\s+FROM\s+(?:[\w`"\[\].]+\.)?[`"\[]?(\w+)[`"\]]?\s*(?:$|[\s;])/im)
+                            : null;
                         if (tableMatch) {
                             simpleTableName = tableMatch[1];
                             if (!forceReadOnlyResult) {
