@@ -22,10 +22,6 @@ export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
 }
 
-export function CleanupStaleQueries(arg1) {
-  return window['go']['app']['App']['CleanupStaleQueries'](arg1);
-}
-
 export function ConfigureDriverRuntimeDirectory(arg1) {
   return window['go']['app']['App']['ConfigureDriverRuntimeDirectory'](arg1);
 }
@@ -384,10 +380,6 @@ export function SetMacNativeWindowControls(arg1) {
 
 export function SetWindowTranslucency(arg1, arg2) {
   return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2);
-}
-
-export function Startup(arg1) {
-  return window['go']['app']['App']['Startup'](arg1);
 }
 
 export function TestConnection(arg1) {

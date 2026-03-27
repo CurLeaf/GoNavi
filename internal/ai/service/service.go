@@ -31,7 +31,7 @@ type Service struct {
 	safetyLevel    ai.SQLPermissionLevel
 	contextLevel   ai.ContextLevel
 	guard          *safety.Guard
-	configDir      string // 配置存储目录
+	configDir      string                        // 配置存储目录
 	cancelFuncs    map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 }
 
@@ -56,8 +56,13 @@ func NewService() *Service {
 	}
 }
 
-// Startup Wails 生命周期回调
-func (s *Service) Startup(ctx context.Context) {
+// InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.
+func InitializeLifecycle(s *Service, ctx context.Context) {
+	s.startup(ctx)
+}
+
+// startup Wails 生命周期回调
+func (s *Service) startup(ctx context.Context) {
 	s.ctx = ctx
 	s.configDir = resolveConfigDir()
 	s.loadConfig()
@@ -588,8 +593,8 @@ func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]
 	}
 
 	return map[string]interface{}{
-		"success": true,
-		"content": resp.Content,
+		"success":    true,
+		"content":    resp.Content,
 		"tool_calls": resp.ToolCalls,
 		"tokensUsed": map[string]int{
 			"promptTokens":     resp.TokensUsed.PromptTokens,

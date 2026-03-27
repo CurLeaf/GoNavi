@@ -81,7 +81,3 @@ export function AISetSafetyLevel(arg1) {
 export function AITestProvider(arg1) {
   return window['go']['aiservice']['Service']['AITestProvider'](arg1);
 }
-
-export function Startup(arg1) {
-  return window['go']['aiservice']['Service']['Startup'](arg1);
-}

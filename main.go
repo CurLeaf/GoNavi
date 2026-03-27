@@ -34,8 +34,8 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
 		OnStartup: func(ctx context.Context) {
-			application.Startup(ctx)
-			aiService.Startup(ctx)
+			app.InitializeLifecycle(application, ctx)
+			aiservice.InitializeLifecycle(aiService, ctx)
 		},
 		OnShutdown: application.Shutdown,
 		Bind: []interface{}{

@@ -64,9 +64,14 @@ func NewApp() *App {
 	}
 }
 
-// Startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) Startup(ctx context.Context) {
+// InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.
+func InitializeLifecycle(a *App, ctx context.Context) {
+	a.startup(ctx)
+}
+
+// startup is called when the app starts. The context is saved
+// so we can call the runtime methods.
+func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startedAt = time.Now()
 	logger.Init()
@@ -700,8 +705,8 @@ func (a *App) CancelQuery(queryID string) connection.QueryResult {
 	return connection.QueryResult{Success: false, Message: "查询不存在或已完成"}
 }
 
-// CleanupStaleQueries removes queries older than maxAge
-func (a *App) CleanupStaleQueries(maxAge time.Duration) {
+// cleanupStaleQueries removes queries older than maxAge.
+func (a *App) cleanupStaleQueries(maxAge time.Duration) {
 	a.queryMu.Lock()
 	defer a.queryMu.Unlock()
 
