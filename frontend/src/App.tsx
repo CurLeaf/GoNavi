@@ -28,6 +28,13 @@ import {
   isShortcutMatch,
   normalizeShortcutCombo,
 } from './utils/shortcuts';
+import {
+  SIDEBAR_UTILITY_ITEM_KEYS,
+  resolveAIEntryPlacement,
+  resolveAIEdgeHandleAttachment,
+  resolveAIEdgeHandleDockStyle,
+  resolveAIEdgeHandleStyle,
+} from './utils/aiEntryLayout';
 import { ConfigureGlobalProxy, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
@@ -1125,6 +1132,61 @@ function App() {
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
+  const aiEntryPlacement = resolveAIEntryPlacement();
+  const aiEdgeHandleAttachment = resolveAIEdgeHandleAttachment(aiPanelVisible);
+  const aiEdgeHandleDockStyle = useMemo(
+      () => resolveAIEdgeHandleDockStyle(aiEdgeHandleAttachment),
+      [aiEdgeHandleAttachment],
+  );
+  const aiEdgeHandleStyle = useMemo(() => (
+      resolveAIEdgeHandleStyle({
+          darkMode,
+          aiPanelVisible,
+          effectiveUiScale,
+      })
+  ), [aiPanelVisible, darkMode, effectiveUiScale]);
+  const sidebarUtilityItems = useMemo(() => {
+      const itemMap = {
+          tools: {
+              key: 'tools',
+              title: '工具',
+              icon: <ToolOutlined />,
+              onClick: () => setIsToolsModalOpen(true),
+          },
+          proxy: {
+              key: 'proxy',
+              title: '代理',
+              icon: <GlobalOutlined />,
+              onClick: () => setIsProxyModalOpen(true),
+          },
+          theme: {
+              key: 'theme',
+              title: '主题',
+              icon: <SkinOutlined />,
+              onClick: () => setIsThemeModalOpen(true),
+          },
+          about: {
+              key: 'about',
+              title: '关于',
+              icon: <InfoCircleOutlined />,
+              onClick: () => setIsAboutOpen(true),
+          },
+      } as const;
+
+      return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
+  }, []);
+  const renderAIEdgeHandle = () => (
+      <Tooltip title="AI 助手">
+          <Button
+              type="text"
+              icon={<RobotOutlined />}
+              onClick={toggleAIPanel}
+              style={aiEdgeHandleStyle}
+          >
+              AI
+          </Button>
+      </Tooltip>
+  );
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -1634,24 +1696,12 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <Tooltip title="工具"><Button type="text" icon={<ToolOutlined />} style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)} /></Tooltip>
-                        <Tooltip title="代理"><Button type="text" icon={<GlobalOutlined />} style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)} /></Tooltip>
-                        <Tooltip title="主题"><Button type="text" icon={<SkinOutlined />} style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)} /></Tooltip>
-                        <Tooltip title="关于"><Button type="text" icon={<InfoCircleOutlined />} style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)} /></Tooltip>
-                        <div style={{ width: 1, height: 16, background: 'rgba(128,128,128,0.2)', margin: '0 4px' }} />
-                        <Tooltip title="AI 助手">
-                            <Button
-                                type="text"
-                                icon={<RobotOutlined />}
-                                onClick={toggleAIPanel}
-                                style={{
-                                    ...utilityButtonStyle,
-                                    color: aiPanelVisible ? (darkMode ? '#ffd666' : '#1677ff') : utilityButtonStyle.color,
-                                    background: aiPanelVisible ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)') : 'transparent'
-                                }}
-                            />
-                        </Tooltip>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+                        {sidebarUtilityItems.map((item) => (
+                            <Tooltip key={item.key} title={item.title}>
+                                <Button type="text" icon={item.icon} style={utilityButtonStyle} onClick={item.onClick} />
+                            </Tooltip>
+                        ))}
                     </div>
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -1760,12 +1810,24 @@ function App() {
             />
           </Sider>
            <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
                   <TabManager />
                </div>
+               {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'content-shell' && (
+                  <div style={aiEdgeHandleDockStyle}>
+                      {renderAIEdgeHandle()}
+                  </div>
+               )}
                {aiPanelVisible && (
-                  <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => setIsAISettingsOpen(true)} overlayTheme={overlayTheme} />
+                  <div style={{ position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}>
+                      {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'panel-shell' && (
+                          <div style={aiEdgeHandleDockStyle}>
+                              {renderAIEdgeHandle()}
+                          </div>
+                      )}
+                      <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => setIsAISettingsOpen(true)} overlayTheme={overlayTheme} />
+                  </div>
                )}
              </div>
              {isLogPanelOpen && (
