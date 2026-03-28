@@ -88,7 +88,7 @@ func TestCleanupStaleQueries(t *testing.T) {
 	app.queryMu.Unlock()
 
 	// Cleanup queries older than 1 hour
-	app.CleanupStaleQueries(1 * time.Hour)
+	app.cleanupStaleQueries(1 * time.Hour)
 
 	// Verify stale query was removed
 	app.queryMu.Lock()
@@ -110,7 +110,7 @@ func TestCleanupStaleQueries(t *testing.T) {
 	defer cancel2()
 
 	// Cleanup queries older than 1 hour
-	app.CleanupStaleQueries(1 * time.Hour)
+	app.cleanupStaleQueries(1 * time.Hour)
 
 	// Verify fresh query still exists
 	app.queryMu.Lock()

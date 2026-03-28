@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { 
     DndContext, 
@@ -4641,6 +4641,43 @@ const DataGrid: React.FC<DataGridProps> = ({
                    {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
                </>
            )}
+
+           <>
+               <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
+               <Tooltip title="一键借助 AI 智能分析当前查询页数据">
+                   <Button 
+                       icon={<RobotOutlined />} 
+                       style={{
+                           background: darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))' : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))',
+                           borderColor: darkMode ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.4)',
+                           color: '#10b981',
+                           fontWeight: 500,
+                           boxShadow: darkMode ? '0 2px 8px rgba(16,185,129,0.1)' : '0 2px 6px rgba(16,185,129,0.05)',
+                       }}
+                       onMouseEnter={(e) => {
+                           e.currentTarget.style.background = darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.25), rgba(16,185,129,0.1))' : 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))';
+                           e.currentTarget.style.borderColor = '#10b981';
+                       }}
+                       onMouseLeave={(e) => {
+                           e.currentTarget.style.background = darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))' : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))';
+                           e.currentTarget.style.borderColor = darkMode ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.4)';
+                       }}
+                       onClick={() => {
+                           const sampleData = mergedDisplayData.slice(0, 10);
+                           const prompt = `请帮我分析以下查询结果数据（取前 ${sampleData.length} 条示例）：\n\`\`\`json\n${JSON.stringify(sampleData, null, 2)}\n\`\`\`\n\n请分析数据特征、发现规律，或者给出一些业务上的洞察。`;
+                           const store = useStore.getState();
+                           const wasClosed = !store.aiPanelVisible;
+                           if (wasClosed) store.setAIPanelVisible(true);
+                           // 如果面板刚打开，需要等待组件挂载完成后再注入 prompt
+                           setTimeout(() => {
+                               window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+                           }, wasClosed ? 350 : 0);
+                       }}
+                   >
+                       AI 数据洞察
+                   </Button>
+               </Tooltip>
+           </>
 
            {isDuckDBConnection && onRequestTotalCount && (
                <>

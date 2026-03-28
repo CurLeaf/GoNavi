@@ -23,6 +23,17 @@ import (
 
 const dbCachePingInterval = 30 * time.Second
 
+const (
+	startupConnectRetryWindow   = 20 * time.Second
+	startupConnectRetryDelay    = 800 * time.Millisecond
+	startupConnectRetryAttempts = 4
+)
+
+var (
+	newDatabaseFunc                = db.NewDatabase
+	resolveDialConfigWithProxyFunc = resolveDialConfigWithProxy
+)
+
 type cachedDatabase struct {
 	inst     db.Database
 	lastPing time.Time
@@ -36,6 +47,7 @@ type queryContext struct {
 // App struct
 type App struct {
 	ctx            context.Context
+	startedAt      time.Time
 	dbCache        map[string]cachedDatabase // Cache for DB connections
 	mu             sync.RWMutex              // Mutex for cache access
 	updateMu       sync.Mutex
@@ -52,13 +64,19 @@ func NewApp() *App {
 	}
 }
 
-// Startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) Startup(ctx context.Context) {
+// InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.
+func InitializeLifecycle(a *App, ctx context.Context) {
+	a.startup(ctx)
+}
+
+// startup is called when the app starts. The context is saved
+// so we can call the runtime methods.
+func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startedAt = time.Now()
 	logger.Init()
 	applyMacWindowTranslucencyFix()
-	logger.Infof("应用启动完成")
+	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }
 
 // SetWindowTranslucency 动态调整 macOS 窗口透明度。
@@ -66,6 +84,12 @@ func (a *App) Startup(ctx context.Context) {
 // opacity=1.0 且 blur=0 时窗口标记为 opaque，GPU 不再持续计算窗口背后的模糊合成。
 func (a *App) SetWindowTranslucency(opacity float64, blur float64) {
 	setMacWindowTranslucency(opacity, blur)
+}
+
+// SetMacNativeWindowControls toggles macOS native traffic-light window controls.
+// On non-macOS platforms this is a no-op.
+func (a *App) SetMacNativeWindowControls(enabled bool) {
+	setMacNativeWindowControls(enabled)
 }
 
 // Shutdown is called when the app terminates
@@ -423,12 +447,12 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
 
-	dbInst, err := db.NewDatabase(effectiveConfig.Type)
+	dbInst, err := newDatabaseFunc(effectiveConfig.Type)
 	if err != nil {
 		return nil, err
 	}
 
-	connectConfig, proxyErr := resolveDialConfigWithProxy(effectiveConfig)
+	connectConfig, proxyErr := resolveDialConfigWithProxyFunc(effectiveConfig)
 	if proxyErr != nil {
 		_ = dbInst.Close()
 		return nil, wrapConnectError(effectiveConfig, proxyErr)
@@ -445,10 +469,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	isFileDB := isFileDatabaseType(effectiveConfig.Type)
 
 	key := getCacheKey(effectiveConfig)
-	shortKey := key
-	if len(shortKey) > 12 {
-		shortKey = shortKey[:12]
-	}
+	shortKey := shortenCacheKey(key)
 	if isFileDB {
 		rawDSN := resolveFileDatabaseDSN(effectiveConfig)
 		normalizedDSN := resolveFileDatabaseDSN(normalizeCacheKeyConfig(effectiveConfig))
@@ -525,26 +546,13 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		logger.Infof("未命中文件库连接缓存，开始创建连接：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 	}
 
-	logger.Infof("获取数据库连接：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
-	logger.Infof("创建数据库驱动实例：类型=%s 缓存Key=%s", effectiveConfig.Type, shortKey)
-	dbInst, err := db.NewDatabase(effectiveConfig.Type)
+	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(config)
 	if err != nil {
-		logger.Error(err, "创建数据库驱动实例失败：类型=%s 缓存Key=%s", effectiveConfig.Type, shortKey)
 		return nil, err
 	}
-
-	connectConfig, proxyErr := resolveDialConfigWithProxy(effectiveConfig)
-	if proxyErr != nil {
-		wrapped := wrapConnectError(effectiveConfig, proxyErr)
-		logger.Error(wrapped, "连接代理准备失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
-		return nil, wrapped
-	}
-
-	if err := dbInst.Connect(connectConfig); err != nil {
-		wrapped := wrapConnectError(effectiveConfig, err)
-		logger.Error(wrapped, "建立数据库连接失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
-		return nil, wrapped
-	}
+	effectiveConfig = connectedConfig
+	key = getCacheKey(effectiveConfig)
+	shortKey = shortenCacheKey(key)
 
 	now := time.Now()
 
@@ -563,6 +571,121 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 	return dbInst, nil
+}
+
+func shortenCacheKey(key string) string {
+	if len(key) > 12 {
+		return key[:12]
+	}
+	return key
+}
+
+func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionConfig) (db.Database, connection.ConnectionConfig, error) {
+	var lastErr error
+	var lastEffectiveConfig connection.ConnectionConfig
+
+	for attempt := 1; attempt <= startupConnectRetryAttempts; attempt++ {
+		effectiveConfig := applyGlobalProxyToConnection(rawConfig)
+		lastEffectiveConfig = effectiveConfig
+		cacheKey := shortenCacheKey(getCacheKey(effectiveConfig))
+
+		logger.Infof("获取数据库连接：%s 缓存Key=%s 启动阶段=%s", formatConnSummary(effectiveConfig), cacheKey, a.startupPhaseLabel())
+		logger.Infof("创建数据库驱动实例：类型=%s 缓存Key=%s 尝试=%d/%d", effectiveConfig.Type, cacheKey, attempt, startupConnectRetryAttempts)
+
+		dbInst, err := newDatabaseFunc(effectiveConfig.Type)
+		if err != nil {
+			logger.Error(err, "创建数据库驱动实例失败：类型=%s 缓存Key=%s", effectiveConfig.Type, cacheKey)
+			return nil, effectiveConfig, err
+		}
+
+		connectConfig, proxyErr := resolveDialConfigWithProxyFunc(effectiveConfig)
+		if proxyErr != nil {
+			_ = dbInst.Close()
+			wrapped := wrapConnectError(effectiveConfig, proxyErr)
+			logger.Error(wrapped, "连接代理准备失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), cacheKey)
+			return nil, effectiveConfig, wrapped
+		}
+
+		if err := dbInst.Connect(connectConfig); err == nil {
+			if attempt > 1 {
+				logger.Warnf("数据库连接在重试后成功：%s 缓存Key=%s 尝试=%d/%d", formatConnSummary(effectiveConfig), cacheKey, attempt, startupConnectRetryAttempts)
+			}
+			return dbInst, effectiveConfig, nil
+		} else {
+			_ = dbInst.Close()
+			wrapped := wrapConnectError(effectiveConfig, err)
+			lastErr = wrapped
+			logger.Error(wrapped, "建立数据库连接失败：%s 缓存Key=%s", formatConnSummary(effectiveConfig), cacheKey)
+			if !a.shouldRetryConnect(err, attempt) {
+				return nil, effectiveConfig, wrapped
+			}
+			logger.Warnf("检测到瞬时网络失败，准备重试连接：%s 缓存Key=%s 尝试=%d/%d 延迟=%s 原因=%s",
+				formatConnSummary(effectiveConfig), cacheKey, attempt, startupConnectRetryAttempts, startupConnectRetryDelay, normalizeErrorMessage(err))
+			time.Sleep(startupConnectRetryDelay)
+		}
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("建立数据库连接失败")
+	}
+	return nil, lastEffectiveConfig, lastErr
+}
+
+func (a *App) startupPhaseLabel() string {
+	if a == nil || a.startedAt.IsZero() {
+		return "未知"
+	}
+	age := time.Since(a.startedAt).Round(time.Millisecond)
+	if age < 0 {
+		age = 0
+	}
+	if age <= startupConnectRetryWindow {
+		snapshot := currentGlobalProxyConfig()
+		state := "关闭"
+		if snapshot.Enabled {
+			state = fmt.Sprintf("启用(%s://%s:%d)", strings.ToLower(strings.TrimSpace(snapshot.Proxy.Type)), strings.TrimSpace(snapshot.Proxy.Host), snapshot.Proxy.Port)
+		}
+		return fmt.Sprintf("启动期(age=%s,全局代理=%s)", age, state)
+	}
+	return fmt.Sprintf("稳定期(age=%s)", age)
+}
+
+func (a *App) shouldRetryConnect(err error, attempt int) bool {
+	if attempt >= startupConnectRetryAttempts {
+		return false
+	}
+	if !isTransientStartupConnectError(err) {
+		return false
+	}
+	if a != nil && !a.startedAt.IsZero() {
+		age := time.Since(a.startedAt)
+		if age >= 0 && age <= startupConnectRetryWindow {
+			return true
+		}
+	}
+	// Outside startup window, still grant one retry for transient network glitches.
+	return attempt == 1
+}
+
+func isTransientStartupConnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(normalizeErrorMessage(err))
+	transientHints := []string{
+		"no route to host",
+		"network is unreachable",
+		"connection refused",
+		"connection timed out",
+		"i/o timeout",
+		"context deadline exceeded",
+	}
+	for _, hint := range transientHints {
+		if strings.Contains(message, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 // generateQueryID generates a unique ID for a query using UUID v4
@@ -585,8 +708,8 @@ func (a *App) CancelQuery(queryID string) connection.QueryResult {
 	return connection.QueryResult{Success: false, Message: "查询不存在或已完成"}
 }
 
-// CleanupStaleQueries removes queries older than maxAge
-func (a *App) CleanupStaleQueries(maxAge time.Duration) {
+// cleanupStaleQueries removes queries older than maxAge.
+func (a *App) cleanupStaleQueries(maxAge time.Duration) {
 	a.queryMu.Lock()
 	defer a.queryMu.Unlock()
 

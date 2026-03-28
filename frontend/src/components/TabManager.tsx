@@ -89,6 +89,7 @@ const TabManager: React.FC = () => {
   const theme = useStore(state => state.theme);
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveTab = useStore(state => state.setActiveTab);
+  const addTab = useStore(state => state.addTab);
   const closeTab = useStore(state => state.closeTab);
   const closeOtherTabs = useStore(state => state.closeOtherTabs);
   const closeTabsToLeft = useStore(state => state.closeTabsToLeft);
@@ -133,6 +134,59 @@ const TabManager: React.FC = () => {
   const handleDragCancel = () => {
     setDraggingTabId(null);
   };
+
+  React.useEffect(() => {
+    const handleGlobalInsertSql = (e: any) => {
+      const { sql, runImmediately, connectionId: eventConnId, dbName: eventDbName } = e.detail;
+      if (!sql) return;
+
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      
+      // 🔧 runImmediately（点击"执行"）始终新建独立 tab，避免追加到已有 tab 导致 SQL 重复
+      if (runImmediately) {
+        const newTabId = 'tab-' + Date.now();
+        const resolvedConnId = eventConnId || activeTab?.connectionId || (connections.length > 0 ? connections[0].id : '');
+        const resolvedDbName = eventConnId ? (eventDbName || '') : (activeTab?.dbName || '');
+        addTab({
+            id: newTabId,
+            type: 'query',
+            title: '新建查询',
+            query: sql,
+            connectionId: resolvedConnId,
+            dbName: resolvedDbName
+        });
+        setActiveTab(newTabId);
+        setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('gonavi:insert-sql-to-tab', {
+                detail: { tabId: newTabId, sql, runImmediately: true, connectionId: resolvedConnId, dbName: resolvedDbName }
+            }));
+        }, 300);
+        return;
+      }
+      
+      // 插入模式：追加到已有 tab 或新建 tab
+      if (activeTab && activeTab.type === 'query') {
+        window.dispatchEvent(new CustomEvent('gonavi:insert-sql-to-tab', {
+          detail: { tabId: activeTab.id, sql, runImmediately: false, connectionId: eventConnId, dbName: eventDbName }
+        }));
+      } else {
+        const newTabId = 'tab-' + Date.now();
+        const resolvedConnId = eventConnId || activeTab?.connectionId || (connections.length > 0 ? connections[0].id : '');
+        const resolvedDbName = eventConnId ? (eventDbName || '') : (activeTab?.dbName || '');
+        addTab({
+            id: newTabId,
+            type: 'query',
+            title: '新建查询',
+            query: sql,
+            connectionId: resolvedConnId,
+            dbName: resolvedDbName
+        });
+        setActiveTab(newTabId);
+      }
+    };
+    window.addEventListener('gonavi:insert-sql', handleGlobalInsertSql);
+    return () => window.removeEventListener('gonavi:insert-sql', handleGlobalInsertSql);
+  }, [tabs, activeTabId, addTab, setActiveTab, connections]);
 
   const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
 

@@ -1432,7 +1432,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'connection') {
           setActiveContext({ connectionId: key, dbName: '' });
       } else if (type === 'database') {
-          setActiveContext({ connectionId: dataRef.id, dbName: title });
+          setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'table') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'view' || type === 'db-trigger' || type === 'routine') {
@@ -1455,6 +1455,14 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const onDoubleClick = (e: any, node: any) => {
+      // 保证用户直接双击节点未触发 onClick/onSelect 时也能强行拿到选中状态
+      const { type, dataRef, key: nodeKey } = node;
+      if (type === 'connection') setActiveContext({ connectionId: nodeKey, dbName: '' });
+      else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
+      else if (type === 'table' || type === 'view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
+      else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
+      else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
+
       if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
           const { id, dbName, schemaName } = node.dataRef;
           addTab({
@@ -3702,117 +3710,87 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: '4px 10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Search
-                    ref={searchInputRef}
-                    placeholder="搜索..."
-                    onChange={onSearch}
-                    size="small"
-                    style={{ flex: 1, minWidth: 0 }}
-                />
-                <Popover
-                    content={searchScopePopoverContent}
-                    trigger="click"
-                    placement="bottomRight"
-                    open={isSearchScopePopoverOpen}
-                    onOpenChange={setIsSearchScopePopoverOpen}
-                    styles={{ body: { padding: 0, borderRadius: 18, overflow: 'hidden' } }}
-                >
-                    <Tooltip title={`搜索范围：${searchScopeSummary}`}>
-                        <Button
-                            size="small"
-                            style={{
-                                minWidth: 86,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: 6,
-                                paddingInline: 10,
-                                borderRadius: 10,
-                                borderColor: darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.12)',
-                                background: darkMode ? bgMain : 'rgba(255,255,255,0.92)',
-                                color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
-                                boxShadow: isSearchScopePopoverOpen
-                                    ? (darkMode ? '0 0 0 1px rgba(255,214,102,0.22) inset' : '0 0 0 1px rgba(24,144,255,0.24) inset')
-                                    : 'none',
-                                backdropFilter: darkMode ? 'blur(10px)' : 'none',
-                                flexShrink: 0,
-                            }}
-                        >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', color: searchScopes.includes('smart') ? '#ffd666' : (darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(22,32,51,0.72)') }}>
-                                <FilterOutlined />
-                            </span>
-                            <span style={{ fontWeight: 700, color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033' }}>筛选</span>
-                            <span
+        <div style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
+            <Input
+                ref={searchInputRef}
+                placeholder="搜索..."
+                onChange={onSearch}
+                size="small"
+                prefix={<SearchOutlined style={{ color: darkMode ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)', marginRight: 4 }} />}
+                style={{
+                    borderRadius: 6,
+                    border: 'none',
+                    background: darkMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.03)',
+                    boxShadow: 'none',
+                    padding: '4px 8px',
+                    color: darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.85)',
+                }}
+                suffix={
+                    <Popover
+                        content={searchScopePopoverContent}
+                        trigger="click"
+                        placement="bottomRight"
+                        open={isSearchScopePopoverOpen}
+                        onOpenChange={setIsSearchScopePopoverOpen}
+                        styles={{ body: { padding: 0, borderRadius: 16, overflow: 'hidden' } }}
+                    >
+                        <Tooltip title={`搜索范围：${searchScopeSummary}`}>
+                            <div
                                 style={{
-                                    minWidth: 18,
-                                    height: 18,
-                                    padding: '0 5px',
-                                    borderRadius: 999,
-                                    display: 'inline-flex',
+                                    display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center',
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    lineHeight: 1,
-                                    background: searchScopes.includes('smart')
-                                        ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)')
-                                        : (darkMode ? 'rgba(118,169,250,0.18)' : 'rgba(24,144,255,0.12)'),
+                                    gap: 4,
+                                    cursor: 'pointer',
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    background: isSearchScopePopoverOpen
+                                        ? (darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)')
+                                        : 'transparent',
+                                    transition: 'background 0.2s',
                                     color: searchScopes.includes('smart')
                                         ? (darkMode ? '#ffd666' : '#1677ff')
-                                        : (darkMode ? '#91caff' : '#1677ff'),
+                                        : (darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)'),
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (!isSearchScopePopoverOpen) {
+                                      e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+                                      e.currentTarget.style.color = darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.65)';
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (!isSearchScopePopoverOpen) {
+                                      e.currentTarget.style.background = 'transparent';
+                                      e.currentTarget.style.color = searchScopes.includes('smart')
+                                          ? (darkMode ? '#ffd666' : '#1677ff')
+                                          : (darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)');
+                                    }
                                 }}
                             >
-                                {searchScopes.includes('smart') ? '智' : searchScopes.length}
-                            </span>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', color: darkMode ? 'rgba(255,255,255,0.48)' : 'rgba(22,32,51,0.4)', fontSize: 12 }}>
-                                <DownOutlined />
-                            </span>
-                        </Button>
-                    </Tooltip>
-                </Popover>
-            </div>
+                                <FilterOutlined style={{ fontSize: 13 }} />
+                                <span style={{ fontSize: 12, fontWeight: 500 }}>
+                                    {searchScopes.includes('smart') ? '智' : searchScopes.length}
+                                </span>
+                            </div>
+                        </Tooltip>
+                    </Popover>
+                }
+            />
         </div>
 
         {/* Toolbar */}
-        <div style={{ padding: '4px 10px', borderBottom: 'none', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            <Button
-                size="small"
-                icon={<FolderOpenOutlined />}
-                onClick={() => {
-                    setRenameViewTarget(null); // Create mode
-                    createTagForm.resetFields();
-                    setIsCreateTagModalOpen(true);
-                }}
-                style={{ flex: '1 1 auto' }}
-            >
-                新建组
-            </Button>
-            <Button
-                size="small"
-                icon={<CheckSquareOutlined />}
-                onClick={() => openBatchOperationModal()}
-                style={{ flex: '1 1 auto' }}
-            >
-                批量操作表
-            </Button>
-            <Button
-                size="small"
-                icon={<CheckSquareOutlined />}
-                onClick={() => openBatchDatabaseModal()}
-                style={{ flex: '1 1 auto' }}
-            >
-                批量操作库
-            </Button>
-            <Button
-                size="small"
-                icon={<FileAddOutlined />}
-                onClick={handleOpenSQLFileFromToolbar}
-                style={{ flex: '1 1 auto' }}
-            >
-                运行外部SQL文件
-            </Button>
+        <div style={{ padding: '6px 16px', display: 'flex', gap: 8, justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>
+            <Tooltip title="新建组">
+                <Button size="small" type="text" icon={<FolderOpenOutlined />} onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
+            </Tooltip>
+            <Tooltip title="批量操作表">
+                <Button size="small" type="text" icon={<TableOutlined />} onClick={() => openBatchOperationModal()} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
+            </Tooltip>
+            <Tooltip title="批量操作库">
+                <Button size="small" type="text" icon={<DatabaseOutlined />} onClick={() => openBatchDatabaseModal()} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
+            </Tooltip>
+            <Tooltip title="运行外部SQL文件">
+                <Button size="small" type="text" icon={<FileAddOutlined />} onClick={handleOpenSQLFileFromToolbar} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
+            </Tooltip>
         </div>
 
         <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>

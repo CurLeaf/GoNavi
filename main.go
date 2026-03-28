@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"embed"
 
+	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/logger"
 
@@ -19,6 +21,7 @@ var assets embed.FS
 func main() {
 	// Create an instance of the app structure
 	application := app.NewApp()
+	aiService := aiservice.NewService()
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -30,10 +33,14 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
-		OnStartup:        application.Startup,
-		OnShutdown:       application.Shutdown,
+		OnStartup: func(ctx context.Context) {
+			app.InitializeLifecycle(application, ctx)
+			aiservice.InitializeLifecycle(aiService, ctx)
+		},
+		OnShutdown: application.Shutdown,
 		Bind: []interface{}{
 			application,
+			aiService,
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent:              true,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
@@ -202,8 +202,8 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
   // Result Sets
   const [resultSets, setResultSets] = useState<ResultSet[]>([]);
   const [activeResultKey, setActiveResultKey] = useState<string>('');
-  
   const [loading, setLoading] = useState(false);
+  const [executionError, setExecutionError] = useState<string>('');
   const [, setCurrentQueryId] = useState<string>('');
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
@@ -464,6 +464,38 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
 
       // 应用透明主题（主题已在 main.tsx 全局注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
+
+      // 注册 AI 右键菜单操作
+      const aiActions = [
+          { id: 'ai.generateSQL', label: '🤖 AI 生成 SQL', prompt: '请根据当前数据库表结构生成查询语句：' },
+          { id: 'ai.explainSQL', label: '🤖 AI 解释 SQL', useSelection: true, prompt: '请解释以下 SQL 语句的执行逻辑：\n```sql\n{SQL}\n```' },
+          { id: 'ai.optimizeSQL', label: '🤖 AI 优化 SQL', useSelection: true, prompt: '请分析以下 SQL 语句的性能并给出优化建议：\n```sql\n{SQL}\n```' },
+      ];
+
+      aiActions.forEach(action => {
+          editor.addAction({
+              id: action.id,
+              label: action.label,
+              contextMenuGroupId: '9_ai',
+              contextMenuOrder: 1,
+              run: (ed: any) => {
+                  const selection = ed.getModel()?.getValueInRange(ed.getSelection());
+                  const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
+                  const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDbRef.current || '默认'}"】\n` : '';
+                  let prompt = ctxText + action.prompt;
+                  if (action.useSelection && selection) {
+                      prompt = prompt.replace('{SQL}', selection);
+                  }
+                  // 打开 AI 面板并填入 prompt
+                  const store = useStore.getState();
+                  if (!store.aiPanelVisible) {
+                      store.setAIPanelVisible(true);
+                  }
+                  // 通过自定义事件将 prompt 发送到 AI 面板
+                  window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+              },
+          });
+      });
 
       // 全局只注册一次 SQL completion provider，避免多 tab 重复注册导致补全项重复
       if (!sqlCompletionRegistered) {
@@ -823,7 +855,92 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
               return { suggestions };
           }
       });
+      // 注册 / 斜杠命令 AI 快捷补全
+      const slashCmdDefs = [
+          { cmd: '/query',    label: '🔍 自然语言查询',  desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
+          { cmd: '/sql',      label: '📝 生成 SQL',      desc: '描述需求自动生成语句',   prompt: '请根据以下需求生成 SQL：' },
+          { cmd: '/explain',  label: '💡 解释 SQL',      desc: '解释选中 SQL 的逻辑',    prompt: '请解释以下 SQL 的执行逻辑和每一步的作用：\n```sql\n{SQL}\n```', useSelection: true },
+          { cmd: '/optimize', label: '⚡ 优化分析',      desc: '分析 SQL 性能瓶颈',      prompt: '请分析以下 SQL 的性能问题，并给出优化后的版本：\n```sql\n{SQL}\n```', useSelection: true },
+          { cmd: '/schema',   label: '🏗️ 表设计评审',    desc: '评审表结构设计质量',     prompt: '请全面评审当前关联表的设计，包括字段类型、范式、索引策略等方面的改进建议：' },
+          { cmd: '/index',    label: '📊 索引建议',      desc: '推荐最优索引方案',       prompt: '请基于当前表结构和常见查询场景，推荐最优的索引方案并给出建表语句：' },
+          { cmd: '/diff',     label: '🔄 表对比',        desc: '对比两表差异生成变更',   prompt: '请对比以下两张表的结构差异，并生成从旧版本迁移到新版本的 ALTER 语句：' },
+          { cmd: '/mock',     label: '🎲 造测试数据',    desc: '生成 INSERT 测试数据',   prompt: '请为当前关联的表生成 10 条符合业务语义的测试数据 INSERT 语句：' },
+      ];
+      // 全局变量存储命令定义，供 onDidChangeModelContent 使用
+      (window as any).__gonaviSlashCmdDefs = slashCmdDefs;
+
+      monaco.languages.registerCompletionItemProvider('sql', {
+          triggerCharacters: ['/'],
+          provideCompletionItems: (model: any, position: any) => {
+              const lineContent = model.getLineContent(position.lineNumber);
+              const textBefore = lineContent.substring(0, position.column - 1).trimStart();
+              if (!textBefore.startsWith('/')) {
+                  return { suggestions: [] };
+              }
+
+              const range = {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: position.column - textBefore.length,
+                  endColumn: position.column,
+              };
+
+              return {
+                  suggestions: slashCmdDefs.map((c, i) => ({
+                      label: `${c.cmd}  ${c.label}`,
+                      kind: monaco.languages.CompletionItemKind.Event,
+                      detail: c.desc,
+                      insertText: `__AI_${c.cmd.slice(1).toUpperCase()}__`,
+                      range,
+                      sortText: String(i).padStart(2, '0'),
+                  })),
+              };
+          },
+      });
+
       } // end sqlCompletionRegistered guard
+
+      // 每个编辑器实例都注册内容变化监听（检测斜杠命令标记）
+      let _handlingSlash = false;
+      editor.onDidChangeModelContent(() => {
+          if (_handlingSlash) return;
+          const model = editor.getModel();
+          if (!model) return;
+          const content = model.getValue();
+          const markerMatch = content.match(/__AI_(\w+)__/);
+          if (!markerMatch) return;
+
+          const cmdKey = markerMatch[1].toLowerCase();
+          const defs = (window as any).__gonaviSlashCmdDefs || [];
+          const cmdDef = defs.find((c: any) => c.cmd === `/${cmdKey}`);
+          if (!cmdDef) return;
+
+          // 清除标记文本（带递归保护）
+          _handlingSlash = true;
+          const fullText = model.getValue();
+          const newText = fullText.replace(markerMatch[0], '').replace(/^\s*\n/, '');
+          model.setValue(newText);
+          _handlingSlash = false;
+
+          // 组装 prompt
+          const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
+          const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDbRef.current || '默认'}"】\n` : '';
+          let finalPrompt = ctxText + cmdDef.prompt;
+          if (cmdDef.useSelection) {
+              const sel = editor.getSelection();
+              const selText = sel ? model.getValueInRange(sel) : '';
+              finalPrompt = finalPrompt.replace('{SQL}', selText || getCurrentQuery());
+          }
+
+          // 打开 AI 面板并注入 prompt
+          const store = useStore.getState();
+          if (!store.aiPanelVisible) {
+              store.setAIPanelVisible(true);
+          }
+          setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt: finalPrompt } }));
+          }, store.aiPanelVisible ? 0 : 350);
+      });
   };
 
   const handleFormat = () => {
@@ -833,6 +950,28 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       } catch (e) {
           void message.error("格式化失败: SQL 语法可能有误");
       }
+  };
+
+  const handleAIAction = (action: 'generate' | 'explain' | 'optimize' | 'schema') => {
+      const editor = editorRef.current;
+      const selection = editor?.getModel()?.getValueInRange(editor.getSelection()) || '';
+      const fullSQL = getCurrentQuery();
+
+      const conn = connections.find(c => c.id === currentConnectionId);
+      const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDb || '默认'}"】\n` : '';
+
+      const prompts: Record<string, string> = {
+          generate: `${ctxText}请根据当前数据库表结构生成查询语句：`,
+          explain: `${ctxText}请解释以下 SQL 语句的执行逻辑：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
+          optimize: `${ctxText}请分析以下 SQL 语句的性能并给出优化建议：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
+          schema: `${ctxText}请针对当前数据库的表结构进行系统分析，并给出性能和设计上的优化建议。`,
+      };
+
+      const store = useStore.getState();
+      if (!store.aiPanelVisible) {
+          store.setAIPanelVisible(true);
+      }
+      window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt: prompts[action] } }));
   };
 
   const formatSettingsMenu: MenuProps['items'] = [
@@ -1430,9 +1569,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
         // 清除旧查询ID
         clearQueryId();
     }
-    const runSeq = ++runSeqRef.current;
-    setLoading(true);
-    const runStartTime = Date.now();
+      const runSeq = ++runSeqRef.current;
+      setLoading(true);
+      setExecutionError('');
+      const runStartTime = Date.now();
     const conn = connections.find(c => c.id === currentConnectionId);
     if (!conn) {
         message.error("Connection not found");
@@ -1489,7 +1629,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
                         const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                        message.error(prefix + shellConvert.error);
+                        setExecutionError(prefix + shellConvert.error);
                         setResultSets([]);
                         setActiveResultKey('');
                         return;
@@ -1522,7 +1662,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 });
                 if (!res.success) {
                     const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                    message.error(prefix + res.message);
+                    setExecutionError(prefix + res.message);
                     setResultSets([]);
                     setActiveResultKey('');
                     return;
@@ -1644,7 +1784,7 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                     return;
                 }
 
-                message.error(res.message);
+                setExecutionError(res.message);
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -1882,6 +2022,89 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
       };
   }, [activeTabId, tab.id, handleRun]);
 
+  // 监听由 TabManager 分发的专用注入事件
+  useEffect(() => {
+      const handleInsertSql = (e: any) => {
+          if (e.detail?.tabId !== tab.id || !e.detail?.sql) return;
+          const { sql: sqlText, connectionId, dbName } = e.detail;
+
+          // 同步更新 ref，防止异步 fetchDbs 竞态覆盖正确的 dbName
+          if (connectionId && connectionId !== currentConnectionId) {
+              if (dbName) {
+                  currentDbRef.current = dbName;
+                  setCurrentDb(dbName);
+              }
+              setCurrentConnectionId(connectionId);
+          } else if (dbName && dbName !== currentDb) {
+              currentDbRef.current = dbName;
+              setCurrentDb(dbName);
+          }
+
+
+          const editor = editorRef.current;
+          const monaco = monacoRef.current;
+          if (editor && monaco) {
+              const model = editor.getModel();
+              const existingContent = editor.getValue?.() || '';
+
+              // runImmediately 模式下，如果编辑器内容已是待注入的 SQL（TabManager 创建时已传入），
+              // 跳过追加，直接选中全部内容并执行
+              if (e.detail.runImmediately && existingContent.trim() === sqlText.trim()) {
+                  if (model) {
+                      const lineCount = model.getLineCount();
+                      const maxCol = model.getLineMaxColumn(lineCount);
+                      editor.setSelection(new monaco.Range(1, 1, lineCount, maxCol));
+                      editor.focus();
+                      setTimeout(() => handleRun(), 500);
+                  }
+              } else {
+              let position = editor.getPosition();
+              if (!position && model) {
+                  const lineCount = model.getLineCount();
+                  const maxCol = model.getLineMaxColumn(lineCount);
+                  position = new monaco.Position(lineCount, maxCol);
+              }
+
+              if (position) {
+                  const mText = (sqlText.endsWith('\n') ? sqlText : sqlText + '\n');
+                  const startRange = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
+                  
+                  editor.executeEdits('ai-insert', [{
+                      range: startRange,
+                      text: (position.column > 1 ? '\n' : '') + mText,
+                      forceMoveMarkers: true
+                  }]);
+                  
+                  // 定位并滚动到可见区域
+                  const targetLine = position.lineNumber + (position.column > 1 ? 1 : 0);
+                  editor.revealLineInCenterIfOutsideViewport(targetLine);
+                  editor.setPosition({ lineNumber: targetLine + mText.split('\n').length - 1, column: 1 });
+                  editor.focus();
+                  
+                  if (!e.detail.runImmediately) {
+                      message.success('代码已在当前光标处成功插入');
+                  }
+
+                  if (e.detail.runImmediately) {
+                      const endPosition = editor.getPosition();
+                      editor.setSelection(new monaco.Range(
+                          targetLine, 1,
+                          endPosition.lineNumber, endPosition.column
+                      ));
+                      // 🔧 延迟 500ms 等待连接/数据库切换的 setState 生效后再执行
+                      setTimeout(() => handleRun(), 500);
+                  }
+              }
+              }
+          } else {
+              setQuery((prev: string) => prev ? prev + '\n' + sqlText : sqlText);
+              message.success('代码已追加');
+          }
+      };
+      window.addEventListener('gonavi:insert-sql-to-tab', handleInsertSql as EventListener);
+      return () => window.removeEventListener('gonavi:insert-sql-to-tab', handleInsertSql as EventListener);
+  }, [tab.id, handleRun]);
+
   const resolveDefaultQueryName = () => {
       const rawTitle = String(tab.title || '').trim();
       if (!rawTitle || rawTitle.startsWith('新建查询')) {
@@ -2067,6 +2290,16 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                 <Button icon={<SettingOutlined />} />
             </Dropdown>
         </Button.Group>
+
+        <Dropdown menu={{ items: [
+            { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
+            { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
+            { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
+            { type: 'divider' as const },
+            { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
+        ] }} placement="bottomRight">
+            <Button icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
+        </Dropdown>
       </div>
       
       <div style={{ height: editorHeight, minHeight: '100px' }}>
@@ -2168,6 +2401,35 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   })()
               }))}
           />
+        ) : executionError ? (
+          <div style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
+              <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CloseOutlined />
+                  <span>执行失败</span>
+              </div>
+              <div className="custom-scrollbar" style={{ padding: 16, background: darkMode ? '#2d1a1a' : '#fff2f0', border: `1px solid ${darkMode ? '#5c2020' : '#ffccc7'}`, borderRadius: 6, color: darkMode ? '#ffa39e' : '#cf1322', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '40vh', overflow: 'auto' }}>
+                  {executionError}
+              </div>
+              <div style={{ marginTop: 8 }}>
+                  <Button
+                      type="primary"
+                      icon={<RobotOutlined />}
+                      style={{ background: '#818cf8', borderColor: '#818cf8', boxShadow: '0 2px 0 rgba(129, 140, 248, 0.2)' }}
+                      onClick={() => {
+                          const errSql = getCurrentQuery();
+                          const prompt = `我在执行以下 SQL 时遇到了错误：\n\`\`\`sql\n${errSql}\n\`\`\`\n\n数据库报错信息如下：\n\`\`\`text\n${executionError}\n\`\`\`\n\n请帮我分析错误原因，并给出修改建议。`;
+                          const store = useStore.getState();
+                          const wasClosed = !store.aiPanelVisible;
+                          if (wasClosed) store.setAIPanelVisible(true);
+                          setTimeout(() => {
+                              window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+                          }, wasClosed ? 350 : 0);
+                      }}
+                  >
+                      一键 AI 诊断
+                  </Button>
+              </div>
+          </div>
         ) : (
           <div style={{ flex: 1, minHeight: 0 }} />
         )}

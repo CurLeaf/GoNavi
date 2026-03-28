@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select } from 'antd';
+import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -9,10 +9,14 @@ import ConnectionModal from './components/ConnectionModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
+import AIChatPanel from './components/AIChatPanel';
+import AISettingsModal from './components/AISettingsModal';
 import { useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
+import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -24,7 +28,7 @@ import {
   isShortcutMatch,
   normalizeShortcutCombo,
 } from './utils/shortcuts';
-import { ConfigureGlobalProxy, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ConfigureGlobalProxy, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -89,9 +93,14 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
+  const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
+  const aiPanelVisible = useStore(state => state.aiPanelVisible);
+  const toggleAIPanel = useStore(state => state.toggleAIPanel);
+  const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
+  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -197,8 +206,16 @@ function App() {
                       content: '全局代理配置失败: ' + errMsg,
                       key: 'global-proxy-sync-error',
                   });
+              })
+              .finally(() => {
+                  if (!cancelled) {
+                      setHasAppliedInitialGlobalProxy(true);
+                  }
               });
       } catch (e) {
+          if (!cancelled) {
+              setHasAppliedInitialGlobalProxy(true);
+          }
           console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
       }
 
@@ -722,6 +739,19 @@ function App() {
       || (runtimePlatform === '' && /mac/i.test(detectNavigatorPlatform()));
   const isWindowsRuntime = runtimePlatform === 'windows'
       || (runtimePlatform === '' && isWindowsPlatform());
+  const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
+
+  useEffect(() => {
+      if (!isStoreHydrated || !isMacRuntime) {
+          return;
+      }
+
+      try {
+          void SetMacNativeWindowControls(useNativeMacWindowControls).catch(() => undefined);
+      } catch (e) {
+          console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
+      }
+  }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
 
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
@@ -1094,6 +1124,7 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -1167,6 +1198,10 @@ function App() {
       try {
           if (await WindowIsFullscreen()) {
               await WindowUnfullscreen();
+              return;
+          }
+          if (useNativeMacWindowControls && isMacRuntime) {
+              await WindowFullscreen();
               return;
           }
           await WindowToggleMaximise();
@@ -1331,6 +1366,25 @@ function App() {
   }, []);
 
   useEffect(() => {
+      if (!isMacRuntime || !useNativeMacWindowControls) {
+          return;
+      }
+
+      const handleMacNativeEscapeCapture = (event: KeyboardEvent) => {
+          if (!shouldSuppressMacNativeEscapeExit(isMacRuntime, useNativeMacWindowControls, useStore.getState().windowState === 'fullscreen', event)) {
+              return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+      };
+
+      window.addEventListener('keydown', handleMacNativeEscapeCapture, true);
+      return () => {
+          window.removeEventListener('keydown', handleMacNativeEscapeCapture, true);
+      };
+  }, [isMacRuntime, useNativeMacWindowControls]);
+
+  useEffect(() => {
       const handleGlobalShortcut = (event: KeyboardEvent) => {
           const matchedAction = SHORTCUT_ACTION_ORDER.find((action) => {
               const binding = shortcutOptions[action];
@@ -1369,6 +1423,11 @@ function App() {
               case 'openShortcutManager':
                   setIsShortcutModalOpen(true);
                   break;
+              case 'toggleMacFullscreen':
+                  if (isMacRuntime && useNativeMacWindowControls) {
+                      void handleTitleBarWindowToggle();
+                  }
+                  break;
           }
       };
 
@@ -1376,7 +1435,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [handleNewQuery, shortcutOptions, themeMode, setTheme]);
+  }, [handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -1523,40 +1582,45 @@ function App() {
                 userSelect: 'none',
                 WebkitAppRegion: 'drag', // Wails drag region
                 '--wails-draggable': 'drag',
-                paddingLeft: Math.max(12, Math.round(16 * effectiveUiScale)),
+                paddingLeft: getMacNativeTitlebarPaddingLeft(effectiveUiScale, useNativeMacWindowControls),
+                paddingRight: getMacNativeTitlebarPaddingRight(effectiveUiScale, useNativeMacWindowControls),
                 fontSize: tokenFontSize
             } as any}
           >
-              <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: Math.max(6, Math.round(8 * effectiveUiScale)), fontWeight: 600, minWidth: 0 }}>
                   {/* Logo can be added here if available */}
                   GoNavi
               </div>
-              <div
-                data-no-titlebar-toggle="true"
-                onDoubleClick={(e) => e.stopPropagation()}
-                style={{ display: 'flex', height: '100%', WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
-              >
-                  <Button 
-                    type="text" 
-                    icon={<MinusOutlined />} 
-                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                    onClick={WindowMinimise} 
-                  />
-                  <Button 
-                    type="text" 
-                    icon={<BorderOutlined />} 
-                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                    onClick={() => { void handleTitleBarWindowToggle(); }} 
-                  />
-                  <Button 
-                    type="text" 
-                    icon={<CloseOutlined />} 
-                    danger
-                    className="titlebar-close-btn"
-                    style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                    onClick={Quit} 
-                  />
-              </div>
+              {useNativeMacWindowControls ? (
+                  <div style={{ minWidth: Math.max(40, Math.round(48 * effectiveUiScale)) }} />
+              ) : (
+                  <div
+                    data-no-titlebar-toggle="true"
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    style={{ display: 'flex', height: '100%', WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as any}
+                  >
+                      <Button 
+                        type="text" 
+                        icon={<MinusOutlined />} 
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
+                        onClick={WindowMinimise} 
+                      />
+                      <Button 
+                        type="text" 
+                        icon={<BorderOutlined />} 
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
+                        onClick={() => { void handleTitleBarWindowToggle(); }} 
+                      />
+                      <Button 
+                        type="text" 
+                        icon={<CloseOutlined />} 
+                        danger
+                        className="titlebar-close-btn"
+                        style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
+                        onClick={Quit} 
+                      />
+                  </div>
+              )}
           </div>
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
@@ -1570,11 +1634,24 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: isSidebarNarrow ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
-                        <Button type="text" icon={<ToolOutlined />} title="工具" style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)}>{isSidebarUltraCompact ? null : '工具'}</Button>
-                        <Button type="text" icon={<GlobalOutlined />} title="代理" style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)}>{isSidebarUltraCompact ? null : '代理'}</Button>
-                        <Button type="text" icon={<SkinOutlined />} title="主题" style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)}>{isSidebarUltraCompact ? null : '主题'}</Button>
-                        <Button type="text" icon={<InfoCircleOutlined />} title="关于" style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)}>{isSidebarUltraCompact ? null : '关于'}</Button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <Tooltip title="工具"><Button type="text" icon={<ToolOutlined />} style={utilityButtonStyle} onClick={() => setIsToolsModalOpen(true)} /></Tooltip>
+                        <Tooltip title="代理"><Button type="text" icon={<GlobalOutlined />} style={utilityButtonStyle} onClick={() => setIsProxyModalOpen(true)} /></Tooltip>
+                        <Tooltip title="主题"><Button type="text" icon={<SkinOutlined />} style={utilityButtonStyle} onClick={() => setIsThemeModalOpen(true)} /></Tooltip>
+                        <Tooltip title="关于"><Button type="text" icon={<InfoCircleOutlined />} style={utilityButtonStyle} onClick={() => setIsAboutOpen(true)} /></Tooltip>
+                        <div style={{ width: 1, height: 16, background: 'rgba(128,128,128,0.2)', margin: '0 4px' }} />
+                        <Tooltip title="AI 助手">
+                            <Button
+                                type="text"
+                                icon={<RobotOutlined />}
+                                onClick={toggleAIPanel}
+                                style={{
+                                    ...utilityButtonStyle,
+                                    color: aiPanelVisible ? (darkMode ? '#ffd666' : '#1677ff') : utilityButtonStyle.color,
+                                    background: aiPanelVisible ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)') : 'transparent'
+                                }}
+                            />
+                        </Tooltip>
                     </div>
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
@@ -1588,8 +1665,44 @@ function App() {
                     </div>
                 </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58 }}>
-                    <Sidebar onEditConnection={handleEditConnection} />
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, position: 'relative' }}>
+                    <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
+                        <Sidebar onEditConnection={handleEditConnection} />
+                    </div>
+                    {!connectionWorkbenchState.ready && (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                inset: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: 16,
+                                background: darkMode ? 'rgba(7, 12, 20, 0.42)' : 'rgba(255, 255, 255, 0.58)',
+                                backdropFilter: 'blur(4px)',
+                                zIndex: 1,
+                            }}
+                        >
+                            <div
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 10,
+                                    padding: '10px 14px',
+                                    borderRadius: 999,
+                                    background: darkMode ? 'rgba(15, 23, 36, 0.86)' : 'rgba(255, 255, 255, 0.94)',
+                                    border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(22,32,51,0.08)',
+                                    boxShadow: darkMode ? '0 12px 24px rgba(0,0,0,0.26)' : '0 12px 24px rgba(15,23,42,0.08)',
+                                    color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+                                    fontSize: 12,
+                                    fontWeight: 500,
+                                }}
+                            >
+                                <Spin size="small" />
+                                <span>{connectionWorkbenchState.message}</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Floating SQL Log Toggle */}
@@ -1646,9 +1759,14 @@ function App() {
                 title="拖动调整宽度"
             />
           </Sider>
-           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
-                 <TabManager />
+           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+             <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
+                  <TabManager />
+               </div>
+               {aiPanelVisible && (
+                  <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => setIsAISettingsOpen(true)} overlayTheme={overlayTheme} />
+               )}
              </div>
              {isLogPanelOpen && (
                  <LogPanel 
@@ -1746,6 +1864,12 @@ function App() {
             open={isDriverModalOpen}
             onClose={() => setIsDriverModalOpen(false)}
             onOpenGlobalProxySettings={() => setIsProxyModalOpen(true)}
+          />
+          <AISettingsModal
+            open={isAISettingsOpen}
+            onClose={() => setIsAISettingsOpen(false)}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
           />
           <Modal
             title={renderUtilityModalTitle(<InfoCircleOutlined />, '关于 GoNavi', '查看版本信息、仓库地址、更新状态与下载入口。')}
@@ -2008,6 +2132,24 @@ function App() {
                                       </div>
                                   </div>
                               </div>
+                              {isMacRuntime ? (
+                                  <div style={utilityPanelStyle}>
+                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>macOS 窗口控制</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>使用 macOS 原生窗口控制</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>启用后显示左上角红黄绿按钮，并优先使用 macOS 原生全屏行为。</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.useNativeMacWindowControls === true}
+                                              onChange={(checked) => setAppearance({ useNativeMacWindowControls: checked })}
+                                          />
+                                      </div>
+                                      <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 8 }}>
+                                          * 已同步隐藏右上角自定义按钮；如系统窗口样式未立即刷新，可重启应用后再确认
+                                      </div>
+                                  </div>
+                              ) : null}
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 8, fontWeight: 500 }}>启动窗口</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -2020,13 +2162,13 @@ function App() {
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
                                   <Button
-                                      onClick={() => {
-                                          setUiScale(DEFAULT_UI_SCALE);
-                                          setFontSize(DEFAULT_FONT_SIZE);
-                                          setAppearance({ enabled: true, opacity: 1.0, blur: 0 });
-                                      }}
-                                  >
-                                      恢复默认
+                                       onClick={() => {
+                                           setUiScale(DEFAULT_UI_SCALE);
+                                           setFontSize(DEFAULT_FONT_SIZE);
+                                           setAppearance({ enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false });
+                                       }}
+                                   >
+                                       恢复默认
                                   </Button>
                               </div>
                           </div>
@@ -2075,6 +2217,9 @@ function App() {
                   </div>
                   {SHORTCUT_ACTION_ORDER.map((action) => {
                       const meta = SHORTCUT_ACTION_META[action];
+                      if (meta.platformOnly === 'mac' && !isMacRuntime) {
+                          return null;
+                      }
                       const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
                       const isCapturing = capturingShortcutAction === action;
                       return (
