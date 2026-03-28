@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 
 	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
@@ -14,9 +13,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
-
-//go:embed all:frontend/dist
-var assets embed.FS
 
 func main() {
 	// Create an instance of the app structure
