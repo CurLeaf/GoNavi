@@ -50,6 +50,13 @@ type MultiResultQuerierContext interface {
 	QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error)
 }
 
+// BatchWriteExecer 是可选接口，支持将多条写语句一次性批量发送执行。
+// 驱动的底层连接需支持多语句协议（如 MySQL multiStatements=true、PostgreSQL 原生多语句）。
+// 实现此接口可大幅减少批量 INSERT/UPDATE/DELETE 的网络往返次数。
+type BatchWriteExecer interface {
+	ExecBatchContext(ctx context.Context, query string) (int64, error)
+}
+
 // BatchApplier 定义了批量变更提交接口。
 // 支持批量编辑的驱动实现此接口，用于一次性提交前端 DataGrid 中的增删改操作。
 type BatchApplier interface {

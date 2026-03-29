@@ -233,6 +233,17 @@ func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, er
 	return scanRows(rows)
 }
 
+func (p *PostgresDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if p.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := p.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if p.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

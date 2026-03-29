@@ -135,6 +135,17 @@ func (m *MariaDB) Query(query string) ([]map[string]interface{}, []string, error
 	return scanRows(rows)
 }
 
+func (m *MariaDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if m.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := m.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (m *MariaDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
