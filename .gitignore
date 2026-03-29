@@ -21,6 +21,8 @@ GoNavi-Wails.exe
 .claude/
 .gemini/
 **/tmpclaude-*
+docs/superpowers/
+docs/需求追踪/
 
 CLAUDE.md
 **/CLAUDE.md

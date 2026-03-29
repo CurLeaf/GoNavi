@@ -3,12 +3,10 @@ import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Ta
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
 import {
-    getProviderFingerprint,
-    getProviderHostname,
-    matchQwenPresetKey,
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
     QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
     QWEN_CODING_PLAN_MODELS,
+    resolveProviderPresetKey,
     resolvePresetBaseURL,
     resolvePresetModelSelection,
     resolvePresetTransport,
@@ -62,28 +60,9 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 
 const findPreset = (key: string): ProviderPreset => PROVIDER_PRESETS.find(p => p.key === key) || PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
 
-const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'>): ProviderPreset => {
-    const qwenPresetKey = matchQwenPresetKey(provider);
-    if (qwenPresetKey) {
-        return findPreset(qwenPresetKey);
-    }
-    const fingerprint = getProviderFingerprint(provider.baseUrl);
-    const exactPreset = PROVIDER_PRESETS.find(pr =>
-        pr.backendType === provider.type
-        && fingerprint !== ''
-        && fingerprint === getProviderFingerprint(pr.defaultBaseUrl)
-    );
-    if (exactPreset) {
-        return exactPreset;
-    }
-
-    const host = getProviderHostname(provider.baseUrl);
-    if (host.endsWith('moonshot.cn')) {
-        return findPreset('moonshot');
-    }
-    return PROVIDER_PRESETS.find(pr => pr.backendType === provider.type && host !== '' && host === getProviderHostname(pr.defaultBaseUrl))
-        || PROVIDER_PRESETS.find(pr => pr.backendType === provider.type)
-        || findPreset('custom');
+const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>): ProviderPreset => {
+    const presetKey = resolveProviderPresetKey(provider, PROVIDER_PRESETS, 'custom');
+    return findPreset(presetKey);
 };
 
 const SAFETY_OPTIONS: { label: string; value: AISafetyLevel; desc: string; color: string; icon: string }[] = [
