@@ -51,7 +51,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
   // Ref to track if component is mounted to prevent state updates after unmount
   const mountedRef = useRef(true);
   // Interval ref
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Previous ops counter to calculate QPS if instantaneous_ops_per_sec is not enough
   const prevMetricsRef = useRef({ prevOps: 0, prevTime: 0 });
 

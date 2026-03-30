@@ -1036,13 +1036,21 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 dbs = dbs.filter(db => conn.includeDatabases!.includes(db.title));
             }
 
-            setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            if (dbs.length > 0) {
+                setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            } else {
+                // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
+                setLoadedKeys(prev => prev.filter(k => k !== node.key));
+                message.warning({ content: '未获取到可见数据库/schema，请检查账号权限或右键刷新', key: `conn-${conn.id}-dbs` });
+            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	            setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
 	          }
 	      } catch (e: any) {
 	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	          setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	          message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
