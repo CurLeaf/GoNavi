@@ -53,18 +53,23 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 <h2 align="center">📸 Screenshots</h2>
 
 <div align="center">
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/341cda98-79a5-4198-90f3-1335131ccde0" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/224a74e7-65df-4aef-9710-d8e82e3a70c1" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/ec522145-5ceb-4481-ae46-a9251c89bdfc" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/0eefe07f-2836-44fa-9ddf-a0d2124b90e2" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/6765e539-83ea-4cd6-9c9e-f42790fa05b5" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/60e3d187-171a-4248-94e0-c6b08736e235" />
     <br />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/330ce49b-45f1-4919-ae14-75f7d47e5f73" />
-    <img width="14%" alt="image" src="https://github.com/user-attachments/assets/d15fa9e9-5486-423b-a0e9-53b467e45432" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/f0c57590-d987-4ecf-89b2-64efad60b6d7" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/7a478602-0f08-4b30-8f6a-879f4a60ae32" />
+    <img width="14%" alt="image" src="https://github.com/user-attachments/assets/6442ca7d-ce9e-46d9-aecd-405ba88f5a5e" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/bc17895e-02a4-4cc5-b471-c3803cf25a2b" />
 </div>
 
 ---
 
 ## Key Features
+
+### AI Assistant (New)
+- **Multi-provider Support**: OpenAI, Google Gemini, Anthropic Claude, and custom API support.
+- **Context-Aware Chat**: Attach table schemas to the AI context for accurate SQL generation and assistance.
+- **Slash Commands**: Quick commands for generating SQL, explaining queries, optimizing performance, and reviewing schema designs.
 
 ### Performance
 - **Smooth interaction under load**: optimized table interaction (including column resize workflow on large datasets).
@@ -207,6 +212,11 @@ For the full workflow, branch model, and maintainer sync rules, see:
 
 External contributors should open pull requests directly against `main`.
 
+## Links
+
+- [linux.do](https://linux.do/)
+- [AIBook](https://aibook.ren/)
+- 
 ## License
 
 Licensed under [Apache-2.0](LICENSE).
