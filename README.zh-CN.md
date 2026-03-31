@@ -52,18 +52,23 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 <h2 align="center">📸 项目截图</h2>
 
 <div align="center">
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/341cda98-79a5-4198-90f3-1335131ccde0" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/224a74e7-65df-4aef-9710-d8e82e3a70c1" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/ec522145-5ceb-4481-ae46-a9251c89bdfc" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/0eefe07f-2836-44fa-9ddf-a0d2124b90e2" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/6765e539-83ea-4cd6-9c9e-f42790fa05b5" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/60e3d187-171a-4248-94e0-c6b08736e235" />
     <br />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/330ce49b-45f1-4919-ae14-75f7d47e5f73" />
-    <img width="14%" alt="image" src="https://github.com/user-attachments/assets/d15fa9e9-5486-423b-a0e9-53b467e45432" />
-    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/f0c57590-d987-4ecf-89b2-64efad60b6d7" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/7a478602-0f08-4b30-8f6a-879f4a60ae32" />
+    <img width="14%" alt="image" src="https://github.com/user-attachments/assets/6442ca7d-ce9e-46d9-aecd-405ba88f5a5e" />
+    <img width="25%" alt="image" src="https://github.com/user-attachments/assets/bc17895e-02a4-4cc5-b471-c3803cf25a2b" />
 </div>
 
 ---
 
 ## 核心特性
+
+### AI 智能助手 (New)
+- **多模型服务商支持**：内置跨平台接入 OpenAI, Google Gemini, Anthropic Claude，同时支持任意自定义兼容 OpenAI 格式的 API。
+- **关联表结构上下文**：原生支持将当前数据库表结构直接提取作为上下文发送给 AI，让 SQL 生成、分析变得更精准。
+- **快捷指令**：内置多种快捷对话指（如一键生成 SQL、解释执行逻辑、分析性能优化、表字段代码评审等）。
 
 ### 性能与交互
 - 大数据场景下保持流畅交互（含 DataGrid 列宽拖拽、批量编辑流程优化）。
@@ -189,6 +194,11 @@ sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0
 - [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
 
 外部贡献者统一直接向 `main` 发起 Pull Request。
+
+## 友情链接
+
+- [linux.do](https://linux.do/)
+- [AI全书](https://aibook.ren/)
 
 ## 开源协议
 

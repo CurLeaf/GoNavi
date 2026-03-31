@@ -30,7 +30,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   CodeOutlined,
   TagOutlined,
   CheckOutlined,
-  FilterOutlined
+  FilterOutlined,
+  DashboardOutlined
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -1035,13 +1036,21 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 dbs = dbs.filter(db => conn.includeDatabases!.includes(db.title));
             }
 
-            setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            if (dbs.length > 0) {
+                setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            } else {
+                // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
+                setLoadedKeys(prev => prev.filter(k => k !== node.key));
+                message.warning({ content: '未获取到可见数据库/schema，请检查账号权限或右键刷新', key: `conn-${conn.id}-dbs` });
+            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	            setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
 	          }
 	      } catch (e: any) {
 	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	          setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	          message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
@@ -3098,6 +3107,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         });
                     }
                 },
+                {
+                    key: 'open-monitor',
+                    label: 'Redis 实例监控',
+                    icon: <DashboardOutlined />,
+                    onClick: () => {
+                        addTab({
+                            id: `redis-monitor-${node.key}-${Date.now()}`,
+                            title: `监控: ${node.title}`,
+                            type: 'redis-monitor',
+                            connectionId: node.key,
+                            redisDB: 0
+                        });
+                    }
+                },
                 { type: 'divider' },
                 {
                     key: 'edit',
@@ -3305,6 +3328,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         id: `redis-cmd-${id}-db${redisDB}-${Date.now()}`,
                         title: `命令 - db${redisDB}`,
                         type: 'redis-command',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'open-monitor',
+                label: 'Redis 实例监控',
+                icon: <DashboardOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
+                        title: `监控: ${connections.find(c => c.id === id)?.name || id}`,
+                        type: 'redis-monitor',
                         connectionId: id,
                         redisDB: redisDB
                     });

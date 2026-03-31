@@ -183,7 +183,7 @@ let sharedAllColumnsData: {dbName: string, tableName: string, name: string, type
 let sharedVisibleDbs: string[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 
-const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
+const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
   
   type ResultSet = {
@@ -716,11 +716,16 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                       // Prefer preloaded MySQL all-columns cache
                       let cols: { name: string, type?: string, tableName?: string, dbName?: string }[];
                       if (sharedAllColumnsData.length > 0) {
+                          const tiTableLower = (tableInfo.tableName || '').toLowerCase();
                           cols = sharedAllColumnsData
-                              .filter(c =>
-                                  (c.dbName || '').toLowerCase() === (tableInfo.dbName || '').toLowerCase() &&
-                                  (c.tableName || '').toLowerCase() === (tableInfo.tableName || '').toLowerCase()
-                              )
+                              .filter(c => {
+                                  if ((c.dbName || '').toLowerCase() !== (tableInfo.dbName || '').toLowerCase()) return false;
+                                  const cTableLower = (c.tableName || '').toLowerCase();
+                                  if (cTableLower === tiTableLower) return true;
+                                  // schema.table 格式匹配纯表名
+                                  const parsed = splitSchemaAndTable(c.tableName || '');
+                                  return (parsed.table || '').toLowerCase() === tiTableLower;
+                              })
                               .map(c => ({ name: c.name, type: c.type, tableName: c.tableName, dbName: c.dbName }));
                       } else {
                           const dbCols = await getColumnsByDB(tableInfo.tableName);
@@ -773,7 +778,10 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
-                      return (foundTables.has(fullIdent) || foundTables.has(shortIdent)) && startsWithPrefix(c.name || '');
+                      // 对 schema.table 格式，也用纯表名部分匹配（如 public.users → users）
+                      const parsed = splitSchemaAndTable(c.tableName || '');
+                      const pureIdent = (parsed.table || '').toLowerCase();
+                      return (foundTables.has(fullIdent) || foundTables.has(shortIdent) || (pureIdent && foundTables.has(pureIdent))) && startsWithPrefix(c.name || '');
                   })
                   .map(c => {
                       // 当前库的表字段优先级更高
@@ -788,24 +796,61 @@ const QueryEditor: React.FC<{ tab: TabData }> = ({ tab }) => {
                       };
                   });
 
-              // 表提示：当前库显示表名，其他库显示 db.table 格式
+              // 表提示：当前库智能处理 schema.table 格式
+              // 1. 构建纯表名到 schema 列表的映射，检测同名表
+              const currentDbTables = sharedTablesData.filter(t =>
+                  (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase()
+              );
+              const tableNameToSchemas = new Map<string, string[]>();
+              for (const t of currentDbTables) {
+                  const parsed = splitSchemaAndTable(t.tableName || '');
+                  const pureTable = (parsed.table || t.tableName || '').toLowerCase();
+                  const schemas = tableNameToSchemas.get(pureTable) || [];
+                  schemas.push(parsed.schema || '');
+                  tableNameToSchemas.set(pureTable, schemas);
+              }
+
               const tableSuggestions = sharedTablesData
                 .filter(t => {
                     const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
-                    const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
-                    return startsWithPrefix(label || '');
+                    if (!isCurrentDb) {
+                        // 跨库：用 db.table 格式匹配
+                        return startsWithPrefix(`${t.dbName}.${t.tableName}`);
+                    }
+                    // 当前库：同时用完整名和纯表名匹配
+                    const parsed = splitSchemaAndTable(t.tableName || '');
+                    const pureTable = parsed.table || t.tableName || '';
+                    return startsWithPrefix(t.tableName || '') || startsWithPrefix(pureTable);
                 })
                 .map(t => {
                   const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
-                  const label = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
-                  const insertText = isCurrentDb ? t.tableName : `${t.dbName}.${t.tableName}`;
+                  if (!isCurrentDb) {
+                      const label = `${t.dbName}.${t.tableName}`;
+                      return {
+                          label,
+                          kind: monaco.languages.CompletionItemKind.Class,
+                          insertText: label,
+                          detail: `Table (${t.dbName})`,
+                          range,
+                          sortText: sortGroups.tableOther + t.tableName,
+                      };
+                  }
+                  // 当前库：检查是否有跨 schema 同名表
+                  const parsed = splitSchemaAndTable(t.tableName || '');
+                  const pureTable = parsed.table || t.tableName || '';
+                  const schemas = tableNameToSchemas.get(pureTable.toLowerCase()) || [];
+                  const hasDuplicate = schemas.length > 1;
+                  // 同名表存在于多个 schema → 显示 schema.table；否则只显示纯表名
+                  const label = hasDuplicate ? t.tableName : pureTable;
+                  const insertText = hasDuplicate ? t.tableName : pureTable;
+                  const schemaInfo = parsed.schema ? ` (${parsed.schema})` : '';
                   return {
                       label,
                       kind: monaco.languages.CompletionItemKind.Class,
                       insertText,
-                      detail: `Table (${t.dbName})`,
+                      detail: `Table${schemaInfo}`,
                       range,
-                      sortText: isCurrentDb ? sortGroups.tableCurrent + t.tableName : sortGroups.tableOther + t.tableName,
+                      sortText: sortGroups.tableCurrent + pureTable,
                   };
               });
 
