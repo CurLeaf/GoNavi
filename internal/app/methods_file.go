@@ -574,7 +574,7 @@ func isDateTimeColumnType(columnType string) bool {
 	if typ == "" {
 		return false
 	}
-	return strings.Contains(typ, "datetime") || strings.Contains(typ, "timestamp")
+	return strings.Contains(typ, "datetime") || strings.Contains(typ, "timestamp") || strings.Contains(typ, "timestamptz")
 }
 
 func isTimeOnlyColumnType(columnType string) bool {
@@ -585,7 +585,7 @@ func isTimeOnlyColumnType(columnType string) bool {
 	if strings.Contains(typ, "datetime") || strings.Contains(typ, "timestamp") {
 		return false
 	}
-	return strings.Contains(typ, "time")
+	return strings.Contains(typ, "time") || strings.Contains(typ, "timetz")
 }
 
 func isDateOnlyColumnType(dbType, columnType string) bool {
@@ -1717,6 +1717,10 @@ func dumpTableSQL(
 	if err != nil {
 		return err
 	}
+	columnTypeMap := map[string]string{}
+	if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
+		columnTypeMap = buildImportColumnTypeMap(defs)
+	}
 	if len(data) == 0 {
 		if _, err := w.WriteString("-- (0 rows)\n"); err != nil {
 			return err
@@ -1733,7 +1737,7 @@ func dumpTableSQL(
 	for _, row := range data {
 		values := make([]string, 0, len(columns))
 		for _, c := range columns {
-			values = append(values, formatSQLValue(config.Type, row[c]))
+			values = append(values, formatImportSQLValue(config.Type, columnTypeMap[normalizeColumnName(c)], row[c]))
 		}
 		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n", quotedTable, strings.Join(quotedCols, ", "), strings.Join(values, ", "))); err != nil {
 			return err

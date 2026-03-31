@@ -33,6 +33,7 @@ import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral,
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
+import { buildCopyInsertSQL, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -995,6 +996,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const selectionColumnWidth = 46;
   const currentConnConfig = connections.find(c => c.id === connectionId)?.config;
   const dataSourceCaps = getDataSourceCapabilities(currentConnConfig);
+  const dbType = dataSourceCaps.type;
   const isDuckDBConnection = dataSourceCaps.type === 'duckdb';
   const supportsCopyInsert = dataSourceCaps.supportsCopyInsert;
   const supportsSqlQueryExport = dataSourceCaps.supportsSqlQueryExport;
@@ -1336,6 +1338,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next;
   }, [columnMetaMap]);
 
+  const columnTypeMapByLowerName = useMemo(() => {
+      const next: Record<string, string> = {};
+      Object.entries(columnMetaMapByLowerName).forEach(([name, meta]) => {
+          const type = String(meta?.type || '').trim();
+          if (!name || !type) return;
+          next[name] = type;
+      });
+      return next;
+  }, [columnMetaMapByLowerName]);
+
   const normalizeCommitCellValue = useCallback(
       (columnName: string, value: any, mode: 'insert' | 'update') => {
           if (value === undefined) return undefined;
@@ -1357,7 +1369,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   // INSERT 空时间值直接忽略字段，让数据库默认值生效；UPDATE 空时间值转 NULL。
                   return mode === 'insert' ? undefined : null;
               }
-              return normalizeDateTimeString(value);
+              return normalizeTemporalLiteralText(value, meta?.type, true);
           }
 
           return value;
@@ -3501,17 +3513,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 使用 columnNames 保持表定义的字段顺序，而非 Object.keys() 的不确定顺序
       const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
       const sqlList = records.map((r: any) => {
-          const values = orderedCols.map(c => {
-              const v = r[c];
-              if (v === null || v === undefined) return 'NULL';
-              const str = typeof v === 'string' ? normalizeDateTimeString(v) : String(v);
-              const escaped = str.replace(/'/g, "''");
-              return `'${escaped}'`;
+          return buildCopyInsertSQL({
+              dbType,
+              tableName,
+              orderedCols,
+              record: r,
+              columnTypesByLowerName: columnTypeMapByLowerName,
           });
-          const targetTable = tableName || 'table';
-          return `INSERT INTO \`${targetTable}\` (${orderedCols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
       });
-      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, columnNames, getTargets, copyToClipboard]);
+      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, columnNames, getTargets, copyToClipboard, dbType, tableName, columnTypeMapByLowerName]);
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);

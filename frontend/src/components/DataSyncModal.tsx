@@ -6,6 +6,7 @@ import { DBGetDatabases, DBGetTables, DataSync, DataSyncAnalyze, DataSyncPreview
 import { SavedConnection } from '../types';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -74,7 +75,10 @@ const toSqlLiteral = (value: any, dbType: string): string => {
     return value ? 'TRUE' : 'FALSE';
   }
   if (value instanceof Date) {
-    return `'${value.toISOString().replace(/'/g, "''")}'`;
+    return `'${formatLocalDateTimeLiteral(value).replace(/'/g, "''")}'`;
+  }
+  if (typeof value === 'string') {
+    return `'${value.replace(/'/g, "''")}'`;
   }
   if (typeof value === 'object') {
     try {
@@ -84,6 +88,20 @@ const toSqlLiteral = (value: any, dbType: string): string => {
     }
   }
   return `'${String(value).replace(/'/g, "''")}'`;
+};
+
+const toTypedSqlLiteral = (value: any, dbType: string, columnType?: string): string => {
+  if (typeof value === 'string') {
+    const normalized = normalizeTemporalLiteralText(value, columnType, false);
+    return toSqlLiteral(normalized, dbType);
+  }
+  if (value instanceof Date) {
+    const normalized = String(columnType || '').trim()
+      ? formatLocalDateTimeLiteral(value)
+      : value.toISOString();
+    return toSqlLiteral(normalized, dbType);
+  }
+  return toSqlLiteral(value, dbType);
 };
 
 const resolveRedisDbIndex = (raw?: string): number => {
@@ -100,6 +118,9 @@ const buildSqlPreview = (
   if (!previewData || !tableName) return { sqlText: '', statementCount: 0 };
   const tableExpr = quoteSqlTable(dbType, tableName);
   const pkCol = String(previewData.pkColumn || 'id');
+  const columnTypesByLowerName = previewData?.columnTypes && typeof previewData.columnTypes === 'object'
+    ? previewData.columnTypes as Record<string, string>
+    : {};
   const statements: string[] = [];
 
   const insertRows = Array.isArray(previewData.inserts) ? previewData.inserts : [];
@@ -118,7 +139,7 @@ const buildSqlPreview = (
       const columns = Object.keys(row);
       if (columns.length === 0) return;
       const colExpr = columns.map((c) => quoteSqlIdent(dbType, c)).join(', ');
-      const valExpr = columns.map((c) => toSqlLiteral(row[c], dbType)).join(', ');
+      const valExpr = columns.map((c) => toTypedSqlLiteral(row[c], dbType, columnTypesByLowerName[String(c).toLowerCase()])).join(', ');
       statements.push(`INSERT INTO ${tableExpr} (${colExpr}) VALUES (${valExpr});`);
     });
   }
@@ -134,10 +155,10 @@ const buildSqlPreview = (
       const setCols = changedColumns.filter((c: string) => String(c) !== pkCol);
       if (setCols.length === 0) return;
       const setExpr = setCols
-        .map((c: string) => `${quoteSqlIdent(dbType, c)} = ${toSqlLiteral(source[c], dbType)}`)
+        .map((c: string) => `${quoteSqlIdent(dbType, c)} = ${toTypedSqlLiteral(source[c], dbType, columnTypesByLowerName[String(c).toLowerCase()])}`)
         .join(', ');
       statements.push(
-        `UPDATE ${tableExpr} SET ${setExpr} WHERE ${quoteSqlIdent(dbType, pkCol)} = ${toSqlLiteral(pk, dbType)};`,
+        `UPDATE ${tableExpr} SET ${setExpr} WHERE ${quoteSqlIdent(dbType, pkCol)} = ${toTypedSqlLiteral(pk, dbType, columnTypesByLowerName[String(pkCol).toLowerCase()])};`,
       );
     });
   }
@@ -147,7 +168,7 @@ const buildSqlPreview = (
       const pk = String(rowWrap?.pk ?? '');
       if (selectedDelete.size > 0 && !selectedDelete.has(pk)) return;
       statements.push(
-        `DELETE FROM ${tableExpr} WHERE ${quoteSqlIdent(dbType, pkCol)} = ${toSqlLiteral(pk, dbType)};`,
+        `DELETE FROM ${tableExpr} WHERE ${quoteSqlIdent(dbType, pkCol)} = ${toTypedSqlLiteral(pk, dbType, columnTypesByLowerName[String(pkCol).toLowerCase()])};`,
       );
     });
   }

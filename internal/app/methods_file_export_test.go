@@ -273,3 +273,17 @@ func TestWriteRowsToFile_HTML_EscapeHeader(t *testing.T) {
 		t.Fatalf("html 表头未正确转义: %s", content)
 	}
 }
+
+func TestFormatImportSQLValue_NormalizesTimestampWithoutTimezone(t *testing.T) {
+	got := formatImportSQLValue("postgres", "timestamp without time zone", "2026-01-21T18:32:26+08:00")
+	if got != "'2026-01-21 18:32:26'" {
+		t.Fatalf("时间字面量归一化异常，want=%q got=%q", "'2026-01-21 18:32:26'", got)
+	}
+}
+
+func TestFormatImportSQLValue_LeavesTextLiteralUntouched(t *testing.T) {
+	got := formatImportSQLValue("postgres", "text", "2026-01-21T18:32:26+08:00")
+	if got != "'2026-01-21T18:32:26+08:00'" {
+		t.Fatalf("文本字段不应被归一化，want=%q got=%q", "'2026-01-21T18:32:26+08:00'", got)
+	}
+}
