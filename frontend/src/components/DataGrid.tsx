@@ -637,7 +637,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   if (editable) {
     childNode = editing ? (
-      <Form.Item style={{ margin: 0 }} name={getCellFieldName(record, dataIndex)}>
+      <Form.Item style={{ margin: 0 }} name={getCellFieldName(record, dataIndex)} preserve={false}>
         {isDateTimeField ? (
           pickerType === 'time' ? (
             <TimePicker
