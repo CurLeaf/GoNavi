@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal } from 'antd';
-import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined } from '@ant-design/icons';
+import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
@@ -22,6 +22,7 @@ interface TableStatRow {
 
 type SortField = 'name' | 'rows' | 'dataSize';
 type SortOrder = 'asc' | 'desc';
+type ViewMode = 'card' | 'list';
 
 const formatSize = (bytes: number): string => {
     if (!bytes || bytes <= 0) return '—';
@@ -146,6 +147,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [searchText, setSearchText] = useState('');
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+    const [viewMode, setViewMode] = useState<ViewMode>('card');
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
 
@@ -366,14 +368,43 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 <Dropdown menu={{ items: sortMenuItems }} trigger={['click']}>
                     <Tooltip title="排序"><SortAscendingOutlined style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
                 </Dropdown>
+                <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 6, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
+                    <Tooltip title="卡片视图">
+                        <div
+                            onClick={() => setViewMode('card')}
+                            style={{
+                                padding: '3px 7px', borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                background: viewMode === 'card' ? (darkMode ? 'rgba(255,255,255,0.12)' : '#fff') : 'transparent',
+                                boxShadow: viewMode === 'card' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                color: viewMode === 'card' ? accentColor : textMuted,
+                            }}
+                        >
+                            <AppstoreOutlined style={{ fontSize: 14 }} />
+                        </div>
+                    </Tooltip>
+                    <Tooltip title="列表视图">
+                        <div
+                            onClick={() => setViewMode('list')}
+                            style={{
+                                padding: '3px 7px', borderRadius: 5, cursor: 'pointer', transition: 'all 0.15s',
+                                background: viewMode === 'list' ? (darkMode ? 'rgba(255,255,255,0.12)' : '#fff') : 'transparent',
+                                boxShadow: viewMode === 'list' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                                color: viewMode === 'list' ? accentColor : textMuted,
+                            }}
+                        >
+                            <UnorderedListOutlined style={{ fontSize: 14 }} />
+                        </div>
+                    </Tooltip>
+                </div>
                 <Tooltip title="刷新"><ReloadOutlined onClick={loadData} style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
             </div>
 
-            {/* Cards Grid */}
+            {/* Content Area */}
             <div style={{ flex: 1, overflow: 'auto', padding: '0 16px 16px 16px' }}>
                 {sortedFiltered.length === 0 ? (
                     <Empty description={searchText ? '无匹配结果' : '暂无表'} style={{ marginTop: 80 }} />
-                ) : (
+                ) : viewMode === 'card' ? (
+                    /* ========== 卡片视图 ========== */
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
@@ -450,6 +481,115 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                 </div>
                             </Dropdown>
                         ))}
+                    </div>
+                ) : (
+                    /* ========== 列表/表格视图 ========== */
+                    <div style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                            <thead>
+                                <tr style={{ background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)' }}>
+                                    {[
+                                        { field: 'name' as SortField, label: '表名', width: undefined },
+                                        { field: null, label: '注释', width: undefined },
+                                        { field: 'rows' as SortField, label: '行数', width: 100 },
+                                        { field: 'dataSize' as SortField, label: '数据大小', width: 110 },
+                                        { field: null, label: '索引大小', width: 110 },
+                                        { field: null, label: '引擎', width: 90 },
+                                    ].map((col, idx) => (
+                                        <th
+                                            key={idx}
+                                            onClick={col.field ? () => toggleSort(col.field!) : undefined}
+                                            style={{
+                                                padding: '10px 14px',
+                                                textAlign: idx >= 2 ? 'right' : 'left',
+                                                fontWeight: 600,
+                                                color: textSecondary,
+                                                borderBottom: `1px solid ${cardBorder}`,
+                                                cursor: col.field ? 'pointer' : 'default',
+                                                userSelect: 'none',
+                                                whiteSpace: 'nowrap',
+                                                width: col.width,
+                                            }}
+                                        >
+                                            {col.label}
+                                            {col.field && sortField === col.field && (
+                                                <span style={{ marginLeft: 4, fontSize: 11 }}>
+                                                    {sortOrder === 'asc' ? '↑' : '↓'}
+                                                </span>
+                                            )}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sortedFiltered.map((t, rowIdx) => (
+                                    <Dropdown
+                                        key={t.name}
+                                        trigger={['contextMenu']}
+                                        menu={{
+                                            items: [
+                                                { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
+                                                    setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
+                                                    addTab({
+                                                        id: `query-${Date.now()}`,
+                                                        title: '新建查询',
+                                                        type: 'query',
+                                                        connectionId: tab.connectionId,
+                                                        dbName: tab.dbName,
+                                                        query: `SELECT * FROM ${t.name};`,
+                                                    });
+                                                }},
+                                                { type: 'divider' },
+                                                { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
+                                                { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
+                                                { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
+                                                { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
+                                                { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) },
+                                                { type: 'divider' },
+                                                { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
+                                                    { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
+                                                    { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(t.name, 'xlsx') },
+                                                    { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(t.name, 'json') },
+                                                    { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(t.name, 'md') },
+                                                    { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(t.name, 'html') },
+                                                ]},
+                                            ],
+                                        }}
+                                    >
+                                        <tr
+                                            onDoubleClick={() => openTable(t.name)}
+                                            style={{
+                                                cursor: 'pointer',
+                                                transition: 'background 0.12s',
+                                                borderBottom: rowIdx < sortedFiltered.length - 1 ? `1px solid ${cardBorder}` : 'none',
+                                            }}
+                                            onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = cardHoverBg; }}
+                                            onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                                        >
+                                            <td style={{ padding: '10px 14px', color: textPrimary, fontWeight: 500 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <TableOutlined style={{ fontSize: 13, color: accentColor, flexShrink: 0 }} />
+                                                    <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                                                    </Tooltip>
+                                                </div>
+                                            </td>
+                                            <td style={{ padding: '10px 14px', color: textSecondary, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {t.comment ? (
+                                                    <Tooltip title={t.comment} mouseEnterDelay={0.4}><span>{t.comment}</span></Tooltip>
+                                                ) : (
+                                                    <span style={{ color: textMuted }}>—</span>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</td>
+                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</td>
+                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</td>
+                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textMuted }}>{t.engine || '—'}</td>
+                                        </tr>
+                                    </Dropdown>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>
