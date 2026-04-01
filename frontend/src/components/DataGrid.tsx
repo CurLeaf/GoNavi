@@ -1173,6 +1173,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [dataPanelValue, setDataPanelValue] = useState('');
   const [dataPanelIsJson, setDataPanelIsJson] = useState(false);
   const dataPanelDirtyRef = useRef(false);
+  const dataPanelOriginalRef = useRef('');
   const [rowEditorOpen, setRowEditorOpen] = useState(false);
   const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
   const rowEditorBaseRawRef = useRef<Record<string, any>>({});
@@ -1495,14 +1496,18 @@ const DataGrid: React.FC<DataGridProps> = ({
   const updateFocusedCell = useCallback((record: Item, dataIndex: string) => {
       if (!record || !dataIndex) return;
       const raw = record?.[dataIndex];
-      const text = toEditableText(raw);
+      let text = toEditableText(raw);
+      // 日期时间字段格式化（处理带时区的 ISO 格式如 2026-03-22T00:00:00+08:00）
+      if (typeof raw === 'string') {
+          text = normalizeDateTimeString(raw);
+      }
       const isJson = looksLikeJsonText(text);
       setFocusedCellInfo({ record, dataIndex, title: dataIndex });
-      // 仅在面板未被用户手动编辑时自动同步值
-      if (!dataPanelDirtyRef.current) {
-          setDataPanelValue(text);
-          setDataPanelIsJson(isJson);
-      }
+      // 切换到新单元格时总是更新预览值并重置 dirty 标记
+      dataPanelOriginalRef.current = text;
+      setDataPanelValue(text);
+      setDataPanelIsJson(isJson);
+      dataPanelDirtyRef.current = false;
   }, []);
 
   const handleDataPanelFormatJson = useCallback(() => {
@@ -2899,28 +2904,49 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, []);
 
   const handleCellSave = useCallback((row: any) => {
-      // Optimistic update for display
-      // In parent-controlled data, we might need parent to update 'data', 
-      // but here we manage 'modifiedRows' locally and overlay it.
-      // Since 'displayData' is derived from 'data' + 'modifiedRows', we need to update the source if it's in 'data'.
-      // But 'data' prop is immutable.
-      // So we update 'modifiedRows'.
-      
-      // Check if it's an added row
       const rowKey = row?.[GONAVI_ROW_KEY];
       if (rowKey === undefined) return;
       const isAdded = addedRows.some(r => r?.[GONAVI_ROW_KEY] === rowKey);
       if (isAdded) {
           setAddedRows(prev => prev.map(r => r?.[GONAVI_ROW_KEY] === rowKey ? { ...r, ...row } : r));
       } else {
+          // 查找原始行数据，对比是否真正有值变更
+          const originalRow = data.find(r => r?.[GONAVI_ROW_KEY] === rowKey);
+          if (originalRow) {
+              const changedFields: Record<string, any> = {};
+              for (const col of Object.keys(row)) {
+                  if (col === GONAVI_ROW_KEY) continue;
+                  if (!isCellValueEqualForDiff(originalRow[col], row[col])) {
+                      changedFields[col] = row[col];
+                  }
+              }
+              if (Object.keys(changedFields).length === 0) {
+                  // 没有实际变更，从 modifiedRows 中移除该行（如有）
+                  setModifiedRows(prev => {
+                      const keyStr = rowKeyStr(rowKey);
+                      if (!(keyStr in prev)) return prev;
+                      const next = { ...prev };
+                      delete next[keyStr];
+                      return next;
+                  });
+                  return;
+              }
+          }
           setModifiedRows(prev => ({ ...prev, [rowKeyStr(rowKey)]: row }));
       }
-  }, [addedRows]);
+  }, [addedRows, data]);
 
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
+      // 与 updateFocusedCell 设置的原始值比较，避免幽灵变更
+      if (dataPanelValue === dataPanelOriginalRef.current) {
+          dataPanelDirtyRef.current = false;
+          void message.info('数据未变更');
+          return;
+      }
       const nextRow: any = { ...focusedCellInfo.record, [focusedCellInfo.dataIndex]: dataPanelValue };
       handleCellSave(nextRow);
+      dataPanelOriginalRef.current = dataPanelValue;
       dataPanelDirtyRef.current = false;
       void message.success('已保存');
   }, [focusedCellInfo, dataPanelValue, handleCellSave]);
@@ -3488,7 +3514,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {
-          void message.info("No changes to commit");
+          void message.info("没有可提交的变更");
           return;
       }
 
@@ -5341,8 +5367,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                             theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                             value={dataPanelValue}
                             onChange={(val) => {
-                                setDataPanelValue(val || '');
-                                dataPanelDirtyRef.current = true;
+                                const newVal = val || '';
+                                setDataPanelValue(newVal);
+                                // 只有值真正与原始值不同时才标记 dirty
+                                dataPanelDirtyRef.current = newVal !== dataPanelOriginalRef.current;
                             }}
                             options={{
                                 minimap: { enabled: false },
