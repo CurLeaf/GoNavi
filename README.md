@@ -215,12 +215,11 @@ For the full workflow, branch model, and maintainer sync rules, see:
 External contributors should open pull requests directly against `main`.
 
 ## Star History
-
-<a href="https://star-history.com/#Syngnat/GoNavi&Date">
+<a href="https://www.star-history.com/?repos=Syngnat%2FGoNavi&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Syngnat/GoNavi&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Syngnat/GoNavi&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Syngnat/GoNavi&type=date&legend=top-left" />
  </picture>
 </a>
 
