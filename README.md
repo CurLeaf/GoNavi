@@ -216,7 +216,13 @@ External contributors should open pull requests directly against `main`.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date)](https://star-history.com/#Syngnat/GoNavi&Date)
+<a href="https://star-history.com/#Syngnat/GoNavi&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date" />
+ </picture>
+</a>
 
 ## Links
 
