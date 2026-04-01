@@ -571,28 +571,47 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 }) => {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<any>(null);
+  const cellRef = useRef<HTMLElement>(null);
   const pickerOpenRef = useRef(false);
+  const scrollLockRef = useRef<{ el: HTMLElement; handler: (e: WheelEvent) => void } | null>(null);
   const form = useContext(EditableContext);
   const cellContextMenuContext = useContext(CellContextMenuContext);
 
+  /** DatePicker 面板打开时锁定表格滚动，关闭时恢复 */
+  const lockTableScroll = useCallback((lock: boolean) => {
+      if (lock) {
+          // 查找虚拟滚动容器或常规滚动容器
+          const tableWrapper = cellRef.current?.closest?.('.ant-table-wrapper') as HTMLElement | null;
+          if (tableWrapper) {
+              const handler = (e: WheelEvent) => { e.preventDefault(); e.stopPropagation(); };
+              tableWrapper.addEventListener('wheel', handler, { capture: true, passive: false });
+              scrollLockRef.current = { el: tableWrapper, handler };
+          }
+      } else if (scrollLockRef.current) {
+          const { el, handler } = scrollLockRef.current;
+          el.removeEventListener('wheel', handler, { capture: true } as any);
+          scrollLockRef.current = null;
+      }
+  }, []);
+
   useEffect(() => {
     if (editing) {
+      // 每次进入编辑时强制设置表单值（覆盖 form store 中可能残留的旧值）
+      const raw = record[dataIndex];
+      const fieldName = getCellFieldName(record, dataIndex);
+      if (isDateTimeField) {
+        const dayjsVal = parseToDayjs(raw, pickerType);
+        setCellFieldValue(form, fieldName, dayjsVal);
+      } else {
+        const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
+        setCellFieldValue(form, fieldName, initialValue);
+      }
       inputRef.current?.focus();
     }
   }, [editing]);
 
   const toggleEdit = () => {
     setEditing(!editing);
-    const raw = record[dataIndex];
-    const fieldName = getCellFieldName(record, dataIndex);
-    if (isDateTimeField) {
-      // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
-      const dayjsVal = parseToDayjs(raw, pickerType);
-      setCellFieldValue(form, fieldName, dayjsVal);
-    } else {
-      const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
-      setCellFieldValue(form, fieldName, initialValue);
-    }
   };
 
   const save = async () => {
@@ -637,7 +656,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   if (editable) {
     childNode = editing ? (
-      <Form.Item style={{ margin: 0 }} name={getCellFieldName(record, dataIndex)} preserve={false}>
+      <Form.Item style={{ margin: 0 }} name={getCellFieldName(record, dataIndex)}>
         {isDateTimeField ? (
           pickerType === 'time' ? (
             <TimePicker
@@ -645,6 +664,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
               onChange={() => setTimeout(save, 0)}
+              onOpenChange={lockTableScroll}
               onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
@@ -669,6 +689,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               onOk={() => setTimeout(save, 0)}
               onOpenChange={(open) => {
                 pickerOpenRef.current = open;
+                lockTableScroll(open);
                 // 面板关闭（点击外部）时退出编辑，不保存；仅"确定"按钮（onOk）触发保存
                 if (!open) setTimeout(() => { if (editing) toggleEdit(); }, 0);
               }}
@@ -686,6 +707,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               format={TEMPORAL_FORMATS[pickerType]}
               picker={pickerType as any}
               onChange={() => setTimeout(save, 0)}
+              onOpenChange={lockTableScroll}
               onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
@@ -745,6 +767,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   return (
       <Component
+          ref={cellRef}
           {...restProps}
           data-row-key={record ? String(record?.[GONAVI_ROW_KEY]) : undefined}
           data-col-name={dataIndex || undefined}
