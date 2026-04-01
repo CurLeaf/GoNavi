@@ -5,6 +5,8 @@
 [![React Version](https://img.shields.io/badge/React-v18-blue)](https://reactjs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Syngnat/GoNavi/release.yml?label=Build)](https://github.com/Syngnat/GoNavi/actions)
+[![Stars](https://img.shields.io/github/stars/Syngnat/GoNavi?style=social)](https://github.com/Syngnat/GoNavi/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/Syngnat/GoNavi/total?color=blue&label=downloads)](https://github.com/Syngnat/GoNavi/releases)
 
 **语言**: [English](README.md) | 简体中文
 
@@ -194,6 +196,10 @@ sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0
 - [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
 
 外部贡献者统一直接向 `main` 发起 Pull Request。
+
+## Star History (Star 增长趋势)
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date)](https://star-history.com/#Syngnat/GoNavi&Date)
 
 ## 友情链接
 

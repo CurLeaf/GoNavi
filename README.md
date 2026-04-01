@@ -5,6 +5,8 @@
 [![React Version](https://img.shields.io/badge/React-v18-blue)](https://reactjs.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Syngnat/GoNavi/release.yml?label=Build)](https://github.com/Syngnat/GoNavi/actions)
+[![Stars](https://img.shields.io/github/stars/Syngnat/GoNavi?style=social)](https://github.com/Syngnat/GoNavi/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/Syngnat/GoNavi/total?color=blue&label=downloads)](https://github.com/Syngnat/GoNavi/releases)
 
 **Language**: English | [简体中文](README.zh-CN.md)
 
@@ -211,6 +213,10 @@ For the full workflow, branch model, and maintainer sync rules, see:
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
 External contributors should open pull requests directly against `main`.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Syngnat/GoNavi&type=Date)](https://star-history.com/#Syngnat/GoNavi&Date)
 
 ## Links
 
