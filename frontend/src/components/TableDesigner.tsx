@@ -220,10 +220,8 @@ const COMMON_DEFAULTS = [
 const MYSQL_INDEX_TYPE_OPTIONS = [
     { label: '默认', value: 'DEFAULT' },
     { label: 'BTREE', value: 'BTREE' },
-    { label: 'HASH', value: 'HASH' },
     { label: 'FULLTEXT', value: 'FULLTEXT' },
     { label: 'SPATIAL', value: 'SPATIAL' },
-    { label: 'RTREE', value: 'RTREE' },
 ];
 
 const PGLIKE_INDEX_TYPE_OPTIONS = [
