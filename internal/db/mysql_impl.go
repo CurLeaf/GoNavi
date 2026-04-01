@@ -329,6 +329,17 @@ func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error
 	return scanRows(rows)
 }
 
+func (m *MySQLDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if m.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := m.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

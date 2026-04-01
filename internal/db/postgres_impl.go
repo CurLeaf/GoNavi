@@ -166,6 +166,9 @@ func (p *PostgresDB) Connect(config connection.ConnectionConfig) error {
 				logger.Infof("PostgreSQL 自动选择连接数据库：%s", dbName)
 			}
 
+			// 设置 search_path，使所有用户 schema 下的表可以不带 schema 前缀访问
+			p.ensureSearchPath(dsn)
+
 			cleanupOnFailure = false
 			return nil
 		}
@@ -231,6 +234,17 @@ func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, er
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+func (p *PostgresDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if p.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := p.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -598,6 +612,101 @@ ORDER BY table_schema, table_name, ordinal_position`
 		cols = append(cols, col)
 	}
 	return cols, nil
+}
+
+// ensureSearchPath 查询当前数据库中所有用户 schema，通过重建连接池将 search_path 写入 DSN。
+// 仅使用 SET search_path 只对连接池中的单个连接生效，后续查询可能拿到未设置的连接。
+// 将 search_path 写入 DSN (lib/pq 支持任意 PostgreSQL runtime parameter)，
+// 使连接池中每个连接建立时自动携带 search_path，与金仓行为一致。
+func (p *PostgresDB) ensureSearchPath(baseDSN string) {
+	if p.conn == nil {
+		return
+	}
+
+	rawSchemas := p.queryUserSchemas()
+	if len(rawSchemas) == 0 {
+		return
+	}
+
+	// 构建 search_path SQL 片段（带双引号转义），用于 SET 兜底
+	searchPathSQL, normalizedSchemas := buildKingbaseSearchPathCommon(rawSchemas)
+	if strings.TrimSpace(searchPathSQL) == "" {
+		return
+	}
+
+	// 策略 1：将 search_path 写入 DSN，重建连接池
+	// lib/pq 支持在 URL 查参数中设置任意 PostgreSQL runtime parameter，
+	// 如 ?search_path=ce,public，每个新连接建立时会自动 SET search_path。
+	searchPathDSNVal := strings.Join(normalizedSchemas, ",")
+	u, parseErr := url.Parse(baseDSN)
+	if parseErr == nil {
+		q := u.Query()
+		q.Set("search_path", searchPathDSNVal)
+		u.RawQuery = q.Encode()
+		newDSN := u.String()
+
+		newDB, err := sql.Open("postgres", newDSN)
+		if err == nil {
+			newDB.SetConnMaxLifetime(5 * time.Minute)
+			oldConn := p.conn
+			p.conn = newDB
+			if err := p.Ping(); err == nil {
+				_ = oldConn.Close()
+				logger.Infof("PostgreSQL 已通过 DSN 配置 search_path：%s", searchPathDSNVal)
+				return
+			}
+			// DSN 方式失败，回滚
+			_ = newDB.Close()
+			p.conn = oldConn
+			logger.Warnf("PostgreSQL DSN search_path 验证失败，回退至 SET 方式")
+		}
+	}
+
+	// 策略 2 兜底：通过 SET search_path 设置（仅影响单个连接，但聊胜于无）
+	timeout := p.pingTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := utils.ContextWithTimeout(timeout)
+	defer cancel()
+
+	if _, err := p.conn.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", searchPathSQL)); err != nil {
+		logger.Warnf("PostgreSQL 设置 search_path 失败：%v", err)
+		return
+	}
+	logger.Infof("PostgreSQL 已通过 SET 设置 search_path：%s", searchPathSQL)
+}
+
+// queryUserSchemas 查询当前数据库中所有用户 schema。
+func (p *PostgresDB) queryUserSchemas() []string {
+	if p.conn == nil {
+		return nil
+	}
+
+	query := `SELECT nspname FROM pg_namespace
+		WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND nspname NOT LIKE 'pg_%'
+		ORDER BY nspname`
+
+	rows, err := p.conn.Query(query)
+	if err != nil {
+		logger.Warnf("PostgreSQL 查询用户 schema 失败：%v", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var schemas []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			schemas = append(schemas, name)
+		}
+	}
+	return schemas
 }
 
 func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {

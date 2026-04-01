@@ -71,3 +71,50 @@ func TestCollectDamengDatabaseNames_ReturnsErrorWhenNoNameResolved(t *testing.T)
 		t.Fatalf("错误不符合预期: %v", err)
 	}
 }
+
+// TestCollectDamengDatabaseNames_IncludesSYSDBA 验证 SYSDBA（达梦默认管理员 schema）
+// 不会被系统 schema 过滤排除。
+func TestCollectDamengDatabaseNames_IncludesSYSDBA(t *testing.T) {
+	t.Parallel()
+
+	got, err := collectDamengDatabaseNames(func(query string) ([]map[string]interface{}, []string, error) {
+		switch query {
+		case damengDatabaseQueries[0]:
+			// 查询 0 返回 SYSDBA（之前会被排除，修复后应该返回）
+			return []map[string]interface{}{{"DATABASE_NAME": "SYSDBA"}}, nil, nil
+		default:
+			return nil, nil, errors.New("permission denied")
+		}
+	})
+	if err != nil {
+		t.Fatalf("collectDamengDatabaseNames 返回错误: %v", err)
+	}
+
+	want := []string{"SYSDBA"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SYSDBA 应该包含在结果中, got=%v want=%v", got, want)
+	}
+}
+
+// TestCollectDamengDatabaseNames_FallbackToCurrentUser 验证当所有查询都失败时
+// 兜底查询 SELECT USER FROM DUAL 能返回当前用户作为 schema。
+func TestCollectDamengDatabaseNames_FallbackToCurrentUser(t *testing.T) {
+	t.Parallel()
+
+	lastQuery := damengDatabaseQueries[len(damengDatabaseQueries)-1]
+	got, err := collectDamengDatabaseNames(func(query string) ([]map[string]interface{}, []string, error) {
+		if query == lastQuery {
+			return []map[string]interface{}{{"DATABASE_NAME": "SYSDBA"}}, nil, nil
+		}
+		// 前面所有查询要么返回空要么报错
+		return []map[string]interface{}{}, nil, nil
+	})
+	if err != nil {
+		t.Fatalf("collectDamengDatabaseNames 返回错误: %v", err)
+	}
+
+	want := []string{"SYSDBA"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("兜底查询应该返回当前用户, got=%v want=%v", got, want)
+	}
+}

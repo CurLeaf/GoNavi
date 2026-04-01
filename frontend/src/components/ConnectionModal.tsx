@@ -2101,7 +2101,7 @@ const ConnectionModal: React.FC<{
                               <Form.Item
                                   name="user"
                                   label="用户名"
-                                  rules={[createUriAwareRequiredRule('请输入用户名')]}
+                                  rules={dbType === 'mongodb' ? [] : [createUriAwareRequiredRule('请输入用户名')]}
                                   style={{ marginBottom: 0 }}
                               >
                                   <Input />
@@ -2115,6 +2115,7 @@ const ConnectionModal: React.FC<{
                                           allowClear
                                           placeholder="自动协商"
                                           options={[
+                                              { value: 'NONE', label: '无认证 (None)' },
                                               { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
                                               { value: 'SCRAM-SHA-256', label: 'SCRAM-SHA-256' },
                                               { value: 'MONGODB-AWS', label: 'MONGODB-AWS' },

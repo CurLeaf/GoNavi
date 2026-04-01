@@ -215,7 +215,9 @@ func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	hostText := strings.Join(seeds, ",")
 	uri := fmt.Sprintf("%s://%s", scheme, hostText)
 
-	if config.User != "" {
+	noAuth := strings.EqualFold(strings.TrimSpace(config.MongoAuthMechanism), "NONE")
+
+	if config.User != "" && !noAuth {
 		var userinfo *url.Userinfo
 		if config.Password != "" {
 			userinfo = url.UserPassword(config.User, config.Password)
@@ -236,11 +238,14 @@ func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	params.Set("connectTimeoutMS", strconv.Itoa(timeout*1000))
 	params.Set("serverSelectionTimeoutMS", strconv.Itoa(timeout*1000))
 
-	authSource := strings.TrimSpace(config.AuthSource)
-	if authSource == "" {
-		authSource = "admin"
+	// 仅在有用户名且非 NONE 认证时设置 authSource
+	if config.User != "" && !noAuth {
+		authSource := strings.TrimSpace(config.AuthSource)
+		if authSource == "" {
+			authSource = "admin"
+		}
+		params.Set("authSource", authSource)
 	}
-	params.Set("authSource", authSource)
 
 	if replicaSet := strings.TrimSpace(config.ReplicaSet); replicaSet != "" {
 		params.Set("replicaSet", replicaSet)
@@ -248,7 +253,8 @@ func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	if readPreference := strings.TrimSpace(config.ReadPreference); readPreference != "" {
 		params.Set("readPreference", readPreference)
 	}
-	if authMechanism := strings.TrimSpace(config.MongoAuthMechanism); authMechanism != "" {
+	// NONE 表示无认证，不设置 authMechanism
+	if authMechanism := strings.TrimSpace(config.MongoAuthMechanism); authMechanism != "" && !noAuth {
 		params.Set("authMechanism", authMechanism)
 	}
 

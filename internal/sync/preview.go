@@ -21,6 +21,7 @@ type PreviewUpdateRow struct {
 type TableDiffPreview struct {
 	Table        string             `json:"table"`
 	PKColumn     string             `json:"pkColumn"`
+	ColumnTypes  map[string]string  `json:"columnTypes,omitempty"`
 	TotalInserts int                `json:"totalInserts"`
 	TotalUpdates int                `json:"totalUpdates"`
 	TotalDeletes int                `json:"totalDeletes"`
@@ -112,12 +113,21 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	out := TableDiffPreview{
 		Table:        tableName,
 		PKColumn:     pkCol,
+		ColumnTypes:  make(map[string]string, len(cols)),
 		TotalInserts: 0,
 		TotalUpdates: 0,
 		TotalDeletes: 0,
 		Inserts:      make([]PreviewRow, 0),
 		Updates:      make([]PreviewUpdateRow, 0),
 		Deletes:      make([]PreviewRow, 0),
+	}
+	for _, col := range cols {
+		name := strings.ToLower(strings.TrimSpace(col.Name))
+		typ := strings.TrimSpace(col.Type)
+		if name == "" || typ == "" {
+			continue
+		}
+		out.ColumnTypes[name] = typ
 	}
 
 	sourcePKSet := make(map[string]struct{}, len(sourceRows))

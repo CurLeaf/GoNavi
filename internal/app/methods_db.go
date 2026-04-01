@@ -581,6 +581,48 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		}
 	}
 
+	// 全部为写操作且驱动支持批量 Exec → 一次性发送，大幅减少网络往返
+	// 适用于 MySQL/MariaDB/Doris/PostgreSQL/SQLite/DuckDB 等支持多语句 Exec 的驱动
+	if !allReadOnly {
+		allWrite := true
+		for _, stmt := range statements {
+			if strings.TrimSpace(stmt) != "" && isReadOnlySQLQuery(runConfig.Type, stmt) {
+				allWrite = false
+				break
+			}
+		}
+		if allWrite {
+			if batcher, ok := dbInst.(db.BatchWriteExecer); ok {
+				affected, batchErr := batcher.ExecBatchContext(ctx, query)
+				if batchErr != nil && shouldRefreshCachedConnection(batchErr) {
+					if a.invalidateCachedDatabase(runConfig, batchErr) {
+						retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+						if retryErr != nil {
+							logger.Error(retryErr, "DBQueryMulti 批量写重建连接失败：%s", formatConnSummary(runConfig))
+							return connection.QueryResult{Success: false, Message: retryErr.Error(), QueryID: queryID}
+						}
+						if retryBatcher, ok2 := retryInst.(db.BatchWriteExecer); ok2 {
+							affected, batchErr = retryBatcher.ExecBatchContext(ctx, query)
+						}
+					}
+				}
+				if batchErr != nil {
+					logger.Error(batchErr, "DBQueryMulti 批量写执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+					return connection.QueryResult{Success: false, Message: batchErr.Error(), QueryID: queryID}
+				}
+				logger.Infof("DBQueryMulti 批量写执行成功：%s 语句数=%d affectedRows=%d", formatConnSummary(runConfig), len(statements), affected)
+				return connection.QueryResult{
+					Success: true,
+					Data: []connection.ResultSetData{{
+						Rows:    []map[string]interface{}{{"affectedRows": affected}},
+						Columns: []string{"affectedRows"},
+					}},
+					QueryID: queryID,
+				}
+			}
+		}
+	}
+
 	var resultSets []connection.ResultSetData
 	for idx, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)

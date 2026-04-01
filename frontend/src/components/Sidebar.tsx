@@ -30,7 +30,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   CodeOutlined,
   TagOutlined,
   CheckOutlined,
-  FilterOutlined
+  FilterOutlined,
+  DashboardOutlined
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -174,6 +175,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const selectedNodesRef = useRef<any[]>([]);
   const loadingNodesRef = useRef<Set<string>>(new Set());
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
   
   // Virtual Scroll State
@@ -1035,13 +1037,21 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 dbs = dbs.filter(db => conn.includeDatabases!.includes(db.title));
             }
 
-            setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            if (dbs.length > 0) {
+                setTreeData(origin => updateTreeData(origin, node.key, dbs));
+            } else {
+                // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
+                setLoadedKeys(prev => prev.filter(k => k !== node.key));
+                message.warning({ content: '未获取到可见数据库/schema，请检查账号权限或右键刷新', key: `conn-${conn.id}-dbs` });
+            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	            setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
 	          }
 	      } catch (e: any) {
 	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
+	          setLoadedKeys(prev => prev.filter(k => k !== node.key));
 	          message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
@@ -1447,6 +1457,22 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       else if (type === 'folder-indexes') openDesign(info.node, 'indexes', false);
       else if (type === 'folder-fks') openDesign(info.node, 'foreignKeys', false);
       else if (type === 'folder-triggers') openDesign(info.node, 'triggers', false);
+      else if (type === 'object-group' && dataRef?.groupKey === 'tables') {
+          // 单击延迟打开表概览，双击时会取消此定时器
+          if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+          const { id, dbName: gDbName, schemaName } = dataRef;
+          clickTimerRef.current = setTimeout(() => {
+              clickTimerRef.current = null;
+              addTab({
+                  id: `table-overview-${id}-${gDbName}${schemaName ? `-${schemaName}` : ''}`,
+                  title: `表概览 - ${gDbName}${schemaName ? ` (${schemaName})` : ''}`,
+                  type: 'table-overview' as any,
+                  connectionId: id,
+                  dbName: gDbName,
+                  schemaName,
+              } as any);
+          }, 250);
+      }
   };
 
   const onExpand = (newExpandedKeys: React.Key[]) => {
@@ -1455,7 +1481,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const onDoubleClick = (e: any, node: any) => {
-      // 保证用户直接双击节点未触发 onClick/onSelect 时也能强行拿到选中状态
+      // 双击时取消单击延迟动作（如表概览打开），让双击只触发展开/折叠
+      if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = null;
+      }
       const { type, dataRef, key: nodeKey } = node;
       if (type === 'connection') setActiveContext({ connectionId: nodeKey, dbName: '' });
       else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
@@ -1463,18 +1493,6 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
 
-      if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
-          const { id, dbName, schemaName } = node.dataRef;
-          addTab({
-              id: `table-overview-${id}-${dbName}${schemaName ? `-${schemaName}` : ''}`,
-              title: `表概览 - ${dbName}${schemaName ? ` (${schemaName})` : ''}`,
-              type: 'table-overview' as any,
-              connectionId: id,
-              dbName,
-              schemaName,
-          } as any);
-          return;
-      }
       if (node.type === 'table') {
           const { tableName, dbName, id } = node.dataRef;
           // 记录表访问
@@ -3081,7 +3099,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     key: 'refresh',
                     label: '刷新',
                     icon: <ReloadOutlined />,
-                    onClick: () => loadDatabases(node)
+                    onClick: () => {
+                        const connKey = String(node.key);
+                        // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
+                        setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
+                        setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
+                        // 清除 loadingNodesRef 中残留的子节点加载标记
+                        Array.from(loadingNodesRef.current).forEach(lk => {
+                            if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
+                        });
+                        loadDatabases(node);
+                    }
                 },
                 { type: 'divider' },
                 {
@@ -3093,6 +3121,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                             id: `redis-cmd-${node.key}-${Date.now()}`,
                             title: `命令 - ${node.title}`,
                             type: 'redis-command',
+                            connectionId: node.key,
+                            redisDB: 0
+                        });
+                    }
+                },
+                {
+                    key: 'open-monitor',
+                    label: 'Redis 实例监控',
+                    icon: <DashboardOutlined />,
+                    onClick: () => {
+                        addTab({
+                            id: `redis-monitor-${node.key}-${Date.now()}`,
+                            title: `监控: ${node.title}`,
+                            type: 'redis-monitor',
                             connectionId: node.key,
                             redisDB: 0
                         });
@@ -3184,7 +3226,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 key: 'refresh',
                 label: '刷新',
                 icon: <ReloadOutlined />,
-                onClick: () => loadDatabases(node)
+                onClick: () => {
+                    const connKey = String(node.key);
+                    // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
+                    setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
+                    setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
+                    // 清除 loadingNodesRef 中残留的子节点加载标记
+                    Array.from(loadingNodesRef.current).forEach(lk => {
+                        if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
+                    });
+                    loadDatabases(node);
+                }
             },
             { type: 'divider' },
             {
@@ -3305,6 +3357,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         id: `redis-cmd-${id}-db${redisDB}-${Date.now()}`,
                         title: `命令 - db${redisDB}`,
                         type: 'redis-command',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'open-monitor',
+                label: 'Redis 实例监控',
+                icon: <DashboardOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
+                        title: `监控: ${connections.find(c => c.id === id)?.name || id}`,
+                        type: 'redis-monitor',
                         connectionId: id,
                         redisDB: redisDB
                     });

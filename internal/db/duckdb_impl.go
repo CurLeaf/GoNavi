@@ -90,6 +90,17 @@ func (d *DuckDB) Query(query string) ([]map[string]interface{}, []string, error)
 	return scanRows(rows)
 }
 
+func (d *DuckDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if d.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := d.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

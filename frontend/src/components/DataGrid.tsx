@@ -32,7 +32,9 @@ import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
+import { buildCopyInsertSQL, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -569,32 +571,52 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 }) => {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<any>(null);
+  const cellRef = useRef<HTMLElement>(null);
+  const pickerOpenRef = useRef(false);
+  const scrollLockRef = useRef<{ el: HTMLElement; handler: (e: WheelEvent) => void } | null>(null);
   const form = useContext(EditableContext);
   const cellContextMenuContext = useContext(CellContextMenuContext);
 
+  /** DatePicker 面板打开时锁定表格滚动，关闭时恢复 */
+  const lockTableScroll = useCallback((lock: boolean) => {
+      if (lock) {
+          // 查找虚拟滚动容器或常规滚动容器
+          const tableWrapper = cellRef.current?.closest?.('.ant-table-wrapper') as HTMLElement | null;
+          if (tableWrapper) {
+              const handler = (e: WheelEvent) => { e.preventDefault(); e.stopPropagation(); };
+              tableWrapper.addEventListener('wheel', handler, { capture: true, passive: false });
+              scrollLockRef.current = { el: tableWrapper, handler };
+          }
+      } else if (scrollLockRef.current) {
+          const { el, handler } = scrollLockRef.current;
+          el.removeEventListener('wheel', handler, { capture: true } as any);
+          scrollLockRef.current = null;
+      }
+  }, []);
+
   useEffect(() => {
     if (editing) {
+      // 每次进入编辑时强制设置表单值（覆盖 form store 中可能残留的旧值）
+      const raw = record[dataIndex];
+      const fieldName = getCellFieldName(record, dataIndex);
+      if (isDateTimeField) {
+        const dayjsVal = parseToDayjs(raw, pickerType);
+        setCellFieldValue(form, fieldName, dayjsVal);
+      } else {
+        const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
+        setCellFieldValue(form, fieldName, initialValue);
+      }
       inputRef.current?.focus();
     }
   }, [editing]);
 
   const toggleEdit = () => {
     setEditing(!editing);
-    const raw = record[dataIndex];
-    const fieldName = getCellFieldName(record, dataIndex);
-    if (isDateTimeField) {
-      // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
-      const dayjsVal = parseToDayjs(raw, pickerType);
-      setCellFieldValue(form, fieldName, dayjsVal);
-    } else {
-      const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
-      setCellFieldValue(form, fieldName, initialValue);
-    }
   };
 
   const save = async () => {
     try {
-      if (!form) return;
+      if (!form || !editing) return;
       const fieldName = getCellFieldName(record, dataIndex);
       await form.validateFields([fieldName]);
       let nextValue = form.getFieldValue(fieldName);
@@ -615,6 +637,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
       }
     } catch (errInfo) {
       console.log('Save failed:', errInfo);
+      // 日期时间类型保存失败时兜底退出编辑，避免 DatePicker 卡在编辑态
+      if (isDateTimeField && editing) setEditing(false);
     }
   };
 
@@ -640,6 +664,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
               onChange={() => setTimeout(save, 0)}
+              onOpenChange={lockTableScroll}
+              onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
           ) : pickerType === 'datetime' ? (
@@ -647,11 +673,30 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               ref={inputRef}
               style={{ width: '100%' }}
               showTime
+              showNow={false}
               format={TEMPORAL_FORMATS[pickerType]}
+              renderExtraFooter={() => (
+                <a
+                  style={{ padding: '0 2px' }}
+                  onClick={() => {
+                    // 自定义"此刻"：仅将当前时间填入表单字段，面板保持打开。
+                    // 用户需点击"确定"才真正保存，替代内置 showNow 的自动提交行为。
+                    const fieldName = getCellFieldName(record, dataIndex);
+                    setCellFieldValue(form, fieldName, dayjs());
+                  }}
+                >此刻</a>
+              )}
               onOk={() => setTimeout(save, 0)}
               onOpenChange={(open) => {
-                // 面板关闭（点击外部）且非通过"确定"按钮触发时退出编辑，不保存
+                pickerOpenRef.current = open;
+                lockTableScroll(open);
+                // 面板关闭（点击外部）时退出编辑，不保存；仅"确定"按钮（onOk）触发保存
                 if (!open) setTimeout(() => { if (editing) toggleEdit(); }, 0);
+              }}
+              onBlur={() => {
+                // 兜底：面板未打开或已关闭时，点击外部通过 blur 退出编辑。
+                // 延迟检查面板状态，避免点击自定义"此刻"按钮时误退出（此时面板仍打开）。
+                setTimeout(() => { if (editing && !pickerOpenRef.current) setEditing(false); }, 150);
               }}
               needConfirm
             />
@@ -662,6 +707,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               format={TEMPORAL_FORMATS[pickerType]}
               picker={pickerType as any}
               onChange={() => setTimeout(save, 0)}
+              onOpenChange={lockTableScroll}
+              onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
           )
@@ -720,6 +767,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   return (
       <Component
+          ref={cellRef}
           {...restProps}
           data-row-key={record ? String(record?.[GONAVI_ROW_KEY]) : undefined}
           data-col-name={dataIndex || undefined}
@@ -818,6 +866,7 @@ interface DataGridProps {
         total: number,
         totalKnown?: boolean,
         totalApprox?: boolean,
+        approximateTotal?: number,
         totalCountLoading?: boolean,
         totalCountCancelled?: boolean,
     };
@@ -995,6 +1044,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const selectionColumnWidth = 46;
   const currentConnConfig = connections.find(c => c.id === connectionId)?.config;
   const dataSourceCaps = getDataSourceCapabilities(currentConnConfig);
+  const prefersManualTotalCount = dataSourceCaps.preferManualTotalCount;
+  const supportsApproximateTableCount = dataSourceCaps.supportsApproximateTableCount;
+  const supportsApproximateTotalPages = dataSourceCaps.supportsApproximateTotalPages;
+  const dbType = dataSourceCaps.type;
   const isDuckDBConnection = dataSourceCaps.type === 'duckdb';
   const supportsCopyInsert = dataSourceCaps.supportsCopyInsert;
   const supportsSqlQueryExport = dataSourceCaps.supportsSqlQueryExport;
@@ -1120,6 +1173,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [dataPanelValue, setDataPanelValue] = useState('');
   const [dataPanelIsJson, setDataPanelIsJson] = useState(false);
   const dataPanelDirtyRef = useRef(false);
+  const dataPanelOriginalRef = useRef('');
   const [rowEditorOpen, setRowEditorOpen] = useState(false);
   const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
   const rowEditorBaseRawRef = useRef<Record<string, any>>({});
@@ -1336,6 +1390,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next;
   }, [columnMetaMap]);
 
+  const columnTypeMapByLowerName = useMemo(() => {
+      const next: Record<string, string> = {};
+      Object.entries(columnMetaMapByLowerName).forEach(([name, meta]) => {
+          const type = String(meta?.type || '').trim();
+          if (!name || !type) return;
+          next[name] = type;
+      });
+      return next;
+  }, [columnMetaMapByLowerName]);
+
   const normalizeCommitCellValue = useCallback(
       (columnName: string, value: any, mode: 'insert' | 'update') => {
           if (value === undefined) return undefined;
@@ -1357,7 +1421,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   // INSERT 空时间值直接忽略字段，让数据库默认值生效；UPDATE 空时间值转 NULL。
                   return mode === 'insert' ? undefined : null;
               }
-              return normalizeDateTimeString(value);
+              return normalizeTemporalLiteralText(value, meta?.type, true);
           }
 
           return value;
@@ -1432,14 +1496,18 @@ const DataGrid: React.FC<DataGridProps> = ({
   const updateFocusedCell = useCallback((record: Item, dataIndex: string) => {
       if (!record || !dataIndex) return;
       const raw = record?.[dataIndex];
-      const text = toEditableText(raw);
+      let text = toEditableText(raw);
+      // 日期时间字段格式化（处理带时区的 ISO 格式如 2026-03-22T00:00:00+08:00）
+      if (typeof raw === 'string') {
+          text = normalizeDateTimeString(raw);
+      }
       const isJson = looksLikeJsonText(text);
       setFocusedCellInfo({ record, dataIndex, title: dataIndex });
-      // 仅在面板未被用户手动编辑时自动同步值
-      if (!dataPanelDirtyRef.current) {
-          setDataPanelValue(text);
-          setDataPanelIsJson(isJson);
-      }
+      // 切换到新单元格时总是更新预览值并重置 dirty 标记
+      dataPanelOriginalRef.current = text;
+      setDataPanelValue(text);
+      setDataPanelIsJson(isJson);
+      dataPanelDirtyRef.current = false;
   }, []);
 
   const handleDataPanelFormatJson = useCallback(() => {
@@ -2836,28 +2904,49 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, []);
 
   const handleCellSave = useCallback((row: any) => {
-      // Optimistic update for display
-      // In parent-controlled data, we might need parent to update 'data', 
-      // but here we manage 'modifiedRows' locally and overlay it.
-      // Since 'displayData' is derived from 'data' + 'modifiedRows', we need to update the source if it's in 'data'.
-      // But 'data' prop is immutable.
-      // So we update 'modifiedRows'.
-      
-      // Check if it's an added row
       const rowKey = row?.[GONAVI_ROW_KEY];
       if (rowKey === undefined) return;
       const isAdded = addedRows.some(r => r?.[GONAVI_ROW_KEY] === rowKey);
       if (isAdded) {
           setAddedRows(prev => prev.map(r => r?.[GONAVI_ROW_KEY] === rowKey ? { ...r, ...row } : r));
       } else {
+          // 查找原始行数据，对比是否真正有值变更
+          const originalRow = data.find(r => r?.[GONAVI_ROW_KEY] === rowKey);
+          if (originalRow) {
+              const changedFields: Record<string, any> = {};
+              for (const col of Object.keys(row)) {
+                  if (col === GONAVI_ROW_KEY) continue;
+                  if (!isCellValueEqualForDiff(originalRow[col], row[col])) {
+                      changedFields[col] = row[col];
+                  }
+              }
+              if (Object.keys(changedFields).length === 0) {
+                  // 没有实际变更，从 modifiedRows 中移除该行（如有）
+                  setModifiedRows(prev => {
+                      const keyStr = rowKeyStr(rowKey);
+                      if (!(keyStr in prev)) return prev;
+                      const next = { ...prev };
+                      delete next[keyStr];
+                      return next;
+                  });
+                  return;
+              }
+          }
           setModifiedRows(prev => ({ ...prev, [rowKeyStr(rowKey)]: row }));
       }
-  }, [addedRows]);
+  }, [addedRows, data]);
 
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
+      // 与 updateFocusedCell 设置的原始值比较，避免幽灵变更
+      if (dataPanelValue === dataPanelOriginalRef.current) {
+          dataPanelDirtyRef.current = false;
+          void message.info('数据未变更');
+          return;
+      }
       const nextRow: any = { ...focusedCellInfo.record, [focusedCellInfo.dataIndex]: dataPanelValue };
       handleCellSave(nextRow);
+      dataPanelOriginalRef.current = dataPanelValue;
       dataPanelDirtyRef.current = false;
       void message.success('已保存');
   }, [focusedCellInfo, dataPanelValue, handleCellSave]);
@@ -3425,7 +3514,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {
-          void message.info("No changes to commit");
+          void message.info("没有可提交的变更");
           return;
       }
 
@@ -3501,16 +3590,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       // 使用 columnNames 保持表定义的字段顺序，而非 Object.keys() 的不确定顺序
       const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
       const sqlList = records.map((r: any) => {
-          const values = orderedCols.map(c => {
-              const v = r[c];
-              if (v === null || v === undefined) return 'NULL';
-              const escaped = String(v).replace(/'/g, "''");
-              return `'${escaped}'`;
+          return buildCopyInsertSQL({
+              dbType,
+              tableName,
+              orderedCols,
+              record: r,
+              columnTypesByLowerName: columnTypeMapByLowerName,
           });
-          const targetTable = tableName || 'table';
-          return `INSERT INTO \`${targetTable}\` (${orderedCols.map(c => `\`${c}\``).join(', ')}) VALUES (${values.join(', ')});`;
       });
-      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, tableName, columnNames, getTargets, copyToClipboard]);
+      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, columnNames, getTargets, copyToClipboard, dbType, tableName, columnTypeMapByLowerName]);
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
@@ -4482,37 +4570,20 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const paginationSummaryText = useMemo(() => {
       if (!pagination) return '';
-      const total = Number.isFinite(pagination.total) ? pagination.total : 0;
-      const rangeStart = Math.max(0, (pagination.current - 1) * pagination.pageSize + (total > 0 ? 1 : 0));
-      const hasValidRange = total > 0 && rangeStart > 0;
-      const rangeEnd = hasValidRange ? Math.min(total, rangeStart + pagination.pageSize - 1) : 0;
-      const currentCount = hasValidRange ? Math.max(0, rangeEnd - rangeStart + 1) : 0;
-
-      if (pagination.totalKnown === false) {
-          if (isDuckDBConnection) {
-              if (pagination.totalCountLoading) return `当前 ${currentCount} 条 / 正在统计精确总数…`;
-              if (pagination.totalApprox && Number.isFinite(total) && total > 0) return `当前 ${currentCount} 条 / 约 ${total} 条`;
-              if (pagination.totalCountCancelled) return `当前 ${currentCount} 条 / 已取消统计`;
-              return `当前 ${currentCount} 条 / 总数未统计`;
-          }
-          return `当前 ${currentCount} 条 / 正在统计总数…`;
-      }
-
-      if (isDuckDBConnection && (!Number.isFinite(total) || total <= 0)) {
-          return '当前 0 条 / 共 0 条';
-      }
-
-      return `当前 ${currentCount} 条 / 共 ${total} 条`;
-  }, [pagination, isDuckDBConnection]);
+      return resolvePaginationSummaryText({
+          pagination,
+          prefersManualTotalCount,
+          supportsApproximateTableCount,
+      });
+  }, [pagination, prefersManualTotalCount, supportsApproximateTableCount]);
 
   const paginationPageText = useMemo(() => {
       if (!pagination) return '';
-      const total = Number.isFinite(pagination.total) ? pagination.total : 0;
-      const canShowTotalPages = pagination.totalKnown !== false || (isDuckDBConnection && pagination.totalApprox && total > 0);
-      if (!canShowTotalPages || total <= 0) return `第 ${pagination.current} 页`;
-      const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pagination.pageSize)));
-      return `第 ${pagination.current} / ${totalPages} 页`;
-  }, [pagination, isDuckDBConnection]);
+      return resolvePaginationPageText({
+          pagination,
+          supportsApproximateTotalPages,
+      });
+  }, [pagination, supportsApproximateTotalPages]);
 
   const handlePageSizeChange = useCallback((value: string) => {
       if (!pagination || !onPageChange) return;
@@ -4679,7 +4750,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                </Tooltip>
            </>
 
-           {isDuckDBConnection && onRequestTotalCount && (
+           {prefersManualTotalCount && onRequestTotalCount && (
                <>
                    <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
                    <Tooltip title={pagination?.totalCountLoading ? '取消本次精确总数统计（不会影响当前浏览）' : '按当前筛选统计精确总数'}>
@@ -4779,7 +4850,11 @@ const DataGrid: React.FC<DataGridProps> = ({
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
+               display: 'flex',
+               flexDirection: 'column',
            }}>
+               {/* 筛选条件 + 排序区域：固定最大高度，超出后可滚动，避免条件过多挤压数据表 */}
+               <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', flex: '0 1 auto' }}>
                {filterConditions.map((cond, condIndex) => (
                    <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start', opacity: cond.enabled === false ? 0.58 : 1 }}>
                        <Checkbox
@@ -4922,14 +4997,17 @@ const DataGrid: React.FC<DataGridProps> = ({
                                 }} />
                             </div>
                         ))}
-                        <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
-                            const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
-                            onSort(JSON.stringify(next), '');
-                        }} disabled={sortInfo.length >= displayColumnNames.length} style={{ marginBottom: 4 }}>添加排序</Button>
                     </div>
                 )}
-               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: (onSort && sortInfo.length > 0) ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) ? `1px dashed ${panelFrameColor}` : 'none' }}>
-                   <Button type="dashed" onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+               </div>
+               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: '0 0 auto', marginTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
+                   <Button type="primary" ghost onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+                   {onSort && (
+                       <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
+                           const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
+                           onSort(JSON.stringify(next), '');
+                       }} disabled={sortInfo.length >= displayColumnNames.length}>添加排序</Button>
+                   )}
                    <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: true })))}>全启用</Button>
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: false })))}>全停用</Button>
@@ -5289,8 +5367,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                             theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                             value={dataPanelValue}
                             onChange={(val) => {
-                                setDataPanelValue(val || '');
-                                dataPanelDirtyRef.current = true;
+                                const newVal = val || '';
+                                setDataPanelValue(newVal);
+                                // 只有值真正与原始值不同时才标记 dirty
+                                dataPanelDirtyRef.current = newVal !== dataPanelOriginalRef.current;
                             }}
                             options={{
                                 minimap: { enabled: false },
@@ -5538,7 +5618,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                    <Pagination
                        current={pagination.current}
                        pageSize={pagination.pageSize}
-                       total={pagination.total}
+                       total={resolvePaginationTotalForControl({
+                           pagination,
+                           supportsApproximateTotalPages,
+                       })}
                        showSizeChanger={false}
                        onChange={onPageChange}
                        showTitle={false}

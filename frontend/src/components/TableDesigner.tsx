@@ -217,14 +217,6 @@ const COMMON_DEFAULTS = [
     { value: "''" },
 ];
 
-const MYSQL_INDEX_TYPE_OPTIONS = [
-    { label: '默认', value: 'DEFAULT' },
-    { label: 'BTREE', value: 'BTREE' },
-    { label: 'HASH', value: 'HASH' },
-    { label: 'FULLTEXT', value: 'FULLTEXT' },
-    { label: 'SPATIAL', value: 'SPATIAL' },
-    { label: 'RTREE', value: 'RTREE' },
-];
 
 const PGLIKE_INDEX_TYPE_OPTIONS = [
     { label: '默认', value: 'DEFAULT' },
@@ -1441,12 +1433,35 @@ ${selectedTrigger.statement}`;
       ];
   };
 
-  const getIndexTypeOptions = () => {
+  const getIndexTypeOptions = (kind?: IndexKind) => {
       const dbType = getDbType();
-      if (isMysqlLikeDialect(dbType)) return MYSQL_INDEX_TYPE_OPTIONS;
-      if (isPgLikeDialect(dbType)) return PGLIKE_INDEX_TYPE_OPTIONS;
+      const k = kind || 'NORMAL';
+      if (isMysqlLikeDialect(dbType)) {
+          // MySQL InnoDB: 所有索引均为固定方法类型
+          if (k === 'FULLTEXT') return [{ label: 'FULLTEXT', value: 'FULLTEXT' }];
+          if (k === 'SPATIAL') return [{ label: 'RTREE', value: 'RTREE' }];
+          return [{ label: 'BTREE', value: 'BTREE' }];
+      }
+      if (isPgLikeDialect(dbType)) {
+          if (k === 'PRIMARY' || k === 'UNIQUE') return [{ label: 'BTREE', value: 'BTREE' }];
+          return PGLIKE_INDEX_TYPE_OPTIONS;
+      }
       if (isSqlServerDialect(dbType)) return SQLSERVER_INDEX_TYPE_OPTIONS;
       return [{ label: '默认', value: 'DEFAULT' }];
+  };
+
+  /** 根据索引类别返回固定的索引方法类型，可选类别返回 undefined */
+  const getFixedIndexType = (kind: IndexKind): string | undefined => {
+      const dbType = getDbType();
+      if (isMysqlLikeDialect(dbType)) {
+          if (kind === 'PRIMARY') return 'BTREE';
+          if (kind === 'FULLTEXT') return 'FULLTEXT';
+          if (kind === 'SPATIAL') return 'RTREE';
+      }
+      if (isPgLikeDialect(dbType)) {
+          if (kind === 'PRIMARY') return 'BTREE';
+      }
+      return undefined;
   };
 
   const buildCreateTableSql = (targetTableName: string, targetColumns: EditableColumn[], targetCharset: string, targetCollation: string) => {
@@ -2928,20 +2943,34 @@ END;`;
                     <Select
                         value={indexForm.kind}
                         options={getIndexKindOptions()}
-                        onChange={(val: IndexKind) =>
-                            setIndexForm(prev => ({
-                                ...prev,
-                                kind: val,
-                                name: val === 'PRIMARY' ? 'PRIMARY' : (prev.name === 'PRIMARY' ? '' : prev.name),
-                                indexType: val === 'NORMAL' || val === 'UNIQUE' ? (prev.indexType || 'DEFAULT') : 'DEFAULT',
-                            }))
-                        }
+                        onChange={(val: IndexKind) => {
+                            const fixedType = getFixedIndexType(val);
+                            if (fixedType) {
+                                // 固定类型（PRIMARY/FULLTEXT/SPATIAL）直接设置对应的索引方法
+                                setIndexForm(prev => ({
+                                    ...prev,
+                                    kind: val,
+                                    name: val === 'PRIMARY' ? 'PRIMARY' : (prev.name === 'PRIMARY' ? '' : prev.name),
+                                    indexType: fixedType,
+                                }));
+                            } else {
+                                const nextTypeOptions = getIndexTypeOptions(val);
+                                const currentType = indexForm.indexType || 'DEFAULT';
+                                const isCurrentTypeValid = nextTypeOptions.some(opt => opt.value === currentType);
+                                setIndexForm(prev => ({
+                                    ...prev,
+                                    kind: val,
+                                    name: val === 'PRIMARY' ? 'PRIMARY' : (prev.name === 'PRIMARY' ? '' : prev.name),
+                                    indexType: isCurrentTypeValid ? currentType : 'DEFAULT',
+                                }));
+                            }
+                        }}
                         style={{ width: 220 }}
                     />
                     <Select
                         value={indexForm.indexType}
                         onChange={(val) => setIndexForm(prev => ({ ...prev, indexType: val }))}
-                        options={getIndexTypeOptions()}
+                        options={getIndexTypeOptions(indexForm.kind)}
                         style={{ width: 160 }}
                         disabled={indexForm.kind === 'PRIMARY' || indexForm.kind === 'FULLTEXT' || indexForm.kind === 'SPATIAL'}
                     />

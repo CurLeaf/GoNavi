@@ -1,14 +1,36 @@
 import { describe, expect, it } from 'vitest';
-
+import type { AIProviderType } from '../types';
 import {
-  matchQwenPresetKey,
+  LEGACY_QWEN_CODING_PLAN_OPENAI_BASE_URL,
+  QWEN_BAILIAN_ANTHROPIC_BASE_URL,
   QWEN_BAILIAN_MODELS_BASE_URL,
   QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
   QWEN_CODING_PLAN_MODELS,
+  matchQwenPresetKey,
   resolvePresetBaseURL,
   resolvePresetModelSelection,
   resolvePresetTransport,
+  resolveProviderPresetKey,
 } from './aiProviderPresets';
+
+type PresetMatcher = {
+  key: string;
+  backendType: AIProviderType;
+  defaultBaseUrl: string;
+  fixedApiFormat?: string;
+};
+
+const PRESETS: PresetMatcher[] = [
+  { key: 'openai', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1' },
+  { key: 'qwen-bailian', backendType: 'anthropic', defaultBaseUrl: QWEN_BAILIAN_ANTHROPIC_BASE_URL },
+  {
+    key: 'qwen-coding-plan',
+    backendType: 'custom',
+    defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
+    fixedApiFormat: 'claude-cli',
+  },
+  { key: 'custom', backendType: 'custom', defaultBaseUrl: '' },
+];
 
 describe('ai provider preset helpers', () => {
   it('maps legacy Bailian compatible-mode URL back to the Bailian preset', () => {
@@ -18,19 +40,27 @@ describe('ai provider preset helpers', () => {
     })).toBe('qwen-bailian');
   });
 
-  it('maps Coding Plan anthropic URL to the dedicated Coding Plan preset', () => {
-    expect(matchQwenPresetKey({
-      type: 'anthropic',
-      baseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
-    })).toBe('qwen-coding-plan');
-  });
-
   it('maps Coding Plan Claude CLI config back to the dedicated Coding Plan preset', () => {
     expect(matchQwenPresetKey({
       type: 'custom',
       apiFormat: 'claude-cli',
       baseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
     })).toBe('qwen-coding-plan');
+  });
+
+  it('maps legacy Coding Plan OpenAI config back to the dedicated Coding Plan preset', () => {
+    expect(matchQwenPresetKey({
+      type: 'openai',
+      baseUrl: LEGACY_QWEN_CODING_PLAN_OPENAI_BASE_URL,
+    })).toBe('qwen-coding-plan');
+  });
+
+  it('does not treat a custom OpenAI endpoint as the built-in Coding Plan preset', () => {
+    expect(matchQwenPresetKey({
+      type: 'custom',
+      apiFormat: 'openai',
+      baseUrl: LEGACY_QWEN_CODING_PLAN_OPENAI_BASE_URL,
+    })).toBeNull();
   });
 
   it('does not keep a baked-in model list for the Coding Plan preset', () => {
@@ -107,5 +137,49 @@ describe('ai provider preset helpers', () => {
       type: 'custom',
       apiFormat: 'gemini',
     });
+  });
+});
+
+describe('resolveProviderPresetKey', () => {
+  it('不会把自定义 OpenAI 端点误识别成千问 Coding Plan', () => {
+    const key = resolveProviderPresetKey(
+      {
+        type: 'custom',
+        apiFormat: 'openai',
+        baseUrl: LEGACY_QWEN_CODING_PLAN_OPENAI_BASE_URL,
+      },
+      PRESETS,
+      'custom',
+    );
+
+    expect(key).toBe('custom');
+  });
+
+  it('仍然能识别当前内置的千问 Coding Plan 预设', () => {
+    const key = resolveProviderPresetKey(
+      {
+        type: 'custom',
+        apiFormat: 'claude-cli',
+        baseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
+      },
+      PRESETS,
+      'custom',
+    );
+
+    expect(key).toBe('qwen-coding-plan');
+  });
+
+  it('仍然能识别当前内置的千问百炼预设', () => {
+    const key = resolveProviderPresetKey(
+      {
+        type: 'anthropic',
+        apiFormat: undefined,
+        baseUrl: QWEN_BAILIAN_ANTHROPIC_BASE_URL,
+      },
+      PRESETS,
+      'custom',
+    );
+
+    expect(key).toBe('qwen-bailian');
   });
 });
