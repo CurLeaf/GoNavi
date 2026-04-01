@@ -571,6 +571,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 }) => {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<any>(null);
+  const pickerOpenRef = useRef(false);
   const form = useContext(EditableContext);
   const cellContextMenuContext = useContext(CellContextMenuContext);
 
@@ -596,7 +597,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   const save = async () => {
     try {
-      if (!form) return;
+      if (!form || !editing) return;
       const fieldName = getCellFieldName(record, dataIndex);
       await form.validateFields([fieldName]);
       let nextValue = form.getFieldValue(fieldName);
@@ -617,6 +618,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
       }
     } catch (errInfo) {
       console.log('Save failed:', errInfo);
+      // 日期时间类型保存失败时兜底退出编辑，避免 DatePicker 卡在编辑态
+      if (isDateTimeField && editing) setEditing(false);
     }
   };
 
@@ -642,6 +645,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
               onChange={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
           ) : pickerType === 'datetime' ? (
@@ -649,11 +653,29 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               ref={inputRef}
               style={{ width: '100%' }}
               showTime
+              showNow={false}
               format={TEMPORAL_FORMATS[pickerType]}
+              renderExtraFooter={() => (
+                <a
+                  style={{ padding: '0 2px' }}
+                  onClick={() => {
+                    // 自定义"此刻"：仅将当前时间填入表单字段，面板保持打开。
+                    // 用户需点击"确定"才真正保存，替代内置 showNow 的自动提交行为。
+                    const fieldName = getCellFieldName(record, dataIndex);
+                    setCellFieldValue(form, fieldName, dayjs());
+                  }}
+                >此刻</a>
+              )}
               onOk={() => setTimeout(save, 0)}
               onOpenChange={(open) => {
-                // 面板关闭（点击外部）且非通过"确定"按钮触发时退出编辑，不保存
+                pickerOpenRef.current = open;
+                // 面板关闭（点击外部）时退出编辑，不保存；仅"确定"按钮（onOk）触发保存
                 if (!open) setTimeout(() => { if (editing) toggleEdit(); }, 0);
+              }}
+              onBlur={() => {
+                // 兜底：面板未打开或已关闭时，点击外部通过 blur 退出编辑。
+                // 延迟检查面板状态，避免点击自定义"此刻"按钮时误退出（此时面板仍打开）。
+                setTimeout(() => { if (editing && !pickerOpenRef.current) setEditing(false); }, 150);
               }}
               needConfirm
             />
@@ -664,6 +686,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               format={TEMPORAL_FORMATS[pickerType]}
               picker={pickerType as any}
               onChange={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(save, 0)}
               needConfirm={false}
             />
           )
