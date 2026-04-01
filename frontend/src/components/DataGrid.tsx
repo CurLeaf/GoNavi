@@ -4801,7 +4801,11 @@ const DataGrid: React.FC<DataGridProps> = ({
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
+               display: 'flex',
+               flexDirection: 'column',
            }}>
+               {/* 筛选条件 + 排序区域：固定最大高度，超出后可滚动，避免条件过多挤压数据表 */}
+               <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', flex: '0 1 auto' }}>
                {filterConditions.map((cond, condIndex) => (
                    <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start', opacity: cond.enabled === false ? 0.58 : 1 }}>
                        <Checkbox
@@ -4944,14 +4948,17 @@ const DataGrid: React.FC<DataGridProps> = ({
                                 }} />
                             </div>
                         ))}
-                        <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
-                            const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
-                            onSort(JSON.stringify(next), '');
-                        }} disabled={sortInfo.length >= displayColumnNames.length} style={{ marginBottom: 4 }}>添加排序</Button>
                     </div>
                 )}
-               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: (onSort && sortInfo.length > 0) ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) ? `1px dashed ${panelFrameColor}` : 'none' }}>
-                   <Button type="dashed" onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+               </div>
+               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: '0 0 auto', marginTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
+                   <Button type="primary" ghost onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+                   {onSort && (
+                       <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
+                           const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
+                           onSort(JSON.stringify(next), '');
+                       }} disabled={sortInfo.length >= displayColumnNames.length}>添加排序</Button>
+                   )}
                    <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: true })))}>全启用</Button>
                    <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: false })))}>全停用</Button>
