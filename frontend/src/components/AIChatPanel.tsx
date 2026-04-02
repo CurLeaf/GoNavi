@@ -226,6 +226,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const resizeStartX = useRef(0);
     const resizeStartWidth = useRef(0);
     const toolCallRoundRef = useRef(0); // 连续失败轮次计数
+    const totalToolRoundRef = useRef(0); // 全局工具调用总轮次计数（防止无限循环）
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
     const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
     const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
@@ -783,6 +784,20 @@ SELECT * FROM users WHERE status = 1;
     const toolContextMapRef = useRef<Map<string, { connectionId: string; dbName: string; tables: string[] }>>(new Map());
 
     const executeLocalTools = useCallback(async (toolCalls: AIToolCall[], currentAsstMsgId: string) => {
+        // 【全局轮次熔断】防止模型（如 DeepSeek）在已生成答案后仍无限循环调用工具
+        const MAX_TOOL_CALL_ROUNDS = 15;
+        totalToolRoundRef.current += 1;
+        if (totalToolRoundRef.current > MAX_TOOL_CALL_ROUNDS) {
+            updateAIChatMessage(sid, currentAsstMsgId, { loading: false, phase: 'idle' });
+            useStore.getState().addAIChatMessage(sid, {
+                id: genId(), role: 'assistant',
+                content: `⚠️ 工具调用已达 ${MAX_TOOL_CALL_ROUNDS} 轮上限，自动终止循环。如需继续探索，请发送新的消息。`,
+                timestamp: Date.now(),
+            });
+            setSending(false);
+            return;
+        }
+
         const results: AIChatMessage[] = [];
         // 【串行逐条执行 + 实时写入 store】
         for (const tc of toolCalls) {
@@ -910,7 +925,14 @@ SELECT * FROM users WHERE status = 1;
                                     }
                                 }
                                 const { DBQuery } = await import('../../wailsjs/go/app/App');
-                                const qRes = await DBQuery(conn.config as any, safeDbName, safeSql + (safeSql.toLowerCase().includes('limit') ? '' : ' LIMIT 50'));
+                                // 只对只读查询自动追加 LIMIT，写操作（UPDATE/DELETE/INSERT等）不追加
+                                const sqlTrimmed = safeSql.replace(/;\s*$/, ''); // 去掉末尾分号防止拼接出 "; LIMIT 50"
+                                const sqlFirstWord = sqlTrimmed.trimStart().split(/\s/)[0]?.toLowerCase() || '';
+                                const isReadQuery = ['select', 'show', 'describe', 'desc', 'explain', 'with'].includes(sqlFirstWord);
+                                const finalSql = (isReadQuery && !sqlTrimmed.toLowerCase().includes('limit'))
+                                    ? sqlTrimmed + ' LIMIT 50'
+                                    : sqlTrimmed;
+                                const qRes = await DBQuery(conn.config as any, safeDbName, finalSql);
                                 if (qRes?.success) {
                                     const rows = Array.isArray(qRes.data) ? qRes.data : [];
                                     const limitedRows = rows.slice(0, 50);
@@ -1020,6 +1042,15 @@ SELECT * FROM users WHERE status = 1;
             }
 
             const allMessages = [...sysMessages, ...finalMessagesPayload];
+
+            // 【轮次感知引导】当工具调用轮次较多时，注入 system 提示引导模型尽快给出答案
+            if (totalToolRoundRef.current >= 5) {
+                allMessages.push({
+                    role: 'system',
+                    content: `注意：你已经进行了 ${totalToolRoundRef.current} 轮工具调用。如果你已经获得了足够的信息来回答用户的问题，请立即给出最终答案，不要继续调用工具。只有在确实缺少关键信息时才继续调用工具。`
+                });
+            }
+
             const Service = (window as any).go?.aiservice?.Service;
             if (Service?.AIChatStream) {
                 await Service.AIChatStream(sid, allMessages, LOCAL_TOOLS);
@@ -1057,6 +1088,7 @@ SELECT * FROM users WHERE status = 1;
         setComposerNotice(null);
 
         toolCallRoundRef.current = 0; // 重置工具调用轮次计数
+        totalToolRoundRef.current = 0; // 重置总轮次计数
         nudgeCountRef.current = 0;     // 重置催促计数
 
         const currentImages = [...draftImages];
