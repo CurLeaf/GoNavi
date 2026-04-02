@@ -1067,29 +1067,35 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const options = versionMap[row.type] || [];
           const selectedKey = selectedVersionMap[row.type];
           const selectOptions = buildVersionSelectOptions(options);
+          const mongoHint = row.type === 'mongodb'
+            ? '当前仅支持 MongoDB 1.17.x 和 2.x；更老 1.x 暂不提供安装。'
+            : '';
           return (
-            <Select
-              size="small"
-              style={{ width: '100%' }}
-              loading={!!versionLoadingMap[row.type]}
-              disabled={actionState.driverType === row.type}
-              placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
-              value={selectedKey}
-              options={selectOptions as any}
-              onOpenChange={(open) => {
-                if (open && options.length === 0 && !versionLoadingMap[row.type]) {
-                  void loadVersionOptions(row, true);
-                  return;
-                }
-                if (open && selectedKey) {
-                  void loadVersionPackageSize(row, selectedKey);
-                }
-              }}
-              onChange={(value) => {
-                setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
-                void loadVersionPackageSize(row, value);
-              }}
-            />
+            <div style={{ display: 'grid', gap: 4 }}>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                loading={!!versionLoadingMap[row.type]}
+                disabled={actionState.driverType === row.type}
+                placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
+                value={selectedKey}
+                options={selectOptions as any}
+                onOpenChange={(open) => {
+                  if (open && options.length === 0 && !versionLoadingMap[row.type]) {
+                    void loadVersionOptions(row, true);
+                    return;
+                  }
+                  if (open && selectedKey) {
+                    void loadVersionPackageSize(row, selectedKey);
+                  }
+                }}
+                onChange={(value) => {
+                  setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
+                  void loadVersionPackageSize(row, value);
+                }}
+              />
+              {mongoHint ? <Text type="secondary" style={{ fontSize: 12 }}>{mongoHint}</Text> : null}
+            </div>
           );
         },
       },
