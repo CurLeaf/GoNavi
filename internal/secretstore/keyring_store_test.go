@@ -7,6 +7,17 @@ import (
 	"github.com/99designs/keyring"
 )
 
+func TestStoreStatusValuesRemainStable(t *testing.T) {
+	t.Parallel()
+
+	if StatusAvailable != "available" {
+		t.Fatalf("expected StatusAvailable to remain stable, got %q", StatusAvailable)
+	}
+	if StatusUnavailable != "unavailable" {
+		t.Fatalf("expected StatusUnavailable to remain stable, got %q", StatusUnavailable)
+	}
+}
+
 func TestBuildRefRejectsEmptyKind(t *testing.T) {
 	t.Parallel()
 

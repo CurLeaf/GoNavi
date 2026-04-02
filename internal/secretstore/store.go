@@ -18,6 +18,13 @@ type SecretStore interface {
 	HealthCheck() error
 }
 
+type StoreStatus string
+
+const (
+	StatusAvailable   StoreStatus = "available"
+	StatusUnavailable StoreStatus = "unavailable"
+)
+
 type UnavailableError struct {
 	Reason string
 }
