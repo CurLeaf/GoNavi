@@ -1057,19 +1057,15 @@ SELECT * FROM users WHERE status = 1;
 
             const allMessages = [...sysMessages, ...finalMessagesPayload];
 
-            // 【轮次感知引导】当工具调用轮次较多时，注入 system 提示引导模型尽快给出答案
-            if (totalToolRoundRef.current >= 5) {
-                allMessages.push({
-                    role: 'system',
-                    content: `注意：你已经进行了 ${totalToolRoundRef.current} 轮工具调用。如果你已经获得了足够的信息来回答用户的问题，请立即给出最终答案，不要继续调用工具。只有在确实缺少关键信息时才继续调用工具。`
-                });
-            }
+            // 【软收敛】超过 10 轮工具调用后，不再传递 tools 参数，从物理层面强制模型只能用文本回答
+            const SOFT_LIMIT_ROUNDS = 10;
+            const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : LOCAL_TOOLS;
 
             const Service = (window as any).go?.aiservice?.Service;
             if (Service?.AIChatStream) {
-                await Service.AIChatStream(sid, allMessages, LOCAL_TOOLS);
+                await Service.AIChatStream(sid, allMessages, chainTools);
             } else if (Service?.AIChatSend) {
-                const result = await Service.AIChatSend(allMessages, LOCAL_TOOLS);
+                const result = await Service.AIChatSend(allMessages, chainTools);
                 const errR = result?.error || '未知错误';
                 const errC = sanitizeErrorMsg(errR);
                 useStore.getState().addAIChatMessage(sid, {
