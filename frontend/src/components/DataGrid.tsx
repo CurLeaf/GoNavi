@@ -23,20 +23,31 @@ import {
     arrayMove 
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns } from '../../wailsjs/go/app/App';
+import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns, DBGetIndexes } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
-import type { ColumnDefinition } from '../types';
+import type { ColumnDefinition, IndexDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import {
+    resolveDataTableColumnWidth,
+    resolveDataTableDefaultColumnWidth,
+    resolveDataTableVerticalBorderColor,
+} from '../utils/dataGridDisplay';
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
-import { buildCopyInsertSQL, normalizeTemporalLiteralText } from './dataGridCopyInsert';
+import {
+    buildCopyDeleteSQL,
+    buildCopyInsertSQL,
+    buildCopyUpdateSQL,
+    normalizeTemporalLiteralText,
+    resolveUniqueKeyGroupsFromIndexes,
+} from './dataGridCopyInsert';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -533,6 +544,8 @@ const DataContext = React.createContext<{
     selectedRowKeysRef: React.MutableRefObject<React.Key[]>;
     displayDataRef: React.MutableRefObject<any[]>;
     handleCopyInsert: (r: any) => void;
+    handleCopyUpdate: (r: any) => void;
+    handleCopyDelete: (r: any) => void;
     handleCopyJson: (r: any) => void;
     handleCopyCsv: (r: any) => void;
     handleExportSelected: (format: string, r: any) => Promise<void>;
@@ -785,7 +798,19 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
     
     if (!record || !context) return <tr {...props}>{children}</tr>;
 
-    const { selectedRowKeysRef, displayDataRef, handleCopyInsert, handleCopyJson, handleCopyCsv, handleExportSelected, copyToClipboard, enableRowContextMenu, supportsCopyInsert } = context;
+    const {
+        selectedRowKeysRef,
+        displayDataRef,
+        handleCopyInsert,
+        handleCopyUpdate,
+        handleCopyDelete,
+        handleCopyJson,
+        handleCopyCsv,
+        handleExportSelected,
+        copyToClipboard,
+        enableRowContextMenu,
+        supportsCopyInsert,
+    } = context;
 
     if (!enableRowContextMenu) {
         return <tr {...props}>{children}</tr>;
@@ -806,6 +831,16 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
             label: '复制为 INSERT',
             icon: <ConsoleSqlOutlined />,
             onClick: () => handleCopyInsert(record),
+        }, {
+            key: 'update',
+            label: '复制为 UPDATE',
+            icon: <ConsoleSqlOutlined />,
+            onClick: () => handleCopyUpdate(record),
+        }, {
+            key: 'delete',
+            label: '复制为 DELETE',
+            icon: <ConsoleSqlOutlined />,
+            onClick: () => handleCopyDelete(record),
         }] : []),
         { key: 'json', label: '复制为 JSON', icon: <FileTextOutlined />, onClick: () => handleCopyJson(record) },
         { key: 'csv', label: '复制为 CSV', icon: <FileTextOutlined />, onClick: () => handleCopyCsv(record) },
@@ -931,6 +966,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const showDataTableVerticalBorders = appearance.showDataTableVerticalBorders === true;
+  const dataTableColumnWidthMode = appearance.dataTableColumnWidthMode;
+  const defaultColumnWidth = resolveDataTableDefaultColumnWidth(dataTableColumnWidthMode);
+  const dataTableVerticalBorderColor = resolveDataTableVerticalBorderColor({
+      darkMode,
+      visible: showDataTableVerticalBorders,
+  });
   const canModifyData = !readOnly && !!tableName;
   const showColumnComment = queryOptions?.showColumnComment ?? true;
   const showColumnType = queryOptions?.showColumnType ?? true;
@@ -1312,8 +1354,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
+  const [uniqueKeyGroups, setUniqueKeyGroups] = useState<string[][]>([]);
   const columnMetaCacheRef = useRef<Record<string, Record<string, ColumnMeta>>>({});
   const columnMetaSeqRef = useRef(0);
+  const uniqueKeyGroupsCacheRef = useRef<Record<string, string[][]>>({});
+  const uniqueKeyGroupsSeqRef = useRef(0);
 
   useEffect(() => {
       const ext = sortInfoExternal || [];
@@ -1328,10 +1373,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       const normalizedDbName = String(dbName || '').trim();
       if (!connectionId || !normalizedTableName) {
           setColumnMetaMap({});
+          setUniqueKeyGroups([]);
           return;
       }
       const cacheKey = `${connectionId}|${normalizedDbName}|${normalizedTableName}`;
       setColumnMetaMap(columnMetaCacheRef.current[cacheKey] || {});
+      setUniqueKeyGroups(uniqueKeyGroupsCacheRef.current[cacheKey] || []);
   }, [connectionId, dbName, tableName]);
 
   useEffect(() => {
@@ -1382,6 +1429,47 @@ const DataGrid: React.FC<DataGridProps> = ({
           });
   }, [connections, connectionId, dbName, tableName]);
 
+  useEffect(() => {
+      const normalizedTableName = String(tableName || '').trim();
+      const normalizedDbName = String(dbName || '').trim();
+      if (!connectionId || !normalizedTableName) return;
+
+      const cacheKey = `${connectionId}|${normalizedDbName}|${normalizedTableName}`;
+      if (uniqueKeyGroupsCacheRef.current[cacheKey]) return;
+
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) {
+          setUniqueKeyGroups([]);
+          return;
+      }
+
+      const config = {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+
+      const seq = ++uniqueKeyGroupsSeqRef.current;
+      DBGetIndexes(config as any, normalizedDbName, normalizedTableName)
+          .then((res) => {
+              if (seq !== uniqueKeyGroupsSeqRef.current) return;
+              if (!res.success || !Array.isArray(res.data)) {
+                  setUniqueKeyGroups([]);
+                  return;
+              }
+              const nextGroups = resolveUniqueKeyGroupsFromIndexes(res.data as IndexDefinition[]);
+              uniqueKeyGroupsCacheRef.current[cacheKey] = nextGroups;
+              setUniqueKeyGroups(nextGroups);
+          })
+          .catch(() => {
+              if (seq !== uniqueKeyGroupsSeqRef.current) return;
+              setUniqueKeyGroups([]);
+          });
+  }, [connections, connectionId, dbName, tableName]);
+
   const columnMetaMapByLowerName = useMemo(() => {
       const next: Record<string, ColumnMeta> = {};
       Object.entries(columnMetaMap).forEach(([name, meta]) => {
@@ -1401,6 +1489,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
       return next;
   }, [columnMetaMapByLowerName]);
+
+  const allTableColumnNames = useMemo(() => {
+      const metaColumns = Object.keys(columnMetaMap);
+      if (metaColumns.length > 0) {
+          return metaColumns;
+      }
+      if (exportScope === 'table') {
+          return columnNames.filter((columnName) => columnName !== GONAVI_ROW_KEY);
+      }
+      return [];
+  }, [columnMetaMap, exportScope, columnNames]);
 
   const normalizeCommitCellValue = useCallback(
       (columnName: string, value: any, mode: 'insert' | 'update') => {
@@ -1572,8 +1671,15 @@ const DataGrid: React.FC<DataGridProps> = ({
                     overflow: hidden !important;
                 }
                 .${gridId} .ant-table-tbody > tr > td,
-                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
-                .${gridId} .ant-table-thead > tr > th { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid transparent !important; }
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell,
+                .${gridId} .ant-table-tbody-virtual-holder .ant-table-row > .ant-table-cell { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid ${dataTableVerticalBorderColor} !important; }
+                .${gridId} .ant-table-thead > tr > th { background: transparent !important; border-bottom: 1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'} !important; border-inline-end: 1px solid ${dataTableVerticalBorderColor} !important; }
+                .${gridId} .ant-table-tbody > tr > td:last-child,
+                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell:last-child,
+                .${gridId} .ant-table-tbody-virtual-holder .ant-table-row > .ant-table-cell:last-child,
+                .${gridId} .ant-table-thead > tr > th:last-child {
+                    border-inline-end-color: transparent !important;
+                }
                 /* 选择列对齐：header TH 无 class（Ant Design 虚拟模式），需用 :first-child 匹配 */
                 .${gridId} .ant-table-header th:first-child,
                 .${gridId} .ant-table-thead > tr > th:first-child {
@@ -2010,7 +2116,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     justify-content: center;
                     line-height: 1;
                 }
-  `, [themeStyles, gridId, tableBodyBottomPadding, darkMode, opacity]);
+  `, [themeStyles, gridId, tableBodyBottomPadding, darkMode, opacity, dataTableVerticalBorderColor]);
 
   const recalculateTableMetrics = useCallback((targetElement?: HTMLElement | null) => {
       const target = targetElement || containerRef.current;
@@ -2805,7 +2911,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   
             const startX = e.clientX;
   
-            const currentWidth = columnWidths[key] || 200; 
+            const currentWidth = resolveDataTableColumnWidth({
+                manualWidth: columnWidths[key],
+                widthMode: dataTableColumnWidthMode,
+            });
   
             const containerLeft = containerRef.current?.getBoundingClientRect().left ?? 0;
   
@@ -2836,7 +2945,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   
             document.body.style.userSelect = 'none'; 
   
-        }, [columnWidths]);
+        }, [columnWidths, dataTableColumnWidthMode]);
 
   // 2. Drag Move (Global)
   const handleResizeMove = useCallback((e: MouseEvent) => {
@@ -3280,7 +3389,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           dataIndex: key,
           key: key,
           // 不使用 ellipsis，避免 Ant Design 的 Tooltip 展开行为
-          width: columnWidths[key] || 200,
+          width: resolveDataTableColumnWidth({
+              manualWidth: columnWidths[key],
+              widthMode: dataTableColumnWidthMode,
+          }),
           sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
           sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData, // Only editable if table name known and not readonly
@@ -3321,7 +3433,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle, dataTableColumnWidthMode]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -3554,24 +3666,87 @@ const DataGrid: React.FC<DataGridProps> = ({
       return [clickedRecord];
   }, []);
 
-  const handleCopyInsert = useCallback((record: any) => {
+  const buildCopySqlBatchText = useCallback((mode: 'insert' | 'update' | 'delete', record: any): string | null => {
       if (!supportsCopyInsert) {
-          void message.warning("当前数据源不支持复制为 INSERT，请使用 JSON/CSV/Markdown 复制。");
-          return;
+          void message.warning("当前数据源不支持复制 SQL，请使用 JSON/CSV/Markdown 复制。");
+          return null;
       }
       const records = getTargets(record);
-      // 使用 columnNames 保持表定义的字段顺序，而非 Object.keys() 的不确定顺序
       const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
-      const sqlList = records.map((r: any) => {
-          return buildCopyInsertSQL({
+      if (mode === 'insert') {
+          return records.map((row: any) => buildCopyInsertSQL({
               dbType,
               tableName,
               orderedCols,
-              record: r,
+              record: row,
               columnTypesByLowerName: columnTypeMapByLowerName,
-          });
+          })).join('\n\n');
+      }
+
+      const sqlResults = records.map((row: any) => (
+          mode === 'update'
+              ? buildCopyUpdateSQL({
+                  dbType,
+                  tableName,
+                  orderedCols,
+                  record: row,
+                  pkColumns,
+                  uniqueKeyGroups,
+                  allTableColumns: allTableColumnNames,
+                  columnTypesByLowerName: columnTypeMapByLowerName,
+              })
+              : buildCopyDeleteSQL({
+                  dbType,
+                  tableName,
+                  orderedCols,
+                  record: row,
+                  pkColumns,
+                  uniqueKeyGroups,
+                  allTableColumns: allTableColumnNames,
+                  columnTypesByLowerName: columnTypeMapByLowerName,
+              })
+      ));
+      const failedResult = sqlResults.find((result) => result.ok === false);
+      if (failedResult && failedResult.ok === false) {
+          void message.warning(failedResult.error);
+          return null;
+      }
+      const sqlTexts: string[] = [];
+      sqlResults.forEach((result) => {
+          if (result.ok) {
+              sqlTexts.push(result.sql);
+          }
       });
-      copyToClipboard(sqlList.join('\n'));  }, [supportsCopyInsert, columnNames, getTargets, copyToClipboard, dbType, tableName, columnTypeMapByLowerName]);
+      return sqlTexts.join('\n\n');
+  }, [
+      supportsCopyInsert,
+      getTargets,
+      columnNames,
+      dbType,
+      tableName,
+      columnTypeMapByLowerName,
+      pkColumns,
+      uniqueKeyGroups,
+      allTableColumnNames,
+  ]);
+
+  const handleCopyInsert = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('insert', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
+
+  const handleCopyUpdate = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('update', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
+
+  const handleCopyDelete = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('delete', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
@@ -4022,6 +4197,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       selectedRowKeysRef,
       displayDataRef,
       handleCopyInsert,
+      handleCopyUpdate,
+      handleCopyDelete,
       handleCopyJson,
       handleCopyCsv,
       handleExportSelected,
@@ -4029,7 +4206,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       tableName,
       enableRowContextMenu: false,
       supportsCopyInsert,
-  }), [handleCopyCsv, handleCopyInsert, handleCopyJson, handleExportSelected, copyToClipboard, tableName, canModifyData, supportsCopyInsert]);
+  }), [handleCopyCsv, handleCopyDelete, handleCopyInsert, handleCopyJson, handleCopyUpdate, handleExportSelected, copyToClipboard, tableName, supportsCopyInsert]);
 
   const cellContextMenuValue = useMemo(() => ({
       showMenu: showCellContextMenu,
@@ -4044,7 +4221,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const rowPropsFactory = useCallback((record: any) => ({ record } as any), []);
 
-  const totalWidth = columns.reduce((sum: number, col: any) => sum + (Number(col.width) || 200), 0) + selectionColumnWidth;
+  const totalWidth = columns.reduce((sum: number, col: any) => sum + (Number(col.width) || defaultColumnWidth), 0) + selectionColumnWidth;
   const useContextMenuRow = false;
   const tableScrollX = useMemo(() => {
       // rc-table 在 scroll.x 小于容器宽度时会把实际列宽按视口补齐。
@@ -5446,21 +5623,53 @@ const DataGrid: React.FC<DataGridProps> = ({
                     </>
                 )}
                 {supportsCopyInsert && (
-                    <div
-                        style={{
-                            padding: '8px 12px',
-                            cursor: 'pointer',
-                            transition: 'background 0.2s',
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                        onClick={() => {
-                            if (cellContextMenu.record) handleCopyInsert(cellContextMenu.record);
-                            setCellContextMenu(prev => ({ ...prev, visible: false }));
-                        }}
-                    >
-                        复制为 INSERT
-                    </div>
+                    <>
+                        <div
+                            style={{
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            onClick={() => {
+                                if (cellContextMenu.record) handleCopyInsert(cellContextMenu.record);
+                                setCellContextMenu(prev => ({ ...prev, visible: false }));
+                            }}
+                        >
+                            复制为 INSERT
+                        </div>
+                        <div
+                            style={{
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            onClick={() => {
+                                if (cellContextMenu.record) handleCopyUpdate(cellContextMenu.record);
+                                setCellContextMenu(prev => ({ ...prev, visible: false }));
+                            }}
+                        >
+                            复制为 UPDATE
+                        </div>
+                        <div
+                            style={{
+                                padding: '8px 12px',
+                                cursor: 'pointer',
+                                transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            onClick={() => {
+                                if (cellContextMenu.record) handleCopyDelete(cellContextMenu.record);
+                                setCellContextMenu(prev => ({ ...prev, visible: false }));
+                            }}
+                        >
+                            复制为 DELETE
+                        </div>
+                    </>
                 )}
                 <div
                     style={{

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
+import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
@@ -11,9 +11,10 @@ import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
-import { useStore } from './store';
+import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
@@ -2295,6 +2296,33 @@ function App() {
                                       </div>
                                   </div>
                               </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>数据表显示</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>显示数据表竖向分隔线</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>仅作用于数据表页面 DataGrid，不影响其他表格组件。</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableVerticalBorders === true}
+                                              onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                          />
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>数据表列宽模式</div>
+                                          <Segmented
+                                              block
+                                              options={DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS}
+                                              value={appearance.dataTableColumnWidthMode}
+                                              onChange={(value) => setAppearance({ dataTableColumnWidthMode: sanitizeDataTableColumnWidthMode(value) })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              标准模式默认列宽 200px；紧凑模式默认列宽 140px。已手动拖拽调整的列宽优先保留。
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
                               {isMacRuntime ? (
                                   <div style={utilityPanelStyle}>
                                       <div style={{ marginBottom: 8, fontWeight: 500 }}>macOS 窗口控制</div>
@@ -2328,7 +2356,7 @@ function App() {
                                        onClick={() => {
                                            setUiScale(DEFAULT_UI_SCALE);
                                            setFontSize(DEFAULT_FONT_SIZE);
-                                           setAppearance({ enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false });
+                                           setAppearance({ ...DEFAULT_APPEARANCE });
                                        }}
                                    >
                                        恢复默认
@@ -2591,5 +2619,3 @@ function App() {
 }
 
 export default App;
-
-

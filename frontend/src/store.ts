@@ -10,8 +10,26 @@ import {
   sanitizeShortcutOptions,
 } from './utils/shortcuts';
 import { toPersistedGlobalProxy } from './utils/globalProxyDraft';
+import {
+  DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
+  sanitizeDataGridDisplaySettings,
+  type DataGridDisplaySettings,
+} from './utils/dataGridDisplay';
 
-const DEFAULT_APPEARANCE = { enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false };
+export interface AppearanceSettings extends DataGridDisplaySettings {
+  enabled: boolean;
+  opacity: number;
+  blur: number;
+  useNativeMacWindowControls: boolean;
+}
+
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  enabled: true,
+  opacity: 1.0,
+  blur: 0,
+  useNativeMacWindowControls: false,
+  ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
+};
 const DEFAULT_UI_SCALE = 1.0;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
@@ -26,7 +44,7 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
-const PERSIST_VERSION = 7;
+const PERSIST_VERSION = 8;
 const DEFAULT_CONNECTION_TYPE = 'mysql';
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
@@ -413,7 +431,7 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   theme: 'light' | 'dark';
-  appearance: { enabled: boolean; opacity: number; blur: number; useNativeMacWindowControls: boolean };
+  appearance: AppearanceSettings;
   uiScale: number;
   fontSize: number;
   startupFullscreen: boolean;
@@ -472,7 +490,7 @@ interface AppState {
   deleteQuery: (id: string) => void;
 
   setTheme: (theme: 'light' | 'dark') => void;
-  setAppearance: (appearance: Partial<{ enabled: boolean; opacity: number; blur: number; useNativeMacWindowControls: boolean }>) => void;
+  setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
@@ -596,12 +614,13 @@ const sanitizeTableHiddenColumns = (value: unknown): Record<string, string[]> =>
 };
 
 const sanitizeAppearance = (
-  appearance: Partial<{ enabled: boolean; opacity: number; blur: number; useNativeMacWindowControls: boolean }> | undefined,
+  appearance: Partial<AppearanceSettings> | undefined,
   version: number
-): { enabled: boolean; opacity: number; blur: number; useNativeMacWindowControls: boolean } => {
+): AppearanceSettings => {
   if (!appearance || typeof appearance !== 'object') {
     return { ...DEFAULT_APPEARANCE };
   }
+  const dataGridDisplaySettings = sanitizeDataGridDisplaySettings(appearance);
   const nextAppearance = {
     enabled: typeof appearance.enabled === 'boolean' ? appearance.enabled : DEFAULT_APPEARANCE.enabled,
     opacity: typeof appearance.opacity === 'number' ? appearance.opacity : DEFAULT_APPEARANCE.opacity,
@@ -609,6 +628,8 @@ const sanitizeAppearance = (
     useNativeMacWindowControls: typeof appearance.useNativeMacWindowControls === 'boolean'
       ? appearance.useNativeMacWindowControls
       : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    showDataTableVerticalBorders: dataGridDisplaySettings.showDataTableVerticalBorders,
+    dataTableColumnWidthMode: dataGridDisplaySettings.dataTableColumnWidthMode,
   };
   if (version < 2 && isLegacyDefaultAppearance(appearance)) {
     return { ...DEFAULT_APPEARANCE };
@@ -1315,5 +1336,3 @@ export const useStore = create<AppState>()(
     }
   )
 );
-
-
