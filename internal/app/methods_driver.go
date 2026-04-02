@@ -745,7 +745,7 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	}
 }
 
-func (a *App) InstallLocalDriverPackage(driverType string, filePath string, downloadDir string) connection.QueryResult {
+func (a *App) InstallLocalDriverPackage(driverType string, filePath string, downloadDir string, version string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
 		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
@@ -768,7 +768,10 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 	db.SetExternalDriverDownloadDirectory(resolvedDir)
 
 	a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, "开始安装本地驱动包")
-	selectedVersion := resolveDriverInstallVersion(definition.PinnedVersion, "local://manual", definition)
+	selectedVersion := resolveDriverInstallVersion(version, "local://manual", definition)
+	if err := validateDriverSelectedVersion(definition, selectedVersion); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	meta, installErr := installOptionalDriverAgentFromLocalPath(definition, filePath, resolvedDir, selectedVersion)
 	if installErr != nil {
 		errText := normalizeErrorMessage(installErr)
@@ -2628,7 +2631,7 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 	sourceName := filepath.Base(pathText)
 	downloadSource := fmt.Sprintf("local://manual/%s", filepath.Base(pathText))
 	if info.IsDir() {
-		matchedPath, matchedEntry, resolveErr := resolveLocalDriverAgentFromDirectory(pathText, driverType)
+		matchedPath, matchedEntry, resolveErr := resolveLocalDriverAgentFromLocalDirectory(pathText, driverType, selectedVersion)
 		if resolveErr != nil {
 			return installedDriverPackage{}, resolveErr
 		}
@@ -2641,7 +2644,7 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 	}
 
 	if !info.IsDir() && strings.EqualFold(filepath.Ext(pathText), ".zip") {
-		entryName, extractErr := installOptionalDriverAgentFromLocalZip(pathText, definition, executablePath)
+		entryName, extractErr := installOptionalDriverAgentFromLocalZip(pathText, definition, executablePath, selectedVersion)
 		if extractErr != nil {
 			return installedDriverPackage{}, extractErr
 		}
@@ -2680,7 +2683,7 @@ type localDriverCandidate struct {
 	inPlatformDir bool
 }
 
-func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType string) (string, string, error) {
+func resolveLocalDriverAgentFromLocalDirectory(directoryPath string, driverType string, selectedVersion string) (string, string, error) {
 	root := strings.TrimSpace(directoryPath)
 	if root == "" {
 		return "", "", fmt.Errorf("本地驱动目录路径为空")
@@ -2703,9 +2706,9 @@ func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType strin
 	}
 	displayName := resolveDriverDisplayName(displayDefinition)
 	platformDir := optionalDriverBundlePlatformDir(stdRuntime.GOOS)
-	assetNameCandidates := optionalDriverReleaseAssetNames(normalizedType)
-	baseNameCandidates := optionalDriverExecutableBaseNames(normalizedType)
-	assetName := optionalDriverReleaseAssetName(normalizedType)
+	assetNameCandidates := optionalDriverReleaseAssetNamesForVersion(normalizedType, selectedVersion)
+	baseNameCandidates := optionalDriverExecutableBaseNamesForVersion(normalizedType, selectedVersion)
+	assetName := optionalDriverReleaseAssetNameForVersion(normalizedType, selectedVersion)
 
 	exactRelativePath := filepath.ToSlash(filepath.Join(platformDir, assetName))
 	for _, candidateName := range assetNameCandidates {
@@ -2820,7 +2823,7 @@ func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType strin
 	)
 }
 
-func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDefinition, executablePath string) (string, error) {
+func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDefinition, executablePath string, selectedVersion string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
 	reader, err := zip.OpenReader(zipPath)
@@ -2829,9 +2832,9 @@ func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDef
 	}
 	defer reader.Close()
 
-	entryPath := optionalDriverBundleEntryPath(driverType)
-	entryPaths := optionalDriverBundleEntryPaths(driverType)
-	expectedBaseNames := optionalDriverReleaseAssetNames(driverType)
+	entryPath := optionalDriverBundleEntryPathForVersion(driverType, selectedVersion)
+	entryPaths := optionalDriverBundleEntryPathsForVersion(driverType, selectedVersion)
+	expectedBaseNames := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	findEntry := func() *zip.File {
 		for _, file := range reader.File {
 			name := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Name), "./"))
@@ -3490,9 +3493,9 @@ func optionalDriverBundlePlatformDir(goos string) string {
 	}
 }
 
-func optionalDriverBundleEntryPaths(driverType string) []string {
+func optionalDriverBundleEntryPathsForVersion(driverType string, selectedVersion string) []string {
 	platformDir := optionalDriverBundlePlatformDir(stdRuntime.GOOS)
-	assetNames := optionalDriverReleaseAssetNames(driverType)
+	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	result := make([]string, 0, len(assetNames))
 	seen := make(map[string]struct{}, len(assetNames))
 	for _, assetName := range assetNames {
@@ -3506,12 +3509,20 @@ func optionalDriverBundleEntryPaths(driverType string) []string {
 	return result
 }
 
-func optionalDriverBundleEntryPath(driverType string) string {
-	paths := optionalDriverBundleEntryPaths(driverType)
+func optionalDriverBundleEntryPaths(driverType string) []string {
+	return optionalDriverBundleEntryPathsForVersion(driverType, "")
+}
+
+func optionalDriverBundleEntryPathForVersion(driverType string, selectedVersion string) string {
+	paths := optionalDriverBundleEntryPathsForVersion(driverType, selectedVersion)
 	if len(paths) == 0 {
-		return filepath.ToSlash(filepath.Join(optionalDriverBundlePlatformDir(stdRuntime.GOOS), optionalDriverReleaseAssetName(driverType)))
+		return filepath.ToSlash(filepath.Join(optionalDriverBundlePlatformDir(stdRuntime.GOOS), optionalDriverReleaseAssetNameForVersion(driverType, selectedVersion)))
 	}
 	return paths[0]
+}
+
+func optionalDriverBundleEntryPath(driverType string) string {
+	return optionalDriverBundleEntryPathForVersion(driverType, "")
 }
 
 func resolveOptionalDriverAssetSize(sizeByAsset map[string]int64, driverType string) int64 {

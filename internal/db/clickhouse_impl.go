@@ -279,7 +279,44 @@ func (c *ClickHouseDB) Ping() error {
 	}
 	ctx, cancel := utils.ContextWithTimeout(timeout)
 	defer cancel()
-	return c.conn.PingContext(ctx)
+	if err := c.conn.PingContext(ctx); err != nil {
+		return err
+	}
+	return c.validateQueryPath()
+}
+
+func (c *ClickHouseDB) validateQueryPath() error {
+	if c.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	timeout := c.pingTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := utils.ContextWithTimeout(timeout)
+	defer cancel()
+
+	rows, err := c.conn.QueryContext(ctx, "SELECT currentDatabase()")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("连接查询验证未返回结果")
+	}
+
+	var current sql.NullString
+	if err := rows.Scan(&current); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *ClickHouseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {

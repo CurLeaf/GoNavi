@@ -1,8 +1,10 @@
 package app
 
 import (
+	"archive/zip"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -154,6 +156,66 @@ func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
 	}
 }
 
+func TestInstallOptionalDriverAgentFromLocalPathSupportsMongoV1DirectoryImport(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	packageRoot := t.TempDir()
+	platformDir := filepath.Join(packageRoot, optionalDriverBundlePlatformDir(runtime.GOOS))
+	if err := os.MkdirAll(platformDir, 0o755); err != nil {
+		t.Fatalf("mkdir package dir failed: %v", err)
+	}
+
+	assetName := mongoVersionedReleaseAssetName(1)
+	writeSelfExecutable(t, filepath.Join(platformDir, assetName))
+
+	installRoot := filepath.Join(t.TempDir(), "drivers")
+	meta, err := installOptionalDriverAgentFromLocalPath(definition, packageRoot, installRoot, "1.17.4")
+	if err != nil {
+		t.Fatalf("expected mongodb v1 directory import to succeed, got %v", err)
+	}
+	if meta.Version != "1.17.4" {
+		t.Fatalf("expected imported version to stay 1.17.4, got %q", meta.Version)
+	}
+	if filepath.Base(meta.FilePath) != assetName {
+		t.Fatalf("expected source file %q, got %q", assetName, meta.FilePath)
+	}
+	if !strings.Contains(meta.DownloadURL, assetName) {
+		t.Fatalf("expected download source to reference %q, got %q", assetName, meta.DownloadURL)
+	}
+	if _, err := os.Stat(meta.ExecutablePath); err != nil {
+		t.Fatalf("expected imported executable to exist, got %v", err)
+	}
+}
+
+func TestInstallOptionalDriverAgentFromLocalPathSupportsMongoV1ZipImport(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	assetName := mongoVersionedReleaseAssetName(1)
+	zipPath := filepath.Join(t.TempDir(), "mongodb-v1.zip")
+	writeZipWithSelfExecutable(t, zipPath, filepath.ToSlash(filepath.Join(optionalDriverBundlePlatformDir(runtime.GOOS), assetName)))
+
+	installRoot := filepath.Join(t.TempDir(), "drivers")
+	meta, err := installOptionalDriverAgentFromLocalPath(definition, zipPath, installRoot, "1.17.4")
+	if err != nil {
+		t.Fatalf("expected mongodb v1 zip import to succeed, got %v", err)
+	}
+	if meta.Version != "1.17.4" {
+		t.Fatalf("expected imported version to stay 1.17.4, got %q", meta.Version)
+	}
+	if !strings.Contains(meta.DownloadURL, assetName) {
+		t.Fatalf("expected zip download source to reference %q, got %q", assetName, meta.DownloadURL)
+	}
+	if _, err := os.Stat(meta.ExecutablePath); err != nil {
+		t.Fatalf("expected imported executable to exist, got %v", err)
+	}
+}
+
 func seedReleaseAssetSizeCache(t *testing.T, cacheKey string, sizeByKey map[string]int64) {
 	t.Helper()
 
@@ -219,4 +281,51 @@ func mongoVersionedReleaseAssetName(major int) string {
 		return name + ".exe"
 	}
 	return name
+}
+
+func writeSelfExecutable(t *testing.T, targetPath string) {
+	t.Helper()
+
+	selfPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable path failed: %v", err)
+	}
+	content, err := os.ReadFile(selfPath)
+	if err != nil {
+		t.Fatalf("read self executable failed: %v", err)
+	}
+	if err := os.WriteFile(targetPath, content, 0o755); err != nil {
+		t.Fatalf("write executable failed: %v", err)
+	}
+}
+
+func writeZipWithSelfExecutable(t *testing.T, zipPath string, entryName string) {
+	t.Helper()
+
+	selfPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable path failed: %v", err)
+	}
+	content, err := os.ReadFile(selfPath)
+	if err != nil {
+		t.Fatalf("read self executable failed: %v", err)
+	}
+
+	file, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip failed: %v", err)
+	}
+	defer file.Close()
+
+	writer := zip.NewWriter(file)
+	entry, err := writer.Create(entryName)
+	if err != nil {
+		t.Fatalf("create zip entry failed: %v", err)
+	}
+	if _, err := entry.Write(content); err != nil {
+		t.Fatalf("write zip entry failed: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close zip writer failed: %v", err)
+	}
 }

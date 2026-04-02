@@ -106,7 +106,7 @@ export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInp
 
 export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
-export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string):Promise<connection.QueryResult>;
+export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
 

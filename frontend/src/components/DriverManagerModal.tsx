@@ -757,6 +757,16 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     };
   }, [appendOperationLog, open]);
 
+  const resolveLocalImportVersion = useCallback((row: DriverStatusRow) => {
+    const options = versionMap[row.type] || [];
+    const selectedKey = selectedVersionMap[row.type];
+    const selectedOption =
+      options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+      options.find((item) => item.recommended) ||
+      options[0];
+    return selectedOption?.version || row.pinnedVersion || '';
+  }, [selectedVersionMap, versionMap]);
+
   const installDriver = useCallback(async (row: DriverStatusRow) => {
     setActionState({ driverType: row.type, kind: 'install' });
     setProgressMap((prev) => ({
@@ -820,9 +830,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         percent: 0,
       },
     }));
-    appendOperationLog(row.type, `[START] 开始本地导入（${sourceLabel}）：${pathText}`);
+    const selectedVersion = resolveLocalImportVersion(row);
+    const versionTip = selectedVersion ? `（${selectedVersion}）` : '';
+    appendOperationLog(row.type, `[START] 开始本地导入${versionTip}（${sourceLabel}）：${pathText}`);
     try {
-      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir);
+      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir, selectedVersion);
       if (!result?.success) {
         const errText = result?.message || `导入 ${row.name} 本地驱动包失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
@@ -831,9 +843,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         }
         return false;
       }
-      appendOperationLog(row.type, '[DONE] 本地导入安装完成');
+      appendOperationLog(row.type, `[DONE] 本地导入安装完成 ${versionTip}`.trim());
       if (!options?.silentToast) {
-        message.success(`${row.name} 本地驱动包已安装启用`);
+        message.success(`${row.name}${versionTip} 本地驱动包已安装启用`);
       }
       if (!options?.skipRefresh) {
         await refreshStatus(false);
@@ -842,7 +854,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, refreshStatus]);
+  }, [appendOperationLog, downloadDir, refreshStatus, resolveLocalImportVersion]);
 
   const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
     const fileRes = await SelectDriverPackageFile(downloadDir);
