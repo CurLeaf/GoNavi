@@ -31,7 +31,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   TagOutlined,
   CheckOutlined,
   FilterOutlined,
-  DashboardOutlined
+  DashboardOutlined,
+  WarningOutlined
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -3396,11 +3397,18 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                }
            },
            {
-               key: 'drop-db',
-               label: '删除数据库',
-               icon: <DeleteOutlined />,
-               danger: true,
-               onClick: () => handleDeleteDatabase(node)
+               key: 'danger-zone',
+               label: '危险操作',
+               icon: <WarningOutlined />,
+               children: [
+                   {
+                       key: 'drop-db',
+                       label: '删除数据库',
+                       icon: <DeleteOutlined />,
+                       danger: true,
+                       onClick: () => handleDeleteDatabase(node)
+                   }
+               ]
            },
            {
                key: 'refresh',
@@ -3513,11 +3521,18 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 }
             },
             {
-                key: 'drop-view',
-                label: '删除视图',
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => handleDropView(node)
+                key: 'danger-zone',
+                label: '危险操作',
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-view',
+                        label: '删除视图',
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDropView(node)
+                    }
+                ]
             },
         ];
     } else if (node.type === 'routine') {
@@ -3538,11 +3553,18 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             },
             { type: 'divider' },
             {
-                key: 'drop-routine',
-                label: `删除${typeLabel}`,
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => handleDropRoutine(node)
+                key: 'danger-zone',
+                label: '危险操作',
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-routine',
+                        label: `删除${typeLabel}`,
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDropRoutine(node)
+                    }
+                ]
             },
         ];
     } else if (node.type === 'table') {
@@ -3594,11 +3616,18 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 }
             },
             {
-                key: 'drop-table',
-                label: '删除表',
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => handleDeleteTable(node)
+                key: 'danger-zone',
+                label: '危险操作',
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-table',
+                        label: '删除表',
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDeleteTable(node)
+                    }
+                ]
             },
             {
                 type: 'divider'

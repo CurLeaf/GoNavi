@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal } from 'antd';
-import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
@@ -432,7 +432,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
                                         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                         { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                        { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) },
+                                        { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                            { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
+                                        ]},
                                         { type: 'divider' },
                                         { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
                                             { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
@@ -544,7 +546,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                                 { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
                                                 { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                                 { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                                { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) },
+                                                { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                                    { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
+                                                ]},
                                                 { type: 'divider' },
                                                 { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
                                                     { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
