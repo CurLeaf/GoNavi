@@ -1,0 +1,72 @@
+package app
+
+import (
+	"os"
+	"testing"
+
+	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/secretstore"
+)
+
+func TestSplitConnectionSecretsStripsPasswordsAndOpaqueDSN(t *testing.T) {
+	input := connection.SavedConnectionInput{
+		ID:   "conn-1",
+		Name: "Primary",
+		Config: connection.ConnectionConfig{
+			ID:       "conn-1",
+			Type:     "postgres",
+			Host:     "db.local",
+			Password: "postgres-secret",
+			DSN:      "postgres://user:pass@db.local/app",
+		},
+	}
+
+	view, bundle := splitConnectionSecrets(input)
+	if view.Config.Password != "" {
+		t.Fatal("metadata must not keep password")
+	}
+	if bundle.Password != "postgres-secret" {
+		t.Fatal("bundle should keep primary password")
+	}
+	if bundle.OpaqueDSN == "" {
+		t.Fatal("opaque DSN should be stored as secret")
+	}
+	if !view.HasPrimaryPassword {
+		t.Fatal("expected view to report primary password")
+	}
+	if !view.HasOpaqueDSN {
+		t.Fatal("expected view to report opaque DSN")
+	}
+}
+
+type fakeAppSecretStore struct {
+	items map[string][]byte
+}
+
+func newFakeAppSecretStore() *fakeAppSecretStore {
+	return &fakeAppSecretStore{items: make(map[string][]byte)}
+}
+
+func (s *fakeAppSecretStore) Put(ref string, payload []byte) error {
+	s.items[ref] = append([]byte(nil), payload...)
+	return nil
+}
+
+func (s *fakeAppSecretStore) Get(ref string) ([]byte, error) {
+	payload, ok := s.items[ref]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return append([]byte(nil), payload...), nil
+}
+
+func (s *fakeAppSecretStore) Delete(ref string) error {
+	delete(s.items, ref)
+	return nil
+}
+
+func (s *fakeAppSecretStore) HealthCheck() error {
+	return nil
+}
+
+var _ secretstore.SecretStore = (*fakeAppSecretStore)(nil)
