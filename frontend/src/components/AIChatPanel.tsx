@@ -674,7 +674,21 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (lastUserMsgIndex >= 0) {
             const userMsg = historyLocal[lastUserMsgIndex];
             truncateAIChatMessages(sid, userMsg.id); 
+
+            // 重置计数器（与 handleSend 保持一致）
+            toolCallRoundRef.current = 0;
+            totalToolRoundRef.current = 0;
+            nudgeCountRef.current = 0;
+
             setSending(true);
+
+            // 插入 connecting 过渡消息（波纹动画），与 handleSend 保持一致
+            const connectingMsg: AIChatMessage = {
+                id: genId(), role: 'assistant', phase: 'connecting', content: '',
+                timestamp: Date.now(), loading: true
+            };
+            addAIChatMessage(sid, connectingMsg);
+
             const truncatedHistory = historyLocal.slice(0, lastUserMsgIndex + 1);
             const messagesPayload = truncatedHistory.map(m => ({ role: m.role, content: m.content, images: m.images }));
             
