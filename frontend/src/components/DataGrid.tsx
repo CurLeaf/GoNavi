@@ -33,6 +33,7 @@ import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral,
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
+import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
 import { buildCopyInsertSQL, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
@@ -2762,39 +2763,10 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleTableChange = useCallback((_pag: any, _filtersArg: any, sorter: any) => {
       if (isResizingRef.current) return; // Block sort if resizing
-      // Ant Design 多列排序模式下 sorter 可能是数组
-      const sorters = Array.isArray(sorter) ? sorter : (sorter?.field ? [sorter] : []);
-      if (sorters.length === 0) {
-          setSortInfo([]);
-          if (onSort) onSort(JSON.stringify([]), '');
-          return;
-      }
-      // 在现有排序数组基础上增量更新
-      const next = [...sortInfo];
-      for (const s of sorters) {
-          const field = String(s.field || '');
-          if (!field) continue;
-          const order = s.order as string;
-          const normalizedOrder = order === 'ascend' || order === 'descend' ? order : '';
-          const existIdx = next.findIndex(item => item.columnKey === field);
-          if (!normalizedOrder) {
-              // Ant Design 第三次点击想取消排序：
-              // 如果该字段已在排序数组中，回转为升序而非移除
-              if (existIdx >= 0) {
-                  next[existIdx] = { ...next[existIdx], order: 'ascend', enabled: true };
-              }
-              // 不在数组中则忽略
-          } else if (existIdx >= 0) {
-              // 已存在：更新排序方向
-              next[existIdx] = { ...next[existIdx], order: normalizedOrder, enabled: true };
-          } else {
-              // 不存在：追加到末尾
-              next.push({ columnKey: field, order: normalizedOrder, enabled: true });
-          }
-      }
+      const next = resolveGridSortInfoFromTableSorter({ sorter });
       setSortInfo(next);
       if (onSort) onSort(JSON.stringify(next), '');
-  }, [onSort, sortInfo]);
+  }, [onSort]);
 
     // Native Drag State
     const draggingRef = useRef<{
