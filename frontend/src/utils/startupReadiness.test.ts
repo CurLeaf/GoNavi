@@ -10,10 +10,10 @@ describe('startup readiness helpers', () => {
     });
   });
 
-  it('keeps sidebar blocked until initial global proxy sync finishes', () => {
+  it('keeps sidebar blocked until secure config bootstrap finishes', () => {
     expect(getConnectionWorkbenchState(true, false)).toEqual({
       ready: false,
-      message: '正在同步全局代理配置...',
+      message: '正在加载安全配置...',
     });
   });
 
@@ -24,3 +24,4 @@ describe('startup readiness helpers', () => {
     });
   });
 });
+

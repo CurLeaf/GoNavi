@@ -22,6 +22,7 @@ export interface HTTPTunnelConfig {
 }
 
 export interface ConnectionConfig {
+  id?: string;
   type: string;
   host: string;
   port: number;
@@ -70,10 +71,25 @@ export interface SavedConnection {
   id: string;
   name: string;
   config: ConnectionConfig;
+  secretRef?: string;
+  hasPrimaryPassword?: boolean;
+  hasSSHPassword?: boolean;
+  hasProxyPassword?: boolean;
+  hasHttpTunnelPassword?: boolean;
+  hasMySQLReplicaPassword?: boolean;
+  hasMongoReplicaPassword?: boolean;
+  hasOpaqueURI?: boolean;
+  hasOpaqueDSN?: boolean;
   includeDatabases?: string[];
   includeRedisDatabases?: number[]; // Redis databases to show (0-15)
   iconType?: string;   // 自定义图标类型（如 'mysql','postgres'），不填则取 config.type
   iconColor?: string;  // 自定义图标颜色（十六进制），不填则取类型默认色
+}
+
+export interface GlobalProxyConfig extends ProxyConfig {
+  enabled: boolean;
+  hasPassword?: boolean;
+  secretRef?: string;
 }
 
 export interface ConnectionTag {
@@ -243,3 +259,5 @@ export interface AISafetyResult {
   requiresConfirm: boolean;
   warningMessage?: string;
 }
+
+

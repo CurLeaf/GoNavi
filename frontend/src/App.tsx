@@ -17,6 +17,8 @@ import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, is
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
+import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
+import { LEGACY_PERSIST_KEY, readLegacyPersistedSecrets, stripLegacyPersistedSecrets } from './utils/legacyConnectionStorage';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -35,7 +37,7 @@ import {
   resolveAIEdgeHandleDockStyle,
   resolveAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
-import { ConfigureGlobalProxy, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -76,6 +78,8 @@ function App() {
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
+  const replaceConnections = useStore(state => state.replaceConnections);
+  const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -100,14 +104,14 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
-  const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
+  const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
-  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
+  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -167,6 +171,90 @@ function App() {
           return;
       }
 
+      let cancelled = false;
+      const loadSecureConfig = async () => {
+          const backendApp = (window as any).go?.app?.App;
+          const persistedPayload = typeof window !== 'undefined'
+              ? window.localStorage.getItem(LEGACY_PERSIST_KEY)
+              : null;
+          const legacy = readLegacyPersistedSecrets(persistedPayload);
+
+          let importedLegacyConnections = false;
+          let importedLegacyGlobalProxy = false;
+
+          if (legacy.connections.length > 0) {
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  try {
+                      await backendApp.ImportLegacyConnections(
+                          legacy.connections.map(({ id, name, config }) => ({ id, name, config }))
+                      );
+                      importedLegacyConnections = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy saved connections', err);
+                  }
+              } else {
+                  replaceConnections(legacy.connections);
+              }
+          }
+
+          if (legacy.globalProxy) {
+              if (typeof backendApp?.ImportLegacyGlobalProxy === 'function') {
+                  try {
+                      await backendApp.ImportLegacyGlobalProxy(toSaveGlobalProxyInput(legacy.globalProxy));
+                      importedLegacyGlobalProxy = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy global proxy', err);
+                  }
+              } else {
+                  replaceGlobalProxy(createGlobalProxyDraft(legacy.globalProxy));
+              }
+          }
+
+          if ((importedLegacyConnections || importedLegacyGlobalProxy) && persistedPayload && typeof window !== 'undefined') {
+              const sanitizedPayload = stripLegacyPersistedSecrets(persistedPayload);
+              if (sanitizedPayload && sanitizedPayload !== persistedPayload) {
+                  window.localStorage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
+              }
+          }
+
+          if (typeof backendApp?.GetSavedConnections === 'function') {
+              try {
+                  const savedConnections = await backendApp.GetSavedConnections();
+                  if (!cancelled && Array.isArray(savedConnections)) {
+                      replaceConnections(savedConnections);
+                  }
+              } catch (err) {
+                  console.warn('Failed to load saved connections from backend', err);
+              }
+          }
+
+          if (typeof backendApp?.GetGlobalProxyConfig === 'function') {
+              try {
+                  const proxyResult = await backendApp.GetGlobalProxyConfig();
+                  if (!cancelled && proxyResult?.success && proxyResult.data) {
+                      replaceGlobalProxy(createGlobalProxyDraft(proxyResult.data));
+                  }
+              } catch (err) {
+                  console.warn('Failed to load global proxy from backend', err);
+              }
+          }
+
+          if (!cancelled) {
+              setHasLoadedSecureConfig(true);
+          }
+      };
+
+      void loadSecureConfig();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+
+  useEffect(() => {
+      if (!isStoreHydrated || !hasLoadedSecureConfig) {
+          return;
+      }
+
       const host = String(globalProxy.host || '').trim();
       const port = Number(globalProxy.port);
       const portValid = Number.isFinite(port) && port > 0 && port <= 65535;
@@ -180,57 +268,44 @@ function App() {
               });
               globalProxyInvalidHintShownRef.current = true;
           }
-      } else {
-          globalProxyInvalidHintShownRef.current = false;
-          void message.destroy('global-proxy-invalid');
+          return;
       }
 
-      const enabledForBackend = globalProxy.enabled && !invalidWhenEnabled;
-      let cancelled = false;
-      try {
-          ConfigureGlobalProxy(enabledForBackend, {
-              type: globalProxy.type,
-              host,
-              port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
-              user: String(globalProxy.user || '').trim(),
-              password: globalProxy.password || '',
-          })
-              .then((res) => {
-                  if (cancelled || res?.success) {
-                      return;
-                  }
-                  void message.error({
-                      content: '全局代理配置失败: ' + (res?.message || '未知错误'),
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .catch((err) => {
-                  if (cancelled) {
-                      return;
-                  }
-                  const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
-                  void message.error({
-                      content: '全局代理配置失败: ' + errMsg,
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .finally(() => {
-                  if (!cancelled) {
-                      setHasAppliedInitialGlobalProxy(true);
-                  }
-              });
-      } catch (e) {
-          if (!cancelled) {
-              setHasAppliedInitialGlobalProxy(true);
-          }
-          console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
+      globalProxyInvalidHintShownRef.current = false;
+      void message.destroy('global-proxy-invalid');
+
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SaveGlobalProxy !== 'function') {
+          return;
       }
+
+      let cancelled = false;
+      Promise.resolve(
+          backendApp.SaveGlobalProxy(
+              toSaveGlobalProxyInput({
+                  ...globalProxy,
+                  host,
+                  port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
+              })
+          )
+      )
+          .catch((err) => {
+              if (cancelled) {
+                  return;
+              }
+              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+              void message.error({
+                  content: '全局代理配置失败: ' + errMsg,
+                  key: 'global-proxy-sync-error',
+              });
+          });
 
       return () => {
           cancelled = true;
       };
   }, [
       isStoreHydrated,
+      hasLoadedSecureConfig,
       globalProxy.enabled,
       globalProxy.type,
       globalProxy.host,
@@ -2490,3 +2565,5 @@ function App() {
 }
 
 export default App;
+
+

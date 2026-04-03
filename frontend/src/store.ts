@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage, AIContextItem } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage, AIContextItem, GlobalProxyConfig } from './types';
 import {
   ShortcutAction,
   ShortcutBinding,
@@ -9,6 +9,7 @@ import {
   cloneShortcutOptions,
   sanitizeShortcutOptions,
 } from './utils/shortcuts';
+import { toPersistedGlobalProxy } from './utils/globalProxyDraft';
 
 const DEFAULT_APPEARANCE = { enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false };
 const DEFAULT_UI_SCALE = 1.0;
@@ -34,6 +35,7 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   port: 1080,
   user: '',
   password: '',
+  hasPassword: false,
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
   'mysql',
@@ -246,6 +248,7 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
 
   const safeConfig: ConnectionConfig & Record<string, unknown> = {
     ...raw,
+    id: toTrimmedString(raw.id ?? raw.ID),
     type,
     host: toTrimmedString(raw.host, 'localhost') || 'localhost',
     port: normalizePort(raw.port, defaultPort),
@@ -321,7 +324,16 @@ const sanitizeSavedConnection = (value: unknown, index: number): SavedConnection
   return {
     id,
     name,
-    config,
+    config: { ...config, id: config.id || id },
+    secretRef: toTrimmedString(raw.secretRef) || undefined,
+    hasPrimaryPassword: raw.hasPrimaryPassword === true,
+    hasSSHPassword: raw.hasSSHPassword === true,
+    hasProxyPassword: raw.hasProxyPassword === true,
+    hasHttpTunnelPassword: raw.hasHttpTunnelPassword === true,
+    hasMySQLReplicaPassword: raw.hasMySQLReplicaPassword === true,
+    hasMongoReplicaPassword: raw.hasMongoReplicaPassword === true,
+    hasOpaqueURI: raw.hasOpaqueURI === true,
+    hasOpaqueDSN: raw.hasOpaqueDSN === true,
     includeDatabases: includeDatabases.length > 0 ? includeDatabases : undefined,
     includeRedisDatabases: includeRedisDatabases.length > 0 ? includeRedisDatabases : undefined,
   };
@@ -393,10 +405,6 @@ export interface QueryOptions {
   showColumnType: boolean;
 }
 
-export interface GlobalProxyConfig extends ProxyConfig {
-  enabled: boolean;
-}
-
 interface AppState {
   connections: SavedConnection[];
   connectionTags: ConnectionTag[];
@@ -440,6 +448,7 @@ interface AppState {
   addConnection: (conn: SavedConnection) => void;
   updateConnection: (conn: SavedConnection) => void;
   removeConnection: (id: string) => void;
+  replaceConnections: (connections: SavedConnection[]) => void;
 
   addConnectionTag: (tag: ConnectionTag) => void;
   updateConnectionTag: (tag: ConnectionTag) => void;
@@ -468,6 +477,7 @@ interface AppState {
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
   setGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
+  replaceGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: 'upper' | 'lower' }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
   updateShortcut: (action: ShortcutAction, binding: Partial<ShortcutBinding>) => void;
@@ -618,18 +628,24 @@ const sanitizeFontSize = (value: unknown): number => {
   return normalizeIntegerInRange(value, DEFAULT_FONT_SIZE, MIN_FONT_SIZE, MAX_FONT_SIZE);
 };
 
-const sanitizeGlobalProxy = (value: unknown): GlobalProxyConfig => {
+const sanitizeGlobalProxy = (
+  value: unknown,
+  options: { allowPassword?: boolean } = {}
+): GlobalProxyConfig => {
   const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
   const typeRaw = toTrimmedString(raw.type, DEFAULT_GLOBAL_PROXY.type).toLowerCase();
   const type: 'socks5' | 'http' = typeRaw === 'http' ? 'http' : 'socks5';
   const fallbackPort = type === 'http' ? 8080 : 1080;
+  const password = toTrimmedString(raw.password);
   return {
     enabled: raw.enabled === true,
     type,
     host: toTrimmedString(raw.host),
     port: normalizePort(raw.port, fallbackPort),
     user: toTrimmedString(raw.user),
-    password: toTrimmedString(raw.password),
+    password: options.allowPassword === false ? '' : password,
+    hasPassword: raw.hasPassword === true || password !== '',
+    secretRef: toTrimmedString(raw.secretRef) || undefined,
   };
 };
 
@@ -782,6 +798,7 @@ export const useStore = create<AppState>()(
             connectionIds: tag.connectionIds.filter(cid => cid !== id)
           }))
       })),
+      replaceConnections: (connections) => set({ connections: sanitizeConnections(connections) }),
 
       addConnectionTag: (tag) => set((state) => ({ connectionTags: [...state.connectionTags, tag] })),
       updateConnectionTag: (tag) => set((state) => ({
@@ -963,6 +980,7 @@ export const useStore = create<AppState>()(
       setFontSize: (size) => set({ fontSize: sanitizeFontSize(size) }),
       setStartupFullscreen: (enabled) => set({ startupFullscreen: !!enabled }),
       setGlobalProxy: (proxy) => set((state) => ({ globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }) })),
+      replaceGlobalProxy: (proxy) => set({ globalProxy: sanitizeGlobalProxy({ ...DEFAULT_GLOBAL_PROXY, ...proxy }) }),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) => set((state) => ({ queryOptions: { ...state.queryOptions, ...options } })),
       updateShortcut: (action, binding) => set((state) => ({
@@ -1203,7 +1221,7 @@ export const useStore = create<AppState>()(
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
-        nextState.connections = sanitizeConnections(state.connections);
+        nextState.connections = [];
         if (version < 5) {
           nextState.connectionTags = sanitizeConnectionTags(state.connectionTags);
         } else {
@@ -1215,7 +1233,7 @@ export const useStore = create<AppState>()(
         nextState.uiScale = sanitizeUiScale(state.uiScale);
         nextState.fontSize = sanitizeFontSize(state.fontSize);
         nextState.startupFullscreen = sanitizeStartupFullscreen(state.startupFullscreen);
-        nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
+        nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy, { allowPassword: false });
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(state.shortcutOptions);
@@ -1242,7 +1260,7 @@ export const useStore = create<AppState>()(
         return {
           ...currentState,
           ...state,
-          connections: sanitizeConnections(state.connections),
+          connections: currentState.connections,
           connectionTags: sanitizeConnectionTags(state.connectionTags),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           theme: sanitizeTheme(state.theme),
@@ -1250,7 +1268,7 @@ export const useStore = create<AppState>()(
           uiScale: sanitizeUiScale(state.uiScale),
           fontSize: sanitizeFontSize(state.fontSize),
           startupFullscreen: sanitizeStartupFullscreen(state.startupFullscreen),
-          globalProxy: sanitizeGlobalProxy(state.globalProxy),
+          globalProxy: sanitizeGlobalProxy(state.globalProxy, { allowPassword: false }),
           tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
           tableColumnOrders: sanitizeTableColumnOrders(state.tableColumnOrders),
           enableColumnOrderMemory: state.enableColumnOrderMemory !== false,
@@ -1271,7 +1289,6 @@ export const useStore = create<AppState>()(
         };
       },
       partialize: (state) => ({
-        connections: state.connections,
         connectionTags: state.connectionTags,
         savedQueries: state.savedQueries,
         theme: state.theme,
@@ -1279,7 +1296,7 @@ export const useStore = create<AppState>()(
         uiScale: state.uiScale,
         fontSize: state.fontSize,
         startupFullscreen: state.startupFullscreen,
-        globalProxy: state.globalProxy,
+        globalProxy: toPersistedGlobalProxy(state.globalProxy),
         sqlFormatOptions: state.sqlFormatOptions,
         queryOptions: state.queryOptions,
         shortcutOptions: state.shortcutOptions,
@@ -1298,3 +1315,5 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+
