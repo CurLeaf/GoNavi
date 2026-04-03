@@ -353,7 +353,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (!activeProvider) return;
         try {
             const Service = (window as any).go?.aiservice?.Service;
-            const payload = { ...activeProvider, model: val };
+            const payload = {
+                ...activeProvider,
+                model: val,
+                apiKey: activeProvider.apiKey || '',
+                hasSecret: activeProvider.hasSecret ?? Boolean(activeProvider.secretRef),
+            };
             await Service?.AISaveProvider?.(payload);
             setActiveProvider(payload);
             setComposerNotice(null);

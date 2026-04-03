@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
@@ -59,6 +59,24 @@ const detectNavigatorPlatform = (): string => {
       return uaDataPlatform;
   }
   return navigator.userAgent || '';
+};
+
+
+const toLegacySavedConnectionInput = (item: any) => ({
+  id: typeof item?.id === 'string' ? item.id : '',
+  name: typeof item?.name === 'string' ? item.name : '',
+  config: (item?.config && typeof item.config === 'object') ? item.config : {},
+  includeDatabases: Array.isArray(item?.includeDatabases) ? item.includeDatabases : undefined,
+  includeRedisDatabases: Array.isArray(item?.includeRedisDatabases) ? item.includeRedisDatabases : undefined,
+  iconType: typeof item?.iconType === 'string' ? item.iconType : '',
+  iconColor: typeof item?.iconColor === 'string' ? item.iconColor : '',
+});
+
+const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
+  const merged = new Map<string, SavedConnection>();
+  current.forEach((conn) => merged.set(conn.id, conn));
+  imported.forEach((conn) => merged.set(conn.id, conn));
+  return Array.from(merged.values());
 };
 
 function App() {
@@ -186,7 +204,7 @@ function App() {
               if (typeof backendApp?.ImportLegacyConnections === 'function') {
                   try {
                       await backendApp.ImportLegacyConnections(
-                          legacy.connections.map(({ id, name, config }) => ({ id, name, config }))
+                          legacy.connections.map(toLegacySavedConnectionInput)
                       );
                       importedLegacyConnections = true;
                   } catch (err) {
@@ -751,7 +769,6 @@ function App() {
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
-  const addConnection = useStore(state => state.addConnection);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const updateCheckInFlightRef = React.useRef(false);
@@ -1166,20 +1183,29 @@ function App() {
       if (res.success) {
           try {
               const imported = JSON.parse(res.data);
-              if (Array.isArray(imported)) {
-                  let count = 0;
-                  imported.forEach((conn: any) => {
-                      if (!connections.some(c => c.id === conn.id)) {
-                          addConnection(conn);
-                          count++;
-                      }
-                  });
-                  void message.success(`成功导入 ${count} 个连接`);
-              } else {
+              if (!Array.isArray(imported)) {
                   void message.error("文件格式错误：需要 JSON 数组");
+                  return;
               }
-          } catch (e) {
-              void message.error("解析 JSON 失败");
+
+              const normalizedItems = imported.map(toLegacySavedConnectionInput);
+              const backendApp = (window as any).go?.app?.App;
+
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  const importedViews = await backendApp.ImportLegacyConnections(normalizedItems);
+                  if (!Array.isArray(importedViews)) {
+                      throw new Error('导入失败：后端未返回连接列表');
+                  }
+                  replaceConnections(mergeSavedConnections(connections, importedViews));
+                  void message.success(`成功导入 ${importedViews.length} 个连接`);
+                  return;
+              }
+
+              const fallbackItems = normalizedItems as SavedConnection[];
+              replaceConnections(mergeSavedConnections(connections, fallbackItems));
+              void message.success(`成功导入 ${fallbackItems.length} 个连接`);
+          } catch (e: any) {
+              void message.error(e?.message || "解析 JSON 失败");
           }
       } else if (res.message !== "已取消") {
           void message.error("导入失败: " + res.message);
@@ -1191,7 +1217,7 @@ function App() {
           void message.warning("没有连接可导出");
           return;
       }
-      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
+      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases','iconType','iconColor'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
       } else if (res.message !== "已取消") {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Modal, Button, Input, Select, Form, Checkbox, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
 import {
@@ -18,6 +18,7 @@ import {
     PROVIDER_PRESET_GRID_STYLE,
     PROVIDER_PRESET_CARD_TITLE_STYLE,
 } from '../utils/aiSettingsPresetLayout';
+import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 
@@ -88,6 +89,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [builtinPrompts, setBuiltinPrompts] = useState<Record<string, string>>({});
     const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'prompts' | 'tools'>('providers');
+    const [clearProviderSecret, setClearProviderSecret] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
 
@@ -105,6 +107,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const watchedType = Form.useWatch('type', form);
     const watchedPresetKey = Form.useWatch('presetKey', form);
     const watchedApiFormat = Form.useWatch('apiFormat', form) || 'openai';
+    const watchedApiKeyInput = Form.useWatch('apiKey', form);
 
     const loadConfig = useCallback(async () => {
         try {
@@ -217,12 +220,18 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
-            
+            const secretDraft = resolveProviderSecretDraft({
+                hasSecret: editingProvider?.hasSecret,
+                apiKeyInput: values.apiKey,
+                clearSecret: clearProviderSecret,
+            });
             const payload = { 
                 ...editingProvider, 
                 ...values, 
                 ...resolvedTransport,
                 name: finalName,
+                apiKey: secretDraft.apiKey,
+                hasSecret: secretDraft.hasSecret,
                 model: finalModel,
                 models: resolvedModels,
                 baseUrl: finalBaseUrl,
@@ -230,7 +239,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
-            void messageApi.success('已保存'); setIsEditing(false); setEditingProvider(null); void loadConfig();
+            void messageApi.success('已保存'); setIsEditing(false); setEditingProvider(null); setClearProviderSecret(false); void loadConfig();
             window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
         } catch (e: any) {
             if (e?.errorFields) { /* antd form validation error, ignore */ }
@@ -287,10 +296,20 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
+            const secretDraft = resolveProviderSecretDraft({
+                hasSecret: editingProvider?.hasSecret,
+                apiKeyInput: values.apiKey,
+                clearSecret: clearProviderSecret,
+            });
+            if (secretDraft.mode === 'clear') {
+                throw new Error('测试连接前请填写新的 API Key，或取消清除已保存密钥');
+            }
             const res = await Service?.AITestProvider?.({
                 ...editingProvider,
                 ...values,
                 ...resolvedTransport,
+                apiKey: secretDraft.apiKey,
+                hasSecret: secretDraft.hasSecret,
                 baseUrl: finalBaseUrl,
                 model: finalModel,
                 models: resolvedModels,
@@ -401,7 +420,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             <div>
                 {/* 顶部返回 */}
                 <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Button size="small" onClick={() => { setIsEditing(false); setEditingProvider(null); }}
+                    <Button size="small" onClick={() => { setIsEditing(false); setEditingProvider(null); setClearProviderSecret(false); }}
                         style={{ borderRadius: 8 }}>← 返回</Button>
                     <span style={{ fontWeight: 700, fontSize: 16, color: overlayTheme.titleText }}>
                         {editingProvider?.id ? '编辑模型供应商' : '添加模型供应商'}
@@ -492,11 +511,25 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                         <div style={fieldLabelStyle}>
                             <KeyOutlined style={{ fontSize: 14 }} /> 认证 & 连接
                         </div>
-                        <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Key</span>} name="apiKey" rules={[{ required: true, message: '请输入 API Key' }]} style={{ marginBottom: 16 }}>
-                            <Input.Password placeholder="sk-... / 你的 API Key"
+                        <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Key</span>} name="apiKey" rules={[{ validator: (_, value) => { const apiKey = String(value || '').trim(); if (apiKey || clearProviderSecret || editingProvider?.hasSecret) { return Promise.resolve(); } return Promise.reject(new Error('请输入 API Key')); } }]} style={{ marginBottom: editingProvider?.hasSecret ? 8 : 16 }}>
+                            <Input.Password placeholder={editingProvider?.hasSecret ? '留空表示继续沿用已保存密钥' : 'sk-... / 你的 API Key'}
                                 size="middle"
                                 style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
                         </Form.Item>
+                        {editingProvider?.hasSecret && (
+                            <div style={{ marginBottom: 16, padding: '10px 12px', borderRadius: 10, border: `1px solid ${cardBorder}`, background: cardBg }}>
+                                <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, marginBottom: 8 }}>
+                                    当前已保存 API Key。留空表示继续沿用，输入新值表示替换。
+                                </div>
+                                <Checkbox
+                                    checked={clearProviderSecret}
+                                    disabled={String(watchedApiKeyInput || '').trim() !== ''}
+                                    onChange={(event) => setClearProviderSecret(event.target.checked)}
+                                >
+                                    清除已保存 API Key
+                                </Checkbox>
+                            </div>
+                        )}
 
                         {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
                             <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Endpoint (URL)</span>} name="baseUrl" rules={[{ required: true, message: '请输入有效的接口地址' }]} style={{ marginBottom: 0 }}>
@@ -765,3 +798,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 };
 
 export default AISettingsModal;
+
+
+
+

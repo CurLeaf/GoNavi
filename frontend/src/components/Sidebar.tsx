@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+﻿import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
 	import {
 	  DatabaseOutlined,
@@ -367,129 +367,25 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     });
   }, [connections, connectionTags]);
 
-  const buildDuplicateConnectionName = (rawName: string): string => {
-    const baseName = String(rawName || '').trim() || '连接';
-    const suffix = ' - 副本';
-    const usedNames = new Set(connections.map(conn => String(conn.name || '').trim()));
-    let candidate = `${baseName}${suffix}`;
-    let counter = 2;
-    while (usedNames.has(candidate)) {
-      candidate = `${baseName}${suffix} ${counter}`;
-      counter += 1;
-    }
-    return candidate;
-  };
+  const handleDuplicateConnection = async (conn: SavedConnection) => {
+    if (!conn?.id) return;
 
-  const cloneConnectionConfig = (config: SavedConnection['config']): SavedConnection['config'] => {
-    const raw: any = config || {};
-    let cloned: any = {};
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.DuplicateConnection !== 'function') {
+      message.error('复制连接失败：后端接口不可用');
+      return;
+    }
+
     try {
-      cloned = typeof structuredClone === 'function'
-        ? structuredClone(raw)
-        : JSON.parse(JSON.stringify(raw));
-    } catch {
-      cloned = { ...raw };
+      const duplicatedConnection = await backendApp.DuplicateConnection(conn.id);
+      if (!duplicatedConnection) {
+        throw new Error('复制连接失败：后端未返回结果');
+      }
+      addConnection(duplicatedConnection);
+      message.success(`已复制连接: ${duplicatedConnection.name}`);
+    } catch (error: any) {
+      message.error(error?.message || '复制连接失败');
     }
-
-    const readString = (...values: unknown[]): string => {
-      for (const value of values) {
-        if (typeof value === 'string') {
-          return value;
-        }
-      }
-      return '';
-    };
-
-    const readBool = (fallback: boolean, ...values: unknown[]): boolean => {
-      for (const value of values) {
-        if (typeof value === 'boolean') {
-          return value;
-        }
-      }
-      return fallback;
-    };
-
-    const readNumber = (fallback: number, ...values: unknown[]): number => {
-      for (const value of values) {
-        const num = Number(value);
-        if (Number.isFinite(num)) {
-          return num;
-        }
-      }
-      return fallback;
-    };
-
-    const rawSSH = (cloned.ssh ?? cloned.SSH ?? {}) as Record<string, unknown>;
-    const normalizedSSH = {
-      host: readString(rawSSH.host, rawSSH.Host, cloned.sshHost, cloned.SSHHost),
-      port: readNumber(22, rawSSH.port, rawSSH.Port, cloned.sshPort, cloned.SSHPort),
-      user: readString(rawSSH.user, rawSSH.User, cloned.sshUser, cloned.SSHUser),
-      password: readString(rawSSH.password, rawSSH.Password, cloned.sshPassword, cloned.SSHPassword),
-      keyPath: readString(rawSSH.keyPath, rawSSH.KeyPath, cloned.sshKeyPath, cloned.SSHKeyPath),
-    };
-    const hasSSHDetail = Boolean(
-      normalizedSSH.host
-      || normalizedSSH.user
-      || normalizedSSH.password
-      || normalizedSSH.keyPath
-    );
-
-    const rawProxy = (cloned.proxy ?? cloned.Proxy ?? {}) as Record<string, unknown>;
-    const proxyTypeRaw = readString(rawProxy.type, rawProxy.Type, cloned.proxyType, cloned.ProxyType).toLowerCase();
-    const proxyType: 'socks5' | 'http' = proxyTypeRaw === 'http' ? 'http' : 'socks5';
-    const normalizedProxy = {
-      type: proxyType,
-      host: readString(rawProxy.host, rawProxy.Host, cloned.proxyHost, cloned.ProxyHost),
-      port: readNumber(proxyType === 'http' ? 8080 : 1080, rawProxy.port, rawProxy.Port, cloned.proxyPort, cloned.ProxyPort),
-      user: readString(rawProxy.user, rawProxy.User, cloned.proxyUser, cloned.ProxyUser),
-      password: readString(rawProxy.password, rawProxy.Password, cloned.proxyPassword, cloned.ProxyPassword),
-    };
-    const hasProxyDetail = Boolean(normalizedProxy.host || normalizedProxy.user || normalizedProxy.password);
-    const rawHttpTunnel = (cloned.httpTunnel ?? cloned.HTTPTunnel ?? {}) as Record<string, unknown>;
-    const normalizedHttpTunnel = {
-      host: readString(rawHttpTunnel.host, rawHttpTunnel.Host, cloned.httpTunnelHost, cloned.HttpTunnelHost),
-      port: readNumber(8080, rawHttpTunnel.port, rawHttpTunnel.Port, cloned.httpTunnelPort, cloned.HttpTunnelPort),
-      user: readString(rawHttpTunnel.user, rawHttpTunnel.User, cloned.httpTunnelUser, cloned.HttpTunnelUser),
-      password: readString(rawHttpTunnel.password, rawHttpTunnel.Password, cloned.httpTunnelPassword, cloned.HttpTunnelPassword),
-    };
-    const hasHttpTunnelDetail = Boolean(normalizedHttpTunnel.host || normalizedHttpTunnel.user || normalizedHttpTunnel.password);
-    const normalizedUseHttpTunnel = readBool(hasHttpTunnelDetail, cloned.useHttpTunnel, cloned.UseHTTPTunnel);
-    const normalizedUseProxy = !normalizedUseHttpTunnel && readBool(hasProxyDetail, cloned.useProxy, cloned.UseProxy);
-
-    const rawHosts = Array.isArray(cloned.hosts)
-      ? cloned.hosts
-      : (Array.isArray(cloned.Hosts) ? cloned.Hosts : []);
-    const normalizedHosts = rawHosts
-      .map((entry: unknown) => String(entry || '').trim())
-      .filter((entry: string) => !!entry);
-
-    return {
-      ...(cloned as SavedConnection['config']),
-      useSSH: readBool(hasSSHDetail, cloned.useSSH, cloned.UseSSH),
-      ssh: normalizedSSH,
-      useProxy: normalizedUseProxy,
-      proxy: normalizedProxy,
-      useHttpTunnel: normalizedUseHttpTunnel,
-      httpTunnel: normalizedHttpTunnel,
-      hosts: normalizedHosts,
-      timeout: readNumber(30, cloned.timeout, cloned.Timeout),
-    };
-  };
-
-  const handleDuplicateConnection = (conn: SavedConnection) => {
-    if (!conn) return;
-
-    const duplicatedConnection: SavedConnection = {
-      ...conn,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: buildDuplicateConnectionName(conn.name),
-      config: cloneConnectionConfig(conn.config),
-      includeDatabases: conn.includeDatabases ? [...conn.includeDatabases] : undefined,
-      includeRedisDatabases: conn.includeRedisDatabases ? [...conn.includeRedisDatabases] : undefined,
-    };
-
-    addConnection(duplicatedConnection);
-    message.success(`已复制连接: ${duplicatedConnection.name}`);
   };
   const updateTreeData = (list: TreeNode[], key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
     return list.map(node => {
@@ -3163,9 +3059,22 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         Modal.confirm({
                             title: '确认删除',
                             content: `确定要删除连接 "${node.title}" 吗？`,
-                            onOk: () => {
-                                closeTabsByConnection(String(node.key));
-                                removeConnection(node.key);
+                            onOk: async () => {
+                                const connId = String(node.key);
+                                const backendApp = (window as any).go?.app?.App;
+                                if (typeof backendApp?.DeleteConnection !== 'function') {
+                                    message.error('删除连接失败：后端接口不可用');
+                                    throw new Error('DeleteConnection unavailable');
+                                }
+                                try {
+                                    await backendApp.DeleteConnection(connId);
+                                    closeTabsByConnection(connId);
+                                    removeConnection(connId);
+                                    message.success('已删除连接');
+                                } catch (error: any) {
+                                    message.error(error?.message || '删除连接失败');
+                                    throw error;
+                                }
                             }
                         });
                     }
@@ -3300,9 +3209,22 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                      Modal.confirm({
                          title: '确认删除',
                          content: `确定要删除连接 "${node.title}" 吗？`,
-                         onOk: () => {
-                             closeTabsByConnection(String(node.key));
-                             removeConnection(node.key);
+                         onOk: async () => {
+                             const connId = String(node.key);
+                             const backendApp = (window as any).go?.app?.App;
+                             if (typeof backendApp?.DeleteConnection !== 'function') {
+                                 message.error('删除连接失败：后端接口不可用');
+                                 throw new Error('DeleteConnection unavailable');
+                             }
+                             try {
+                                 await backendApp.DeleteConnection(connId);
+                                 closeTabsByConnection(connId);
+                                 removeConnection(connId);
+                                 message.success('已删除连接');
+                             } catch (error: any) {
+                                 message.error(error?.message || '删除连接失败');
+                                 throw error;
+                             }
                          }
                      });
                  }

@@ -1,15 +1,31 @@
 package connection
 
 type SavedConnectionInput struct {
-	ID     string           `json:"id,omitempty"`
-	Name   string           `json:"name"`
-	Config ConnectionConfig `json:"config"`
+	ID                        string           `json:"id,omitempty"`
+	Name                      string           `json:"name"`
+	Config                    ConnectionConfig `json:"config"`
+	IncludeDatabases          []string         `json:"includeDatabases,omitempty"`
+	IncludeRedisDatabases     []int            `json:"includeRedisDatabases,omitempty"`
+	IconType                  string           `json:"iconType,omitempty"`
+	IconColor                 string           `json:"iconColor,omitempty"`
+	ClearPrimaryPassword      bool             `json:"clearPrimaryPassword,omitempty"`
+	ClearSSHPassword          bool             `json:"clearSSHPassword,omitempty"`
+	ClearProxyPassword        bool             `json:"clearProxyPassword,omitempty"`
+	ClearHTTPTunnelPassword   bool             `json:"clearHttpTunnelPassword,omitempty"`
+	ClearMySQLReplicaPassword bool             `json:"clearMySQLReplicaPassword,omitempty"`
+	ClearMongoReplicaPassword bool             `json:"clearMongoReplicaPassword,omitempty"`
+	ClearOpaqueURI            bool             `json:"clearOpaqueURI,omitempty"`
+	ClearOpaqueDSN            bool             `json:"clearOpaqueDSN,omitempty"`
 }
 
 type SavedConnectionView struct {
 	ID                      string           `json:"id"`
 	Name                    string           `json:"name"`
 	Config                  ConnectionConfig `json:"config"`
+	IncludeDatabases        []string         `json:"includeDatabases,omitempty"`
+	IncludeRedisDatabases   []int            `json:"includeRedisDatabases,omitempty"`
+	IconType                string           `json:"iconType,omitempty"`
+	IconColor               string           `json:"iconColor,omitempty"`
 	SecretRef               string           `json:"secretRef,omitempty"`
 	HasPrimaryPassword      bool             `json:"hasPrimaryPassword,omitempty"`
 	HasSSHPassword          bool             `json:"hasSSHPassword,omitempty"`

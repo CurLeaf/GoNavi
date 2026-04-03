@@ -98,6 +98,10 @@ export function DataSyncPreview(arg1, arg2, arg3) {
   return window['go']['app']['App']['DataSyncPreview'](arg1, arg2, arg3);
 }
 
+export function DeleteConnection(arg1) {
+  return window['go']['app']['App']['DeleteConnection'](arg1);
+}
+
 export function DownloadDriverPackage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DownloadDriverPackage'](arg1, arg2, arg3, arg4);
 }
@@ -120,6 +124,10 @@ export function DropTable(arg1, arg2, arg3) {
 
 export function DropView(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropView'](arg1, arg2, arg3);
+}
+
+export function DuplicateConnection(arg1) {
+  return window['go']['app']['App']['DuplicateConnection'](arg1);
 }
 
 export function ExecuteSQLFile(arg1, arg2, arg3, arg4) {
@@ -174,6 +182,10 @@ export function GetGlobalProxyConfig() {
   return window['go']['app']['App']['GetGlobalProxyConfig']();
 }
 
+export function GetSavedConnections() {
+  return window['go']['app']['App']['GetSavedConnections']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
@@ -184,6 +196,14 @@ export function ImportData(arg1, arg2, arg3) {
 
 export function ImportDataWithProgress(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ImportDataWithProgress'](arg1, arg2, arg3, arg4);
+}
+
+export function ImportLegacyConnections(arg1) {
+  return window['go']['app']['App']['ImportLegacyConnections'](arg1);
+}
+
+export function ImportLegacyGlobalProxy(arg1) {
+  return window['go']['app']['App']['ImportLegacyGlobalProxy'](arg1);
 }
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3) {
@@ -352,6 +372,14 @@ export function ResolveDriverPackageDownloadURL(arg1, arg2) {
 
 export function ResolveDriverRepositoryURL(arg1) {
   return window['go']['app']['App']['ResolveDriverRepositoryURL'](arg1);
+}
+
+export function SaveConnection(arg1) {
+  return window['go']['app']['App']['SaveConnection'](arg1);
+}
+
+export function SaveGlobalProxy(arg1) {
+  return window['go']['app']['App']['SaveGlobalProxy'](arg1);
 }
 
 export function SelectDatabaseFile(arg1, arg2) {

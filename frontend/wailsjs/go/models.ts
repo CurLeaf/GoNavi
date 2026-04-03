@@ -78,6 +78,8 @@ export namespace ai {
 	    type: string;
 	    name: string;
 	    apiKey: string;
+	    secretRef?: string;
+	    hasSecret?: boolean;
 	    baseUrl: string;
 	    model: string;
 	    models?: string[];
@@ -96,6 +98,8 @@ export namespace ai {
 	        this.type = source["type"];
 	        this.name = source["name"];
 	        this.apiKey = source["apiKey"];
+	        this.secretRef = source["secretRef"];
+	        this.hasSecret = source["hasSecret"];
 	        this.baseUrl = source["baseUrl"];
 	        this.model = source["model"];
 	        this.models = source["models"];
@@ -284,6 +288,7 @@ export namespace connection {
 	    }
 	}
 	export class ConnectionConfig {
+	    id?: string;
 	    type: string;
 	    host: string;
 	    port: number;
@@ -324,6 +329,7 @@ export namespace connection {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
 	        this.type = source["type"];
 	        this.host = source["host"];
 	        this.port = source["port"];
@@ -377,6 +383,32 @@ export namespace connection {
 		    return a;
 		}
 	}
+	export class GlobalProxyView {
+	    enabled: boolean;
+	    type: string;
+	    host: string;
+	    port: number;
+	    user?: string;
+	    password?: string;
+	    hasPassword?: boolean;
+	    secretRef?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GlobalProxyView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.type = source["type"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.user = source["user"];
+	        this.password = source["password"];
+	        this.hasPassword = source["hasPassword"];
+	        this.secretRef = source["secretRef"];
+	    }
+	}
 	
 	
 	export class QueryResult {
@@ -400,6 +432,146 @@ export namespace connection {
 	    }
 	}
 	
+	export class SaveGlobalProxyInput {
+	    enabled: boolean;
+	    type: string;
+	    host: string;
+	    port: number;
+	    user?: string;
+	    password?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveGlobalProxyInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.type = source["type"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.user = source["user"];
+	        this.password = source["password"];
+	    }
+	}
+	export class SavedConnectionInput {
+	    id?: string;
+	    name: string;
+	    config: ConnectionConfig;
+	    includeDatabases?: string[];
+	    includeRedisDatabases?: number[];
+	    iconType?: string;
+	    iconColor?: string;
+	    clearPrimaryPassword?: boolean;
+	    clearSSHPassword?: boolean;
+	    clearProxyPassword?: boolean;
+	    clearHttpTunnelPassword?: boolean;
+	    clearMySQLReplicaPassword?: boolean;
+	    clearMongoReplicaPassword?: boolean;
+	    clearOpaqueURI?: boolean;
+	    clearOpaqueDSN?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedConnectionInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.config = this.convertValues(source["config"], ConnectionConfig);
+	        this.includeDatabases = source["includeDatabases"];
+	        this.includeRedisDatabases = source["includeRedisDatabases"];
+	        this.iconType = source["iconType"];
+	        this.iconColor = source["iconColor"];
+	        this.clearPrimaryPassword = source["clearPrimaryPassword"];
+	        this.clearSSHPassword = source["clearSSHPassword"];
+	        this.clearProxyPassword = source["clearProxyPassword"];
+	        this.clearHttpTunnelPassword = source["clearHttpTunnelPassword"];
+	        this.clearMySQLReplicaPassword = source["clearMySQLReplicaPassword"];
+	        this.clearMongoReplicaPassword = source["clearMongoReplicaPassword"];
+	        this.clearOpaqueURI = source["clearOpaqueURI"];
+	        this.clearOpaqueDSN = source["clearOpaqueDSN"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SavedConnectionView {
+	    id: string;
+	    name: string;
+	    config: ConnectionConfig;
+	    includeDatabases?: string[];
+	    includeRedisDatabases?: number[];
+	    iconType?: string;
+	    iconColor?: string;
+	    secretRef?: string;
+	    hasPrimaryPassword?: boolean;
+	    hasSSHPassword?: boolean;
+	    hasProxyPassword?: boolean;
+	    hasHttpTunnelPassword?: boolean;
+	    hasMySQLReplicaPassword?: boolean;
+	    hasMongoReplicaPassword?: boolean;
+	    hasOpaqueURI?: boolean;
+	    hasOpaqueDSN?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedConnectionView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.config = this.convertValues(source["config"], ConnectionConfig);
+	        this.includeDatabases = source["includeDatabases"];
+	        this.includeRedisDatabases = source["includeRedisDatabases"];
+	        this.iconType = source["iconType"];
+	        this.iconColor = source["iconColor"];
+	        this.secretRef = source["secretRef"];
+	        this.hasPrimaryPassword = source["hasPrimaryPassword"];
+	        this.hasSSHPassword = source["hasSSHPassword"];
+	        this.hasProxyPassword = source["hasProxyPassword"];
+	        this.hasHttpTunnelPassword = source["hasHttpTunnelPassword"];
+	        this.hasMySQLReplicaPassword = source["hasMySQLReplicaPassword"];
+	        this.hasMongoReplicaPassword = source["hasMongoReplicaPassword"];
+	        this.hasOpaqueURI = source["hasOpaqueURI"];
+	        this.hasOpaqueDSN = source["hasOpaqueDSN"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 

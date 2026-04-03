@@ -217,6 +217,8 @@ export interface AIProviderConfig {
   type: AIProviderType;
   name: string;
   apiKey: string;
+  secretRef?: string;
+  hasSecret?: boolean;
   baseUrl: string;
   model: string;
   models?: string[];

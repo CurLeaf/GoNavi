@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 // import './index.css' // Optional global styles
@@ -17,15 +17,125 @@ import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
 loader.config({ monaco })
 
+const cloneBrowserMockValue = (value: any) => {
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return value;
+    }
+};
+
+const resolveBrowserMockSecretFlag = (nextValue: unknown, clearFlag: boolean, existingFlag?: boolean) => {
+    if (String(nextValue ?? '') !== '') return true;
+    if (clearFlag) return false;
+    return !!existingFlag;
+};
+
+const buildBrowserMockDuplicateName = (rawName: string, items: any[]): string => {
+    const baseName = String(rawName || '').trim() || '连接';
+    const suffix = ' - 副本';
+    const usedNames = new Set(items.map((item) => String(item?.name || '').trim()));
+    let candidate = `${baseName}${suffix}`;
+    let counter = 2;
+    while (usedNames.has(candidate)) {
+        candidate = `${baseName}${suffix} ${counter}`;
+        counter += 1;
+    }
+    return candidate;
+};
+
 if (typeof window !== 'undefined' && !(window as any).go) {
+    const mockConnections: any[] = [];
+    let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
+
+    const upsertMockConnection = (view: any) => {
+        const index = mockConnections.findIndex((item) => item.id === view.id);
+        if (index >= 0) {
+            mockConnections[index] = view;
+            return;
+        }
+        mockConnections.push(view);
+    };
+
+    const saveMockConnection = (input: any) => {
+        const existing = mockConnections.find((item) => item.id === input?.id);
+        const config = (input?.config && typeof input.config === 'object') ? input.config : {};
+        const ssh = (config.ssh && typeof config.ssh === 'object') ? config.ssh : {};
+        const proxy = (config.proxy && typeof config.proxy === 'object') ? config.proxy : {};
+        const httpTunnel = (config.httpTunnel && typeof config.httpTunnel === 'object') ? config.httpTunnel : {};
+        const nextId = String(input?.id || existing?.id || `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const view = {
+            id: nextId,
+            name: String(input?.name || existing?.name || '未命名连接'),
+            config: {
+                ...config,
+                id: nextId,
+                password: '',
+                ssh: { ...ssh, password: '' },
+                proxy: { ...proxy, password: '' },
+                httpTunnel: { ...httpTunnel, password: '' },
+                uri: '',
+                dsn: '',
+                mysqlReplicaPassword: '',
+                mongoReplicaPassword: '',
+            },
+            includeDatabases: Array.isArray(input?.includeDatabases) ? [...input.includeDatabases] : existing?.includeDatabases,
+            includeRedisDatabases: Array.isArray(input?.includeRedisDatabases) ? [...input.includeRedisDatabases] : existing?.includeRedisDatabases,
+            iconType: typeof input?.iconType === 'string' ? input.iconType : (existing?.iconType || ''),
+            iconColor: typeof input?.iconColor === 'string' ? input.iconColor : (existing?.iconColor || ''),
+            hasPrimaryPassword: resolveBrowserMockSecretFlag(config.password, !!input?.clearPrimaryPassword, existing?.hasPrimaryPassword),
+            hasSSHPassword: resolveBrowserMockSecretFlag(ssh.password, !!input?.clearSSHPassword, existing?.hasSSHPassword),
+            hasProxyPassword: resolveBrowserMockSecretFlag(proxy.password, !!input?.clearProxyPassword, existing?.hasProxyPassword),
+            hasHttpTunnelPassword: resolveBrowserMockSecretFlag(httpTunnel.password, !!input?.clearHttpTunnelPassword, existing?.hasHttpTunnelPassword),
+            hasMySQLReplicaPassword: resolveBrowserMockSecretFlag(config.mysqlReplicaPassword, !!input?.clearMySQLReplicaPassword, existing?.hasMySQLReplicaPassword),
+            hasMongoReplicaPassword: resolveBrowserMockSecretFlag(config.mongoReplicaPassword, !!input?.clearMongoReplicaPassword, existing?.hasMongoReplicaPassword),
+            hasOpaqueURI: resolveBrowserMockSecretFlag(config.uri, !!input?.clearOpaqueURI, existing?.hasOpaqueURI),
+            hasOpaqueDSN: resolveBrowserMockSecretFlag(config.dsn, !!input?.clearOpaqueDSN, existing?.hasOpaqueDSN),
+        };
+        upsertMockConnection(view);
+        return cloneBrowserMockValue(view);
+    };
+
+    const saveMockGlobalProxy = (input: any) => {
+        const nextPassword = String(input?.password ?? '');
+        mockGlobalProxy = {
+            ...mockGlobalProxy,
+            ...input,
+            password: '',
+            hasPassword: nextPassword !== '' ? true : !!mockGlobalProxy.hasPassword,
+        };
+        return cloneBrowserMockValue(mockGlobalProxy);
+    };
+
     (window as any).go = {
         app: {
             App: {
                 CheckUpdate: async () => ({ success: false }),
                 DownloadUpdate: async () => ({ success: false }),
-                GetSavedConnections: async () => [],
-                SaveConnection: async () => null,
-                DeleteConnection: async () => null,
+                GetSavedConnections: async () => cloneBrowserMockValue(mockConnections),
+                SaveConnection: async (input: any) => saveMockConnection(input),
+                DeleteConnection: async (id: string) => {
+                    const index = mockConnections.findIndex((item) => item.id === id);
+                    if (index >= 0) {
+                        mockConnections.splice(index, 1);
+                    }
+                    return null;
+                },
+                DuplicateConnection: async (id: string) => {
+                    const existing = mockConnections.find((item) => item.id === id);
+                    if (!existing) return null;
+                    const duplicated = cloneBrowserMockValue({
+                        ...existing,
+                        id: `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        name: buildBrowserMockDuplicateName(existing.name, mockConnections),
+                        config: cloneBrowserMockValue(existing.config),
+                        includeDatabases: Array.isArray(existing.includeDatabases) ? [...existing.includeDatabases] : undefined,
+                        includeRedisDatabases: Array.isArray(existing.includeRedisDatabases) ? [...existing.includeRedisDatabases] : undefined,
+                    });
+                    mockConnections.push(duplicated);
+                    return cloneBrowserMockValue(duplicated);
+                },
+                ImportLegacyConnections: async (items: any[]) => items.map((item) => saveMockConnection(item)),
                 OpenConnection: async () => null,
                 CloseConnection: async () => null,
                 GetDatabases: async () => [],
@@ -42,11 +152,13 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false }),
                 ExportData: async () => ({ success: false }),
+                GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
+                SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
+                ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
             }
         }
     };
 }
-
 // 全局注册透明主题，避免每个 Editor 组件 beforeMount 中重复定义
 monaco.editor.defineTheme('transparent-dark', {
   base: 'vs-dark', inherit: true, rules: [],

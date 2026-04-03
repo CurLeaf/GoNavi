@@ -52,6 +52,8 @@ export function DataSyncAnalyze(arg1:sync.SyncConfig):Promise<connection.QueryRe
 
 export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Promise<connection.QueryResult>;
 
+export function DeleteConnection(arg1:string):Promise<void>;
+
 export function DownloadDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function DownloadUpdate():Promise<connection.QueryResult>;
@@ -63,6 +65,8 @@ export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DuplicateConnection(arg1:string):Promise<connection.SavedConnectionView>;
 
 export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -90,11 +94,17 @@ export function GetDriverVersionPackageSize(arg1:string,arg2:string):Promise<con
 
 export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
+export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;
+
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
+
+export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
@@ -179,6 +189,10 @@ export function ResolveDriverDownloadDirectory(arg1:string):Promise<connection.Q
 export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
+
+export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
+
+export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
 export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 

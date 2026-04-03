@@ -95,6 +95,53 @@ func mergeConnectionSecretBundles(base, overlay connectionSecretBundle) connecti
 	return merged
 }
 
+func applyConnectionSecretClears(bundle connectionSecretBundle, input connection.SavedConnectionInput) connectionSecretBundle {
+	cleared := bundle
+	if input.ClearPrimaryPassword {
+		cleared.Password = ""
+	}
+	if input.ClearSSHPassword {
+		cleared.SSHPassword = ""
+	}
+	if input.ClearProxyPassword {
+		cleared.ProxyPassword = ""
+	}
+	if input.ClearHTTPTunnelPassword {
+		cleared.HTTPTunnelPassword = ""
+	}
+	if input.ClearMySQLReplicaPassword {
+		cleared.MySQLReplicaPassword = ""
+	}
+	if input.ClearMongoReplicaPassword {
+		cleared.MongoReplicaPassword = ""
+	}
+	if input.ClearOpaqueURI {
+		cleared.OpaqueURI = ""
+	}
+	if input.ClearOpaqueDSN {
+		cleared.OpaqueDSN = ""
+	}
+	return cleared
+}
+
+func cloneStringSlice(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make([]string, len(input))
+	copy(cloned, input)
+	return cloned
+}
+
+func cloneIntSlice(input []int) []int {
+	if len(input) == 0 {
+		return nil
+	}
+	cloned := make([]int, len(input))
+	copy(cloned, input)
+	return cloned
+}
+
 func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.SavedConnectionView, connectionSecretBundle) {
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
@@ -143,6 +190,10 @@ func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.S
 		ID:                      id,
 		Name:                    strings.TrimSpace(input.Name),
 		Config:                  meta,
+		IncludeDatabases:        cloneStringSlice(input.IncludeDatabases),
+		IncludeRedisDatabases:   cloneIntSlice(input.IncludeRedisDatabases),
+		IconType:                strings.TrimSpace(input.IconType),
+		IconColor:               strings.TrimSpace(input.IconColor),
 		HasPrimaryPassword:      strings.TrimSpace(bundle.Password) != "",
 		HasSSHPassword:          strings.TrimSpace(bundle.SSHPassword) != "",
 		HasProxyPassword:        strings.TrimSpace(bundle.ProxyPassword) != "",
@@ -223,6 +274,7 @@ func (r *savedConnectionRepository) Save(input connection.SavedConnectionInput) 
 		mergedBundle = mergeConnectionSecretBundles(existingBundle, bundle)
 		view.SecretRef = existing.SecretRef
 	}
+	mergedBundle = applyConnectionSecretClears(mergedBundle, input)
 
 	if mergedBundle.hasAny() {
 		ref, storeErr := r.storeSecretBundle(view.ID, view.SecretRef, mergedBundle)
@@ -332,6 +384,27 @@ func applyConnectionBundleFlags(view *connection.SavedConnectionView, bundle con
 	view.HasOpaqueDSN = strings.TrimSpace(bundle.OpaqueDSN) != ""
 }
 
+func buildDuplicateConnectionName(baseName string, existing []connection.SavedConnectionView) string {
+	trimmedBaseName := strings.TrimSpace(baseName)
+	if trimmedBaseName == "" {
+		trimmedBaseName = "连接"
+	}
+	suffix := " - 副本"
+	usedNames := make(map[string]struct{}, len(existing))
+	for _, item := range existing {
+		usedNames[strings.TrimSpace(item.Name)] = struct{}{}
+	}
+	candidate := trimmedBaseName + suffix
+	counter := 2
+	for {
+		if _, exists := usedNames[candidate]; !exists {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s%s %d", trimmedBaseName, suffix, counter)
+		counter++
+	}
+}
+
 func (r *savedConnectionRepository) List() ([]connection.SavedConnectionView, error) {
 	return r.load()
 }
@@ -357,15 +430,27 @@ func (r *savedConnectionRepository) Delete(id string) error {
 }
 
 func (r *savedConnectionRepository) Duplicate(id string) (connection.SavedConnectionView, error) {
-	original, err := r.Find(id)
+	connections, err := r.load()
 	if err != nil {
 		return connection.SavedConnectionView{}, err
 	}
 
+	index := -1
+	for i, item := range connections {
+		if item.ID == strings.TrimSpace(id) {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return connection.SavedConnectionView{}, fmt.Errorf("saved connection not found: %s", id)
+	}
+
+	original := connections[index]
 	duplicate := original
 	duplicate.ID = "conn-" + uuid.New().String()[:8]
 	duplicate.Config.ID = duplicate.ID
-	duplicate.Name = original.Name + " Copy"
+	duplicate.Name = buildDuplicateConnectionName(original.Name, connections)
 
 	bundle, err := r.loadSecretBundle(original)
 	if err != nil {
@@ -383,10 +468,6 @@ func (r *savedConnectionRepository) Duplicate(id string) (connection.SavedConnec
 		applyConnectionBundleFlags(&duplicate, connectionSecretBundle{})
 	}
 
-	connections, err := r.load()
-	if err != nil {
-		return connection.SavedConnectionView{}, err
-	}
 	connections = append(connections, duplicate)
 	if err := r.saveAll(connections); err != nil {
 		return connection.SavedConnectionView{}, err
