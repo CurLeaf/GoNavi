@@ -14,6 +14,7 @@ import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import type { AIComposerNotice } from '../utils/aiComposerNotice';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     buildMissingModelNotice,
     buildMissingProviderNotice,
@@ -260,7 +261,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     const conn = useStore.getState().connections.find(c => c.id === connectionId);
                     if (conn) {
                         import('../../wailsjs/go/app/App').then(({ DBShowCreateTable }) => {
-                            DBShowCreateTable(conn.config as any, dbName, tableName).then(res => {
+                            DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, dbName, tableName).then(res => {
                                 if (res.success && res.data) {
                                     let createSql = '';
                                     if (typeof res.data === 'string') createSql = res.data;
@@ -834,7 +835,7 @@ SELECT * FROM users WHERE status = 1;
                         const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
                         if (conn) {
                             try {
-                                const dbRes = await DBGetDatabases(conn.config as any);
+                                const dbRes = await DBGetDatabases(buildRpcConnectionConfig(conn.config) as any);
                                 if (dbRes?.success && Array.isArray(dbRes.data)) {
                                     let dNames = dbRes.data.map((r: any) => r.Database || r.database || Object.values(r)[0]);
                                     if (dNames.length > 50) dNames = [...dNames.slice(0, 50), '...(截断)'];
@@ -855,7 +856,7 @@ SELECT * FROM users WHERE status = 1;
                             try {
                                 const rawDbName = args.dbName || args.database;
                                 const safeDbName = rawDbName ? String(rawDbName).trim() : '';
-                                const tbRes = await DBGetTables(conn.config as any, safeDbName);
+                                const tbRes = await DBGetTables(buildRpcConnectionConfig(conn.config) as any, safeDbName);
                                 if (tbRes?.success && Array.isArray(tbRes.data)) {
                                     let tNames = tbRes.data.map((r: any) => r.Table || r.table || Object.values(r)[0] as string);
                                     if (tNames.length > 150) tNames = [...tNames.slice(0, 150), '...(截断)'];
@@ -881,7 +882,7 @@ SELECT * FROM users WHERE status = 1;
                                 const safeDbName = args.dbName ? String(args.dbName).trim() : '';
                                 const safeTable = args.tableName ? String(args.tableName).trim() : '';
                                 const { DBGetColumns } = await import('../../wailsjs/go/app/App');
-                                const colRes = await DBGetColumns(conn.config as any, safeDbName, safeTable);
+                                const colRes = await DBGetColumns(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
                                 if (colRes?.success && Array.isArray(colRes.data)) {
                                     // 只保留关键字段信息，减少 token 占用
                                     const cols = colRes.data.map((c: any) => {
@@ -912,7 +913,7 @@ SELECT * FROM users WHERE status = 1;
                                 const safeDbName = args.dbName ? String(args.dbName).trim() : '';
                                 const safeTable = args.tableName ? String(args.tableName).trim() : '';
                                 const { DBShowCreateTable } = await import('../../wailsjs/go/app/App');
-                                const ddlRes = await DBShowCreateTable(conn.config as any, safeDbName, safeTable);
+                                const ddlRes = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
                                 if (ddlRes?.success) {
                                     resStr = typeof ddlRes.data === 'string' ? ddlRes.data : JSON.stringify(ddlRes.data);
                                     success = true;
@@ -946,7 +947,7 @@ SELECT * FROM users WHERE status = 1;
                                 const finalSql = (isReadQuery && !sqlTrimmed.toLowerCase().includes('limit'))
                                     ? sqlTrimmed + ' LIMIT 50'
                                     : sqlTrimmed;
-                                const qRes = await DBQuery(conn.config as any, safeDbName, finalSql);
+                                const qRes = await DBQuery(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeSql + (safeSql.toLowerCase().includes('limit') ? '' : ' LIMIT 50'));
                                 if (qRes?.success) {
                                     const rows = Array.isArray(qRes.data) ? qRes.data : [];
                                     const limitedRows = rows.slice(0, 50);
@@ -1306,7 +1307,8 @@ SELECT * FROM users WHERE status = 1;
     const handleDeleteMessage = useCallback((id: string) => deleteAIChatMessage(sid, id), [sid, deleteAIChatMessage]);
     const activeConnectionConfig = useMemo(() => {
         if (!inferredConnectionId) return undefined;
-        return connections.find(c => c.id === inferredConnectionId)?.config;
+        const connection = connections.find(c => c.id === inferredConnectionId);
+        return connection ? buildRpcConnectionConfig(connection.config) : undefined;
     }, [inferredConnectionId, connections]);
     const contextUsageChars = useMemo(() =>
         messages.reduce((sum, m) => sum + (m.content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0),

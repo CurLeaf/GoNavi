@@ -6,6 +6,7 @@ import { DBGetDatabases, DBGetTables, DataSync, DataSyncAnalyze, DataSyncPreview
 import { SavedConnection } from '../types';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
 const { Title, Text } = Typography;
@@ -236,14 +237,11 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   const logBoxRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
 
-  const normalizeConnConfig = (conn: SavedConnection, database?: string) => ({
-      ...conn.config,
-      port: Number((conn.config as any).port),
-      password: conn.config.password || "",
-      useSSH: conn.config.useSSH || false,
-      ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" },
-      database: typeof database === 'string' ? database : (conn.config.database || ""),
-  });
+  const normalizeConnConfig = (conn: SavedConnection, database?: string) => (
+      buildRpcConnectionConfig(conn.config, {
+          database: typeof database === 'string' ? database : (conn.config.database || ''),
+      })
+  );
 
   useEffect(() => {
       if (!open) return;
@@ -542,22 +540,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       });
       
       const config = {
-          sourceConfig: {
-              ...sConn.config,
-              port: Number((sConn.config as any).port),
-              password: sConn.config.password || "",
-              useSSH: sConn.config.useSSH || false,
-              ssh: sConn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" },
-              database: sourceDb,
-          },
-          targetConfig: {
-              ...tConn.config,
-              port: Number((tConn.config as any).port),
-              password: tConn.config.password || "",
-              useSSH: tConn.config.useSSH || false,
-              ssh: tConn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" },
-              database: targetDb,
-          },
+          sourceConfig: normalizeConnConfig(sConn, sourceDb),
+          targetConfig: normalizeConnConfig(tConn, targetDb),
           tables: selectedTables,
           content: syncContent,
           mode: syncMode,

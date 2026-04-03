@@ -32,6 +32,7 @@ import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
@@ -1357,7 +1358,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
 
       const seq = ++columnMetaSeqRef.current;
-      DBGetColumns(config as any, normalizedDbName, normalizedTableName)
+      DBGetColumns(buildRpcConnectionConfig(config) as any, normalizedDbName, normalizedTableName)
           .then((res) => {
               if (seq !== columnMetaSeqRef.current) return;
               if (!res.success || !Array.isArray(res.data)) {
@@ -3500,7 +3501,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
       
       const startTime = Date.now();
-      const res = await ApplyChanges(config as any, dbName || '', tableName, { inserts, updates, deletes } as any);
+      const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, { inserts, updates, deletes } as any);
       const duration = Date.now() - startTime;
       
       // Construct a pseudo-SQL representation for the log
@@ -3618,7 +3619,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!config) return;
       const hide = message.loading(`正在导出...`, 0);
       try {
-          const res = await ExportQuery(config as any, dbName || '', sql, defaultName || 'export', format);
+          const res = await ExportQuery(buildRpcConnectionConfig(config) as any, dbName || '', sql, defaultName || 'export', format);
           if (res.success) {
               void message.success("导出成功");
           } else if (res.message !== "已取消") {
@@ -3736,7 +3737,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!config) return;
           const hide = message.loading(`正在导出全部数据...`, 0);
           try {
-              const res = await ExportTable(config as any, dbName || '', tableName, format);
+              const res = await ExportTable(buildRpcConnectionConfig(config) as any, dbName || '', tableName, format);
               if (res.success) {
                   void message.success("导出成功");
               } else if (res.message !== "已取消") {
@@ -3811,7 +3812,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const config = buildConnConfig();
       if (!config) return;
 
-      const res = await ImportData(config as any, dbName || '', tableName);
+      const res = await ImportData(buildRpcConnectionConfig(config) as any, dbName || '', tableName);
       if (res.success && res.data && res.data.filePath) {
           setImportFilePath(res.data.filePath);
           setImportPreviewVisible(true);

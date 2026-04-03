@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import { useStore } from '../store';
 import { SavedConnection } from '../types';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { RedisGetServerInfo } from '../../wailsjs/go/app/App';
 
 const { Title, Text } = Typography;
@@ -61,7 +62,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
     if (!connection) return;
 
     try {
-      const config = { ...connection.config, redisDB } as any;
+      const config = buildRpcConnectionConfig(connection.config, { redisDB });
       const res = await RedisGetServerInfo(config);
       
       if (!mountedRef.current) return;

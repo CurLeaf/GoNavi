@@ -4,6 +4,7 @@ import { Spin, Alert } from 'antd';
 import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface TriggerViewerProps {
     tab: TabData;
@@ -100,7 +101,7 @@ LIMIT 1`];
             const sql = String(query || '').trim();
             if (!sql) continue;
             try {
-                const result = await DBQuery(config as any, dbName, sql);
+                const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, sql);
                 if (!result.success || !Array.isArray(result.data)) {
                     lastMessage = result.message || lastMessage;
                     continue;
@@ -126,7 +127,7 @@ LIMIT 1`];
         ];
         for (const query of candidates) {
             try {
-                const result = await DBQuery(config as any, dbName, query);
+                const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
                 if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
                     continue;
                 }

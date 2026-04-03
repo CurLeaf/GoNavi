@@ -42,6 +42,7 @@ import { getDbIcon } from './DatabaseIcons';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import FindInDatabaseModal from './FindInDatabaseModal';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 const { Search } = Input;
 
@@ -527,7 +528,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (SIDEBAR_SCHEMA_DB_TYPES.has(dbType)) return true;
       if (dbType !== 'custom') return false;
 
-      const customDriver = String((conn?.config as any)?.driver || '').trim().toLowerCase();
+      const customDriver = String(conn?.config?.driver || '').trim().toLowerCase();
       return SIDEBAR_SCHEMA_CUSTOM_DRIVERS.has(customDriver);
   };
 
@@ -543,7 +544,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const getMetadataDialect = (conn: SavedConnection | undefined): string => {
       const type = String(conn?.config?.type || '').trim().toLowerCase();
       if (type === 'custom') {
-          const driver = String((conn?.config as any)?.driver || '').trim().toLowerCase();
+          const driver = String(conn?.config?.driver || '').trim().toLowerCase();
           if (driver === 'diros' || driver === 'doris') return 'mysql';
           return driver;
       }
@@ -569,7 +570,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const type = String(conn?.config?.type || '').trim().toLowerCase();
       if (type === 'sphinx') return true;
       if (type !== 'custom') return false;
-      const driver = String((conn?.config as any)?.driver || '').trim().toLowerCase();
+      const driver = String(conn?.config?.driver || '').trim().toLowerCase();
       return driver === 'sphinx' || driver === 'sphinxql';
   };
 
@@ -857,7 +858,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
       for (const spec of normalizedSpecs) {
           try {
-              const result = await DBQuery(config as any, dbName, spec.sql);
+              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, spec.sql);
               if (!result.success || !Array.isArray(result.data)) {
                   continue;
               }
@@ -988,7 +989,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           // Handle Redis connections differently
           if (conn.config.type === 'redis') {
               try {
-                  const res = await (window as any).go.app.App.RedisGetDatabases(config);
+                  const res = await (window as any).go.app.App.RedisGetDatabases(buildRpcConnectionConfig(config));
                   if (res.success) {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                       const redisRows: any[] = Array.isArray(res.data) ? res.data : [];
@@ -1020,7 +1021,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           }
 
 	      try {
-	          const res = await DBGetDatabases(config as any);
+	          const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
 	          if (res.success) {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                 const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
@@ -1094,7 +1095,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
 	      };
 	      try {
-	          const res = await DBGetTables(config as any, conn.dbName);
+	          const res = await DBGetTables(buildRpcConnectionConfig(config) as any, conn.dbName);
 	          if (res.success) {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
 
@@ -1578,14 +1579,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   
 	  const handleCopyStructure = async (node: any) => {
 	      const { config, dbName, tableName } = node.dataRef;
-	      const res = await DBShowCreateTable({ 
-	          ...config, 
-	          port: Number(config.port),
-	          password: config.password || "",
-	          database: config.database || "",
-          useSSH: config.useSSH || false,
-          ssh: config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      } as any, dbName, tableName);
+	      const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, dbName, tableName);
       if (res.success) {
           navigator.clipboard.writeText(res.data as string);
           message.success('表结构已复制到剪贴板');
@@ -1597,14 +1591,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const handleExport = async (node: any, format: string) => {
       const { config, dbName, tableName } = node.dataRef;
       const hide = message.loading(`正在导出 ${tableName} 为 ${format.toUpperCase()}...`, 0);
-      const res = await ExportTable({ 
-          ...config, 
-          port: Number(config.port),
-          password: config.password || "",
-          database: config.database || "",
-          useSSH: config.useSSH || false,
-          ssh: config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      } as any, dbName, tableName, format);
+      const res = await ExportTable(buildRpcConnectionConfig(config) as any, dbName, tableName, format);
       hide();
       if (res.success) {
           message.success('导出成功');
@@ -1613,14 +1600,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       }
   };
 
-  const normalizeConnConfig = (raw: any) => ({
-      ...raw,
-      port: Number(raw.port),
-      password: raw.password || "",
-      database: raw.database || "",
-      useSSH: raw.useSSH || false,
-      ssh: raw.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-  });
+  const normalizeConnConfig = (raw: any) => (
+      buildRpcConnectionConfig(raw)
+  );
 
   const handleExportDatabaseSQL = async (node: any, includeData: boolean) => {
       const conn = node.dataRef;
@@ -1715,7 +1697,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
       };
 
-      const res = await DBGetDatabases(config as any);
+      const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
       if (res.success) {
           const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
           let dbs = dbRows.map((row: any) => {
@@ -1750,7 +1732,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       };
 
       const [res, viewResult] = await Promise.all([
-          DBGetTables(config as any, dbName),
+          DBGetTables(buildRpcConnectionConfig(config) as any, dbName),
           loadViews(conn, dbName).catch(() => ({ views: [], supported: false })),
       ]);
 
@@ -2026,7 +2008,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
       };
 
-      const res = await DBGetDatabases(config as any);
+      const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
       if (res.success) {
           const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
           let dbs = dbRows.map((row: any) => {
@@ -2238,7 +2220,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
           };
           
-          const res = await CreateDatabase(config as any, values.name);
+          const res = await CreateDatabase(buildRpcConnectionConfig(config) as any, values.name);
           if (res.success) {
               message.success("数据库创建成功");
               setIsCreateDbModalOpen(false);
@@ -2254,14 +2236,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   };
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
-      return {
-          ...conn.config,
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: clearDatabase ? "" : ((overrideDatabase ?? conn.config.database) || ""),
-          useSSH: conn.config.useSSH || false,
-          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      };
+      return buildRpcConnectionConfig(conn.config, {
+          database: clearDatabase ? '' : ((overrideDatabase ?? conn.config.database) || ''),
+      });
   };
 
   const getConnectionNodeRef = (connRef: any) => {
@@ -2303,7 +2280,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           }
 
           const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameDatabase(config as any, oldDbName, newDbName);
+          const res = await RenameDatabase(buildRpcConnectionConfig(config) as any, oldDbName, newDbName);
           if (res.success) {
               message.success("数据库重命名成功");
               setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
@@ -2330,7 +2307,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           okButtonProps: { danger: true },
           onOk: async () => {
               const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropDatabase(config as any, dbName);
+              const res = await DropDatabase(buildRpcConnectionConfig(config) as any, dbName);
               if (res.success) {
                   message.success("数据库删除成功");
                   closeTabsByDatabase(conn.id, dbName);
@@ -2360,7 +2337,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               return;
           }
           const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameTable(config as any, conn.dbName, oldTableName, newTableName);
+          const res = await RenameTable(buildRpcConnectionConfig(config) as any, conn.dbName, oldTableName, newTableName);
           if (res.success) {
               message.success("表重命名成功");
               await loadTables(getDatabaseNodeRef(conn, conn.dbName));
@@ -2385,7 +2362,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           okButtonProps: { danger: true },
           onOk: async () => {
               const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropTable(config as any, conn.dbName, tableName);
+              const res = await DropTable(buildRpcConnectionConfig(config) as any, conn.dbName, tableName);
               if (res.success) {
                   message.success("表删除成功");
                   await loadTables(getDatabaseNodeRef(conn, conn.dbName));
@@ -2445,7 +2422,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               }
           }
           if (query) {
-              const result = await DBQuery(config as any, dbName, query);
+              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
               if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                   const row = result.data[0] as Record<string, any>;
                   const def = row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
@@ -2511,7 +2488,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           okButtonProps: { danger: true },
           onOk: async () => {
               const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropView(config as any, conn.dbName, viewName);
+              const res = await DropView(buildRpcConnectionConfig(config) as any, conn.dbName, viewName);
               if (res.success) {
                   message.success("视图删除成功");
                   await loadTables(getDatabaseNodeRef(conn, conn.dbName));
@@ -2538,7 +2515,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               return;
           }
           const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameView(config as any, conn.dbName, oldViewName, newViewName);
+          const res = await RenameView(buildRpcConnectionConfig(config) as any, conn.dbName, oldViewName, newViewName);
           if (res.success) {
               message.success("视图重命名成功");
               await loadTables(getDatabaseNodeRef(conn, conn.dbName));
@@ -2610,7 +2587,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               }
           }
           if (query) {
-              const result = await DBQuery(config as any, dbName, query);
+              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
               if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                   if (dialect === 'oracle' || dialect === 'dm') {
                       const lines = result.data.map((row: any) => row.text || row.TEXT || Object.values(row)[0] || '').join('');
@@ -2704,7 +2681,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           okButtonProps: { danger: true },
           onOk: async () => {
               const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropFunction(config as any, conn.dbName, routineName, routineType);
+              const res = await DropFunction(buildRpcConnectionConfig(config) as any, conn.dbName, routineName, routineType);
               if (res.success) {
                   message.success(`${typeLabel}删除成功`);
                   await loadTables(getDatabaseNodeRef(conn, conn.dbName));
