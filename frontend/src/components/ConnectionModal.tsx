@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
 import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined, BgColorsOutlined } from '@ant-design/icons';
 import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICON_COLORS } from './DatabaseIcons';
@@ -6,6 +6,7 @@ import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
+import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -816,6 +817,19 @@ const ConnectionModal: React.FC<{
               ? validateValue(value)
               : String(value ?? '').trim() !== '';
           return valid ? Promise.resolve() : Promise.reject(new Error(messageText));
+      }
+  });
+
+  const createCustomDsnRule = () => ({
+      validator(_: unknown, value: unknown) {
+          const validationMessage = getCustomConnectionDsnValidationMessage({
+              dsnInput: value,
+              hasStoredSecret: initialValues?.hasOpaqueDSN,
+              clearStoredSecret: clearSecrets.opaqueDSN,
+          });
+          return validationMessage
+              ? Promise.reject(new Error(validationMessage))
+              : Promise.resolve();
       }
   });
 
@@ -2100,7 +2114,7 @@ const ConnectionModal: React.FC<{
                       <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
                           <Input placeholder="例如: mysql, postgres" />
                       </Form.Item>
-                      <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[{ required: true, message: '请输入连接字符串' }]}> 
+                      <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[createCustomDsnRule()]}>
                           <Input.TextArea rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
                       </Form.Item>
                       {renderStoredSecretControls({
@@ -3105,6 +3119,8 @@ const ConnectionModal: React.FC<{
 };
 
 export default ConnectionModal;
+
+
 
 
 

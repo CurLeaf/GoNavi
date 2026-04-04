@@ -1,4 +1,4 @@
-﻿import React from 'react'
+import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 // import './index.css' // Optional global styles
@@ -15,34 +15,8 @@ dayjs.locale('zh-cn')
 import 'monaco-editor/esm/nls.messages.zh-cn'
 import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
+import { cloneBrowserMockValue, duplicateBrowserMockConnection, resolveBrowserMockSecretFlag } from './utils/browserMockConnections'
 loader.config({ monaco })
-
-const cloneBrowserMockValue = (value: any) => {
-    try {
-        return JSON.parse(JSON.stringify(value));
-    } catch {
-        return value;
-    }
-};
-
-const resolveBrowserMockSecretFlag = (nextValue: unknown, clearFlag: boolean, existingFlag?: boolean) => {
-    if (String(nextValue ?? '') !== '') return true;
-    if (clearFlag) return false;
-    return !!existingFlag;
-};
-
-const buildBrowserMockDuplicateName = (rawName: string, items: any[]): string => {
-    const baseName = String(rawName || '').trim() || '连接';
-    const suffix = ' - 副本';
-    const usedNames = new Set(items.map((item) => String(item?.name || '').trim()));
-    let candidate = `${baseName}${suffix}`;
-    let counter = 2;
-    while (usedNames.has(candidate)) {
-        candidate = `${baseName}${suffix} ${counter}`;
-        counter += 1;
-    }
-    return candidate;
-};
 
 if (typeof window !== 'undefined' && !(window as any).go) {
     const mockConnections: any[] = [];
@@ -124,13 +98,10 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 DuplicateConnection: async (id: string) => {
                     const existing = mockConnections.find((item) => item.id === id);
                     if (!existing) return null;
-                    const duplicated = cloneBrowserMockValue({
-                        ...existing,
-                        id: `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                        name: buildBrowserMockDuplicateName(existing.name, mockConnections),
-                        config: cloneBrowserMockValue(existing.config),
-                        includeDatabases: Array.isArray(existing.includeDatabases) ? [...existing.includeDatabases] : undefined,
-                        includeRedisDatabases: Array.isArray(existing.includeRedisDatabases) ? [...existing.includeRedisDatabases] : undefined,
+                    const duplicated = duplicateBrowserMockConnection({
+                        existing,
+                        items: mockConnections,
+                        nextId: `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     });
                     mockConnections.push(duplicated);
                     return cloneBrowserMockValue(duplicated);
@@ -174,3 +145,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 )
+
+
+

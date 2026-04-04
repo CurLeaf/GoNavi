@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, Checkbox, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
@@ -19,6 +19,7 @@ import {
     PROVIDER_PRESET_CARD_TITLE_STYLE,
 } from '../utils/aiSettingsPresetLayout';
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
+import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 
@@ -134,18 +135,41 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
 
+    const applyProviderEditorSession = useCallback((session: ProviderEditorSession) => {
+        setEditingProvider(session.editingProvider as AIProviderConfig | null);
+        setIsEditing(session.isEditing);
+        setTestStatus(session.testStatus);
+        setClearProviderSecret(session.clearProviderSecret);
+        form.resetFields();
+        if (session.formValues) {
+            form.setFieldsValue(session.formValues);
+        }
+    }, [form]);
+
+    const resetProviderEditorSession = useCallback(() => {
+        applyProviderEditorSession(buildClosedProviderEditorSession());
+    }, [applyProviderEditorSession]);
+
+    const handleModalClose = useCallback(() => {
+        resetProviderEditorSession();
+        onClose();
+    }, [onClose, resetProviderEditorSession]);
+
+    useEffect(() => {
+        if (!open) {
+            resetProviderEditorSession();
+        }
+    }, [open, resetProviderEditorSession]);
     const handleAddProvider = () => {
         const preset = findPreset('openai');
-        const newProvider: AIProviderConfig = {
-            id: '', type: preset.backendType, name: '', apiKey: '',
-            baseUrl: preset.defaultBaseUrl, model: preset.defaultModel,
-            models: [], maxTokens: 4096, temperature: 0.7,
-        };
-        setEditingProvider({ ...newProvider, presetKey: 'openai' } as any);
-        setIsEditing(true);
-        setTestStatus('idle');
-        form.resetFields();
-        form.setFieldsValue({ ...newProvider, presetKey: 'openai', apiFormat: 'openai' });
+        applyProviderEditorSession(buildAddProviderEditorSession({
+            presetKey: 'openai',
+            presetBackendType: preset.backendType,
+            presetBaseUrl: preset.defaultBaseUrl,
+            presetModel: preset.defaultModel,
+            presetModels: preset.models,
+            apiFormat: 'openai',
+        }));
     };
 
     const handleEditProvider = (p: AIProviderConfig) => {
@@ -156,17 +180,16 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             presetFixedApiFormat: matchedPreset.fixedApiFormat,
             valuesApiFormat: p.apiFormat,
         });
-        setEditingProvider(p);
-        setIsEditing(true);
-        setTestStatus('idle');
-        form.resetFields();
-        form.setFieldsValue({
-            ...p,
-            type: resolvedTransport.type,
-            models: p.models || [],
-            presetKey: matchedPreset.key,
-            apiFormat: resolvedTransport.apiFormat || p.apiFormat || 'openai',
-        });
+        applyProviderEditorSession(buildEditProviderEditorSession({
+            provider: { ...p, presetKey: matchedPreset.key } as any,
+            formValues: {
+                ...p,
+                type: resolvedTransport.type,
+                models: p.models || [],
+                presetKey: matchedPreset.key,
+                apiFormat: resolvedTransport.apiFormat || p.apiFormat || 'openai',
+            },
+        }));
     };
 
     const handleDeleteProvider = async (id: string) => {
@@ -239,7 +262,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
-            void messageApi.success('已保存'); setIsEditing(false); setEditingProvider(null); setClearProviderSecret(false); void loadConfig();
+            void messageApi.success('已保存'); resetProviderEditorSession(); void loadConfig();
             window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
         } catch (e: any) {
             if (e?.errorFields) { /* antd form validation error, ignore */ }
@@ -420,7 +443,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             <div>
                 {/* 顶部返回 */}
                 <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Button size="small" onClick={() => { setIsEditing(false); setEditingProvider(null); setClearProviderSecret(false); }}
+                    <Button size="small" onClick={resetProviderEditorSession}
                         style={{ borderRadius: 8 }}>← 返回</Button>
                     <span style={{ fontWeight: 700, fontSize: 16, color: overlayTheme.titleText }}>
                         {editingProvider?.id ? '编辑模型供应商' : '添加模型供应商'}
@@ -732,7 +755,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 </div>
             }
             open={open}
-            onCancel={onClose}
+            onCancel={handleModalClose}
             footer={null}
             width={820}
             styles={{
@@ -798,6 +821,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 };
 
 export default AISettingsModal;
+
+
 
 
 
