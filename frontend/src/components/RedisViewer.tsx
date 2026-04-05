@@ -7,6 +7,7 @@ import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from '@monaco-editor/react';
 import type { DataNode } from 'antd/es/tree';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     applyRenamedRedisKeyState,
     applyTreeNodeCheck,
@@ -429,7 +430,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         setLoading(true);
         try {
-            const res = await (window as any).go.app.App.RedisScanKeys(config, normalizedPattern, fromCursor, effectiveTargetCount);
+            const res = await (window as any).go.app.App.RedisScanKeys(buildRpcConnectionConfig(config), normalizedPattern, fromCursor, effectiveTargetCount);
             if (requestId !== latestLoadRequestIdRef.current) {
                 return;
             }
@@ -508,7 +509,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         setValueLoading(true);
         try {
-            const res = await (window as any).go.app.App.RedisGetValue(config, key);
+            const res = await (window as any).go.app.App.RedisGetValue(buildRpcConnectionConfig(config), key);
             if (res.success) {
                 setKeyValue(res.data);
                 setSelectedKey(key);
@@ -539,7 +540,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         if (!config) return;
 
         try {
-            const res = await (window as any).go.app.App.RedisDeleteKeys(config, keysToDelete);
+            const res = await (window as any).go.app.App.RedisDeleteKeys(buildRpcConnectionConfig(config), keysToDelete);
             if (res.success) {
                 message.success(`已删除 ${res.data.deleted} 个 Key`);
                 setKeys(prev => prev.filter(k => !keysToDelete.includes(k.key)));
@@ -567,7 +568,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         try {
             const values = await ttlForm.validateFields();
-            const res = await (window as any).go.app.App.RedisSetTTL(config, selectedKey, values.ttl);
+            const res = await (window as any).go.app.App.RedisSetTTL(buildRpcConnectionConfig(config), selectedKey, values.ttl);
             if (res.success) {
                 message.success('TTL 设置成功');
                 setTtlModalOpen(false);
@@ -586,7 +587,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         if (!config || !selectedKey) return;
 
         try {
-            const res = await (window as any).go.app.App.RedisSetString(config, selectedKey, editValue, keyValue?.ttl || -1);
+            const res = await (window as any).go.app.App.RedisSetString(buildRpcConnectionConfig(config), selectedKey, editValue, keyValue?.ttl || -1);
             if (res.success) {
                 message.success('保存成功');
                 setEditModalOpen(false);
@@ -605,7 +606,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         try {
             const values = await newKeyForm.validateFields();
-            const res = await (window as any).go.app.App.RedisSetString(config, values.key, values.value, values.ttl || -1);
+            const res = await (window as any).go.app.App.RedisSetString(buildRpcConnectionConfig(config), values.key, values.value, values.ttl || -1);
             if (res.success) {
                 message.success('创建成功');
                 setNewKeyModalOpen(false);
@@ -642,7 +643,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 return;
             }
 
-            const existsRes = await (window as any).go.app.App.RedisKeyExists(config, nextKey);
+            const existsRes = await (window as any).go.app.App.RedisKeyExists(buildRpcConnectionConfig(config), nextKey);
             if (!existsRes?.success) {
                 message.error('校验目标 Key 失败: ' + (existsRes?.message || '未知错误'));
                 return;
@@ -652,7 +653,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 return;
             }
 
-            const res = await (window as any).go.app.App.RedisRenameKey(config, renameTargetKey, nextKey);
+            const res = await (window as any).go.app.App.RedisRenameKey(buildRpcConnectionConfig(config), renameTargetKey, nextKey);
             if (res.success) {
                 const nextState = applyRenamedRedisKeyState(
                     {
@@ -1177,7 +1178,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisSetHashField(config, selectedKey, field, newValue);
+                    const res = await (window as any).go.app.App.RedisSetHashField(buildRpcConnectionConfig(config), selectedKey, field, newValue);
                     if (res.success) {
                         message.success('修改成功');
                         loadKeyValue(selectedKey);
@@ -1193,7 +1194,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisDeleteHashField(config, selectedKey, field);
+                    const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, field);
                     if (res.success) {
                         message.success('删除成功');
                         loadKeyValue(selectedKey);
@@ -1338,7 +1339,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisListSet(config, selectedKey, index, newValue);
+                    const res = await (window as any).go.app.App.RedisListSet(buildRpcConnectionConfig(config), selectedKey, index, newValue);
                     if (res.success) {
                         message.success('修改成功');
                         loadKeyValue(selectedKey);
@@ -1354,7 +1355,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisListPush(config, selectedKey, { values: [value], position });
+                    const res = await (window as any).go.app.App.RedisListPush(buildRpcConnectionConfig(config), selectedKey, { values: [value], position });
                     if (res.success) {
                         message.success('添加成功');
                         loadKeyValue(selectedKey);
@@ -1508,7 +1509,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisSetAdd(config, selectedKey, [member]);
+                    const res = await (window as any).go.app.App.RedisSetAdd(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
                         message.success('添加成功');
                         loadKeyValue(selectedKey);
@@ -1524,7 +1525,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisSetRemove(config, selectedKey, [member]);
+                    const res = await (window as any).go.app.App.RedisSetRemove(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
                         message.success('删除成功');
                         loadKeyValue(selectedKey);
@@ -1645,7 +1646,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisZSetAdd(config, selectedKey, [{ member, score }]);
+                    const res = await (window as any).go.app.App.RedisZSetAdd(buildRpcConnectionConfig(config), selectedKey, [{ member, score }]);
                     if (res.success) {
                         message.success('添加成功');
                         loadKeyValue(selectedKey);
@@ -1661,7 +1662,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisZSetRemove(config, selectedKey, [member]);
+                    const res = await (window as any).go.app.App.RedisZSetRemove(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
                         message.success('删除成功');
                         loadKeyValue(selectedKey);
@@ -1841,7 +1842,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 }
 
                 try {
-                    const res = await (window as any).go.app.App.RedisStreamAdd(config, selectedKey, fieldMap, id || '*');
+                    const res = await (window as any).go.app.App.RedisStreamAdd(buildRpcConnectionConfig(config), selectedKey, fieldMap, id || '*');
                     if (res.success) {
                         const newID = res.data?.id ? ` (${res.data.id})` : '';
                         message.success(`添加成功${newID}`);
@@ -1859,7 +1860,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 if (!config) return;
 
                 try {
-                    const res = await (window as any).go.app.App.RedisStreamDelete(config, selectedKey, [id]);
+                    const res = await (window as any).go.app.App.RedisStreamDelete(buildRpcConnectionConfig(config), selectedKey, [id]);
                     if (res.success) {
                         const deleted = Number(res.data?.deleted ?? 0);
                         if (deleted > 0) {

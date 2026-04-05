@@ -757,6 +757,16 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     };
   }, [appendOperationLog, open]);
 
+  const resolveLocalImportVersion = useCallback((row: DriverStatusRow) => {
+    const options = versionMap[row.type] || [];
+    const selectedKey = selectedVersionMap[row.type];
+    const selectedOption =
+      options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+      options.find((item) => item.recommended) ||
+      options[0];
+    return selectedOption?.version || row.pinnedVersion || '';
+  }, [selectedVersionMap, versionMap]);
+
   const installDriver = useCallback(async (row: DriverStatusRow) => {
     setActionState({ driverType: row.type, kind: 'install' });
     setProgressMap((prev) => ({
@@ -820,9 +830,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         percent: 0,
       },
     }));
-    appendOperationLog(row.type, `[START] 开始本地导入（${sourceLabel}）：${pathText}`);
+    const selectedVersion = resolveLocalImportVersion(row);
+    const versionTip = selectedVersion ? `（${selectedVersion}）` : '';
+    appendOperationLog(row.type, `[START] 开始本地导入${versionTip}（${sourceLabel}）：${pathText}`);
     try {
-      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir);
+      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir, selectedVersion);
       if (!result?.success) {
         const errText = result?.message || `导入 ${row.name} 本地驱动包失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
@@ -831,9 +843,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         }
         return false;
       }
-      appendOperationLog(row.type, '[DONE] 本地导入安装完成');
+      appendOperationLog(row.type, `[DONE] 本地导入安装完成 ${versionTip}`.trim());
       if (!options?.silentToast) {
-        message.success(`${row.name} 本地驱动包已安装启用`);
+        message.success(`${row.name}${versionTip} 本地驱动包已安装启用`);
       }
       if (!options?.skipRefresh) {
         await refreshStatus(false);
@@ -842,7 +854,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, refreshStatus]);
+  }, [appendOperationLog, downloadDir, refreshStatus, resolveLocalImportVersion]);
 
   const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
     const fileRes = await SelectDriverPackageFile(downloadDir);
@@ -1067,29 +1079,35 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const options = versionMap[row.type] || [];
           const selectedKey = selectedVersionMap[row.type];
           const selectOptions = buildVersionSelectOptions(options);
+          const mongoHint = row.type === 'mongodb'
+            ? '当前仅支持 MongoDB 1.17.x 和 2.x；更老 1.x 暂不提供安装。'
+            : '';
           return (
-            <Select
-              size="small"
-              style={{ width: '100%' }}
-              loading={!!versionLoadingMap[row.type]}
-              disabled={actionState.driverType === row.type}
-              placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
-              value={selectedKey}
-              options={selectOptions as any}
-              onOpenChange={(open) => {
-                if (open && options.length === 0 && !versionLoadingMap[row.type]) {
-                  void loadVersionOptions(row, true);
-                  return;
-                }
-                if (open && selectedKey) {
-                  void loadVersionPackageSize(row, selectedKey);
-                }
-              }}
-              onChange={(value) => {
-                setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
-                void loadVersionPackageSize(row, value);
-              }}
-            />
+            <div style={{ display: 'grid', gap: 4 }}>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                loading={!!versionLoadingMap[row.type]}
+                disabled={actionState.driverType === row.type}
+                placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
+                value={selectedKey}
+                options={selectOptions as any}
+                onOpenChange={(open) => {
+                  if (open && options.length === 0 && !versionLoadingMap[row.type]) {
+                    void loadVersionOptions(row, true);
+                    return;
+                  }
+                  if (open && selectedKey) {
+                    void loadVersionPackageSize(row, selectedKey);
+                  }
+                }}
+                onChange={(value) => {
+                  setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
+                  void loadVersionPackageSize(row, value);
+                }}
+              />
+              {mongoHint ? <Text type="secondary" style={{ fontSize: 12 }}>{mongoHint}</Text> : null}
+            </div>
           );
         },
       },

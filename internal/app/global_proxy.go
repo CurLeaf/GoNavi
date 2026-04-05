@@ -123,11 +123,26 @@ func proxyConfigEqual(a, b connection.ProxyConfig) bool {
 		a.Password == b.Password
 }
 
+func currentGlobalProxyView() connection.GlobalProxyView {
+	snapshot := currentGlobalProxyConfig()
+	if !snapshot.Enabled {
+		return connection.GlobalProxyView{Enabled: false}
+	}
+	return connection.GlobalProxyView{
+		Enabled:     true,
+		Type:        snapshot.Proxy.Type,
+		Host:        snapshot.Proxy.Host,
+		Port:        snapshot.Proxy.Port,
+		User:        snapshot.Proxy.User,
+		HasPassword: strings.TrimSpace(snapshot.Proxy.Password) != "",
+	}
+}
+
 func (a *App) GetGlobalProxyConfig() connection.QueryResult {
 	return connection.QueryResult{
 		Success: true,
 		Message: "OK",
-		Data:    currentGlobalProxyConfig(),
+		Data:    currentGlobalProxyView(),
 	}
 }
 
@@ -312,3 +327,4 @@ func buildProxyURLFromConfig(proxyConfig connection.ProxyConfig) (*url.URL, erro
 	}
 	return proxyURL, nil
 }
+

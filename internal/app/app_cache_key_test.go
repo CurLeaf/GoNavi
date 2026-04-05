@@ -24,6 +24,25 @@ func TestGetCacheKey_IgnoreTimeout(t *testing.T) {
 	}
 }
 
+func TestGetCacheKey_IgnoreConnectionID(t *testing.T) {
+	base := connection.ConnectionConfig{
+		ID:       "conn-1",
+		Type:     "mysql",
+		Host:     "127.0.0.1",
+		Port:     3306,
+		User:     "root",
+		Password: "root",
+	}
+	modified := base
+	modified.ID = "conn-2"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left != right {
+		t.Fatalf("expected same cache key when only connection id differs, got %s vs %s", left, right)
+	}
+}
+
 func TestGetCacheKey_DuckDBHostAndDatabaseEquivalent(t *testing.T) {
 	withHost := connection.ConnectionConfig{
 		Type: "duckdb",

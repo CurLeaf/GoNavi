@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
@@ -11,12 +11,15 @@ import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
-import { useStore } from './store';
+import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
+import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
+import { LEGACY_PERSIST_KEY, readLegacyPersistedSecrets, stripLegacyPersistedSecrets } from './utils/legacyConnectionStorage';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -35,7 +38,7 @@ import {
   resolveAIEdgeHandleDockStyle,
   resolveAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
-import { ConfigureGlobalProxy, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -59,6 +62,24 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
+
+const toLegacySavedConnectionInput = (item: any) => ({
+  id: typeof item?.id === 'string' ? item.id : '',
+  name: typeof item?.name === 'string' ? item.name : '',
+  config: (item?.config && typeof item.config === 'object') ? item.config : {},
+  includeDatabases: Array.isArray(item?.includeDatabases) ? item.includeDatabases : undefined,
+  includeRedisDatabases: Array.isArray(item?.includeRedisDatabases) ? item.includeRedisDatabases : undefined,
+  iconType: typeof item?.iconType === 'string' ? item.iconType : '',
+  iconColor: typeof item?.iconColor === 'string' ? item.iconColor : '',
+});
+
+const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
+  const merged = new Map<string, SavedConnection>();
+  current.forEach((conn) => merged.set(conn.id, conn));
+  imported.forEach((conn) => merged.set(conn.id, conn));
+  return Array.from(merged.values());
+};
+
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -76,6 +97,8 @@ function App() {
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
+  const replaceConnections = useStore(state => state.replaceConnections);
+  const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -100,14 +123,14 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
-  const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
+  const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
-  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
+  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -167,6 +190,90 @@ function App() {
           return;
       }
 
+      let cancelled = false;
+      const loadSecureConfig = async () => {
+          const backendApp = (window as any).go?.app?.App;
+          const persistedPayload = typeof window !== 'undefined'
+              ? window.localStorage.getItem(LEGACY_PERSIST_KEY)
+              : null;
+          const legacy = readLegacyPersistedSecrets(persistedPayload);
+
+          let importedLegacyConnections = false;
+          let importedLegacyGlobalProxy = false;
+
+          if (legacy.connections.length > 0) {
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  try {
+                      await backendApp.ImportLegacyConnections(
+                          legacy.connections.map(toLegacySavedConnectionInput)
+                      );
+                      importedLegacyConnections = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy saved connections', err);
+                  }
+              } else {
+                  replaceConnections(legacy.connections);
+              }
+          }
+
+          if (legacy.globalProxy) {
+              if (typeof backendApp?.ImportLegacyGlobalProxy === 'function') {
+                  try {
+                      await backendApp.ImportLegacyGlobalProxy(toSaveGlobalProxyInput(legacy.globalProxy));
+                      importedLegacyGlobalProxy = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy global proxy', err);
+                  }
+              } else {
+                  replaceGlobalProxy(createGlobalProxyDraft(legacy.globalProxy));
+              }
+          }
+
+          if ((importedLegacyConnections || importedLegacyGlobalProxy) && persistedPayload && typeof window !== 'undefined') {
+              const sanitizedPayload = stripLegacyPersistedSecrets(persistedPayload);
+              if (sanitizedPayload && sanitizedPayload !== persistedPayload) {
+                  window.localStorage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
+              }
+          }
+
+          if (typeof backendApp?.GetSavedConnections === 'function') {
+              try {
+                  const savedConnections = await backendApp.GetSavedConnections();
+                  if (!cancelled && Array.isArray(savedConnections)) {
+                      replaceConnections(savedConnections);
+                  }
+              } catch (err) {
+                  console.warn('Failed to load saved connections from backend', err);
+              }
+          }
+
+          if (typeof backendApp?.GetGlobalProxyConfig === 'function') {
+              try {
+                  const proxyResult = await backendApp.GetGlobalProxyConfig();
+                  if (!cancelled && proxyResult?.success && proxyResult.data) {
+                      replaceGlobalProxy(createGlobalProxyDraft(proxyResult.data));
+                  }
+              } catch (err) {
+                  console.warn('Failed to load global proxy from backend', err);
+              }
+          }
+
+          if (!cancelled) {
+              setHasLoadedSecureConfig(true);
+          }
+      };
+
+      void loadSecureConfig();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+
+  useEffect(() => {
+      if (!isStoreHydrated || !hasLoadedSecureConfig) {
+          return;
+      }
+
       const host = String(globalProxy.host || '').trim();
       const port = Number(globalProxy.port);
       const portValid = Number.isFinite(port) && port > 0 && port <= 65535;
@@ -180,57 +287,44 @@ function App() {
               });
               globalProxyInvalidHintShownRef.current = true;
           }
-      } else {
-          globalProxyInvalidHintShownRef.current = false;
-          void message.destroy('global-proxy-invalid');
+          return;
       }
 
-      const enabledForBackend = globalProxy.enabled && !invalidWhenEnabled;
-      let cancelled = false;
-      try {
-          ConfigureGlobalProxy(enabledForBackend, {
-              type: globalProxy.type,
-              host,
-              port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
-              user: String(globalProxy.user || '').trim(),
-              password: globalProxy.password || '',
-          })
-              .then((res) => {
-                  if (cancelled || res?.success) {
-                      return;
-                  }
-                  void message.error({
-                      content: '全局代理配置失败: ' + (res?.message || '未知错误'),
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .catch((err) => {
-                  if (cancelled) {
-                      return;
-                  }
-                  const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
-                  void message.error({
-                      content: '全局代理配置失败: ' + errMsg,
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .finally(() => {
-                  if (!cancelled) {
-                      setHasAppliedInitialGlobalProxy(true);
-                  }
-              });
-      } catch (e) {
-          if (!cancelled) {
-              setHasAppliedInitialGlobalProxy(true);
-          }
-          console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
+      globalProxyInvalidHintShownRef.current = false;
+      void message.destroy('global-proxy-invalid');
+
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SaveGlobalProxy !== 'function') {
+          return;
       }
+
+      let cancelled = false;
+      Promise.resolve(
+          backendApp.SaveGlobalProxy(
+              toSaveGlobalProxyInput({
+                  ...globalProxy,
+                  host,
+                  port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
+              })
+          )
+      )
+          .catch((err) => {
+              if (cancelled) {
+                  return;
+              }
+              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+              void message.error({
+                  content: '全局代理配置失败: ' + errMsg,
+                  key: 'global-proxy-sync-error',
+              });
+          });
 
       return () => {
           cancelled = true;
       };
   }, [
       isStoreHydrated,
+      hasLoadedSecureConfig,
       globalProxy.enabled,
       globalProxy.type,
       globalProxy.host,
@@ -676,7 +770,6 @@ function App() {
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
-  const addConnection = useStore(state => state.addConnection);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const updateCheckInFlightRef = React.useRef(false);
@@ -1091,20 +1184,29 @@ function App() {
       if (res.success) {
           try {
               const imported = JSON.parse(res.data);
-              if (Array.isArray(imported)) {
-                  let count = 0;
-                  imported.forEach((conn: any) => {
-                      if (!connections.some(c => c.id === conn.id)) {
-                          addConnection(conn);
-                          count++;
-                      }
-                  });
-                  void message.success(`成功导入 ${count} 个连接`);
-              } else {
+              if (!Array.isArray(imported)) {
                   void message.error("文件格式错误：需要 JSON 数组");
+                  return;
               }
-          } catch (e) {
-              void message.error("解析 JSON 失败");
+
+              const normalizedItems = imported.map(toLegacySavedConnectionInput);
+              const backendApp = (window as any).go?.app?.App;
+
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  const importedViews = await backendApp.ImportLegacyConnections(normalizedItems);
+                  if (!Array.isArray(importedViews)) {
+                      throw new Error('导入失败：后端未返回连接列表');
+                  }
+                  replaceConnections(mergeSavedConnections(connections, importedViews));
+                  void message.success(`成功导入 ${importedViews.length} 个连接`);
+                  return;
+              }
+
+              const fallbackItems = normalizedItems as SavedConnection[];
+              replaceConnections(mergeSavedConnections(connections, fallbackItems));
+              void message.success(`成功导入 ${fallbackItems.length} 个连接`);
+          } catch (e: any) {
+              void message.error(e?.message || "解析 JSON 失败");
           }
       } else if (res.message !== "已取消") {
           void message.error("导入失败: " + res.message);
@@ -1116,7 +1218,7 @@ function App() {
           void message.warning("没有连接可导出");
           return;
       }
-      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
+      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases','iconType','iconColor'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
       } else if (res.message !== "已取消") {
@@ -2194,6 +2296,33 @@ function App() {
                                       </div>
                                   </div>
                               </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>数据表显示</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>显示数据表竖向分隔线</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>仅作用于数据表页面 DataGrid，不影响其他表格组件。</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableVerticalBorders === true}
+                                              onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                          />
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>数据表列宽模式</div>
+                                          <Segmented
+                                              block
+                                              options={DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS}
+                                              value={appearance.dataTableColumnWidthMode}
+                                              onChange={(value) => setAppearance({ dataTableColumnWidthMode: sanitizeDataTableColumnWidthMode(value) })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              标准模式默认列宽 200px；紧凑模式默认列宽 140px。已手动拖拽调整的列宽优先保留。
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
                               {isMacRuntime ? (
                                   <div style={utilityPanelStyle}>
                                       <div style={{ marginBottom: 8, fontWeight: 500 }}>macOS 窗口控制</div>
@@ -2227,7 +2356,7 @@ function App() {
                                        onClick={() => {
                                            setUiScale(DEFAULT_UI_SCALE);
                                            setFontSize(DEFAULT_FONT_SIZE);
-                                           setAppearance({ enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false });
+                                           setAppearance({ ...DEFAULT_APPEARANCE });
                                        }}
                                    >
                                        恢复默认

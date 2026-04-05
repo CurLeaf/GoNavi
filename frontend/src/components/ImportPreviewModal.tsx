@@ -4,6 +4,7 @@ import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { PreviewImportFile, ImportDataWithProgress } from '../../wailsjs/go/app/App';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface ImportPreviewModalProps {
     visible: boolean;
@@ -107,7 +108,7 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                 ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
             };
 
-            const res = await ImportDataWithProgress(config as any, dbName, tableName, filePath);
+            const res = await ImportDataWithProgress(buildRpcConnectionConfig(config) as any, dbName, tableName, filePath);
 
             if (res.success && res.data) {
                 setImportResult(res.data);

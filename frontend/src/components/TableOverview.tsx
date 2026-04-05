@@ -4,6 +4,7 @@ import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, D
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -163,9 +164,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            const dialect = getMetadataDialect(connection.config.type, (connection.config as any)?.driver);
+            const dialect = getMetadataDialect(connection.config.type, connection.config.driver);
             const sql = buildTableStatusSQL(dialect, tab.dbName || '', (tab as any).schemaName);
-            const res = await DBQuery(config as any, tab.dbName || '', sql);
+            const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
                 setTables(parseTableStats(dialect, res.data));
             } else {
@@ -239,7 +240,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const handleCopyStructure = useCallback(async (tableName: string) => {
         const config = buildConfig();
         if (!config) return;
-        const res = await DBShowCreateTable(config as any, tab.dbName || '', tableName);
+        const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
         if (res.success) {
             navigator.clipboard.writeText(res.data as string);
             message.success('表结构已复制到剪贴板');
@@ -252,7 +253,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const config = buildConfig();
         if (!config) return;
         const hide = message.loading(`正在导出 ${tableName} 为 ${format.toUpperCase()}...`, 0);
-        const res = await ExportTable(config as any, tab.dbName || '', tableName, format);
+        const res = await ExportTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, format);
         hide();
         if (res.success) {
             message.success('导出成功');
@@ -269,7 +270,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             content: `确定删除表 "${tableName}" 吗？该操作不可恢复。`,
             okButtonProps: { danger: true },
             onOk: async () => {
-                const res = await DropTable(config as any, tab.dbName || '', tableName);
+                const res = await DropTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
                 if (res.success) {
                     message.success('表删除成功');
                     loadData();
@@ -299,7 +300,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 const trimmed = newName.trim();
                 if (!trimmed) { message.error('表名不能为空'); return Promise.reject(); }
                 if (trimmed === tableName) { message.warning('新旧表名相同'); return; }
-                const res = await RenameTable(config as any, tab.dbName || '', tableName, trimmed);
+                const res = await RenameTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, trimmed);
                 if (res.success) {
                     message.success('表重命名成功');
                     loadData();

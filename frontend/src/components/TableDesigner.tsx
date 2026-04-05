@@ -9,6 +9,7 @@ import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, Trigg
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -751,14 +752,14 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     };
 
     const promises: Promise<any>[] = [
-        DBGetColumns(config as any, tab.dbName || '', tab.tableName || ''),
-        DBGetIndexes(config as any, tab.dbName || '', tab.tableName || ''),
-        DBGetForeignKeys(config as any, tab.dbName || '', tab.tableName || ''),
-        DBGetTriggers(config as any, tab.dbName || '', tab.tableName || '')
+        DBGetColumns(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
+        DBGetIndexes(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
+        DBGetForeignKeys(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''),
+        DBGetTriggers(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || '')
     ];
 
     if (!isNewTable) {
-        promises.push(DBShowCreateTable(config as any, tab.dbName || '', tab.tableName || ''));
+        promises.push(DBShowCreateTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tab.tableName || ''));
     }
 
     const results = await Promise.all(promises);
@@ -848,7 +849,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     if (!type) return '';
 
     if (type === 'custom') {
-        return inferDialectFromCustomDriver(String((conn?.config as any)?.driver || ''));
+        return inferDialectFromCustomDriver(String(conn?.config?.driver || ''));
     }
 
     if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
@@ -993,7 +994,7 @@ ${selectedTrigger.statement}`;
         const dropSql = buildDropTriggerSql(selectedTrigger.name);
 
         try {
-          const res = await DBQuery(config as any, tab.dbName || '', dropSql);
+          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql);
           if (res.success) {
             message.success('触发器删除成功');
             setSelectedTrigger(null);
@@ -1030,7 +1031,7 @@ ${selectedTrigger.statement}`;
       // 如果是编辑模式，先删除旧触发器
       if (triggerEditMode === 'edit' && selectedTrigger) {
         const dropSql = buildDropTriggerSql(selectedTrigger.name);
-        const dropRes = await DBQuery(config as any, tab.dbName || '', dropSql);
+        const dropRes = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', dropSql);
         if (!dropRes.success) {
           message.error('删除旧触发器失败: ' + dropRes.message);
           setTriggerExecuting(false);
@@ -1039,7 +1040,7 @@ ${selectedTrigger.statement}`;
       }
 
       // 执行创建语句
-      const res = await DBQuery(config as any, tab.dbName || '', triggerEditSql);
+      const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', triggerEditSql);
       if (res.success) {
         message.success(triggerEditMode === 'create' ? '触发器创建成功' : '触发器修改成功');
         setIsTriggerEditModalOpen(false);
@@ -1522,7 +1523,7 @@ ${selectedTrigger.statement}`;
       const sql = buildCreateTableSql(copyTableName.trim(), selectedColumns, copyCharset, copyCollation);
       setCopyExecuting(true);
       try {
-          const res = await DBQuery(config as any, tab.dbName || '', sql);
+          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
           if (res.success) {
               message.success(`已将 ${selectedColumns.length} 个字段复制到新表 ${copyTableName.trim()}`);
               setIsCopyColumnsModalOpen(false);
@@ -1551,7 +1552,7 @@ ${selectedTrigger.statement}`;
       for (let i = 0; i < statements.length; i++) {
           let stmt = statements[i];
           if (!stmt.endsWith(';')) stmt += ';';
-          const res = await DBQuery(config as any, tab.dbName || '', stmt);
+          const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', stmt);
           if (!res.success) {
               const prefix = statements.length > 1 ? `第 ${i + 1}/${statements.length} 条语句执行失败: ` : '执行失败: ';
               return {
@@ -2202,7 +2203,7 @@ END;`;
 	      const conn = connections.find(c => c.id === tab.connectionId);
 	      if (!conn) return;
 	      const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
-	      const res = await DBQuery(config as any, tab.dbName || '', previewSql);
+	      const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', previewSql);
 	      if (res.success) {
 	          message.success(isNewTable ? "表创建成功！" : "表结构修改成功！");
 	          setIsPreviewOpen(false);
