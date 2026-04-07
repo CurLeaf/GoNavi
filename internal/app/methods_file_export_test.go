@@ -141,6 +141,69 @@ func TestWriteRowsToFile_JSON_NumberKeepPlainText(t *testing.T) {
 	}
 }
 
+func TestNormalizeExportJSONValue_LocalDateTimeString_NoTimezoneShift(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	got := normalizeExportJSONValue("2026-04-07 18:44:32")
+	if got != "2026-04-07 18:44:32" {
+		t.Fatalf("本地无时区字符串不应发生时区偏移，want=%q got=%v", "2026-04-07 18:44:32", got)
+	}
+}
+
+func TestFormatExportCellText_TimeValue_KeepWallClock(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	utc := time.Date(2026, 4, 7, 10, 44, 32, 0, time.UTC)
+	got := formatExportCellText(utc)
+	if got != "2026-04-07 10:44:32" {
+		t.Fatalf("time.Time 导出应保持原始钟表时间，want=%q got=%q", "2026-04-07 10:44:32", got)
+	}
+}
+
+func TestParseTemporalString_LocalDateTime_NoTimezoneShift(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	parsed, ok := parseTemporalString("2026-04-07 18:44:32")
+	if !ok {
+		t.Fatal("parseTemporalString 应成功解析本地日期时间")
+	}
+	if parsed.Local().Format("2006-01-02 15:04:05") != "2026-04-07 18:44:32" {
+		t.Fatalf("无时区时间解析后不应发生偏移，got=%q", parsed.Local().Format("2006-01-02 15:04:05"))
+	}
+}
+
+func TestParseTemporalString_RFC3339_KeepWallClock(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	parsed, ok := parseTemporalString("2026-04-07T10:44:32Z")
+	if !ok {
+		t.Fatal("parseTemporalString 应成功解析 RFC3339")
+	}
+	if parsed.Format("2006-01-02 15:04:05") != "2026-04-07 10:44:32" {
+		t.Fatalf("RFC3339 解析后应保持原始钟表时间，got=%q", parsed.Format("2006-01-02 15:04:05"))
+	}
+}
+
+func TestNormalizeExportJSONValue_TimeValue_KeepWallClock(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	utc := time.Date(2026, 4, 7, 18, 44, 32, 0, time.UTC)
+	got := normalizeExportJSONValue(utc)
+	if got != "2026-04-07 18:44:32" {
+		t.Fatalf("JSON 导出 time.Time 应保持原始钟表时间，want=%q got=%v", "2026-04-07 18:44:32", got)
+	}
+}
+
 func TestQueryDataForExport_UsesMinimumTimeout(t *testing.T) {
 	fake := &fakeExportQueryDB{
 		data: []map[string]interface{}{{"v": 1}},

@@ -614,13 +614,23 @@ func parseTemporalString(raw string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
-	layouts := []string{
+	layoutsWithZone := []string{
 		"2006-01-02 15:04:05.999999999 -0700 MST",
 		"2006-01-02 15:04:05 -0700 MST",
 		"2006-01-02 15:04:05.999999999 -0700",
 		"2006-01-02 15:04:05 -0700",
 		time.RFC3339Nano,
 		time.RFC3339,
+	}
+
+	for _, layout := range layoutsWithZone {
+		parsed, err := time.Parse(layout, text)
+		if err == nil {
+			return parsed, true
+		}
+	}
+
+	layoutsWithoutZone := []string{
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02 15:04:05",
 		"2006-01-02",
@@ -628,8 +638,8 @@ func parseTemporalString(raw string) (time.Time, bool) {
 		"15:04:05",
 	}
 
-	for _, layout := range layouts {
-		parsed, err := time.Parse(layout, text)
+	for _, layout := range layoutsWithoutZone {
+		parsed, err := time.ParseInLocation(layout, text, time.Local)
 		if err == nil {
 			return parsed, true
 		}
@@ -2208,9 +2218,9 @@ func formatExportCellText(val interface{}) string {
 		return text
 	default:
 		text := fmt.Sprintf("%v", val)
-		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）格式化为本地时区 yyyy-MM-dd HH:mm:ss
+		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）统一格式化为 yyyy-MM-dd HH:mm:ss
 		if parsed, ok := parseTemporalString(text); ok {
-			return parsed.Local().Format("2006-01-02 15:04:05")
+			return parsed.Format("2006-01-02 15:04:05")
 		}
 		return text
 	}
@@ -2223,15 +2233,15 @@ func normalizeExportJSONValue(val interface{}) interface{} {
 
 	switch v := val.(type) {
 	case time.Time:
-		return v.Local().Format("2006-01-02 15:04:05")
+		return v.Format("2006-01-02 15:04:05")
 	case *time.Time:
 		if v == nil {
 			return nil
 		}
-		return v.Local().Format("2006-01-02 15:04:05")
+		return v.Format("2006-01-02 15:04:05")
 	case string:
 		if parsed, ok := parseTemporalString(v); ok {
-			return parsed.Local().Format("2006-01-02 15:04:05")
+			return parsed.Format("2006-01-02 15:04:05")
 		}
 		return v
 	case float32:
