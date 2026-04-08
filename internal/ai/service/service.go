@@ -1122,7 +1122,7 @@ func (s *Service) AISaveSession(sessionID string, title string, updatedAt float6
 		Messages:  json.RawMessage(messagesJSON),
 	}
 
-	data, err := json.MarshalIndent(sfd, "", "  ")
+	data, err := json.Marshal(sfd)
 	if err != nil {
 		return fmt.Errorf("序列化会话数据失败: %w", err)
 	}
