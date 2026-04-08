@@ -19,6 +19,20 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
+const noAutoCapInputProps = {
+  autoCapitalize: 'none' as const,
+  autoCorrect: 'off' as const,
+  spellCheck: false,
+};
+
+const applyNoAutoCapAttributes = (element: Element) => {
+  if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  element.setAttribute('autocapitalize', 'none');
+  element.setAttribute('autocorrect', 'off');
+  element.setAttribute('spellcheck', 'false');
+};
 
 type ConnectionSecretKey =
   | 'primaryPassword'
@@ -196,6 +210,23 @@ const ConnectionModal: React.FC<{
       marginTop: 12,
       border: darkMode ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(0, 0, 0, 0.06)',
   };
+
+  useEffect(() => {
+      if (!open) return;
+      const applyForConnectionModal = () => {
+          document
+              .querySelectorAll('.connection-modal-wrap input, .connection-modal-wrap textarea')
+              .forEach(applyNoAutoCapAttributes);
+      };
+      applyForConnectionModal();
+      const observer = new MutationObserver(() => {
+          applyForConnectionModal();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      return () => {
+          observer.disconnect();
+      };
+  }, [open]);
 
 
   const modalShellStyle = useMemo(() => ({
@@ -2072,7 +2103,7 @@ const ConnectionModal: React.FC<{
               <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>常用参数集中在左侧，优先完成连接建立所需的最小输入。</div>
 
               <Form.Item name="name" label="连接名称">
-                  <Input placeholder="例如：本地测试库" />
+                  <Input {...noAutoCapInputProps} placeholder="例如：本地测试库" />
               </Form.Item>
 
               {!isCustom && (
@@ -2082,7 +2113,7 @@ const ConnectionModal: React.FC<{
                           label="连接 URI（可复制粘贴）"
                           help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
                       >
-                          <Input.TextArea rows={3} placeholder={getUriPlaceholder()} />
+                          <Input.TextArea {...noAutoCapInputProps} rows={3} placeholder={getUriPlaceholder()} />
                       </Form.Item>
                       <Space size={8} style={{ marginBottom: uriFeedback ? 12 : 16 }} wrap>
                           <Button onClick={handleGenerateURI}>生成 URI</Button>
@@ -2112,10 +2143,10 @@ const ConnectionModal: React.FC<{
               {isCustom ? (
                   <>
                       <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
-                          <Input placeholder="例如: mysql, postgres" />
+                          <Input {...noAutoCapInputProps} placeholder="例如: mysql, postgres" />
                       </Form.Item>
                       <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[createCustomDsnRule()]}>
-                          <Input.TextArea rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
+                          <Input.TextArea {...noAutoCapInputProps} rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
                       </Form.Item>
                       {renderStoredSecretControls({
                           fieldName: 'dsn',
@@ -2135,6 +2166,7 @@ const ConnectionModal: React.FC<{
                               style={{ marginBottom: 0 }}
                           >
                               <Input
+                                  {...noAutoCapInputProps}
                                   placeholder={isFileDb ? (dbType === 'duckdb' ? '/path/to/db.duckdb' : '/path/to/db.sqlite') : 'localhost'}
                               />
                           </Form.Item>
@@ -2162,7 +2194,7 @@ const ConnectionModal: React.FC<{
                               label="默认连接数据库（可选）"
                               help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
                           >
-                              <Input placeholder="例如：appdb" />
+                              <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
                           </Form.Item>
                       )}
 
@@ -2173,7 +2205,7 @@ const ConnectionModal: React.FC<{
                               rules={[createUriAwareRequiredRule('请输入 Oracle 服务名（例如 ORCLPDB1）')]}
                               help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
                           >
-                              <Input placeholder="例如：ORCLPDB1" />
+                              <Input {...noAutoCapInputProps} placeholder="例如：ORCLPDB1" />
                           </Form.Item>
                       )}
 
@@ -2198,10 +2230,10 @@ const ConnectionModal: React.FC<{
                                       </Form.Item>
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                           <Form.Item name="mysqlReplicaUser" label="从库用户名（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="留空沿用主库用户名" />
+                                              <Input {...noAutoCapInputProps} placeholder="留空沿用主库用户名" />
                                           </Form.Item>
                                           <Form.Item name="mysqlReplicaPassword" label="从库密码（可选）" style={{ marginBottom: 0 }}>
-                                              <Input.Password placeholder="留空沿用主库密码" />
+                                              <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主库密码" />
                                           </Form.Item>
                                       </div>
                                       {renderStoredSecretControls({
@@ -2244,14 +2276,14 @@ const ConnectionModal: React.FC<{
                                       </Form.Item>
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                           <Form.Item name="mongoReplicaSet" label="副本集名称（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="例如：rs0" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如：rs0" />
                                           </Form.Item>
                                           <Form.Item name="mongoReplicaUser" label="副本集用户名（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="留空沿用主用户名" />
+                                              <Input {...noAutoCapInputProps} placeholder="留空沿用主用户名" />
                                           </Form.Item>
                                       </div>
                                       <Form.Item name="mongoReplicaPassword" label="副本集密码（可选）" style={{ marginBottom: 0 }}>
-                                          <Input.Password placeholder="留空沿用主密码" />
+                                          <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主密码" />
                                       </Form.Item>
                                       {renderStoredSecretControls({
                                           fieldName: 'mongoReplicaPassword',
@@ -2295,7 +2327,7 @@ const ConnectionModal: React.FC<{
                               )}
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="mongoAuthSource" label="认证库 (authSource)" style={{ marginBottom: 0 }}>
-                                      <Input placeholder="默认使用 database 或 admin" />
+                                      <Input {...noAutoCapInputProps} placeholder="默认使用 database 或 admin" />
                                   </Form.Item>
                                   <Form.Item name="mongoReadPreference" label="读偏好 (readPreference)" style={{ marginBottom: 0 }}>
                                       <Select
@@ -2332,7 +2364,7 @@ const ConnectionModal: React.FC<{
                                   </Form.Item>
                               )}
                               <Form.Item name="password" label="密码 (可选)">
-                                  <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
+                                  <Input.Password {...noAutoCapInputProps} placeholder="Redis 密码（如果设置了 requirepass）" />
                               </Form.Item>
                               {renderStoredSecretControls({
                                   fieldName: 'password',
@@ -2362,10 +2394,10 @@ const ConnectionModal: React.FC<{
                                   rules={dbType === 'mongodb' ? [] : [createUriAwareRequiredRule('请输入用户名')]}
                                   style={{ marginBottom: 0 }}
                               >
-                                  <Input />
+                                  <Input {...noAutoCapInputProps} />
                               </Form.Item>
                               <Form.Item name="password" label="密码" style={{ marginBottom: 0 }}>
-                                  <Input.Password />
+                                  <Input.Password {...noAutoCapInputProps} />
                               </Form.Item>
                               {dbType === 'mongodb' && (
                                   <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ marginBottom: 0 }}>
@@ -2449,10 +2481,10 @@ const ConnectionModal: React.FC<{
                                   {dbType === 'dameng' && (
                                       <>
                                           <Form.Item name="sslCertPath" label="客户端证书路径 (SSL_CERT_PATH)" rules={[{ required: true, message: '达梦 SSL 需要证书路径' }]} style={{ marginBottom: 8 }}>
-                                              <Input placeholder="例如: C:\certs\client-cert.pem" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如: C:\certs\client-cert.pem" />
                                           </Form.Item>
                                           <Form.Item name="sslKeyPath" label="客户端私钥路径 (SSL_KEY_PATH)" rules={[{ required: true, message: '达梦 SSL 需要私钥路径' }]} style={{ marginBottom: 8 }}>
-                                              <Input placeholder="例如: C:\certs\client-key.pem" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如: C:\certs\client-key.pem" />
                                           </Form.Item>
                                       </>
                                   )}
@@ -2475,7 +2507,7 @@ const ConnectionModal: React.FC<{
                               <div style={tunnelSectionStyle}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
                                   <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
+                                      <Input {...noAutoCapInputProps} placeholder="例如: ssh.example.com 或 192.168.1.100" />
                                   </Form.Item>
                                   <Form.Item name="sshPort" label="端口" rules={[{ required: useSSH, message: '请输入SSH端口' }]} style={{ width: 100 }}>
                                       <InputNumber style={{ width: '100%' }} />
@@ -2483,16 +2515,16 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="sshUser" label="SSH 用户" rules={[{ required: useSSH, message: '请输入SSH用户' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="root" />
+                                      <Input {...noAutoCapInputProps} placeholder="root" />
                                   </Form.Item>
                                   <Form.Item name="sshPassword" label="SSH 密码" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="密码" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="密码" />
                                       </Form.Item>
                                   </div>
                                   <Form.Item label="私钥路径 (可选)" help="例如: /Users/name/.ssh/id_rsa">
                                       <Space.Compact style={{ width: '100%' }}>
                                           <Form.Item name="sshKeyPath" noStyle>
-                                              <Input placeholder="绝对路径" />
+                                              <Input {...noAutoCapInputProps} placeholder="绝对路径" />
                                           </Form.Item>
                                           <Button onClick={handleSelectSSHKeyFile} loading={selectingSSHKey}>
                                               浏览...
@@ -2523,7 +2555,7 @@ const ConnectionModal: React.FC<{
                           ) : (
                               <div style={tunnelSectionStyle}>
                               <Form.Item name="proxyHost" label="代理主机" rules={[{ required: useProxy, message: '请输入代理主机' }]}>
-                                  <Input placeholder="例如: 127.0.0.1 或 proxy.company.com" />
+                                  <Input {...noAutoCapInputProps} placeholder="例如: 127.0.0.1 或 proxy.company.com" />
                               </Form.Item>
                               <div style={{ display: 'grid', gridTemplateColumns: '180px 120px', gap: 16 }}>
                                   <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ marginBottom: 0 }}>
@@ -2538,10 +2570,10 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="proxyUser" label="代理用户名（可选）" style={{ flex: 1 }}>
-                                      <Input placeholder="留空表示无认证" />
+                                      <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="proxyPassword" label="代理密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="留空表示无认证" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                       </Form.Item>
                                   </div>
                                   {renderStoredSecretControls({
@@ -2568,7 +2600,7 @@ const ConnectionModal: React.FC<{
                           <div style={tunnelSectionStyle}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
                                   <Form.Item name="httpTunnelHost" label="隧道主机" rules={[{ required: useHttpTunnel, message: '请输入隧道主机' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="例如: tunnel.company.com 或 127.0.0.1" />
+                                      <Input {...noAutoCapInputProps} placeholder="例如: tunnel.company.com 或 127.0.0.1" />
                                   </Form.Item>
                                   <Form.Item name="httpTunnelPort" label="端口" rules={[{ required: useHttpTunnel, message: '请输入隧道端口' }]} style={{ width: 120 }}>
                                       <InputNumber style={{ width: '100%' }} min={1} max={65535} />
@@ -2576,10 +2608,10 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="httpTunnelUser" label="隧道用户名（可选）" style={{ flex: 1 }}>
-                                      <Input placeholder="留空表示无认证" />
+                                      <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="httpTunnelPassword" label="隧道密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="留空表示无认证" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                               </div>
                               {renderStoredSecretControls({
@@ -2791,7 +2823,7 @@ const ConnectionModal: React.FC<{
                   }
               }}
           >
-              <Form.Item name="type" hidden><Input /></Form.Item>
+              <Form.Item name="type" hidden><Input {...noAutoCapInputProps} /></Form.Item>
               {currentDriverUnavailableReason && (
                   <Alert
                       showIcon
@@ -3119,7 +3151,6 @@ const ConnectionModal: React.FC<{
 };
 
 export default ConnectionModal;
-
 
 
 
