@@ -602,24 +602,23 @@ jobs:
             const tag = 'dev-latest';
             const ref = `tags/${tag}`;
             const { owner, repo } = context.repo;
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100,
+            });
 
-            try {
-              const release = await github.rest.repos.getReleaseByTag({
-                owner,
-                repo,
-                tag,
-              });
-              core.info(`Deleting existing release ${release.data.id} for tag ${tag}`);
-              await github.rest.repos.deleteRelease({
-                owner,
-                repo,
-                release_id: release.data.id,
-              });
-            } catch (error) {
-              if (error.status === 404) {
-                core.info(`No existing release found for tag ${tag}`);
-              } else {
-                throw error;
+            const matchedReleases = releases.filter((release) => release.tag_name === tag);
+            if (matchedReleases.length === 0) {
+              core.info(`No existing releases found for tag ${tag}`);
+            } else {
+              for (const release of matchedReleases) {
+                core.info(`Deleting release ${release.id} (${release.name || 'unnamed'}) for tag ${tag}`);
+                await github.rest.repos.deleteRelease({
+                  owner,
+                  repo,
+                  release_id: release.id,
+                });
               }
             }
 
