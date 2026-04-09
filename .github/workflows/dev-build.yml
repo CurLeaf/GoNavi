@@ -576,13 +576,49 @@ jobs:
           echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
 
       # 删除旧的 dev pre-release（保持只有最新一个）
-      - name: Delete Previous Dev Release
-        uses: dev-drprasad/delete-tag-and-release@v1.1
-        continue-on-error: true
+      - name: Reset Previous Dev Release
+        uses: actions/github-script@v7
         with:
-          tag_name: dev-latest
-          delete_release: true
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = 'dev-latest';
+            const ref = `tags/${tag}`;
+            const { owner, repo } = context.repo;
+
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              core.info(`Deleting existing release ${release.data.id} for tag ${tag}`);
+              await github.rest.repos.deleteRelease({
+                owner,
+                repo,
+                release_id: release.data.id,
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                core.info(`No existing release found for tag ${tag}`);
+              } else {
+                throw error;
+              }
+            }
+
+            try {
+              await github.rest.git.deleteRef({
+                owner,
+                repo,
+                ref,
+              });
+              core.info(`Deleted ref ${ref}`);
+            } catch (error) {
+              if (error.status === 404) {
+                core.info(`No existing ref found for ${ref}`);
+              } else {
+                throw error;
+              }
+            }
 
       - name: Create Dev Pre-release
         uses: softprops/action-gh-release@v2
