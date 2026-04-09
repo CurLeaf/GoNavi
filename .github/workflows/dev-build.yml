@@ -5,6 +5,10 @@ on:
     branches:
       - dev
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -575,6 +579,20 @@ jobs:
           DEV_VERSION="dev-${SHORT_SHA}"
           echo "version=${DEV_VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Format Build Time
+        id: build_time
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime, timezone, timedelta
+
+          raw = "${{ github.event.head_commit.timestamp }}"
+          dt = datetime.fromisoformat(raw)
+          china_tz = timezone(timedelta(hours=8))
+          formatted = dt.astimezone(china_tz).strftime("%Y-%m-%d %H:%M:%S")
+          print(f"display={formatted}")
+          PY
+
       # 删除旧的 dev pre-release（保持只有最新一个）
       - name: Reset Previous Dev Release
         uses: actions/github-script@v7
@@ -635,7 +653,7 @@ jobs:
             **版本**: `${{ steps.version.outputs.version }}`
             **分支**: `dev`
             **提交**: [`${{ github.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
-            **构建时间**: ${{ github.event.head_commit.timestamp }}
+            **构建时间**: ${{ steps.build_time.outputs.display }}
 
             > ⚠️ 这是开发测试版本，仅供内部测试使用，不建议用于生产环境。
             > 每次 push 到 `dev` 分支会自动覆盖此 release。
