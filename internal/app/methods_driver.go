@@ -2,6 +2,7 @@ package app
 
 import (
 	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,86 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/mod/semver"
 )
+
+var (
+	goBinaryLookPath = exec.LookPath
+	goBinaryStat     = os.Stat
+	goBinaryCommand  = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command(name, arg...)
+	}
+)
+
+// resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
+func resolveGoBinaryPath() (string, error) {
+	if goPath, err := goBinaryLookPath("go"); err == nil {
+		return goPath, nil
+	}
+
+	// 修复点：GUI 进程常拿不到终端里的 PATH，这里补充常见安装位置兜底。
+	commonCandidates := []string{
+		"/opt/homebrew/bin/go",
+		"/usr/local/go/bin/go",
+		"/usr/local/bin/go",
+	}
+	for _, candidate := range commonCandidates {
+		if info, err := goBinaryStat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+
+	for _, shell := range candidateShellsForCommandLookup() {
+		cmd := goBinaryCommand(shell, "-lc", "command -v go")
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		goPath := resolveExistingPathFromCommandOutput(output)
+		if goPath == "" {
+			continue
+		}
+		if info, err := goBinaryStat(goPath); err == nil && !info.IsDir() {
+			return goPath, nil
+		}
+	}
+
+	return "", exec.ErrNotFound
+}
+
+// resolveExistingPathFromCommandOutput 从命令输出中提取真实存在的路径，避免 shell 启动脚本输出污染探测结果 by AI.Coding
+func resolveExistingPathFromCommandOutput(value []byte) string {
+	for _, line := range bytes.Split(value, []byte{'\n'}) {
+		trimmed := strings.TrimSpace(string(line))
+		if trimmed != "" {
+			if info, err := goBinaryStat(trimmed); err == nil && !info.IsDir() {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+// candidateShellsForCommandLookup 返回可能可用的 shell，用于回收用户登录环境中的 PATH by AI.Coding
+func candidateShellsForCommandLookup() []string {
+	seen := make(map[string]struct{}, 4)
+	result := make([]string, 0, 4)
+	appendShell := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		if _, ok := seen[trimmed]; ok {
+			return
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+
+	appendShell(os.Getenv("SHELL"))
+	appendShell("/bin/zsh")
+	appendShell("/bin/bash")
+	appendShell("/bin/sh")
+	return result
+}
 
 type driverDefinition struct {
 	Type               string `json:"type"`
@@ -3061,7 +3142,7 @@ func downloadOptionalDriverAgentFromBundle(a *App, definition driverDefinition, 
 func buildOptionalDriverAgentFromSource(definition driverDefinition, executablePath string, selectedVersion string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
-	goPath, lookErr := exec.LookPath("go")
+	goPath, lookErr := resolveGoBinaryPath()
 	if lookErr != nil {
 		return "", fmt.Errorf("当前环境未安装 Go，且未找到可用的 %s 预编译代理包", displayName)
 	}
