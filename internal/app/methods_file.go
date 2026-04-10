@@ -264,6 +264,10 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 		Title: "Select Config File",
 		Filters: []runtime.FileFilter{
 			{
+				DisplayName: "GoNavi Connection Package (*.gonavi-conn)",
+				Pattern:     "*.gonavi-conn",
+			},
+			{
 				DisplayName: "JSON Files (*.json)",
 				Pattern:     "*.json",
 			},
@@ -284,6 +288,53 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+func (a *App) ExportConnectionsPackage(password string) connection.QueryResult {
+	payload, err := a.buildConnectionPackagePayload()
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Export Connections",
+		DefaultFilename: "connections" + connectionPackageExtension,
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "GoNavi Connection Package (*.gonavi-conn)",
+				Pattern:     "*.gonavi-conn",
+			},
+		},
+	})
+	if err != nil || strings.TrimSpace(filename) == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename = normalizeConnectionPackageExportFilename(filename)
+
+	pkg, err := encryptConnectionPackage(payload, password)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	content, err := json.MarshalIndent(pkg, "", "  ")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.WriteFile(filename, content, 0o644); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
+func normalizeConnectionPackageExportFilename(filename string) string {
+	trimmed := strings.TrimSpace(filename)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(filepath.Ext(trimmed), connectionPackageExtension) {
+		return trimmed
+	}
+	return trimmed + connectionPackageExtension
 }
 
 func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {

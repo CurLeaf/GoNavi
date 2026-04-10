@@ -185,3 +185,89 @@ func TestSaveGlobalProxyReturnsSecretlessView(t *testing.T) {
 		t.Fatal("expected hasPassword=true")
 	}
 }
+
+func TestImportLegacyConnectionsIsIdempotentForSameID(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	legacy := connection.LegacySavedConnection{
+		ID:   "legacy-1",
+		Name: "Legacy",
+		Config: connection.ConnectionConfig{
+			ID:       "legacy-1",
+			Type:     "postgres",
+			Host:     "db.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: "secret-1",
+		},
+	}
+
+	if _, err := app.ImportLegacyConnections([]connection.LegacySavedConnection{legacy}); err != nil {
+		t.Fatalf("first ImportLegacyConnections returned error: %v", err)
+	}
+	if _, err := app.ImportLegacyConnections([]connection.LegacySavedConnection{legacy}); err != nil {
+		t.Fatalf("second ImportLegacyConnections returned error: %v", err)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected a single saved connection after repeated import, got %d", len(saved))
+	}
+}
+
+func TestImportLegacyConnectionsKeepsExistingSecretWhenReimportOmitsPassword(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	if _, err := app.ImportLegacyConnections([]connection.LegacySavedConnection{
+		{
+			ID:   "legacy-1",
+			Name: "Legacy",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-1",
+				Type:     "postgres",
+				Host:     "db.local",
+				Port:     5432,
+				User:     "postgres",
+				Password: "secret-1",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("initial ImportLegacyConnections returned error: %v", err)
+	}
+
+	if _, err := app.ImportLegacyConnections([]connection.LegacySavedConnection{
+		{
+			ID:   "legacy-1",
+			Name: "Legacy Updated",
+			Config: connection.ConnectionConfig{
+				ID:   "legacy-1",
+				Type: "postgres",
+				Host: "db.local",
+				Port: 5432,
+				User: "postgres",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("update ImportLegacyConnections returned error: %v", err)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected 1 saved connection, got %d", len(saved))
+	}
+	resolved, err := app.resolveConnectionSecrets(saved[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "secret-1" {
+		t.Fatalf("expected original password to be preserved, got %q", resolved.Password)
+	}
+}

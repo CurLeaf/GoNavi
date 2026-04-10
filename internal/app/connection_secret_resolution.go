@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
@@ -14,7 +15,7 @@ func (a *App) resolveConnectionSecrets(config connection.ConnectionConfig) (conn
 	repo := newSavedConnectionRepository(a.configDir, a.secretStore)
 	view, err := repo.Find(config.ID)
 	if err != nil {
-		return config, err
+		return config, normalizeConnectionSecretResolutionError(config, err)
 	}
 
 	base := config
@@ -23,11 +24,30 @@ func (a *App) resolveConnectionSecrets(config connection.ConnectionConfig) (conn
 	}
 	bundle, err := repo.loadSecretBundle(view)
 	if err != nil {
-		return base, err
+		return base, normalizeConnectionSecretResolutionError(base, err)
 	}
 	resolved := mergeConnectionSecretBundleIntoConfig(base, bundle)
 	resolved.ID = view.ID
 	return resolved, nil
+}
+
+func normalizeConnectionSecretResolutionError(config connection.ConnectionConfig, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(lower, "saved connection not found:"):
+		if connectionMetadataLooksEmpty(config) {
+			return fmt.Errorf("未找到已保存连接，可能已被删除，请刷新后重试")
+		}
+		return fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")
+	case strings.Contains(lower, "secret store unavailable"):
+		return fmt.Errorf("系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试")
+	default:
+		return err
+	}
 }
 
 func connectionMetadataLooksEmpty(config connection.ConnectionConfig) bool {

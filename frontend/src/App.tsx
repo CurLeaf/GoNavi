@@ -1,25 +1,51 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
+import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
+import SecurityUpdateBanner from './components/SecurityUpdateBanner';
+import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
+import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
+import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import { DEFAULT_APPEARANCE, useStore } from './store';
-import { SavedConnection } from './types';
+import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
-import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
-import { LEGACY_PERSIST_KEY, readLegacyPersistedSecrets, stripLegacyPersistedSecrets } from './utils/legacyConnectionStorage';
+import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
+import { detectConnectionImportKind, normalizeConnectionPackagePassword } from './utils/connectionExport';
+import {
+  bootstrapSecureConfig,
+  finalizeSecurityUpdateStatus,
+  mergeSecurityUpdateStatusWithLegacySource,
+  startSecurityUpdateFromBootstrap,
+} from './utils/secureConfigBootstrap';
+import {
+  LEGACY_PERSIST_KEY,
+  hasLegacyMigratableSensitiveItems,
+  stripLegacyPersistedConnectionById,
+} from './utils/legacyConnectionStorage';
+import {
+  getSecurityUpdateStatusMeta,
+  resolveSecurityUpdateEntryVisibility,
+} from './utils/securityUpdatePresentation';
+import {
+  resolveSecurityUpdateRepairEntry,
+  shouldReopenSecurityUpdateDetails,
+  shouldRetrySecurityUpdateAfterRepairSave,
+  type SecurityUpdateRepairSource,
+} from './utils/securityUpdateRepairFlow';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -38,7 +64,7 @@ import {
   resolveAIEdgeHandleDockStyle,
   resolveAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
-import { SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { GetSavedConnections, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -48,6 +74,17 @@ const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
+const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
+  overallStatus: 'not_detected',
+  summary: {
+    total: 0,
+    updated: 0,
+    pending: 0,
+    skipped: 0,
+    failed: 0,
+  },
+  issues: [],
+});
 
 const detectNavigatorPlatform = (): string => {
   if (typeof navigator === 'undefined') {
@@ -63,22 +100,30 @@ const detectNavigatorPlatform = (): string => {
 };
 
 
-const toLegacySavedConnectionInput = (item: any) => ({
-  id: typeof item?.id === 'string' ? item.id : '',
-  name: typeof item?.name === 'string' ? item.name : '',
-  config: (item?.config && typeof item.config === 'object') ? item.config : {},
-  includeDatabases: Array.isArray(item?.includeDatabases) ? item.includeDatabases : undefined,
-  includeRedisDatabases: Array.isArray(item?.includeRedisDatabases) ? item.includeRedisDatabases : undefined,
-  iconType: typeof item?.iconType === 'string' ? item.iconType : '',
-  iconColor: typeof item?.iconColor === 'string' ? item.iconColor : '',
-});
-
 const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
   const merged = new Map<string, SavedConnection>();
   current.forEach((conn) => merged.set(conn.id, conn));
   imported.forEach((conn) => merged.set(conn.id, conn));
   return Array.from(merged.values());
 };
+
+type ConnectionPackageDialogMode = 'import' | 'export';
+
+type ConnectionPackageDialogState = {
+  open: boolean;
+  mode: ConnectionPackageDialogMode;
+  password: string;
+  error: string;
+  confirmLoading: boolean;
+};
+
+const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogState => ({
+  open: false,
+  mode: 'export',
+  password: '',
+  error: '',
+  confirmLoading: false,
+});
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -124,6 +169,18 @@ function App() {
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
+  const [securityUpdateStatus, setSecurityUpdateStatus] = useState<SecurityUpdateStatus>(() => createEmptySecurityUpdateStatus());
+  const [securityUpdateRawPayload, setSecurityUpdateRawPayload] = useState<string | null>(null);
+  const [securityUpdateHasLegacySensitiveItems, setSecurityUpdateHasLegacySensitiveItems] = useState(false);
+  const [isSecurityUpdateIntroOpen, setIsSecurityUpdateIntroOpen] = useState(false);
+  const [isSecurityUpdateBannerDismissed, setIsSecurityUpdateBannerDismissed] = useState(false);
+  const [isSecurityUpdateSettingsOpen, setIsSecurityUpdateSettingsOpen] = useState(false);
+  const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
+  const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState('正在检查已保存配置');
+  const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
+  const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
+  const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
+  const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
@@ -131,6 +188,14 @@ function App() {
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
+  const securityUpdateStatusMeta = useMemo(
+      () => getSecurityUpdateStatusMeta(securityUpdateStatus),
+      [securityUpdateStatus],
+  );
+  const securityUpdateEntryVisibility = useMemo(
+      () => resolveSecurityUpdateEntryVisibility(securityUpdateStatus),
+      [securityUpdateStatus],
+  );
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -185,6 +250,39 @@ function App() {
       };
   }, [isStoreHydrated]);
 
+  const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
+      const fallback = createEmptySecurityUpdateStatus();
+      return {
+          ...fallback,
+          ...(status ?? {}),
+          summary: {
+              ...fallback.summary,
+              ...(status?.summary ?? {}),
+          },
+          issues: Array.isArray(status?.issues) ? status.issues : [],
+      };
+  }, []);
+
+  const applySecurityUpdateStatus = useCallback((
+      status?: Partial<SecurityUpdateStatus> | null,
+      options?: {
+          openSettings?: boolean;
+          resetBannerDismissed?: boolean;
+      },
+  ) => {
+      const nextStatus = normalizeSecurityUpdateStatus(status);
+      const visibility = resolveSecurityUpdateEntryVisibility(nextStatus);
+      setSecurityUpdateStatus(nextStatus);
+      setIsSecurityUpdateIntroOpen(visibility.showIntro);
+      if (options?.resetBannerDismissed !== false) {
+          setIsSecurityUpdateBannerDismissed(false);
+      }
+      if (options?.openSettings) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+      return nextStatus;
+  }, [normalizeSecurityUpdateStatus]);
+
   useEffect(() => {
       if (!isStoreHydrated) {
           return;
@@ -192,74 +290,24 @@ function App() {
 
       let cancelled = false;
       const loadSecureConfig = async () => {
-          const backendApp = (window as any).go?.app?.App;
-          const persistedPayload = typeof window !== 'undefined'
-              ? window.localStorage.getItem(LEGACY_PERSIST_KEY)
-              : null;
-          const legacy = readLegacyPersistedSecrets(persistedPayload);
-
-          let importedLegacyConnections = false;
-          let importedLegacyGlobalProxy = false;
-
-          if (legacy.connections.length > 0) {
-              if (typeof backendApp?.ImportLegacyConnections === 'function') {
-                  try {
-                      await backendApp.ImportLegacyConnections(
-                          legacy.connections.map(toLegacySavedConnectionInput)
-                      );
-                      importedLegacyConnections = true;
-                  } catch (err) {
-                      console.warn('Failed to import legacy saved connections', err);
-                  }
-              } else {
-                  replaceConnections(legacy.connections);
+          try {
+              const result = await bootstrapSecureConfig({
+                  backend: (window as any).go?.app?.App,
+                  replaceConnections,
+                  replaceGlobalProxy,
+              });
+              if (cancelled) {
+                  return;
               }
-          }
-
-          if (legacy.globalProxy) {
-              if (typeof backendApp?.ImportLegacyGlobalProxy === 'function') {
-                  try {
-                      await backendApp.ImportLegacyGlobalProxy(toSaveGlobalProxyInput(legacy.globalProxy));
-                      importedLegacyGlobalProxy = true;
-                  } catch (err) {
-                      console.warn('Failed to import legacy global proxy', err);
-                  }
-              } else {
-                  replaceGlobalProxy(createGlobalProxyDraft(legacy.globalProxy));
+              setSecurityUpdateRawPayload(result.rawPayload);
+              setSecurityUpdateHasLegacySensitiveItems(result.hasLegacySensitiveItems);
+              applySecurityUpdateStatus(result.status);
+          } catch (err) {
+              console.warn('Failed to bootstrap secure config', err);
+          } finally {
+              if (!cancelled) {
+                  setHasLoadedSecureConfig(true);
               }
-          }
-
-          if ((importedLegacyConnections || importedLegacyGlobalProxy) && persistedPayload && typeof window !== 'undefined') {
-              const sanitizedPayload = stripLegacyPersistedSecrets(persistedPayload);
-              if (sanitizedPayload && sanitizedPayload !== persistedPayload) {
-                  window.localStorage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
-              }
-          }
-
-          if (typeof backendApp?.GetSavedConnections === 'function') {
-              try {
-                  const savedConnections = await backendApp.GetSavedConnections();
-                  if (!cancelled && Array.isArray(savedConnections)) {
-                      replaceConnections(savedConnections);
-                  }
-              } catch (err) {
-                  console.warn('Failed to load saved connections from backend', err);
-              }
-          }
-
-          if (typeof backendApp?.GetGlobalProxyConfig === 'function') {
-              try {
-                  const proxyResult = await backendApp.GetGlobalProxyConfig();
-                  if (!cancelled && proxyResult?.success && proxyResult.data) {
-                      replaceGlobalProxy(createGlobalProxyDraft(proxyResult.data));
-                  }
-              } catch (err) {
-                  console.warn('Failed to load global proxy from backend', err);
-              }
-          }
-
-          if (!cancelled) {
-              setHasLoadedSecureConfig(true);
           }
       };
 
@@ -267,7 +315,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+  }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy]);
 
   useEffect(() => {
       if (!isStoreHydrated || !hasLoadedSecureConfig) {
@@ -772,6 +820,161 @@ function App() {
   const connections = useStore(state => state.connections);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
+  const handleOpenSecurityUpdateSettings = useCallback(() => {
+      setIsSecurityUpdateIntroOpen(false);
+      setIsSecurityUpdateSettingsOpen(true);
+  }, []);
+  const runSecurityUpdateRound = useCallback(async (mode: 'start' | 'retry' | 'restart') => {
+      const backendApp = (window as any).go?.app?.App;
+      const stageText = mode === 'retry'
+          ? '正在校验更新结果'
+          : '正在更新安全存储';
+      setSecurityUpdateProgressStage(stageText);
+      setIsSecurityUpdateProgressOpen(true);
+      setIsSecurityUpdateIntroOpen(false);
+
+      try {
+          let nextStatus: SecurityUpdateStatus | null = null;
+          if (mode === 'start') {
+              const result = await startSecurityUpdateFromBootstrap({
+                  backend: backendApp,
+                  replaceConnections,
+                  replaceGlobalProxy,
+              });
+              if (result.error) {
+                  throw result.error;
+              }
+              nextStatus = normalizeSecurityUpdateStatus(result.status);
+          } else if (mode === 'retry') {
+              if (typeof backendApp?.RetrySecurityUpdateCurrentRound !== 'function') {
+                  throw new Error('安全更新能力不可用');
+              }
+              nextStatus = normalizeSecurityUpdateStatus(await backendApp.RetrySecurityUpdateCurrentRound({
+                  migrationId: securityUpdateStatus.migrationId,
+              }));
+          } else {
+              if (typeof backendApp?.RestartSecurityUpdate !== 'function') {
+                  throw new Error('安全更新能力不可用');
+              }
+              nextStatus = normalizeSecurityUpdateStatus(await backendApp.RestartSecurityUpdate({
+                  migrationId: securityUpdateStatus.migrationId,
+                  sourceType: 'current_app_saved_config',
+                  rawPayload: securityUpdateRawPayload ?? '',
+                  options: {
+                      allowPartial: true,
+                      writeBackup: true,
+                  },
+              }));
+          }
+
+          if (mode !== 'start') {
+              nextStatus = await finalizeSecurityUpdateStatus({
+                  backend: backendApp,
+                  replaceConnections,
+                  replaceGlobalProxy,
+              }, nextStatus);
+          }
+
+          const shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
+          applySecurityUpdateStatus(nextStatus, {
+              openSettings: shouldOpenSettings,
+          });
+
+          if (nextStatus.overallStatus === 'completed') {
+              setSecurityUpdateHasLegacySensitiveItems(false);
+              setSecurityUpdateRawPayload(null);
+              setIsSecurityUpdateSettingsOpen(false);
+              void message.success('已保存配置已完成安全更新');
+          } else if (nextStatus.overallStatus === 'needs_attention') {
+              void message.warning('更新尚未完成，有少量配置需要你处理');
+          } else if (nextStatus.overallStatus === 'rolled_back') {
+              void message.warning('本次更新未完成，系统已保留当前可用配置');
+          }
+      } catch (err: any) {
+          console.warn('Failed to execute security update round', err);
+          void message.error(err?.message || '安全更新未完成，请稍后重试');
+      } finally {
+          setIsSecurityUpdateProgressOpen(false);
+      }
+  }, [
+      applySecurityUpdateStatus,
+      normalizeSecurityUpdateStatus,
+      replaceConnections,
+      replaceGlobalProxy,
+      securityUpdateRawPayload,
+      securityUpdateStatus.migrationId,
+  ]);
+  const handleStartSecurityUpdate = useCallback(() => {
+      void runSecurityUpdateRound('start');
+  }, [runSecurityUpdateRound]);
+  const handleRetrySecurityUpdate = useCallback(() => {
+      void runSecurityUpdateRound('retry');
+  }, [runSecurityUpdateRound]);
+  const handleRestartSecurityUpdate = useCallback(() => {
+      void runSecurityUpdateRound('restart');
+  }, [runSecurityUpdateRound]);
+  const handlePostponeSecurityUpdate = useCallback(async () => {
+      const backendApp = (window as any).go?.app?.App;
+      setIsSecurityUpdateIntroOpen(false);
+      try {
+          if (typeof backendApp?.DismissSecurityUpdateReminder === 'function') {
+              const nextStatus = mergeSecurityUpdateStatusWithLegacySource(
+                  await backendApp.DismissSecurityUpdateReminder(),
+                  securityUpdateRawPayload,
+              );
+              applySecurityUpdateStatus(nextStatus);
+              return;
+          }
+          applySecurityUpdateStatus({
+              overallStatus: 'postponed',
+              canStart: true,
+              canPostpone: true,
+              summary: securityUpdateStatus.summary,
+              issues: securityUpdateStatus.issues,
+          });
+      } catch (err: any) {
+          console.warn('Failed to dismiss security update reminder', err);
+          void message.error(err?.message || '暂时无法延后本次安全更新');
+      }
+  }, [
+      applySecurityUpdateStatus,
+      securityUpdateRawPayload,
+      securityUpdateStatus.issues,
+      securityUpdateStatus.summary,
+  ]);
+  const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => {
+      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections);
+      if (repairEntry.type === 'warning') {
+          void message.warning(repairEntry.message);
+          return;
+      }
+      if (repairEntry.type === 'connection') {
+          setIsSecurityUpdateSettingsOpen(false);
+          setSecurityUpdateRepairSource(repairEntry.repairSource);
+          setEditingConnection(repairEntry.connection);
+          setIsModalOpen(true);
+          return;
+      }
+      if (repairEntry.type === 'proxy') {
+          setIsSecurityUpdateSettingsOpen(false);
+          setSecurityUpdateRepairSource(repairEntry.repairSource);
+          setIsProxyModalOpen(true);
+          return;
+      }
+      if (repairEntry.type === 'ai') {
+          setIsSecurityUpdateSettingsOpen(false);
+          setSecurityUpdateRepairSource(repairEntry.repairSource);
+          setFocusedAIProviderId(repairEntry.providerId);
+          setIsAISettingsOpen(true);
+          return;
+      }
+      if (repairEntry.type === 'retry') {
+          void runSecurityUpdateRound('retry');
+          return;
+      }
+      setSecurityUpdateRepairSource(null);
+      setIsSecurityUpdateSettingsOpen(true);
+  }, [connections, runSecurityUpdateRound]);
   const updateCheckInFlightRef = React.useRef(false);
   const updateDownloadInFlightRef = React.useRef(false);
   const updateUserDismissedRef = React.useRef(false);
@@ -1179,37 +1382,74 @@ function App() {
       });
   }, [activeTabId, tabs, connections, activeContext, addTab]);
 
+  const closeConnectionPackageDialog = useCallback(() => {
+      setConnectionPackageDialog(createClosedConnectionPackageDialogState());
+      setPendingConnectionImportPayload(null);
+  }, []);
+
+  const refreshConnectionsAfterImport = useCallback(async (importedViews: SavedConnection[]) => {
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.GetSavedConnections === 'function') {
+          const latestConnections = await GetSavedConnections();
+          if (!Array.isArray(latestConnections)) {
+              throw new Error('导入成功，但刷新连接列表失败：后端未返回连接列表');
+          }
+          replaceConnections(latestConnections as SavedConnection[]);
+          return;
+      }
+
+      const latestConnections = useStore.getState().connections;
+      replaceConnections(mergeSavedConnections(latestConnections, importedViews));
+  }, [replaceConnections]);
+
+  const importConnectionsPayload = useCallback(async (raw: string, password: string) => {
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.ImportConnectionsPayload !== 'function') {
+          throw new Error('导入失败：当前后端未提供新版导入能力');
+      }
+
+      const importedViews = await backendApp.ImportConnectionsPayload(raw, password);
+      if (!Array.isArray(importedViews)) {
+          throw new Error('导入失败：后端未返回连接列表');
+      }
+      await refreshConnectionsAfterImport(importedViews as SavedConnection[]);
+      return importedViews as SavedConnection[];
+  }, [refreshConnectionsAfterImport]);
+
   const handleImportConnections = async () => {
       const res = await (window as any).go.app.App.ImportConfigFile();
-      if (res.success) {
-          try {
-              const imported = JSON.parse(res.data);
-              if (!Array.isArray(imported)) {
-                  void message.error("文件格式错误：需要 JSON 数组");
-                  return;
-              }
-
-              const normalizedItems = imported.map(toLegacySavedConnectionInput);
-              const backendApp = (window as any).go?.app?.App;
-
-              if (typeof backendApp?.ImportLegacyConnections === 'function') {
-                  const importedViews = await backendApp.ImportLegacyConnections(normalizedItems);
-                  if (!Array.isArray(importedViews)) {
-                      throw new Error('导入失败：后端未返回连接列表');
-                  }
-                  replaceConnections(mergeSavedConnections(connections, importedViews));
-                  void message.success(`成功导入 ${importedViews.length} 个连接`);
-                  return;
-              }
-
-              const fallbackItems = normalizedItems as SavedConnection[];
-              replaceConnections(mergeSavedConnections(connections, fallbackItems));
-              void message.success(`成功导入 ${fallbackItems.length} 个连接`);
-          } catch (e: any) {
-              void message.error(e?.message || "解析 JSON 失败");
+      if (!res.success) {
+          if (res.message !== "已取消") {
+              void message.error("导入失败: " + res.message);
           }
-      } else if (res.message !== "已取消") {
-          void message.error("导入失败: " + res.message);
+          return;
+      }
+
+      const raw = typeof res.data === 'string' ? res.data : String(res.data ?? '');
+      const importKind = detectConnectionImportKind(raw);
+
+      if (importKind === 'invalid') {
+          void message.error('文件格式错误：仅支持 GoNavi 恢复包或历史 JSON 连接数组');
+          return;
+      }
+
+      if (importKind === 'encrypted-package') {
+          setPendingConnectionImportPayload(raw);
+          setConnectionPackageDialog({
+              open: true,
+              mode: 'import',
+              password: '',
+              error: '',
+              confirmLoading: false,
+          });
+          return;
+      }
+
+      try {
+          const importedViews = await importConnectionsPayload(raw, '');
+          void message.success(`成功导入 ${importedViews.length} 个连接`);
+      } catch (e: any) {
+          void message.error(e?.message || '导入失败');
       }
   };
 
@@ -1218,11 +1458,64 @@ function App() {
           void message.warning("没有连接可导出");
           return;
       }
-      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases','iconType','iconColor'], "connections", "json");
-      if (res.success) {
-          void message.success("导出成功");
-      } else if (res.message !== "已取消") {
-          void message.error("导出失败: " + res.message);
+
+      setConnectionPackageDialog({
+          open: true,
+          mode: 'export',
+          password: '',
+          error: '',
+          confirmLoading: false,
+      });
+  };
+
+  const handleConfirmConnectionPackageDialog = async () => {
+      const backendApp = (window as any).go?.app?.App;
+      const password = normalizeConnectionPackagePassword(connectionPackageDialog.password);
+
+      if (!password) {
+          setConnectionPackageDialog((current) => ({
+              ...current,
+              error: '恢复包密码不能为空',
+          }));
+          return;
+      }
+
+      setConnectionPackageDialog((current) => ({
+          ...current,
+          password,
+          error: '',
+          confirmLoading: true,
+      }));
+
+      try {
+          if (connectionPackageDialog.mode === 'export') {
+              if (typeof backendApp?.ExportConnectionsPackage !== 'function') {
+                  throw new Error('导出失败：当前后端未提供新版导出能力');
+              }
+
+              const res = await backendApp.ExportConnectionsPackage(password);
+              if (!res?.success) {
+                  throw new Error(res?.message || '导出失败');
+              }
+
+              closeConnectionPackageDialog();
+              void message.success('导出成功');
+              return;
+          }
+
+          if (!pendingConnectionImportPayload) {
+              throw new Error('导入失败：未找到待导入的恢复包内容');
+          }
+
+          const importedViews = await importConnectionsPayload(pendingConnectionImportPayload, password);
+          closeConnectionPackageDialog();
+          void message.success(`成功导入 ${importedViews.length} 个连接`);
+      } catch (e: any) {
+          setConnectionPackageDialog((current) => ({
+              ...current,
+              confirmLoading: false,
+              error: e?.message || (current.mode === 'export' ? '导出失败' : '导入失败'),
+          }));
       }
   };
 
@@ -1259,7 +1552,10 @@ function App() {
               key: 'proxy',
               title: '代理',
               icon: <GlobalOutlined />,
-              onClick: () => setIsProxyModalOpen(true),
+              onClick: () => {
+                  setSecurityUpdateRepairSource(null);
+                  setIsProxyModalOpen(true);
+              },
           },
           theme: {
               key: 'theme',
@@ -1342,14 +1638,90 @@ function App() {
       document.removeEventListener('mouseup', handleLogResizeUp);
   };
   
+  const handleCreateConnection = () => {
+      setSecurityUpdateRepairSource(null);
+      setEditingConnection(null);
+      setIsModalOpen(true);
+  };
+
   const handleEditConnection = (conn: SavedConnection) => {
+      setSecurityUpdateRepairSource(null);
       setEditingConnection(conn);
       setIsModalOpen(true);
   };
 
+  const handleConnectionSaved = useCallback(async (savedConnection: SavedConnection) => {
+      if (!shouldRetrySecurityUpdateAfterRepairSave(securityUpdateRepairSource)) {
+          return;
+      }
+
+      const backendApp = (window as any).go?.app?.App;
+      if (securityUpdateStatus.migrationId) {
+          if (typeof backendApp?.RetrySecurityUpdateCurrentRound !== 'function') {
+              return;
+          }
+
+          const rawStatus = await backendApp.RetrySecurityUpdateCurrentRound({
+              migrationId: securityUpdateStatus.migrationId,
+          });
+          const nextStatus = await finalizeSecurityUpdateStatus({
+              backend: backendApp,
+              replaceConnections,
+              replaceGlobalProxy,
+          }, normalizeSecurityUpdateStatus(rawStatus));
+
+          applySecurityUpdateStatus(nextStatus, {
+              openSettings: false,
+          });
+
+          if (nextStatus.overallStatus === 'completed') {
+              setSecurityUpdateHasLegacySensitiveItems(false);
+              setSecurityUpdateRawPayload(null);
+          }
+          return;
+      }
+
+      if (!securityUpdateRawPayload || !savedConnection?.id) {
+          return;
+      }
+
+      const nextRawPayload = stripLegacyPersistedConnectionById(securityUpdateRawPayload, savedConnection.id);
+      if (!nextRawPayload || nextRawPayload === securityUpdateRawPayload) {
+          return;
+      }
+
+      window.localStorage.setItem(LEGACY_PERSIST_KEY, nextRawPayload);
+
+      const rawStatus = typeof backendApp?.GetSecurityUpdateStatus === 'function'
+          ? await backendApp.GetSecurityUpdateStatus()
+          : securityUpdateStatus;
+      const nextStatus = mergeSecurityUpdateStatusWithLegacySource(rawStatus, nextRawPayload);
+      const nextHasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(nextRawPayload);
+
+      setSecurityUpdateRawPayload(nextRawPayload);
+      setSecurityUpdateHasLegacySensitiveItems(nextHasLegacySensitiveItems);
+      applySecurityUpdateStatus(nextStatus, {
+          openSettings: false,
+      });
+  }, [
+      applySecurityUpdateStatus,
+      normalizeSecurityUpdateStatus,
+      replaceConnections,
+      replaceGlobalProxy,
+      securityUpdateRawPayload,
+      securityUpdateRepairSource,
+      securityUpdateStatus,
+      securityUpdateStatus.migrationId,
+  ]);
+
   const handleCloseModal = () => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsModalOpen(false);
       setEditingConnection(null);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
   };
 
   const handleOpenDriverManagerFromConnection = () => {
@@ -1357,6 +1729,45 @@ function App() {
       setEditingConnection(null);
       setIsDriverModalOpen(true);
   };
+
+  const handleCloseDriverManager = useCallback(() => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
+      setIsDriverModalOpen(false);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+  }, [securityUpdateRepairSource]);
+
+  const handleOpenGlobalProxySettings = useCallback(() => {
+      setSecurityUpdateRepairSource(null);
+      setIsProxyModalOpen(true);
+  }, []);
+
+  const handleCloseGlobalProxySettings = useCallback(() => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
+      setIsProxyModalOpen(false);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+  }, [securityUpdateRepairSource]);
+
+  const handleOpenAISettings = useCallback((providerId?: string) => {
+      setSecurityUpdateRepairSource(null);
+      setFocusedAIProviderId(providerId);
+      setIsAISettingsOpen(true);
+  }, []);
+
+  const handleCloseAISettings = useCallback(() => {
+      const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
+      setIsAISettingsOpen(false);
+      setFocusedAIProviderId(undefined);
+      setSecurityUpdateRepairSource(null);
+      if (reopenSecurityUpdateDetails) {
+          setIsSecurityUpdateSettingsOpen(true);
+      }
+  }, [securityUpdateRepairSource]);
 
   const handleTitleBarWindowToggle = async () => {
       try {
@@ -1811,7 +2222,7 @@ function App() {
                         <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
                             新建查询
                         </Button>
-                        <Button icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)} title="新建连接" style={sidebarCreateConnectionActionStyle}>
+                        <Button icon={<PlusOutlined />} onClick={handleCreateConnection} title="新建连接" style={sidebarCreateConnectionActionStyle}>
                             新建连接
                         </Button>
                     </div>
@@ -1912,6 +2323,18 @@ function App() {
             />
           </Sider>
            <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+             {securityUpdateEntryVisibility.showBanner && !isSecurityUpdateBannerDismissed && (
+                <SecurityUpdateBanner
+                  status={securityUpdateStatus}
+                  darkMode={darkMode}
+                  overlayTheme={overlayTheme}
+                  onStart={handleStartSecurityUpdate}
+                  onRetry={handleRetrySecurityUpdate}
+                  onRestart={handleRestartSecurityUpdate}
+                  onOpenDetails={handleOpenSecurityUpdateSettings}
+                  onDismiss={() => setIsSecurityUpdateBannerDismissed(true)}
+                />
+             )}
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
                   <TabManager />
@@ -1928,7 +2351,9 @@ function App() {
                               {renderAIEdgeHandle()}
                           </div>
                       )}
-                      <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => setIsAISettingsOpen(true)} overlayTheme={overlayTheme} />
+                      <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                        handleOpenAISettings();
+                      }} overlayTheme={overlayTheme} />
                   </div>
                )}
              </div>
@@ -1946,6 +2371,7 @@ function App() {
             onClose={handleCloseModal} 
             initialValues={editingConnection}
             onOpenDriverManager={handleOpenDriverManagerFromConnection}
+            onSaved={handleConnectionSaved}
           />
           <Modal
             title={renderUtilityModalTitle(<ToolOutlined />, '工具中心', '集中处理连接配置、同步、驱动和快捷键相关操作。')}
@@ -2007,6 +2433,18 @@ function App() {
                     setIsShortcutModalOpen(true);
                   },
                 },
+                {
+                  key: 'security-update',
+                  icon: <SafetyCertificateOutlined />,
+                  title: '安全更新',
+                  description: securityUpdateEntryVisibility.showDetailEntry || securityUpdateHasLegacySensitiveItems
+                    ? `当前状态：${securityUpdateStatusMeta.label}`
+                    : '查看已保存配置的安全更新状态。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setIsSecurityUpdateSettingsOpen(true);
+                  },
+                },
               ].map((item) => (
                 <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
                   <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
@@ -2026,14 +2464,59 @@ function App() {
           />
           <DriverManagerModal
             open={isDriverModalOpen}
-            onClose={() => setIsDriverModalOpen(false)}
-            onOpenGlobalProxySettings={() => setIsProxyModalOpen(true)}
+            onClose={handleCloseDriverManager}
+            onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
+          />
+          <SecurityUpdateIntroModal
+            open={isSecurityUpdateIntroOpen}
+            loading={isSecurityUpdateProgressOpen}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
+            onStart={handleStartSecurityUpdate}
+            onPostpone={handlePostponeSecurityUpdate}
+            onViewDetails={handleOpenSecurityUpdateSettings}
+          />
+          <SecurityUpdateSettingsModal
+            open={isSecurityUpdateSettingsOpen}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
+            status={securityUpdateStatus}
+            onClose={() => setIsSecurityUpdateSettingsOpen(false)}
+            onStart={handleStartSecurityUpdate}
+            onRetry={handleRetrySecurityUpdate}
+            onRestart={handleRestartSecurityUpdate}
+            onIssueAction={handleSecurityUpdateIssueAction}
+          />
+          <SecurityUpdateProgressModal
+            open={isSecurityUpdateProgressOpen}
+            stageText={securityUpdateProgressStage}
+            overlayTheme={overlayTheme}
           />
           <AISettingsModal
             open={isAISettingsOpen}
-            onClose={() => setIsAISettingsOpen(false)}
+            onClose={handleCloseAISettings}
             darkMode={darkMode}
             overlayTheme={overlayTheme}
+            focusProviderId={focusedAIProviderId}
+          />
+          <ConnectionPackagePasswordModal
+            open={connectionPackageDialog.open}
+            title={connectionPackageDialog.mode === 'export' ? '输入导出密码' : '输入导入密码'}
+            password={connectionPackageDialog.password}
+            error={connectionPackageDialog.error}
+            confirmLoading={connectionPackageDialog.confirmLoading}
+            confirmText={connectionPackageDialog.mode === 'export' ? '开始导出' : '开始导入'}
+            onPasswordChange={(value) => {
+                setConnectionPackageDialog((current) => ({
+                    ...current,
+                    password: value,
+                    error: '',
+                }));
+            }}
+            onConfirm={() => {
+                void handleConfirmConnectionPackageDialog();
+            }}
+            onCancel={closeConnectionPackageDialog}
           />
           <Modal
             title={renderUtilityModalTitle(<InfoCircleOutlined />, '关于 GoNavi', '查看版本信息、仓库地址、更新状态与下载入口。')}
@@ -2454,7 +2937,7 @@ function App() {
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
               open={isProxyModalOpen}
-              onCancel={() => setIsProxyModalOpen(false)}
+              onCancel={handleCloseGlobalProxySettings}
               footer={null}
               width={520}
               styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}

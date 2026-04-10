@@ -82,7 +82,7 @@ func TestResolveProviderConfigSecretsRestoresStoredSecretBundle(t *testing.T) {
 	}
 }
 
-func TestLoadConfigMigratesPlaintextProviderSecrets(t *testing.T) {
+func TestLoadConfigUsesPlaintextProviderSecretsWithoutSilentMigration(t *testing.T) {
 	store := newFakeProviderSecretStore()
 	service := NewServiceWithSecretStore(store)
 	service.configDir = t.TempDir()
@@ -118,24 +118,28 @@ func TestLoadConfigMigratesPlaintextProviderSecrets(t *testing.T) {
 		t.Fatalf("expected 1 provider, got %d", len(providers))
 	}
 	if providers[0].APIKey != "" {
-		t.Fatalf("expected migrated provider to be secretless, got %q", providers[0].APIKey)
+		t.Fatalf("expected provider view to stay secretless, got %q", providers[0].APIKey)
 	}
 	if !providers[0].HasSecret {
-		t.Fatal("expected migrated provider to report HasSecret=true")
+		t.Fatal("expected provider view to report HasSecret=true")
 	}
-	stored, err := store.Get(providers[0].SecretRef)
+
+	if len(service.providers) != 1 {
+		t.Fatalf("expected runtime providers to be loaded, got %d", len(service.providers))
+	}
+	if service.providers[0].APIKey != "sk-test" {
+		t.Fatalf("expected runtime provider to keep plaintext apiKey, got %q", service.providers[0].APIKey)
+	}
+	if service.providers[0].Headers["Authorization"] != "Bearer test" {
+		t.Fatalf("expected runtime provider to keep sensitive header, got %#v", service.providers[0].Headers)
+	}
+
+	ref, err := secretstore.BuildRef("ai-provider", "openai-main")
 	if err != nil {
-		t.Fatalf("expected secret bundle in store, got error: %v", err)
+		t.Fatalf("BuildRef returned error: %v", err)
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
-	}
-	if bundle.APIKey != "sk-test" {
-		t.Fatalf("expected migrated apiKey in store, got %q", bundle.APIKey)
-	}
-	if bundle.SensitiveHeaders["Authorization"] != "Bearer test" {
-		t.Fatalf("expected migrated sensitive header in store, got %#v", bundle.SensitiveHeaders)
+	if _, err := store.Get(ref); !os.IsNotExist(err) {
+		t.Fatalf("expected startup load to avoid secret-store migration, got %v", err)
 	}
 
 	rewritten, err := os.ReadFile(configPath)
@@ -143,11 +147,124 @@ func TestLoadConfigMigratesPlaintextProviderSecrets(t *testing.T) {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
 	text := string(rewritten)
-	if strings.Contains(text, "sk-test") {
-		t.Fatalf("expected rewritten config to remove api key, got %s", text)
+	if !strings.Contains(text, "sk-test") {
+		t.Fatalf("expected config file to remain unchanged, got %s", text)
 	}
-	if strings.Contains(text, "Bearer test") {
-		t.Fatalf("expected rewritten config to remove sensitive header, got %s", text)
+	if !strings.Contains(text, "Bearer test") {
+		t.Fatalf("expected config file to keep sensitive header, got %s", text)
+	}
+}
+
+func TestAISaveProviderKeepsLegacyPlaintextSecretAfterStartupLoad(t *testing.T) {
+	store := newFakeProviderSecretStore()
+	service := NewServiceWithSecretStore(store)
+	service.configDir = t.TempDir()
+
+	legacy := aiConfig{
+		Providers: []ai.ProviderConfig{
+			{
+				ID:      "openai-main",
+				Type:    "custom",
+				Name:    "OpenAI",
+				APIKey:  "sk-test",
+				BaseURL: "",
+				Headers: map[string]string{
+					"Authorization": "Bearer test",
+					"X-Team":        "db",
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(service.configDir, aiConfigFileName), data, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	service.loadConfig()
+
+	if err := service.AISaveProvider(ai.ProviderConfig{
+		ID:        "openai-main",
+		Type:      "custom",
+		Name:      "OpenAI Updated",
+		BaseURL:   "",
+		HasSecret: true,
+		Headers: map[string]string{
+			"X-Team": "platform",
+		},
+	}); err != nil {
+		t.Fatalf("AISaveProvider returned error: %v", err)
+	}
+
+	if service.providers[0].APIKey != "sk-test" {
+		t.Fatalf("expected runtime provider to keep legacy plaintext apiKey, got %q", service.providers[0].APIKey)
+	}
+	if service.providers[0].Headers["Authorization"] != "Bearer test" {
+		t.Fatalf("expected runtime provider to keep legacy sensitive header, got %#v", service.providers[0].Headers)
+	}
+
+	ref, err := secretstore.BuildRef("ai-provider", "openai-main")
+	if err != nil {
+		t.Fatalf("BuildRef returned error: %v", err)
+	}
+	stored, err := store.Get(ref)
+	if err != nil {
+		t.Fatalf("expected save to persist provider secret bundle, got %v", err)
+	}
+	var bundle providerSecretBundle
+	if err := json.Unmarshal(stored, &bundle); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+	if bundle.APIKey != "sk-test" {
+		t.Fatalf("expected persisted apiKey, got %q", bundle.APIKey)
+	}
+}
+
+func TestAITestProviderUsesLegacyPlaintextSecretAfterStartupLoad(t *testing.T) {
+	store := newFakeProviderSecretStore()
+	service := NewServiceWithSecretStore(store)
+	service.configDir = t.TempDir()
+
+	legacy := aiConfig{
+		Providers: []ai.ProviderConfig{
+			{
+				ID:      "openai-main",
+				Type:    "custom",
+				Name:    "OpenAI",
+				APIKey:  "sk-test",
+				BaseURL: "",
+				Headers: map[string]string{
+					"Authorization": "Bearer test",
+					"X-Team":        "db",
+				},
+			},
+		},
+	}
+	data, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(service.configDir, aiConfigFileName), data, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	service.loadConfig()
+
+	result := service.AITestProvider(ai.ProviderConfig{
+		ID:        "openai-main",
+		Type:      "custom",
+		Name:      "OpenAI",
+		BaseURL:   "",
+		HasSecret: true,
+		Headers: map[string]string{
+			"X-Team": "db",
+		},
+	})
+
+	if success, _ := result["success"].(bool); !success {
+		t.Fatalf("expected test provider to use in-memory legacy secret, got %#v", result)
 	}
 }
 

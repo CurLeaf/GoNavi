@@ -121,7 +121,19 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 CheckForUpdates: async () => ({ success: false }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
-                ImportConfigFile: async () => ({ success: false }),
+                ImportConfigFile: async () => ({ success: false, message: '已取消' }),
+                ImportConnectionsPayload: async (raw: string) => {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (Array.isArray(parsed)) {
+                            return parsed.map((item) => saveMockConnection(item));
+                        }
+                    } catch {
+                        throw new Error('浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组');
+                    }
+                    throw new Error('浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组');
+                },
+                ExportConnectionsPackage: async () => ({ success: false, message: '浏览器 mock 不支持恢复包导出' }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),

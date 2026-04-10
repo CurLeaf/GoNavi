@@ -1,7 +1,7 @@
 # IDE
 .idea/
 *.iml
-
+.gitignore
 # build / release artifacts
 frontend/release/
 **/release/
@@ -28,3 +28,4 @@ CLAUDE.md
 **/CLAUDE.md
 .worktrees
 docs
+.tmp_superpowers_edit

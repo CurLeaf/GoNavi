@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -38,5 +39,25 @@ func TestResolveConnectionConfigByIDLoadsSecretsFromStore(t *testing.T) {
 	}
 	if resolved.DSN != "postgres://user:pass@db.local/app" {
 		t.Fatalf("expected restored DSN, got %q", resolved.DSN)
+	}
+}
+
+func TestResolveConnectionSecretsReturnsFriendlyMessageWhenSavedSecretSourceIsMissing(t *testing.T) {
+	store := newFakeAppSecretStore()
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+
+	_, err := app.resolveConnectionSecrets(connection.ConnectionConfig{
+		ID:   "conn-missing",
+		Type: "postgres",
+		Host: "db.local",
+		Port: 5432,
+		User: "postgres",
+	})
+	if err == nil {
+		t.Fatal("expected resolveConnectionSecrets to fail for a missing saved connection")
+	}
+	if !strings.Contains(err.Error(), "已保存密文") {
+		t.Fatalf("expected a secret-specific error message, got %q", err.Error())
 	}
 }
