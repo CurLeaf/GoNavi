@@ -7,7 +7,7 @@ html, body, #root {
 }
 
 body, #root {
-  border-radius: 14px; /* Slightly rounded app window corners */
+  border-radius: var(--gonavi-border-radius); /* Slightly rounded app window corners */
 }
 
 /* 侧边栏 Tree 样式优化 */

@@ -85,6 +85,7 @@ function App() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
+  const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
   const appearance = useStore(state => state.appearance);
@@ -119,7 +120,6 @@ function App() {
   const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const effectiveBlur = normalizeBlurForPlatform(resolvedAppearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
-  const windowCornerRadius = 14;
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
@@ -131,6 +131,19 @@ function App() {
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
+
+  const windowCornerRadius = 14;
+  useEffect(()=>{
+    switch(windowState){
+        case 'fullscreen':
+        case 'maximized':
+            document.body.setAttribute('--gonavi-border-radius', '0px');
+            break;
+        default:
+            document.body.setAttribute('--gonavi-border-radius', `${windowCornerRadius}px`);
+            break;
+    }
+  }, [windowState]);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -1727,8 +1740,8 @@ function App() {
             display: 'flex', 
             flexDirection: 'column',
             background: 'transparent',
-            borderRadius: showLinuxResizeHandles ? 0 : windowCornerRadius,
-            clipPath: showLinuxResizeHandles ? 'none' : `inset(0 round ${windowCornerRadius}px)`,
+            borderRadius: showLinuxResizeHandles ? 0 : 'var(--gonavi-border-radius)',
+            clipPath: showLinuxResizeHandles ? 'none' : 'inset(0 round var(--gonavi-border-radius))',
             backdropFilter: blurFilter,
             WebkitBackdropFilter: blurFilter,
         }}>
@@ -1913,7 +1926,7 @@ function App() {
           </Sider>
            <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
-               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
+               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager />
                </div>
                {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'content-shell' && (
