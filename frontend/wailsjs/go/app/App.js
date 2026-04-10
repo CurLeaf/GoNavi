@@ -214,6 +214,10 @@ export function InstallUpdateAndRestart() {
   return window['go']['app']['App']['InstallUpdateAndRestart']();
 }
 
+export function LogWindowDiagnostic(arg1, arg2) {
+  return window['go']['app']['App']['LogWindowDiagnostic'](arg1, arg2);
+}
+
 export function MongoDiscoverMembers(arg1) {
   return window['go']['app']['App']['MongoDiscoverMembers'](arg1);
 }
