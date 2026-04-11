@@ -23,11 +23,12 @@
 | #318 | mysql,bit 列，修改成 1 失败 | Fixed | `89d79ff` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
 | #320 | 无法连接达梦数据库 | Fixed | `1c2377b` |
+| #322 | 【拖选复制】希望添加 查询结果表格可以拖选复制，效果就如操作excel表格的选择复制一样 | Fixed | Pending |
 | #325 | 有没有考虑对数据库的驱动版本进行选择或者自定义？ | Fixed | `af5e842` |
 | #327 | SHOW DATABASES 报错 | Fixed | `fb500ee` |
 | #328 | [Bug] 安装更新失败 | Fixed | `426ef3b` |
 | #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `fcade0f` |
-| #330 | 建议在查询结果表格中增加自适应内容列宽的功能 | Fixed | Pending |
+| #330 | 建议在查询结果表格中增加自适应内容列宽的功能 | Fixed | `632e57e` |
 | #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | `ca76440` |
 
 ## Notes
@@ -91,6 +92,12 @@
 - 根因：查询结果表格已经支持拖拽调整列宽，但 resize handle 没有提供双击自适应逻辑，导致用户只能靠手工拖拽慢慢试宽度。
 - 处理：为 `DataGrid` 的列宽拖拽手柄增加双击入口，按当前表头与已加载结果集内容估算目标宽度，并直接复用现有 `columnWidths` 状态更新布局。
 - 验证：新增 `frontend/src/components/dataGridAutoWidth.test.ts` 覆盖列宽估算规则，并执行 `frontend` 下 `npm run build` 确认 TS 与打包通过。
+
+### #322
+
+- 根因：`DataGrid` 已经具备拖选单元格和选区状态维护能力，但当前复制能力只支持把同一行选中的列值暂存为内部 patch，用于“粘贴到选中行”，没有把矩形选区真正导出到系统剪贴板。
+- 处理：新增选区复制 helper，将矩形选区按当前可见行列顺序导出为制表符文本；同时补上工具栏“复制选区”按钮和 `Ctrl/Cmd+C` 快捷键，让拖选后的复制行为更接近 Excel。
+- 验证：新增 `frontend/src/components/dataGridSelectionCopy.test.ts` 覆盖选区排序与剪贴板文本规整规则，并执行 `frontend` 下 `npm run build` 确认功能接线通过。
 
 ## Next
 

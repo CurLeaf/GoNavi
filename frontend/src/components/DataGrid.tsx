@@ -49,6 +49,7 @@ import {
     resolveUniqueKeyGroupsFromIndexes,
 } from './dataGridCopyInsert';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
+import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -3734,6 +3735,59 @@ const DataGrid: React.FC<DataGridProps> = ({
       navigator.clipboard.writeText(text).catch(console.error);
       void message.success("Copied to clipboard");
   }, []);
+
+  const handleCopySelectedCellsToClipboard = useCallback(() => {
+      const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+      if (activeSelection.size === 0) {
+          void message.info('请先拖选要复制的单元格');
+          return;
+      }
+
+      const parsed = Array.from(activeSelection)
+          .map((cellKey) => splitCellKey(cellKey))
+          .filter((item): item is { rowKey: string; colName: string } => !!item);
+      if (parsed.length === 0) {
+          void message.info('未识别到可复制的单元格');
+          return;
+      }
+
+      const text = buildSelectedCellClipboardText({
+          selectedCells: parsed,
+          rows: mergedDisplayData as Array<Record<string, any>>,
+          columnOrder: displayColumnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+      });
+      if (!text) {
+          void message.info('当前选区没有可复制内容');
+          return;
+      }
+
+      copyToClipboard(text);
+  }, [selectedCells, mergedDisplayData, displayColumnNames, copyToClipboard]);
+
+  useEffect(() => {
+      if (!cellEditMode) return;
+
+      const onKeyDown = (event: KeyboardEvent) => {
+          const isCopy = (event.ctrlKey || event.metaKey) && !event.altKey && String(event.key || '').toLowerCase() === 'c';
+          if (!isCopy) return;
+
+          const activeElement = document.activeElement as HTMLElement | null;
+          const tagName = String(activeElement?.tagName || '').toLowerCase();
+          if (tagName === 'input' || tagName === 'textarea' || activeElement?.isContentEditable) {
+              return;
+          }
+
+          const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+          if (activeSelection.size === 0) return;
+
+          event.preventDefault();
+          handleCopySelectedCellsToClipboard();
+      };
+
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cellEditMode, selectedCells, handleCopySelectedCellsToClipboard]);
   
   const getTargets = useCallback((clickedRecord: any) => {
       const selKeys = selectedRowKeysRef.current;
@@ -4892,6 +4946,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                         </Button>
                        {cellEditMode && selectedCells.size > 0 && (
                            <>
+                               <Button
+                                   icon={<CopyOutlined />}
+                                   onClick={handleCopySelectedCellsToClipboard}
+                               >
+                                   复制选区 ({selectedCells.size})
+                               </Button>
                                <Button
                                    icon={<CopyOutlined />}
                                    onClick={handleCopySelectedColumnsFromRow}
