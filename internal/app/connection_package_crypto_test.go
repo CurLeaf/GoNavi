@@ -59,6 +59,186 @@ func TestConnectionPackageCryptoRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConnectionPackageV2AppManagedRoundTrip(t *testing.T) {
+	payload := connectionPackagePayload{
+		ExportedAt: "2026-04-11T12:00:00Z",
+		Connections: []connectionPackageItem{
+			{
+				ID:   "conn-v2-1",
+				Name: "app-managed",
+				Config: connection.ConnectionConfig{
+					ID:       "conn-v2-1",
+					Type:     "postgres",
+					Host:     "db.local",
+					Port:     5432,
+					User:     "postgres",
+					Database: "app",
+				},
+				Secrets: connectionSecretBundle{
+					Password:    "primary-secret",
+					SSHPassword: "ssh-secret",
+					OpaqueURI:   "postgres://postgres:primary-secret@db.local/app",
+				},
+			},
+		},
+	}
+
+	file, err := encryptConnectionPackageV2AppManaged(payload)
+	if err != nil {
+		t.Fatalf("encryptConnectionPackageV2AppManaged returned error: %v", err)
+	}
+	if file.V != connectionPackageSchemaVersionV2 {
+		t.Fatalf("expected v2 schema, got %d", file.V)
+	}
+	if file.P != connectionPackageProtectionAppManaged {
+		t.Fatalf("expected p=1, got %d", file.P)
+	}
+	if len(file.Connections) != 1 {
+		t.Fatalf("expected 1 connection, got %d", len(file.Connections))
+	}
+	if file.Connections[0].Secrets.Password == payload.Connections[0].Secrets.Password {
+		t.Fatal("expected p=1 secrets to stay encrypted in file")
+	}
+
+	raw, err := json.Marshal(file)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	if !isConnectionPackageV2AppManaged(string(raw)) {
+		t.Fatal("expected raw v2 p=1 payload to be detected")
+	}
+	if isConnectionPackageEnvelope(string(raw)) {
+		t.Fatal("v2 p=1 payload must not be misclassified as v1 envelope")
+	}
+	rawString := string(raw)
+	for _, forbidden := range []string{
+		"schemaVersion",
+		"cipher",
+		"protectionLevel",
+		"ENC:",
+		"primary-secret",
+		"ssh-secret",
+		"postgres://postgres:primary-secret@db.local/app",
+	} {
+		if strings.Contains(rawString, forbidden) {
+			t.Fatalf("v2 p=1 payload must not contain %q: %s", forbidden, rawString)
+		}
+	}
+
+	got, err := decryptConnectionPackageV2AppManaged(file)
+	if err != nil {
+		t.Fatalf("decryptConnectionPackageV2AppManaged returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, payload) {
+		t.Fatalf("round-trip mismatch: got=%+v want=%+v", got, payload)
+	}
+}
+
+func TestConnectionPackageV2ProtectedRoundTrip(t *testing.T) {
+	payload := connectionPackagePayload{
+		ExportedAt: "2026-04-11T12:00:00Z",
+		Connections: []connectionPackageItem{
+			{
+				ID:   "conn-v2-2",
+				Name: "password-protected",
+				Config: connection.ConnectionConfig{
+					ID:       "conn-v2-2",
+					Type:     "mysql",
+					Host:     "db.local",
+					Port:     3306,
+					User:     "root",
+					Database: "app",
+				},
+				Secrets: connectionSecretBundle{
+					Password:             "primary-secret",
+					SSHPassword:          "ssh-secret",
+					ProxyPassword:        "proxy-secret",
+					HTTPTunnelPassword:   "http-secret",
+					MySQLReplicaPassword: "mysql-secret",
+					MongoReplicaPassword: "mongo-secret",
+					OpaqueURI:            "mysql://root:primary-secret@tcp(db.local:3306)/app",
+					OpaqueDSN:            "root:primary-secret@tcp(db.local:3306)/app",
+				},
+			},
+		},
+	}
+
+	file, err := encryptConnectionPackageV2Protected(payload, "package-password")
+	if err != nil {
+		t.Fatalf("encryptConnectionPackageV2Protected returned error: %v", err)
+	}
+	if file.V != connectionPackageSchemaVersionV2 {
+		t.Fatalf("expected v2 schema, got %d", file.V)
+	}
+	if file.P != connectionPackageProtectionPasswordProtected {
+		t.Fatalf("expected p=2, got %d", file.P)
+	}
+	if file.D == "" || file.NC == "" {
+		t.Fatal("expected p=2 file to carry outer encrypted payload")
+	}
+	if strings.HasPrefix(file.D, "ENC:") {
+		t.Fatalf("outer payload must not carry ENC prefix, got %q", file.D)
+	}
+
+	raw, err := json.Marshal(file)
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+	if !isConnectionPackageV2Protected(string(raw)) {
+		t.Fatal("expected raw v2 p=2 payload to be detected")
+	}
+	if isConnectionPackageEnvelope(string(raw)) {
+		t.Fatal("v2 p=2 payload must not be misclassified as v1 envelope")
+	}
+	rawString := string(raw)
+	for _, forbidden := range []string{
+		"schemaVersion",
+		"cipher",
+		"protectionLevel",
+		"ENC:",
+		"primary-secret",
+		"ssh-secret",
+	} {
+		if strings.Contains(rawString, forbidden) {
+			t.Fatalf("v2 p=2 payload must not contain %q: %s", forbidden, rawString)
+		}
+	}
+
+	got, err := decryptConnectionPackageV2Protected(file, "package-password")
+	if err != nil {
+		t.Fatalf("decryptConnectionPackageV2Protected returned error: %v", err)
+	}
+	if !reflect.DeepEqual(got, payload) {
+		t.Fatalf("round-trip mismatch: got=%+v want=%+v", got, payload)
+	}
+}
+
+func TestConnectionPackageV2ProtectedWrongPasswordReturnsUnifiedError(t *testing.T) {
+	file, err := encryptConnectionPackageV2Protected(connectionPackagePayload{
+		Connections: []connectionPackageItem{
+			{
+				ID:   "conn-v2-3",
+				Name: "wrong-password",
+				Config: connection.ConnectionConfig{
+					ID:   "conn-v2-3",
+					Type: "postgres",
+				},
+				Secrets: connectionSecretBundle{
+					Password: "primary-secret",
+				},
+			},
+		},
+	}, "correct-password")
+	if err != nil {
+		t.Fatalf("encryptConnectionPackageV2Protected returned error: %v", err)
+	}
+
+	_, err = decryptConnectionPackageV2Protected(file, "wrong-password")
+	if !errors.Is(err, errConnectionPackageDecryptFailed) {
+		t.Fatalf("wrong p=2 password should return unified error, got: %v", err)
+	}
+}
+
 func TestConnectionPackageDecryptWrongPasswordReturnsUnifiedError(t *testing.T) {
 	payload := connectionPackagePayload{
 		Connections: []connectionPackageItem{

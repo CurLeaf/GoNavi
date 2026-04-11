@@ -181,6 +181,20 @@ export namespace ai {
 
 export namespace app {
 	
+	export class ConnectionExportOptions {
+	    includeSecrets: boolean;
+	    filePassword?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionExportOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.includeSecrets = source["includeSecrets"];
+	        this.filePassword = source["filePassword"];
+	    }
+	}
 	export class SecurityUpdateOptions {
 	    allowPartial?: boolean;
 	    writeBackup?: boolean;

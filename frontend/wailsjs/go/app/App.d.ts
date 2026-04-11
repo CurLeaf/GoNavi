@@ -75,7 +75,7 @@ export function DuplicateConnection(arg1:string):Promise<connection.SavedConnect
 
 export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
-export function ExportConnectionsPackage(arg1:string):Promise<connection.QueryResult>;
+export function ExportConnectionsPackage(arg1:app.ConnectionExportOptions):Promise<connection.QueryResult>;
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 

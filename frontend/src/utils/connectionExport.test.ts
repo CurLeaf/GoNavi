@@ -2,13 +2,64 @@ import { describe, expect, it } from 'vitest';
 
 import {
   detectConnectionImportKind,
+  isConnectionPackagePasswordRequiredError,
   isConnectionPackageExportCanceled,
   resolveConnectionPackageExportResult,
   normalizeConnectionPackagePassword,
 } from './connectionExport';
 
 describe('connectionExport', () => {
-  it('detects encrypted packages by gonavi envelope kind', () => {
+  it('detects v2 app-managed packages', () => {
+    expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+      p: 1,
+      exportedAt: '2026-04-11T21:00:00Z',
+      connections: [],
+    }))).toBe('app-managed-package');
+  });
+
+  it('detects v2 encrypted packages', () => {
+    expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+      p: 2,
+      kdf: {
+        n: 'a2id',
+        m: 65536,
+        t: 3,
+        l: 4,
+        s: 'c2FsdA==',
+      },
+      nc: 'bm9uY2Utbm9uY2U=',
+      d: 'encrypted-data',
+    }))).toBe('encrypted-package');
+  });
+
+  it('rejects malformed v2 app-managed packages without connections array', () => {
+    expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+      p: 1,
+      exportedAt: '2026-04-11T21:00:00Z',
+    }))).toBe('invalid');
+  });
+
+  it('rejects malformed v2 encrypted packages without protected payload fields', () => {
+    expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+      p: 2,
+      kdf: {
+        n: 'a2id',
+        m: 65536,
+        t: 3,
+        l: 4,
+      },
+    }))).toBe('invalid');
+  });
+
+  it('detects v1 encrypted packages by gonavi envelope kind', () => {
     expect(detectConnectionImportKind(JSON.stringify({
       schemaVersion: 1,
       kind: 'gonavi_connection_package',
@@ -40,6 +91,15 @@ describe('connectionExport', () => {
   it('returns invalid for malformed or unsupported content', () => {
     expect(detectConnectionImportKind('{not-json}')).toBe('invalid');
     expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+      p: 0,
+    }))).toBe('invalid');
+    expect(detectConnectionImportKind(JSON.stringify({
+      v: 2,
+      kind: 'gonavi_connection_package',
+    }))).toBe('invalid');
+    expect(detectConnectionImportKind(JSON.stringify({
       kind: 'gonavi_connection_package',
       payload: 'encrypted-data',
     }))).toBe('invalid');
@@ -60,6 +120,14 @@ describe('connectionExport', () => {
     expect(normalizeConnectionPackagePassword('\n\t  \t')).toBe('');
   });
 
+  it('recognizes backend password-required errors for protected packages', () => {
+    expect(isConnectionPackagePasswordRequiredError(new Error('恢复包密码不能为空'))).toBe(true);
+    expect(isConnectionPackagePasswordRequiredError({ message: '恢复包密码不能为空' })).toBe(true);
+    expect(isConnectionPackagePasswordRequiredError('恢复包密码不能为空')).toBe(true);
+    expect(isConnectionPackagePasswordRequiredError(new Error('文件密码错误或文件已损坏'))).toBe(false);
+    expect(isConnectionPackagePasswordRequiredError(undefined)).toBe(false);
+  });
+
   it('treats export cancel as a non-error backend result', () => {
     expect(isConnectionPackageExportCanceled({ success: false, message: '已取消' })).toBe(true);
     expect(isConnectionPackageExportCanceled({ success: false, message: '导出失败' })).toBe(false);
@@ -71,6 +139,8 @@ describe('connectionExport', () => {
     const staleDialog = {
       open: true,
       mode: 'export' as const,
+      includeSecrets: true,
+      useFilePassword: false,
       password: '  secret-pass  ',
       error: '上一次失败',
       confirmLoading: false,
@@ -83,12 +153,16 @@ describe('connectionExport', () => {
       expect((canceledResult.nextDialog as (current: typeof staleDialog) => typeof staleDialog)({
         open: false,
         mode: 'export',
+        includeSecrets: true,
+        useFilePassword: false,
         password: 'secret-pass',
         error: '更新后的错误',
         confirmLoading: true,
       })).toEqual({
         open: false,
         mode: 'export',
+        includeSecrets: true,
+        useFilePassword: false,
         password: 'secret-pass',
         error: '',
         confirmLoading: false,

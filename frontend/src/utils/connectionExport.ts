@@ -1,9 +1,11 @@
 import type { ConnectionConfig, SavedConnection } from '../types';
 
-export type ConnectionImportKind = 'encrypted-package' | 'legacy-json' | 'invalid';
+export type ConnectionImportKind = 'app-managed-package' | 'encrypted-package' | 'legacy-json' | 'invalid';
 export type ConnectionPackageDialogSnapshot = {
   open: boolean;
   mode: 'export' | 'import';
+  includeSecrets: boolean;
+  useFilePassword: boolean;
   password: string;
   error: string;
   confirmLoading: boolean;
@@ -20,7 +22,11 @@ export type ConnectionPackageExportResult =
 type JsonObject = Record<string, unknown>;
 
 const CONNECTION_PACKAGE_KIND = 'gonavi_connection_package';
+const CONNECTION_PACKAGE_SCHEMA_VERSION_V2 = 2;
+const CONNECTION_PACKAGE_PROTECTION_APP_MANAGED = 1;
+const CONNECTION_PACKAGE_PROTECTION_FILE_PASSWORD = 2;
 const CANCELED_MESSAGE = '已取消';
+const CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE = '恢复包密码不能为空';
 
 const isJsonObject = (value: unknown): value is JsonObject => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -43,6 +49,36 @@ const isConnectionPackageEnvelope = (value: unknown): value is JsonObject => (
   && isConnectionPackageKDF(value.kdf)
   && typeof value.nonce === 'string'
   && typeof value.payload === 'string'
+);
+
+const isConnectionPackageV2Envelope = (value: unknown): value is JsonObject => (
+  isJsonObject(value)
+  && value.kind === CONNECTION_PACKAGE_KIND
+  && value.v === CONNECTION_PACKAGE_SCHEMA_VERSION_V2
+  && typeof value.p === 'number'
+);
+
+const isConnectionPackageKDFV2 = (value: unknown): value is JsonObject => (
+  isJsonObject(value)
+  && typeof value.n === 'string'
+  && typeof value.m === 'number'
+  && typeof value.t === 'number'
+  && typeof value.l === 'number'
+  && typeof value.s === 'string'
+);
+
+const isConnectionPackageV2AppManagedEnvelope = (value: unknown): value is JsonObject => (
+  isConnectionPackageV2Envelope(value)
+  && value.p === CONNECTION_PACKAGE_PROTECTION_APP_MANAGED
+  && Array.isArray(value.connections)
+);
+
+const isConnectionPackageV2ProtectedEnvelope = (value: unknown): value is JsonObject => (
+  isConnectionPackageV2Envelope(value)
+  && value.p === CONNECTION_PACKAGE_PROTECTION_FILE_PASSWORD
+  && isConnectionPackageKDFV2(value.kdf)
+  && typeof value.nc === 'string'
+  && typeof value.d === 'string'
 );
 
 const isLegacyConnectionConfig = (value: unknown): value is JsonObject => (
@@ -72,6 +108,18 @@ const parseConnectionImportRaw = (raw: unknown): unknown => {
 export const detectConnectionImportKind = (raw: unknown): ConnectionImportKind => {
   const parsed = parseConnectionImportRaw(raw);
 
+  if (isConnectionPackageV2AppManagedEnvelope(parsed)) {
+    return 'app-managed-package';
+  }
+
+  if (isConnectionPackageV2ProtectedEnvelope(parsed)) {
+    return 'encrypted-package';
+  }
+
+  if (isConnectionPackageV2Envelope(parsed)) {
+    return 'invalid';
+  }
+
   if (Array.isArray(parsed) && parsed.every((item) => isLegacyConnectionItem(item))) {
     return 'legacy-json';
   }
@@ -84,6 +132,20 @@ export const detectConnectionImportKind = (raw: unknown): ConnectionImportKind =
 };
 
 export const normalizeConnectionPackagePassword = (value: string): string => value.trim();
+
+export const isConnectionPackagePasswordRequiredError = (value: unknown): boolean => {
+  if (typeof value === 'string') {
+    return value.trim() === CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE;
+  }
+
+  if (value instanceof Error) {
+    return value.message.trim() === CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE;
+  }
+
+  return isJsonObject(value)
+    && typeof value.message === 'string'
+    && value.message.trim() === CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE;
+};
 
 export const isConnectionPackageExportCanceled = (result: unknown): boolean => (
   isJsonObject(result)

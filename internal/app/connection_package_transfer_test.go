@@ -83,6 +83,71 @@ func TestBuildConnectionPackagePayloadIncludesSecretBundles(t *testing.T) {
 	}
 }
 
+func TestBuildExportedConnectionPackageWithoutSecretsUsesV2AppManagedAndImportsWithoutPasswords(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	_, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "conn-v2-no-secrets",
+		Name: "Primary",
+		Config: connection.ConnectionConfig{
+			ID:       "conn-v2-no-secrets",
+			Type:     "postgres",
+			Host:     "db.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: "db-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	raw, err := app.buildExportedConnectionPackage(ConnectionExportOptions{
+		IncludeSecrets: false,
+		FilePassword:   "ignored-password",
+	})
+	if err != nil {
+		t.Fatalf("buildExportedConnectionPackage returned error: %v", err)
+	}
+
+	var file connectionPackageFileV2
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatalf("json.Unmarshal returned error: %v", err)
+	}
+	if file.V != connectionPackageSchemaVersionV2 {
+		t.Fatalf("expected v2 package, got v=%d", file.V)
+	}
+	if file.P != connectionPackageProtectionAppManaged {
+		t.Fatalf("expected app-managed protection, got p=%d", file.P)
+	}
+	if strings.Contains(string(raw), `"secrets"`) {
+		t.Fatalf("expected exported JSON to omit secrets when IncludeSecrets=false, got %s", string(raw))
+	}
+
+	importApp := NewAppWithSecretStore(newFakeAppSecretStore())
+	importApp.configDir = t.TempDir()
+
+	imported, err := importApp.ImportConnectionsPayload(string(raw), "")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected 1 imported connection, got %d", len(imported))
+	}
+	if imported[0].HasPrimaryPassword {
+		t.Fatal("expected imported connection to keep empty password when secrets are excluded")
+	}
+
+	resolved, err := importApp.resolveConnectionSecrets(imported[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "" {
+		t.Fatalf("expected imported password to be empty, got %q", resolved.Password)
+	}
+}
+
 func TestImportConnectionPackagePayloadOverwritesExistingSecrets(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
@@ -792,6 +857,93 @@ func TestImportConnectionsPayloadEnvelopeImportsAndOverwritesSecrets(t *testing.
 	}
 }
 
+func TestBuildExportedConnectionPackageWithSecretsUsesV2AppManagedEncryption(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	saveConnectionForPackageExport(t, app, "conn-v2-app", "app-secret")
+
+	raw, err := app.buildExportedConnectionPackage(ConnectionExportOptions{
+		IncludeSecrets: true,
+	})
+	if err != nil {
+		t.Fatalf("buildExportedConnectionPackage returned error: %v", err)
+	}
+
+	rawString := string(raw)
+	if !isConnectionPackageV2AppManaged(rawString) {
+		t.Fatalf("expected app-managed export, got %s", rawString)
+	}
+	for _, forbidden := range []string{
+		"app-secret",
+		"schemaVersion",
+		"cipher",
+		"ENC:",
+	} {
+		if strings.Contains(rawString, forbidden) {
+			t.Fatalf("v2 p=1 export must not contain %q: %s", forbidden, rawString)
+		}
+	}
+
+	imported, err := app.ImportConnectionsPayload(rawString, "")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected 1 imported item, got %d", len(imported))
+	}
+
+	resolved, err := app.resolveConnectionSecrets(imported[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "app-secret" {
+		t.Fatalf("expected v2 p=1 import to restore password, got %q", resolved.Password)
+	}
+}
+
+func TestBuildExportedConnectionPackageWithFilePasswordUsesV2ProtectedEnvelope(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	saveConnectionForPackageExport(t, app, "conn-v2-protected", "protected-secret")
+
+	raw, err := app.buildExportedConnectionPackage(ConnectionExportOptions{
+		IncludeSecrets: true,
+		FilePassword:   "package-password",
+	})
+	if err != nil {
+		t.Fatalf("buildExportedConnectionPackage returned error: %v", err)
+	}
+
+	rawString := string(raw)
+	if !isConnectionPackageV2Protected(rawString) {
+		t.Fatalf("expected password-protected export, got %s", rawString)
+	}
+	if strings.Contains(rawString, "protected-secret") {
+		t.Fatalf("v2 p=2 export must not contain plaintext secret: %s", rawString)
+	}
+
+	_, err = app.ImportConnectionsPayload(rawString, "wrong-password")
+	if !errors.Is(err, errConnectionPackageDecryptFailed) {
+		t.Fatalf("wrong v2 p=2 password should return unified error, got %v", err)
+	}
+
+	imported, err := app.ImportConnectionsPayload(rawString, "package-password")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected 1 imported item, got %d", len(imported))
+	}
+
+	resolved, err := app.resolveConnectionSecrets(imported[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "protected-secret" {
+		t.Fatalf("expected v2 p=2 import to restore password, got %q", resolved.Password)
+	}
+}
+
 func TestNormalizeConnectionPackageExportFilenameAddsExtension(t *testing.T) {
 	filename := normalizeConnectionPackageExportFilename(`C:\tmp\connections`)
 	if !strings.HasSuffix(filename, connectionPackageExtension) {
@@ -813,6 +965,34 @@ func newFailOnPutSecretStore(failRef string) *failOnPutSecretStore {
 	return &failOnPutSecretStore{
 		base:    newFakeAppSecretStore(),
 		failRef: failRef,
+	}
+}
+
+func saveConnectionForPackageExport(t *testing.T, app *App, id string, primaryPassword string) {
+	t.Helper()
+
+	_, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   id,
+		Name: "Exported " + id,
+		Config: connection.ConnectionConfig{
+			ID:       id,
+			Type:     "postgres",
+			Host:     "db.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: primaryPassword,
+			UseSSH:   true,
+			SSH: connection.SSHConfig{
+				Host:     "jump.local",
+				Port:     22,
+				User:     "ops",
+				Password: "ssh-" + primaryPassword,
+			},
+			URI: "postgres://postgres:" + primaryPassword + "@db.local/app",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
 	}
 }
 

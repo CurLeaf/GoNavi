@@ -306,12 +306,7 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 	return connection.QueryResult{Success: true, Data: content}
 }
 
-func (a *App) ExportConnectionsPackage(password string) connection.QueryResult {
-	payload, err := a.buildConnectionPackagePayload()
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-
+func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connection.QueryResult {
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Export Connections",
 		DefaultFilename: "connections" + connectionPackageExtension,
@@ -327,12 +322,7 @@ func (a *App) ExportConnectionsPackage(password string) connection.QueryResult {
 	}
 	filename = normalizeConnectionPackageExportFilename(filename)
 
-	pkg, err := encryptConnectionPackage(payload, password)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-
-	content, err := json.MarshalIndent(pkg, "", "  ")
+	content, err := a.buildExportedConnectionPackage(options)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}

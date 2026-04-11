@@ -26,6 +26,7 @@ import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
 import {
   detectConnectionImportKind,
+  isConnectionPackagePasswordRequiredError,
   resolveConnectionPackageExportResult,
   normalizeConnectionPackagePassword,
 } from './utils/connectionExport';
@@ -120,6 +121,8 @@ type ConnectionPackageDialogMode = 'import' | 'export';
 type ConnectionPackageDialogState = {
   open: boolean;
   mode: ConnectionPackageDialogMode;
+  includeSecrets: boolean;
+  useFilePassword: boolean;
   password: string;
   error: string;
   confirmLoading: boolean;
@@ -128,6 +131,8 @@ type ConnectionPackageDialogState = {
 const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogState => ({
   open: false,
   mode: 'export',
+  includeSecrets: true,
+  useFilePassword: false,
   password: '',
   error: '',
   confirmLoading: false,
@@ -1476,22 +1481,24 @@ function App() {
           return;
       }
 
-      if (importKind === 'encrypted-package') {
-          setPendingConnectionImportPayload(raw);
-          setConnectionPackageDialog({
-              open: true,
-              mode: 'import',
-              password: '',
-              error: '',
-              confirmLoading: false,
-          });
-          return;
-      }
-
       try {
+          setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
           void message.success(`成功导入 ${importedViews.length} 个连接`);
       } catch (e: any) {
+          if (isConnectionPackagePasswordRequiredError(e)) {
+              setPendingConnectionImportPayload(raw);
+              setConnectionPackageDialog({
+                  open: true,
+                  mode: 'import',
+                  includeSecrets: true,
+                  useFilePassword: false,
+                  password: '',
+                  error: '',
+                  confirmLoading: false,
+              });
+              return;
+          }
           void message.error(e?.message || '导入失败');
       }
   };
@@ -1505,6 +1512,8 @@ function App() {
       setConnectionPackageDialog({
           open: true,
           mode: 'export',
+          includeSecrets: true,
+          useFilePassword: false,
           password: '',
           error: '',
           confirmLoading: false,
@@ -1515,7 +1524,7 @@ function App() {
       const backendApp = (window as any).go?.app?.App;
       const password = normalizeConnectionPackagePassword(connectionPackageDialog.password);
 
-      if (!password) {
+      if (connectionPackageDialog.mode === 'import' && !password) {
           setConnectionPackageDialog((current) => ({
               ...current,
               error: '恢复包密码不能为空',
@@ -1523,9 +1532,25 @@ function App() {
           return;
       }
 
+      if (
+          connectionPackageDialog.mode === 'export'
+          && connectionPackageDialog.includeSecrets
+          && connectionPackageDialog.useFilePassword
+          && !password
+      ) {
+          setConnectionPackageDialog((current) => ({
+              ...current,
+              error: '文件保护密码不能为空',
+          }));
+          return;
+      }
+
       setConnectionPackageDialog((current) => ({
           ...current,
-          password,
+          password: (
+              current.mode === 'export'
+              && (!current.includeSecrets || !current.useFilePassword)
+          ) ? '' : password,
           error: '',
           confirmLoading: true,
       }));
@@ -1536,7 +1561,13 @@ function App() {
                   throw new Error('导出失败：当前后端未提供新版导出能力');
               }
 
-              const res = await backendApp.ExportConnectionsPackage(password);
+              const res = await backendApp.ExportConnectionsPackage({
+                  includeSecrets: connectionPackageDialog.includeSecrets,
+                  filePassword: (
+                      connectionPackageDialog.includeSecrets
+                      && connectionPackageDialog.useFilePassword
+                  ) ? password : '',
+              });
               const exportResult = resolveConnectionPackageExportResult(connectionPackageDialog, res);
               if (exportResult.kind === 'canceled') {
                   setConnectionPackageDialog(exportResult.nextDialog);
@@ -2559,11 +2590,31 @@ function App() {
           />
           <ConnectionPackagePasswordModal
             open={connectionPackageDialog.open}
-            title={connectionPackageDialog.mode === 'export' ? '输入导出密码' : '输入导入密码'}
+            title={connectionPackageDialog.mode === 'export' ? '导出连接' : '输入导入密码'}
+            mode={connectionPackageDialog.mode}
+            includeSecrets={connectionPackageDialog.includeSecrets}
+            useFilePassword={connectionPackageDialog.useFilePassword}
             password={connectionPackageDialog.password}
             error={connectionPackageDialog.error}
             confirmLoading={connectionPackageDialog.confirmLoading}
             confirmText={connectionPackageDialog.mode === 'export' ? '开始导出' : '开始导入'}
+            onIncludeSecretsChange={(value) => {
+                setConnectionPackageDialog((current) => ({
+                    ...current,
+                    includeSecrets: value,
+                    useFilePassword: value ? current.useFilePassword : false,
+                    password: value ? current.password : '',
+                    error: '',
+                }));
+            }}
+            onUseFilePasswordChange={(value) => {
+                setConnectionPackageDialog((current) => ({
+                    ...current,
+                    useFilePassword: value,
+                    password: value ? current.password : '',
+                    error: '',
+                }));
+            }}
             onPasswordChange={(value) => {
                 setConnectionPackageDialog((current) => ({
                     ...current,

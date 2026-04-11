@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -8,11 +9,16 @@ import (
 )
 
 const (
-	connectionPackageSchemaVersion = 1
-	connectionPackageKind          = "gonavi_connection_package"
-	connectionPackageCipher        = "AES-256-GCM"
-	connectionPackageKDFName       = "Argon2id"
-	connectionPackageExtension     = ".gonavi-conn"
+	connectionPackageSchemaVersion   = 1
+	connectionPackageSchemaVersionV2 = 2
+	connectionPackageKind            = "gonavi_connection_package"
+	connectionPackageCipher          = "AES-256-GCM"
+	connectionPackageKDFName         = "Argon2id"
+	connectionPackageKDFNameV2       = "a2id"
+	connectionPackageExtension       = ".gonavi-conn"
+
+	connectionPackageProtectionAppManaged        = 1
+	connectionPackageProtectionPasswordProtected = 2
 
 	connectionPackageKDFDefaultMemoryKiB   = 65536
 	connectionPackageKDFDefaultTimeCost    = 3
@@ -53,6 +59,31 @@ type connectionPackageKDFSpec struct {
 	Salt        string `json:"salt"`
 }
 
+type connectionPackageFileV2 struct {
+	V           int                     `json:"v"`
+	Kind        string                  `json:"kind"`
+	P           int                     `json:"p"`
+	ExportedAt  string                  `json:"exportedAt,omitempty"`
+	Connections []connectionPackageItem `json:"connections"`
+}
+
+type connectionPackageFileV2Protected struct {
+	V    int                        `json:"v"`
+	Kind string                     `json:"kind"`
+	P    int                        `json:"p"`
+	KDF  connectionPackageKDFSpecV2 `json:"kdf"`
+	NC   string                     `json:"nc"`
+	D    string                     `json:"d"`
+}
+
+type connectionPackageKDFSpecV2 struct {
+	N string `json:"n"`
+	M uint32 `json:"m"`
+	T uint32 `json:"t"`
+	L uint8  `json:"l"`
+	S string `json:"s"`
+}
+
 type connectionPackagePayload struct {
 	ExportedAt  string                  `json:"exportedAt,omitempty"`
 	Connections []connectionPackageItem `json:"connections"`
@@ -69,12 +100,54 @@ type connectionPackageItem struct {
 	Secrets               connectionSecretBundle      `json:"secrets,omitempty"`
 }
 
+func (i connectionPackageItem) MarshalJSON() ([]byte, error) {
+	type connectionPackageItemJSON struct {
+		ID                    string                      `json:"id"`
+		Name                  string                      `json:"name"`
+		IncludeDatabases      []string                    `json:"includeDatabases,omitempty"`
+		IncludeRedisDatabases []int                       `json:"includeRedisDatabases,omitempty"`
+		IconType              string                      `json:"iconType,omitempty"`
+		IconColor             string                      `json:"iconColor,omitempty"`
+		Config                connection.ConnectionConfig `json:"config"`
+		Secrets               *connectionSecretBundle     `json:"secrets,omitempty"`
+	}
+
+	item := connectionPackageItemJSON{
+		ID:                    i.ID,
+		Name:                  i.Name,
+		IncludeDatabases:      i.IncludeDatabases,
+		IncludeRedisDatabases: i.IncludeRedisDatabases,
+		IconType:              i.IconType,
+		IconColor:             i.IconColor,
+		Config:                i.Config,
+	}
+	if i.Secrets.hasAny() {
+		secrets := i.Secrets
+		item.Secrets = &secrets
+	}
+	return json.Marshal(item)
+}
+
+type ConnectionExportOptions struct {
+	IncludeSecrets bool   `json:"includeSecrets"`
+	FilePassword   string `json:"filePassword,omitempty"`
+}
+
 func defaultConnectionPackageKDFSpec() connectionPackageKDFSpec {
 	return connectionPackageKDFSpec{
 		Name:        connectionPackageKDFName,
 		MemoryKiB:   connectionPackageKDFDefaultMemoryKiB,
 		TimeCost:    connectionPackageKDFDefaultTimeCost,
 		Parallelism: connectionPackageKDFDefaultParallelism,
+	}
+}
+
+func defaultConnectionPackageKDFSpecV2() connectionPackageKDFSpecV2 {
+	return connectionPackageKDFSpecV2{
+		N: connectionPackageKDFNameV2,
+		M: connectionPackageKDFDefaultMemoryKiB,
+		T: connectionPackageKDFDefaultTimeCost,
+		L: connectionPackageKDFDefaultParallelism,
 	}
 }
 

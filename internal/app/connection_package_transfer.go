@@ -48,6 +48,34 @@ func (a *App) buildConnectionPackagePayload() (connectionPackagePayload, error) 
 	}, nil
 }
 
+func (a *App) buildExportedConnectionPackage(options ConnectionExportOptions) ([]byte, error) {
+	payload, err := a.buildConnectionPackagePayload()
+	if err != nil {
+		return nil, err
+	}
+
+	if !options.IncludeSecrets {
+		for index := range payload.Connections {
+			payload.Connections[index].Secrets = connectionSecretBundle{}
+		}
+	}
+
+	normalizedPassword := normalizeConnectionPackagePassword(options.FilePassword)
+	if !options.IncludeSecrets || normalizedPassword == "" {
+		file, err := encryptConnectionPackageV2AppManaged(payload)
+		if err != nil {
+			return nil, err
+		}
+		return json.MarshalIndent(file, "", "  ")
+	}
+
+	file, err := encryptConnectionPackageV2Protected(payload, normalizedPassword)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(file, "", "  ")
+}
+
 func newSavedConnectionInputFromPackageItem(item connectionPackageItem) connection.SavedConnectionInput {
 	id := strings.TrimSpace(item.ID)
 	if id == "" {
@@ -190,6 +218,30 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 	}
 	if len(trimmed) > connectionImportMaxFileBytes {
 		return nil, errConnectionImportFileTooLarge
+	}
+
+	if isConnectionPackageV2AppManaged(trimmed) {
+		var file connectionPackageFileV2
+		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
+			return nil, errConnectionPackageUnsupported
+		}
+		payload, err := decryptConnectionPackageV2AppManaged(file)
+		if err != nil {
+			return nil, err
+		}
+		return a.importConnectionPackagePayload(payload)
+	}
+
+	if isConnectionPackageV2Protected(trimmed) {
+		var file connectionPackageFileV2Protected
+		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
+			return nil, errConnectionPackageUnsupported
+		}
+		payload, err := decryptConnectionPackageV2Protected(file, password)
+		if err != nil {
+			return nil, err
+		}
+		return a.importConnectionPackagePayload(payload)
 	}
 
 	if isConnectionPackageEnvelope(trimmed) {

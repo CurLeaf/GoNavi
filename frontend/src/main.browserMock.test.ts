@@ -51,8 +51,8 @@ const importMain = async () => {
         app?: {
           App?: {
             ImportConfigFile: () => Promise<{ success: boolean; message?: string }>;
-            ImportConnectionsPayload: (raw: string) => Promise<unknown>;
-            ExportConnectionsPackage: () => Promise<{ success: boolean; message?: string }>;
+            ImportConnectionsPayload: (raw: string, password?: string) => Promise<unknown>;
+            ExportConnectionsPackage: (options?: { includeSecrets?: boolean; filePassword?: string }) => Promise<{ success: boolean; message?: string }>;
           };
         };
       };
@@ -83,7 +83,7 @@ describe('main browser mock', () => {
       success: false,
       message: '已取消',
     });
-    await expect(app!.ExportConnectionsPackage()).resolves.toEqual({
+    await expect(app!.ExportConnectionsPackage({ includeSecrets: true, filePassword: '' })).resolves.toEqual({
       success: false,
       message: '浏览器 mock 不支持恢复包导出',
     });

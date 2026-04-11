@@ -123,7 +123,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
-                ImportConnectionsPayload: async (raw: string) => {
+                ImportConnectionsPayload: async (raw: string, _password?: string) => {
                     try {
                         const parsed = JSON.parse(raw);
                         if (Array.isArray(parsed)) {
@@ -134,7 +134,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                     }
                     throw new Error('浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组');
                 },
-                ExportConnectionsPackage: async () => ({ success: false, message: '浏览器 mock 不支持恢复包导出' }),
+                ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: '浏览器 mock 不支持恢复包导出' }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
