@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -281,6 +282,40 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         });
     }, [buildConfig, tab.dbName, loadData]);
 
+    const handleTableDataDangerAction = useCallback((tableName: string, action: TableDataDangerActionKind) => {
+        const config = buildConfig();
+        if (!config) return;
+
+        const { label, progressLabel } = getTableDataDangerActionMeta(action);
+        Modal.confirm({
+            title: `确认${label}`,
+            content: `${label}会永久删除表 "${tableName}" 中的所有数据，操作不可逆，是否继续？`,
+            okText: '继续',
+            cancelText: '取消',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                const app = (window as any).go.app.App;
+                const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
+                const hide = message.loading(`正在${progressLabel} ${tableName}...`, 0);
+                try {
+                    const res = await app[methodName](buildRpcConnectionConfig(config) as any, tab.dbName || '', [tableName]);
+                    hide();
+                    if (res.success) {
+                        message.success(`${progressLabel}成功`);
+                        loadData();
+                    } else {
+                        message.error(`${progressLabel}失败: ${res.message}`);
+                        return Promise.reject();
+                    }
+                } catch (e: any) {
+                    hide();
+                    message.error(`${progressLabel}失败: ${e?.message || String(e)}`);
+                    return Promise.reject();
+                }
+            },
+        });
+    }, [buildConfig, tab.dbName, loadData]);
+
     const handleRenameTable = useCallback((tableName: string) => {
         const config = buildConfig();
         if (!config) return;
@@ -341,6 +376,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const maxCombinedSize = sortedFiltered.reduce((max, table) => {
         return Math.max(max, table.dataSize + table.indexSize);
     }, 0);
+    const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
 
     if (loading) {
         return (
@@ -437,6 +473,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                         { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
                                         { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                            ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
+                                            { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
                                             { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
                                         ]},
                                         { type: 'divider' },
@@ -521,6 +559,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                             { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                             { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
                                             { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                                ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
+                                                { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
                                                 { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
                                             ]},
                                             { type: 'divider' },

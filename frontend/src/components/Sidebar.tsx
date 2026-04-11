@@ -39,6 +39,7 @@ import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 	import { SavedConnection } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import FindInDatabaseModal from './FindInDatabaseModal';
@@ -1761,13 +1762,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const startTime = Date.now();
       try {
           const app = (window as any).go.app.App;
-          const res = await app.TruncateTables(normalizeConnConfig(conn.config), dbName, objectNames);
+          const res = await app.ClearTables(normalizeConnConfig(conn.config), dbName, objectNames);
           hide();
           const duration = Date.now() - startTime;
           if (res.success) {
               message.success('清空成功');
               // 构造 SQL 日志
-              let logSql = `/* Truncate Tables (${objectNames.length} tables) */\n`;
+              let logSql = `/* Clear Tables (${objectNames.length} tables) */\n`;
               if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
                   logSql += res.data.executedSQLs.join(';\n') + ';';
               } else {
@@ -1786,7 +1787,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           } else if (res.message !== '已取消') {
               message.error('清空失败: ' + res.message);
               // 记录失败的日志
-              let logSql = `/* Truncate Tables (${objectNames.length} tables) - FAILED */\n`;
+              let logSql = `/* Clear Tables (${objectNames.length} tables) - FAILED */\n`;
               if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
                   logSql += res.data.executedSQLs.join(';\n') + ';';
               } else {
@@ -1808,7 +1809,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           const errMsg = e?.message || String(e);
           message.error('清空失败: ' + errMsg);
           // 记录异常的日志
-          let logSql = `/* Truncate Tables (${objectNames.length} tables) - ERROR */\n`;
+          let logSql = `/* Clear Tables (${objectNames.length} tables) - ERROR */\n`;
           logSql += objectNames.map(name => name).join('; ');
           addSqlLog({
               id: Date.now().toString(),
@@ -2267,6 +2268,84 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               }
           }
       });
+  };
+
+  const handleTableDataDangerAction = async (node: any, action: TableDataDangerActionKind) => {
+      const conn = node.dataRef;
+      const tableName = String(conn.tableName || '').trim();
+      if (!tableName) return;
+
+      const { label, progressLabel } = getTableDataDangerActionMeta(action);
+      const confirmed = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+              title: `确认${label}`,
+              content: `${label}会永久删除表 "${tableName}" 中的所有数据，操作不可逆，是否继续？`,
+              okText: '继续',
+              cancelText: '取消',
+              okButtonProps: { danger: true },
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+          });
+      });
+      if (!confirmed) return;
+
+      const config = buildRuntimeConfig(conn, conn.dbName);
+      const app = (window as any).go.app.App;
+      const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
+      const hide = message.loading(`正在${progressLabel} ${tableName}...`, 0);
+      const startTime = Date.now();
+      try {
+          const res = await app[methodName](buildRpcConnectionConfig(config) as any, conn.dbName, [tableName]);
+          hide();
+          const duration = Date.now() - startTime;
+          const executedSQLs = Array.isArray(res.data?.executedSQLs) ? res.data.executedSQLs : [];
+          const logSql = executedSQLs.length > 0
+              ? executedSQLs.join(';\n') + ';'
+              : `/* ${label} ${tableName} */`;
+
+          if (res.success) {
+              message.success(`${progressLabel}成功`);
+              addSqlLog({
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  sql: logSql,
+                  status: 'success',
+                  duration,
+                  message: res.message,
+                  dbName: conn.dbName,
+                  affectedRows: res.data?.count || 0,
+              });
+              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
+              return;
+          }
+
+          addSqlLog({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              sql: logSql,
+              status: 'error',
+              duration,
+              message: res.message,
+              dbName: conn.dbName,
+          });
+          if (res.message !== '已取消') {
+              message.error(`${progressLabel}失败: ${res.message}`);
+          }
+      } catch (e: any) {
+          const duration = Date.now() - startTime;
+          const errMsg = e?.message || String(e);
+          hide();
+          addSqlLog({
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              sql: `/* ${label} ${tableName} - ERROR */`,
+              status: 'error',
+              duration,
+              message: errMsg,
+              dbName: conn.dbName,
+          });
+          message.error(`${progressLabel}失败: ${errMsg}`);
+      }
   };
 
   // --- 视图操作 ---
@@ -3519,6 +3598,18 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '危险操作',
                 icon: <WarningOutlined />,
                 children: [
+                    ...(supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver) ? [{
+                        key: 'truncate-table',
+                        label: '截断表',
+                        danger: true,
+                        onClick: () => handleTableDataDangerAction(node, 'truncate')
+                    }] : []),
+                    {
+                        key: 'clear-table',
+                        label: '清空表',
+                        danger: true,
+                        onClick: () => handleTableDataDangerAction(node, 'clear')
+                    },
                     {
                         key: 'drop-table',
                         label: '删除表',

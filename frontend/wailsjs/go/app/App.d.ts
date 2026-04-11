@@ -16,6 +16,8 @@ export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
 export function CheckForUpdates():Promise<connection.QueryResult>;
 
+export function ClearTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
+
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):Promise<connection.QueryResult>;
@@ -128,11 +130,11 @@ export function MySQLQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:str
 
 export function MySQLShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function OpenDataRootDirectory():Promise<connection.QueryResult>;
+
 export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
 
 export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
-
-export function OpenDataRootDirectory():Promise<connection.QueryResult>;
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
@@ -204,9 +206,9 @@ export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<con
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
-export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
-
 export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
+
+export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function SelectDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 

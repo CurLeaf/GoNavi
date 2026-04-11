@@ -30,6 +30,7 @@
 | #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `fcade0f` |
 | #330 | 建议在查询结果表格中增加自适应内容列宽的功能 | Fixed | `632e57e` |
 | #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | `ca76440` |
+| #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
 
@@ -98,6 +99,12 @@
 - 根因：`DataGrid` 已经具备拖选单元格和选区状态维护能力，但当前复制能力只支持把同一行选中的列值暂存为内部 patch，用于“粘贴到选中行”，没有把矩形选区真正导出到系统剪贴板。
 - 处理：新增选区复制 helper，将矩形选区按当前可见行列顺序导出为制表符文本；同时补上工具栏“复制选区”按钮和 `Ctrl/Cmd+C` 快捷键，让拖选后的复制行为更接近 Excel。
 - 验证：新增 `frontend/src/components/dataGridSelectionCopy.test.ts` 覆盖选区排序与剪贴板文本规整规则，并执行 `frontend` 下 `npm run build` 确认功能接线通过。
+
+### #351
+
+- 根因：后端已有批量清空表能力，但前端单表危险操作菜单只暴露了“删除表”，没有把“截断表 / 清空表”作为显式入口提供给用户；同时批量“清空”动作底层语义也混用了 `TRUNCATE/DELETE`。
+- 处理：后端将“截断表”和“清空表”拆分为显式能力，统一通过 helper 生成多数据库 SQL；前端为 Sidebar 和 TableOverview 的表菜单补上两个危险操作入口，并仅在明确支持 `TRUNCATE TABLE` 的数据库类型上显示“截断表”。
+- 验证：新增 `internal/app/methods_file_clear_test.go` 与 `frontend/src/components/tableDataDangerActions.test.ts`，并执行 `go test ./...`、`frontend` 下 `npm run build` 确认全量通过。
 
 ## Next
 

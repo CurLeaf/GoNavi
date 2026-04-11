@@ -26,6 +26,10 @@ export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
 }
 
+export function ClearTables(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ClearTables'](arg1, arg2, arg3);
+}
+
 export function ConfigureDriverRuntimeDirectory(arg1) {
   return window['go']['app']['App']['ConfigureDriverRuntimeDirectory'](arg1);
 }
@@ -215,7 +219,7 @@ export function ImportLegacyGlobalProxy(arg1) {
 }
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
-    return window['go']['app']['App']['InstallLocalDriverPackage'](arg1, arg2, arg3, arg4);
+  return window['go']['app']['App']['InstallLocalDriverPackage'](arg1, arg2, arg3, arg4);
 }
 
 export function InstallUpdateAndRestart() {
@@ -250,16 +254,16 @@ export function MySQLShowCreateTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['MySQLShowCreateTable'](arg1, arg2, arg3);
 }
 
+export function OpenDataRootDirectory() {
+  return window['go']['app']['App']['OpenDataRootDirectory']();
+}
+
 export function OpenDownloadedUpdateDirectory() {
   return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
 }
 
 export function OpenDriverDownloadDirectory(arg1) {
   return window['go']['app']['App']['OpenDriverDownloadDirectory'](arg1);
-}
-
-export function OpenDataRootDirectory() {
-  return window['go']['app']['App']['OpenDataRootDirectory']();
 }
 
 export function OpenSQLFile() {
@@ -402,12 +406,12 @@ export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
 }
 
-export function SelectDatabaseFile(arg1, arg2) {
-  return window['go']['app']['App']['SelectDatabaseFile'](arg1, arg2);
-}
-
 export function SelectDataRootDirectory(arg1) {
   return window['go']['app']['App']['SelectDataRootDirectory'](arg1);
+}
+
+export function SelectDatabaseFile(arg1, arg2) {
+  return window['go']['app']['App']['SelectDatabaseFile'](arg1, arg2);
 }
 
 export function SelectDriverDownloadDirectory(arg1) {
