@@ -130,6 +130,8 @@ export function MySQLShowCreateTable(arg1:connection.ConnectionConfig,arg2:strin
 
 export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
 
+export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
+
 export function OpenDataRootDirectory():Promise<connection.QueryResult>;
 
 export function OpenSQLFile():Promise<connection.QueryResult>;

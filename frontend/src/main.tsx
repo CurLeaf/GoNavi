@@ -128,6 +128,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
                 CheckForUpdates: async () => ({ success: false }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
+                OpenDriverDownloadDirectory: async (path: string) => ({ success: true, data: { path } }),
                 OpenDataRootDirectory: async () => ({ success: true }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false }),

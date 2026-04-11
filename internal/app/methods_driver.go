@@ -512,6 +512,37 @@ func (a *App) SelectDriverPackageDirectory(currentPath string) connection.QueryR
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
 }
 
+func (a *App) OpenDriverDownloadDirectory(directory string) connection.QueryResult {
+	resolved, err := resolveDriverDownloadDirectory(directory)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.MkdirAll(resolved, 0o755); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("创建驱动目录失败：%v", err)}
+	}
+
+	var cmd *exec.Cmd
+	switch stdRuntime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", resolved)
+	case "windows":
+		cmd = exec.Command("explorer", resolved)
+	case "linux":
+		cmd = exec.Command("xdg-open", resolved)
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前平台暂不支持打开目录：%s", stdRuntime.GOOS)}
+	}
+	if err := cmd.Start(); err != nil {
+		logger.Error(err, "打开驱动目录失败")
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("打开驱动目录失败：%v", err)}
+	}
+	return connection.QueryResult{
+		Success: true,
+		Message: fmt.Sprintf("已打开驱动目录：%s", resolved),
+		Data:    map[string]interface{}{"path": resolved},
+	}
+}
+
 func (a *App) ResolveDriverDownloadDirectory(directory string) connection.QueryResult {
 	resolved, err := resolveDriverDownloadDirectory(directory)
 	if err != nil {

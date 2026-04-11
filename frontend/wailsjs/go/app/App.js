@@ -254,6 +254,10 @@ export function OpenDownloadedUpdateDirectory() {
   return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
 }
 
+export function OpenDriverDownloadDirectory(arg1) {
+  return window['go']['app']['App']['OpenDriverDownloadDirectory'](arg1);
+}
+
 export function OpenDataRootDirectory() {
   return window['go']['app']['App']['OpenDataRootDirectory']();
 }
