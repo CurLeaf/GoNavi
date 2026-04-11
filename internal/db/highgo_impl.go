@@ -174,6 +174,17 @@ func (h *HighGoDB) ExecContext(ctx context.Context, query string) (int64, error)
 	return res.RowsAffected()
 }
 
+func (h *HighGoDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if h.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := h.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (h *HighGoDB) Exec(query string) (int64, error) {
 	if h.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

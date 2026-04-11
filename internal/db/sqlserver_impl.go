@@ -190,6 +190,17 @@ func (s *SqlServerDB) ExecContext(ctx context.Context, query string) (int64, err
 	return res.RowsAffected()
 }
 
+func (s *SqlServerDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if s.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := s.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *SqlServerDB) Exec(query string) (int64, error) {
 	if s.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
