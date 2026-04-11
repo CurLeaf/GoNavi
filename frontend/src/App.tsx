@@ -20,6 +20,7 @@ import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
 import { LEGACY_PERSIST_KEY, readLegacyPersistedSecrets, stripLegacyPersistedSecrets } from './utils/legacyConnectionStorage';
+import { getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -534,7 +535,7 @@ function App() {
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-      const fixWindowScaleIfNeeded = async () => {
+      const fixWindowScaleIfNeeded = async (reason: 'activation' | 'ratio-change') => {
           if (cancelled || inFlight) return;
           const now = Date.now();
           if (now - lastFixAt < 700) return;
@@ -545,8 +546,8 @@ function App() {
                   WindowIsMaximised().catch(() => false),
               ]);
 
-              // 避免在全屏/最大化状态下强制改尺寸；这两种状态通常能自行保持 DPI 同步。
-              if (isFullscreen || isMaximised) {
+              // 全屏状态下只广播 resize，避免破坏用户的全屏上下文。
+              if (isFullscreen) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
@@ -555,13 +556,46 @@ function App() {
               const size = await WindowGetSize().catch(() => null);
               const width = Math.trunc(Number(size?.w || 0));
               const height = Math.trunc(Number(size?.h || 0));
+              const hasViewportScaleDrift = hasWindowsViewportScaleDrift({
+                  windowWidth: width,
+                  innerWidth: window.innerWidth,
+                  devicePixelRatio: Number(window.devicePixelRatio) || 1,
+                  visualViewportScale: window.visualViewport?.scale,
+              });
+
+              if (isMaximised) {
+                  if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                      window.dispatchEvent(new Event('resize'));
+                      lastFixAt = Date.now();
+                      return;
+                  }
+
+                  try {
+                      WindowToggleMaximise();
+                      await wait(48);
+                      WindowToggleMaximise();
+                      await wait(64);
+                  } catch (e) {
+                      console.warn("Wails Window maximise toggle unavailable in fixWindowScaleIfNeeded", e);
+                  }
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
               if (width <= 0 || height <= 0) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
               }
 
-              const nudgedWidth = width > 480 ? width - 1 : width + 1;
+              if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
+              const nudgedWidth = getWindowsScaleFixNudgedWidth(width);
               try {
                   WindowSetSize(nudgedWidth, height);
                   await wait(28);
@@ -583,7 +617,7 @@ function App() {
               return;
           }
           lastRatio = currentRatio;
-          void fixWindowScaleIfNeeded();
+          void fixWindowScaleIfNeeded('ratio-change');
       };
 
       const scheduleActivationFix = () => {
@@ -594,7 +628,7 @@ function App() {
           activationTimer = window.setTimeout(() => {
               activationTimer = null;
               if (cancelled) return;
-              void fixWindowScaleIfNeeded();
+              void fixWindowScaleIfNeeded('activation');
           }, 80);
       };
 
