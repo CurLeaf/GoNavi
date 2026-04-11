@@ -42,28 +42,32 @@ body, #root {
   overflow-y: hidden;
 }
 
+.sidebar-tree-scroll-content {
+  min-width: 100%;
+}
+
 .sidebar-tree-scroll-shell .ant-tree {
   min-width: 100%;
 }
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder,
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder-inner {
-  min-width: max-content;
+  min-width: 100%;
 }
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-treenode {
-  width: max-content;
+  width: auto;
   min-width: 100%;
 }
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-node-content-wrapper {
-  width: max-content !important;
-  min-width: 100%;
+  width: auto !important;
+  min-width: 0;
 }
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-title {
   flex: 0 0 auto;
-  min-width: max-content;
+  min-width: 0;
   overflow: visible;
   text-overflow: clip;
 }
