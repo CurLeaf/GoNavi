@@ -282,6 +282,7 @@ const (
 	driverModuleVersionInspectLimit     = 30
 	driverModuleVersionListMaxSize      = 4 << 20
 	driverRecentVersionLimit            = 5
+	driverModuleVersionFetchLimit       = 64
 	driverVersionWarmupMinInterval      = 30 * time.Second
 	driverBundleIndexMaxSize            = 1 << 20
 	driverManifestMaxSize               = 2 << 20
@@ -393,7 +394,8 @@ var driverGoModuleAliasPathMap = map[string][]string{
 }
 
 var driverExtraHistoryLimitMap = map[string]int{
-	"mongodb": 10,
+	"mongodb":  10,
+	"tdengine": 30,
 }
 
 var fallbackRecentDriverVersionsMap = map[string][]goModuleVersionMeta{
@@ -413,6 +415,35 @@ var fallbackRecentDriverVersionsMap = map[string][]goModuleVersionMeta{
 		{Version: "1.17.1"},
 		{Version: "1.17.0"},
 		{Version: "1.16.1"},
+	},
+	"tdengine": {
+		{Version: "3.8.0"},
+		{Version: "3.7.8"},
+		{Version: "3.7.7"},
+		{Version: "3.7.6"},
+		{Version: "3.7.5"},
+		{Version: "3.7.4"},
+		{Version: "3.7.3"},
+		{Version: "3.7.2"},
+		{Version: "3.7.1"},
+		{Version: "3.7.0"},
+		{Version: "3.6.0"},
+		{Version: "3.5.8"},
+		{Version: "3.5.7"},
+		{Version: "3.5.6"},
+		{Version: "3.5.5"},
+		{Version: "3.5.4"},
+		{Version: "3.5.3"},
+		{Version: "3.5.2"},
+		{Version: "3.5.1"},
+		{Version: "3.5.0"},
+		{Version: "3.3.1"},
+		{Version: "3.1.0"},
+		{Version: "3.0.4"},
+		{Version: "3.0.3"},
+		{Version: "3.0.2"},
+		{Version: "3.0.1"},
+		{Version: "3.0.0"},
 	},
 }
 
@@ -1851,8 +1882,13 @@ func resolveRecentDriverVersionMetas(driverType string, limit int) []goModuleVer
 	}
 	modulePaths := resolveDriverGoModulePaths(normalized)
 	if len(modulePaths) > 0 {
-		result := make([]goModuleVersionMeta, 0, limit)
-		seen := make(map[string]struct{}, limit)
+		extraHistoryLimit := resolveDriverExtraHistoryLimit(normalized)
+		primaryLimit := limit + extraHistoryLimit
+		if primaryLimit <= 0 {
+			primaryLimit = limit
+		}
+		result := make([]goModuleVersionMeta, 0, primaryLimit)
+		seen := make(map[string]struct{}, primaryLimit)
 		appendUnique := func(values []goModuleVersionMeta, maxAppend int) {
 			if maxAppend <= 0 {
 				return
@@ -1877,9 +1913,9 @@ func resolveRecentDriverVersionMetas(driverType string, limit int) []goModuleVer
 			}
 		}
 
-		appendUnique(fetchGoModuleVersionMetasCached(modulePaths[0]), limit)
+		appendUnique(fetchGoModuleVersionMetasCached(modulePaths[0]), primaryLimit)
 
-		extraLimit := resolveDriverExtraHistoryLimit(normalized)
+		extraLimit := extraHistoryLimit
 		for _, modulePath := range modulePaths[1:] {
 			if extraLimit <= 0 {
 				break
@@ -2105,8 +2141,8 @@ func fetchGoModuleVersionMetas(modulePath string) ([]goModuleVersionMeta, error)
 		right := "v" + versions[j]
 		return semver.Compare(left, right) > 0
 	})
-	if len(versions) > driverRecentVersionLimit {
-		versions = versions[:driverRecentVersionLimit]
+	if len(versions) > driverModuleVersionFetchLimit {
+		versions = versions[:driverModuleVersionFetchLimit]
 	}
 
 	metas := make([]goModuleVersionMeta, 0, len(versions))

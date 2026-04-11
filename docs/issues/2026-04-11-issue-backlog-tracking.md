@@ -23,9 +23,10 @@
 | #318 | mysql,bit 列，修改成 1 失败 | Fixed | `bee78be` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
 | #320 | 无法连接达梦数据库 | Fixed | `dc17133` |
+| #325 | 有没有考虑对数据库的驱动版本进行选择或者自定义？ | Fixed | Pending |
 | #327 | SHOW DATABASES 报错 | Fixed | `5ac0221` |
 | #328 | [Bug] 安装更新失败 | Fixed | `436f130` |
-| #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | Pending |
+| #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `942ee2f` |
 
 ## Notes
 
@@ -64,6 +65,12 @@
 - 根因：Windows 更新脚本在批处理执行、错误码读取和重启命令上不够稳，`cmd /C start`、LF 行尾和块内 `%ERRORLEVEL%` 在实际环境下容易引发安装失败。
 - 处理：更新脚本统一输出为 CRLF，块内错误码改为延迟展开，旧文件回退路径统一为 `TARGET_OLD`，并将脚本启动方式收敛为 `cmd.exe /D /C call <script>`。
 - 验证：补充 `internal/app/methods_update_windows_script_test.go`，覆盖批处理语法、Win10 回退路径、CRLF 行尾、延迟展开和启动命令构造。
+
+### #325
+
+- 根因：TDengine 的版本列表虽然支持下拉选择，但后端在抓取与缓存 Go 模块版本时只保留最近 5 个版本，导致 `3.5.x / 3.3.x / 3.0.x` 这类旧版根本不会进入选择列表。
+- 处理：放宽 TDengine 的历史版本窗口，并补充离线 fallback 版本矩阵；同时扩大模块版本缓存上限，确保旧版不会在抓取阶段就被截断。
+- 验证：补充 `internal/app/methods_driver_version_test.go` 回归测试，覆盖缓存命中与 fallback 两条路径，并回归 Mongo 版本约束逻辑。
 
 ### #329
 

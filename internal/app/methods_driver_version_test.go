@@ -162,6 +162,76 @@ func TestDownloadDriverPackageRejectsUnsupportedMongoVersion(t *testing.T) {
 	}
 }
 
+func TestResolveRecentDriverVersionMetasIncludesHistoricalTDengineVersionsFromCache(t *testing.T) {
+	seedGoModuleVersionCache(t, "github.com/taosdata/driver-go/v3", []string{
+		"3.8.0",
+		"3.7.8",
+		"3.7.7",
+		"3.7.6",
+		"3.7.5",
+		"3.7.4",
+		"3.7.3",
+		"3.7.2",
+		"3.7.1",
+		"3.7.0",
+		"3.6.0",
+		"3.5.8",
+		"3.5.7",
+		"3.5.6",
+		"3.5.5",
+		"3.5.4",
+		"3.5.3",
+		"3.5.2",
+		"3.5.1",
+		"3.5.0",
+		"3.3.1",
+		"3.1.0",
+		"3.0.4",
+		"3.0.3",
+		"3.0.2",
+		"3.0.1",
+		"3.0.0",
+	})
+
+	metas := resolveRecentDriverVersionMetas("tdengine", driverRecentVersionLimit)
+	versions := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		versions = append(versions, meta.Version)
+	}
+
+	if !containsVersion(versions, "3.5.8") {
+		t.Fatalf("expected tdengine historical version 3.5.8 to remain selectable, got %v", versions)
+	}
+	if !containsVersion(versions, "3.3.1") {
+		t.Fatalf("expected tdengine historical version 3.3.1 to remain selectable, got %v", versions)
+	}
+}
+
+func TestResolveRecentDriverVersionMetasFallsBackToHistoricalTDengineMatrix(t *testing.T) {
+	driverModuleVersionMu.Lock()
+	original := driverModuleVersionMap
+	driverModuleVersionMap = map[string]goModuleVersionListCacheEntry{}
+	driverModuleVersionMu.Unlock()
+	t.Cleanup(func() {
+		driverModuleVersionMu.Lock()
+		driverModuleVersionMap = original
+		driverModuleVersionMu.Unlock()
+	})
+
+	metas := resolveRecentDriverVersionMetas("tdengine", driverRecentVersionLimit)
+	versions := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		versions = append(versions, meta.Version)
+	}
+
+	if !containsVersion(versions, "3.5.8") {
+		t.Fatalf("expected tdengine fallback list to include 3.5.8, got %v", versions)
+	}
+	if !containsVersion(versions, "3.3.1") {
+		t.Fatalf("expected tdengine fallback list to include 3.3.1, got %v", versions)
+	}
+}
+
 func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
 	if !shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", "builtin://activate/mongodb?channel=history&version=1.17.4") {
 		t.Fatal("expected mongodb v1 builtin install to keep source build mode")
@@ -306,6 +376,48 @@ func cloneInt64Map(src map[string]int64) map[string]int64 {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func seedGoModuleVersionCache(t *testing.T, modulePath string, versions []string) {
+	t.Helper()
+
+	driverModuleVersionMu.Lock()
+	original := make(map[string]goModuleVersionListCacheEntry, len(driverModuleVersionMap))
+	for key, value := range driverModuleVersionMap {
+		original[key] = goModuleVersionListCacheEntry{
+			LoadedAt: value.LoadedAt,
+			Versions: append([]goModuleVersionMeta(nil), value.Versions...),
+			Err:      value.Err,
+		}
+	}
+	driverModuleVersionMap[modulePath] = goModuleVersionListCacheEntry{
+		LoadedAt: time.Now(),
+		Versions: mapVersionsToMetas(versions),
+	}
+	driverModuleVersionMu.Unlock()
+
+	t.Cleanup(func() {
+		driverModuleVersionMu.Lock()
+		driverModuleVersionMap = original
+		driverModuleVersionMu.Unlock()
+	})
+}
+
+func mapVersionsToMetas(versions []string) []goModuleVersionMeta {
+	result := make([]goModuleVersionMeta, 0, len(versions))
+	for _, version := range versions {
+		result = append(result, goModuleVersionMeta{Version: version})
+	}
+	return result
+}
+
+func containsVersion(versions []string, target string) bool {
+	for _, version := range versions {
+		if version == target {
+			return true
+		}
+	}
+	return false
 }
 
 func chdirTemp(t *testing.T) {
