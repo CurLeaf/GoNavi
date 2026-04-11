@@ -110,6 +110,8 @@ export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,ar
 
 export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
 
+export function LogWindowDiagnostic(arg1:string,arg2:string):Promise<void>;
+
 export function MongoDiscoverMembers(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function MySQLConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;

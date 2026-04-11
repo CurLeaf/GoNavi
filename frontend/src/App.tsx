@@ -2,7 +2,7 @@
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -130,6 +130,9 @@ function App() {
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
+  const windowDiagSequenceRef = React.useRef(0);
+  const windowDiagLastSignatureRef = React.useRef('');
+  const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
 
   const windowCornerRadius = 14;
@@ -481,6 +484,10 @@ function App() {
               const store = useStore.getState();
               const newState = isFs ? 'fullscreen' : (isMax ? 'maximized' : 'normal');
               if (store.windowState !== newState) {
+                  void emitWindowDiagnostic('transition:windowState', {
+                      from: store.windowState,
+                      to: newState,
+                  });
                   store.setWindowState(newState);
               }
 
@@ -496,15 +503,18 @@ function App() {
               const h = Math.trunc(Number(size.h || 0));
               const x = Math.trunc(Number(pos.x || 0));
               const y = Math.trunc(Number(pos.y || 0));
-              if (w < 400 || h < 300) return;
+               if (w < 400 || h < 300) return;
 
-              const key = `${w},${h},${x},${y}`;
-              if (key === lastSaved) return;
-              lastSaved = key;
-              store.setWindowBounds({ width: w, height: h, x, y });
-          } catch (e) {
-              // 静默忽略
-          }
+               const key = `${w},${h},${x},${y}`;
+               if (key === lastSaved) return;
+               lastSaved = key;
+               if (Math.abs(x) > 5000 || Math.abs(y) > 5000) {
+                   void emitWindowDiagnostic('anomaly:windowBounds', { width: w, height: h, x, y });
+               }
+               store.setWindowBounds({ width: w, height: h, x, y });
+            } catch (e) {
+                // 静默忽略
+            }
       };
 
       const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
@@ -854,6 +864,63 @@ function App() {
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
 
+  const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
+      if (!isMacRuntime) {
+          return;
+      }
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.LogWindowDiagnostic !== 'function') {
+          return;
+      }
+      try {
+          const [isFullscreen, isMaximised, isMinimised, isNormal, size, position] = await Promise.all([
+              WindowIsFullscreen().catch(() => false),
+              WindowIsMaximised().catch(() => false),
+              WindowIsMinimised().catch(() => false),
+              WindowIsNormal().catch(() => false),
+              WindowGetSize().catch(() => null),
+              WindowGetPosition().catch(() => null),
+          ]);
+          const payload = {
+              seq: ++windowDiagSequenceRef.current,
+              ts: new Date().toISOString(),
+              stage,
+              nativeControls: useNativeMacWindowControls,
+              documentVisible: document.visibilityState,
+              documentHasFocus: document.hasFocus(),
+              devicePixelRatio: Number(window.devicePixelRatio) || 1,
+              windowState: {
+                  isFullscreen,
+                  isMaximised,
+                  isMinimised,
+                  isNormal,
+              },
+              size: size ? { w: Math.trunc(Number(size.w || 0)), h: Math.trunc(Number(size.h || 0)) } : null,
+              position: position ? { x: Math.trunc(Number(position.x || 0)), y: Math.trunc(Number(position.y || 0)) } : null,
+              extra,
+          };
+          const signature = JSON.stringify({
+              stage,
+              nativeControls: payload.nativeControls,
+              visible: payload.documentVisible,
+              focus: payload.documentHasFocus,
+              state: payload.windowState,
+              size: payload.size,
+              position: payload.position,
+              extra,
+          });
+          const now = Date.now();
+          if (signature === windowDiagLastSignatureRef.current && now-windowDiagLastAtRef.current < 250) {
+              return;
+          }
+          windowDiagLastSignatureRef.current = signature;
+          windowDiagLastAtRef.current = now;
+          await backendApp.LogWindowDiagnostic(stage, JSON.stringify(payload));
+      } catch (error) {
+          console.warn('Failed to emit window diagnostic', error);
+      }
+  }, [isMacRuntime, useNativeMacWindowControls]);
+
   useEffect(() => {
       if (!isStoreHydrated || !isMacRuntime) {
           return;
@@ -865,6 +932,104 @@ function App() {
           console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
       }
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
+
+  useEffect(() => {
+      if (!isMacRuntime) {
+          return;
+      }
+
+      let cancelled = false;
+      let pollTimer: number | null = null;
+      let burstTimer: number | null = null;
+
+      const stopBurst = () => {
+          if (pollTimer !== null) {
+              window.clearInterval(pollTimer);
+              pollTimer = null;
+          }
+          if (burstTimer !== null) {
+              window.clearTimeout(burstTimer);
+              burstTimer = null;
+          }
+      };
+
+      const startBurst = (reason: string, extra: Record<string, unknown> = {}) => {
+          if (cancelled) {
+              return;
+          }
+          void emitWindowDiagnostic(`burst:start:${reason}`, extra);
+          if (pollTimer === null) {
+              pollTimer = window.setInterval(() => {
+                  void emitWindowDiagnostic(`burst:tick:${reason}`);
+              }, 250);
+          }
+          if (burstTimer !== null) {
+              window.clearTimeout(burstTimer);
+          }
+          burstTimer = window.setTimeout(() => {
+              stopBurst();
+              void emitWindowDiagnostic(`burst:stop:${reason}`);
+          }, 6000);
+      };
+
+      const handleFocus = () => {
+          void emitWindowDiagnostic('event:focus');
+      };
+      const handleBlur = () => {
+          void emitWindowDiagnostic('event:blur');
+      };
+      const handleResize = () => {
+          void emitWindowDiagnostic('event:resize');
+      };
+      const handleVisibilityChange = () => {
+          void emitWindowDiagnostic('event:visibilitychange', { visibility: document.visibilityState });
+      };
+      const handleEditableKeydown = (event: KeyboardEvent) => {
+          if (!isEditableElement(event.target)) {
+              return;
+          }
+          const key = String(event.key || '');
+          const maybeFullscreenKey = key === 'Escape' || key.toLowerCase() === 'f' || key === 'Process';
+          const hasModifier = event.ctrlKey || event.metaKey || event.altKey;
+          startBurst('editable-keydown', {
+              key,
+              code: String(event.code || ''),
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              shiftKey: event.shiftKey,
+              maybeFullscreenKey,
+              hasModifier,
+          });
+      };
+      const handleCompositionStart = () => {
+          startBurst('compositionstart');
+      };
+      const handleCompositionEnd = () => {
+          startBurst('compositionend');
+      };
+
+      void emitWindowDiagnostic('session:start');
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('blur', handleBlur);
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('keydown', handleEditableKeydown, true);
+      window.addEventListener('compositionstart', handleCompositionStart, true);
+      window.addEventListener('compositionend', handleCompositionEnd, true);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+          cancelled = true;
+          stopBurst();
+          window.removeEventListener('focus', handleFocus);
+          window.removeEventListener('blur', handleBlur);
+          window.removeEventListener('resize', handleResize);
+          window.removeEventListener('keydown', handleEditableKeydown, true);
+          window.removeEventListener('compositionstart', handleCompositionStart, true);
+          window.removeEventListener('compositionend', handleCompositionEnd, true);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+  }, [emitWindowDiagnostic, isMacRuntime]);
 
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
@@ -1373,15 +1538,19 @@ function App() {
 
   const handleTitleBarWindowToggle = async () => {
       try {
+          void emitWindowDiagnostic('action:titlebar-toggle:before');
           if (await WindowIsFullscreen()) {
               await WindowUnfullscreen();
+              void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
           if (useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
+              void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
           await WindowToggleMaximise();
+          void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
       } catch (_) {
           // ignore
       }

@@ -91,6 +91,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	logger.Init()
 	a.loadPersistedGlobalProxy()
+	installMacNativeWindowDiagnostics(logger.Path())
 	applyMacWindowTranslucencyFix()
 	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }
@@ -106,6 +107,16 @@ func (a *App) SetWindowTranslucency(opacity float64, blur float64) {
 // On non-macOS platforms this is a no-op.
 func (a *App) SetMacNativeWindowControls(enabled bool) {
 	setMacNativeWindowControls(enabled)
+}
+
+// LogWindowDiagnostic 记录前端采集到的窗口诊断信息，便于排查 macOS 原生全屏异常。
+func (a *App) LogWindowDiagnostic(stage string, payload string) {
+	stage = strings.TrimSpace(stage)
+	payload = strings.TrimSpace(payload)
+	if stage == "" {
+		stage = "unknown"
+	}
+	logger.Warnf("窗口诊断：stage=%s payload=%s", stage, payload)
 }
 
 // Shutdown is called when the app terminates
