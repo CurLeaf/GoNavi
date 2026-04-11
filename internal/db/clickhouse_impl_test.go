@@ -20,13 +20,23 @@ var (
 	registerFakeClickHouseDriverOnce sync.Once
 	fakeClickHouseStateMu            sync.Mutex
 	fakeClickHouseState              = struct {
-		pingErr   error
-		queryErr  error
-		lastQuery string
+		pingErr      error
+		queryErr     error
+		queryResults map[string]fakeClickHouseQueryResult
+		lastQuery    string
+		queries      []string
 	}{
-		lastQuery: "",
+		lastQuery:    "",
+		queryResults: map[string]fakeClickHouseQueryResult{},
+		queries:      nil,
 	}
 )
+
+type fakeClickHouseQueryResult struct {
+	columns []string
+	rows    [][]driver.Value
+	err     error
+}
 
 func TestClickHousePingValidatesQueryPath(t *testing.T) {
 	registerFakeClickHouseDriverOnce.Do(func() {
@@ -42,7 +52,9 @@ func TestClickHousePingValidatesQueryPath(t *testing.T) {
 	fakeClickHouseStateMu.Lock()
 	fakeClickHouseState.pingErr = nil
 	fakeClickHouseState.queryErr = errors.New("query path failed")
+	fakeClickHouseState.queryResults = map[string]fakeClickHouseQueryResult{}
 	fakeClickHouseState.lastQuery = ""
+	fakeClickHouseState.queries = nil
 	fakeClickHouseStateMu.Unlock()
 
 	client := &ClickHouseDB{
@@ -62,6 +74,58 @@ func TestClickHousePingValidatesQueryPath(t *testing.T) {
 	fakeClickHouseStateMu.Unlock()
 	if lastQuery != "SELECT currentDatabase()" {
 		t.Fatalf("expected query validation SQL to run, got %q", lastQuery)
+	}
+}
+
+func TestClickHouseGetDatabasesFallsBackToCurrentDatabase(t *testing.T) {
+	registerFakeClickHouseDriverOnce.Do(func() {
+		sql.Register(fakeClickHouseDriverName, fakeClickHouseDriver{})
+	})
+
+	db, err := sql.Open(fakeClickHouseDriverName, "")
+	if err != nil {
+		t.Fatalf("open fake clickhouse db failed: %v", err)
+	}
+	defer db.Close()
+
+	const listSQL = "SELECT name FROM system.databases ORDER BY name"
+	const fallbackSQL = "SELECT currentDatabase() AS name"
+
+	fakeClickHouseStateMu.Lock()
+	fakeClickHouseState.pingErr = nil
+	fakeClickHouseState.queryErr = nil
+	fakeClickHouseState.queryResults = map[string]fakeClickHouseQueryResult{
+		listSQL: {
+			err: errors.New("access denied to system.databases"),
+		},
+		fallbackSQL: {
+			columns: []string{"name"},
+			rows: [][]driver.Value{
+				{"analytics"},
+			},
+		},
+	}
+	fakeClickHouseState.lastQuery = ""
+	fakeClickHouseState.queries = nil
+	fakeClickHouseStateMu.Unlock()
+
+	client := &ClickHouseDB{conn: db}
+	databases, err := client.GetDatabases()
+	if err != nil {
+		t.Fatalf("expected GetDatabases to fallback, got err=%v", err)
+	}
+	if len(databases) != 1 || databases[0] != "analytics" {
+		t.Fatalf("expected fallback database list, got %v", databases)
+	}
+
+	fakeClickHouseStateMu.Lock()
+	queries := append([]string(nil), fakeClickHouseState.queries...)
+	fakeClickHouseStateMu.Unlock()
+	if len(queries) != 2 {
+		t.Fatalf("expected two queries, got %v", queries)
+	}
+	if queries[0] != listSQL || queries[1] != fallbackSQL {
+		t.Fatalf("unexpected query order: %v", queries)
 	}
 }
 
@@ -95,15 +159,29 @@ func (fakeClickHouseConn) QueryContext(ctx context.Context, query string, args [
 	fakeClickHouseStateMu.Lock()
 	defer fakeClickHouseStateMu.Unlock()
 	fakeClickHouseState.lastQuery = query
+	fakeClickHouseState.queries = append(fakeClickHouseState.queries, query)
+	if result, ok := fakeClickHouseState.queryResults[query]; ok {
+		if result.err != nil {
+			return nil, result.err
+		}
+		return &fakeClickHouseRows{columns: result.columns, rows: result.rows}, nil
+	}
 	if fakeClickHouseState.queryErr != nil {
 		return nil, fakeClickHouseState.queryErr
 	}
 	return &fakeClickHouseRows{}, nil
 }
 
-type fakeClickHouseRows struct{}
+type fakeClickHouseRows struct {
+	columns []string
+	rows    [][]driver.Value
+	index   int
+}
 
 func (r *fakeClickHouseRows) Columns() []string {
+	if len(r.columns) > 0 {
+		return r.columns
+	}
 	return []string{"currentDatabase"}
 }
 
@@ -112,6 +190,16 @@ func (r *fakeClickHouseRows) Close() error {
 }
 
 func (r *fakeClickHouseRows) Next(dest []driver.Value) error {
+	if r.index < len(r.rows) {
+		row := r.rows[r.index]
+		for idx := range dest {
+			if idx < len(row) {
+				dest[idx] = row[idx]
+			}
+		}
+		r.index++
+		return nil
+	}
 	if len(dest) > 0 {
 		dest[0] = "default"
 	}
