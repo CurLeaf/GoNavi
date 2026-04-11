@@ -48,6 +48,7 @@ import {
     normalizeTemporalLiteralText,
     resolveUniqueKeyGroupsFromIndexes,
 } from './dataGridCopyInsert';
+import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -392,7 +393,7 @@ const coerceJsonEditorValueForStorage = (currentValue: any, editedValue: any): a
 
 // --- Resizable Header (Native Implementation) ---
 const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) => {
-  const { onResizeStart, width, ...restProps } = props;
+  const { onResizeStart, onResizeAutoFit, width, ...restProps } = props;
 
   const nextStyle = { ...(restProps.style || {}) } as React.CSSProperties;
   if (width) {
@@ -415,12 +416,20 @@ const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) 
             // Pass the header element reference implicitly via event target
             onResizeStart(e);
         }}
+        onDoubleClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof onResizeAutoFit === 'function') {
+                onResizeAutoFit(e);
+            }
+        }}
         onPointerDown={(e) => {
             // 阻止 pointerdown 冒泡到 @dnd-kit 的 PointerSensor，
             // 避免调整列宽时意外触发列拖拽排序
             e.stopPropagation();
         }}
         onClick={(e) => e.stopPropagation()}
+        title="拖动调整列宽，双击按内容自适应"
         style={{
             position: 'absolute',
             right: 0, // Align to right edge
@@ -2886,6 +2895,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     const resizeRafRef = useRef<number | null>(null);
     const latestClientXRef = useRef<number | null>(null);
     const isResizingRef = useRef(false); // Lock for sorting
+    const autoFitCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const flushGhostPosition = useCallback(() => {
         resizeRafRef.current = null;
@@ -2946,6 +2956,74 @@ const DataGrid: React.FC<DataGridProps> = ({
             document.body.style.userSelect = 'none'; 
   
         }, [columnWidths, dataTableColumnWidthMode]);
+
+  const measureTextWidth = useCallback((text: string, font: string) => {
+      if (typeof document === 'undefined') {
+          return text.length * 8;
+      }
+      if (!autoFitCanvasRef.current) {
+          autoFitCanvasRef.current = document.createElement('canvas');
+      }
+      const context = autoFitCanvasRef.current.getContext('2d');
+      if (!context) {
+          return text.length * 8;
+      }
+      context.font = font;
+      return context.measureText(text).width;
+  }, []);
+
+  const buildAutoFitMeasurer = useCallback((element: HTMLElement | null, fallbackFont: string) => {
+      let font = fallbackFont;
+      if (typeof window !== 'undefined' && element) {
+          const computed = window.getComputedStyle(element);
+          const weight = computed.fontWeight || '400';
+          const size = computed.fontSize || '13px';
+          const family = computed.fontFamily || 'sans-serif';
+          font = `${weight} ${size} ${family}`;
+      }
+      return (text: string) => measureTextWidth(text, font);
+  }, [measureTextWidth]);
+
+  const handleResizeAutoFit = useCallback((key: string) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const handleEl = e.currentTarget as HTMLElement | null;
+      const headerEl = handleEl?.closest('th') as HTMLElement | null;
+      const sampleCell = Array.from(
+          containerRef.current?.querySelectorAll('.ant-table-cell[data-col-name]') || []
+      ).find((node) => (node as HTMLElement).getAttribute('data-col-name') === key) as HTMLElement | undefined;
+
+      const meta = columnMetaMap[key] || columnMetaMapByLowerName[key.toLowerCase()];
+      const headerTexts = [key];
+      if (showColumnType && meta?.type) headerTexts.push(meta.type);
+      if (showColumnComment && meta?.comment) headerTexts.push(meta.comment);
+
+      const defaultWidth = resolveDataTableColumnWidth({
+          manualWidth: columnWidths[key],
+          widthMode: dataTableColumnWidthMode,
+      });
+      const containerWidth = containerRef.current?.clientWidth ?? 0;
+      const nextWidth = calculateAutoFitColumnWidth({
+          headerTexts,
+          valueTexts: displayDataRef.current.map((row) => row?.[key]),
+          measureHeaderText: buildAutoFitMeasurer(headerEl, '600 13px sans-serif'),
+          measureCellText: buildAutoFitMeasurer(sampleCell ?? null, '400 13px sans-serif'),
+          defaultWidth,
+          minWidth: 80,
+          maxWidth: Math.max(720, Math.floor(containerWidth * 0.85)),
+      });
+
+      setColumnWidths((prev) => ({ ...prev, [key]: nextWidth }));
+  }, [
+      buildAutoFitMeasurer,
+      columnMetaMap,
+      columnMetaMapByLowerName,
+      columnWidths,
+      dataTableColumnWidthMode,
+      showColumnComment,
+      showColumnType,
+  ]);
 
   // 2. Drag Move (Global)
   const handleResizeMove = useCallback((e: MouseEvent) => {
@@ -3411,6 +3489,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               width: column.width,
               className: 'gonavi-sortable-header-cell',
               onResizeStart: handleResizeStart(key), // Only need start
+              onResizeAutoFit: handleResizeAutoFit(key),
               onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
                   if (!onSort) return;
                   const headerCell = event.currentTarget as HTMLElement;
@@ -3433,7 +3512,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, canModifyData, onSort, renderColumnTitle, dataTableColumnWidthMode]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, canModifyData, onSort, renderColumnTitle, dataTableColumnWidthMode]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
