@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -91,6 +92,20 @@ func (c *capturingRedisClient) SelectDB(index int) error { return nil }
 func (c *capturingRedisClient) GetCurrentDB() int { return 0 }
 
 func (c *capturingRedisClient) FlushDB() error { return nil }
+
+type scriptedRedisClient struct {
+	capturingRedisClient
+	connectErr   error
+	connectCalls *[]connection.ConnectionConfig
+}
+
+func (c *scriptedRedisClient) Connect(config connection.ConnectionConfig) error {
+	c.connectConfig = config
+	if c.connectCalls != nil {
+		*c.connectCalls = append(*c.connectCalls, config)
+	}
+	return c.connectErr
+}
 
 func TestRedisConnectResolvesSavedSecretsByConnectionID(t *testing.T) {
 	testCases := []struct {
@@ -215,6 +230,34 @@ func TestRedisConnectResolvesSavedSecretsByConnectionID(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "explicit redis username from uri is preserved even when it is root",
+			savedConfig: connection.ConnectionConfig{
+				ID:       "redis-1",
+				Type:     "redis",
+				Host:     "redis.local",
+				Port:     6379,
+				User:     "root",
+				Password: "redis-secret",
+				URI:      "redis://root:redis-secret@redis.local:6379/0",
+			},
+			runtimeConfig: connection.ConnectionConfig{
+				ID:   "redis-1",
+				Type: "redis",
+				Host: "redis.local",
+				Port: 6379,
+				User: "root",
+			},
+			assertResolved: func(t *testing.T, got connection.ConnectionConfig) {
+				t.Helper()
+				if got.User != "root" {
+					t.Fatalf("expected RedisConnect to preserve explicit uri user root, got %q", got.User)
+				}
+				if got.URI != "redis://root:redis-secret@redis.local:6379/0" {
+					t.Fatalf("expected RedisConnect to restore saved redis uri, got %q", got.URI)
+				}
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -254,5 +297,132 @@ func TestRedisConnectResolvesSavedSecretsByConnectionID(t *testing.T) {
 
 			testCase.assertResolved(t, client.connectConfig)
 		})
+	}
+}
+
+func TestRedisConnectPreservesExplicitRootUserWithoutURIWhenConnectSucceeds(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	_, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "redis-1",
+		Name: "Redis Saved",
+		Config: connection.ConnectionConfig{
+			ID:       "redis-1",
+			Type:     "redis",
+			Host:     "redis.local",
+			Port:     6379,
+			User:     "root",
+			Password: "redis-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	CloseAllRedisClients()
+	connectCalls := make([]connection.ConnectionConfig, 0, 1)
+	client := &scriptedRedisClient{connectCalls: &connectCalls}
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		CloseAllRedisClients()
+	}()
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	result := app.RedisConnect(connection.ConnectionConfig{
+		ID:   "redis-1",
+		Type: "redis",
+		Host: "redis.local",
+		Port: 6379,
+		User: "root",
+	})
+	if !result.Success {
+		t.Fatalf("RedisConnect returned failure: %+v", result)
+	}
+	if len(connectCalls) != 1 {
+		t.Fatalf("expected exactly one Redis connect attempt, got %d", len(connectCalls))
+	}
+	if connectCalls[0].User != "root" {
+		t.Fatalf("expected RedisConnect to preserve explicit root user when connect succeeds, got %q", connectCalls[0].User)
+	}
+}
+
+func TestRedisConnectRetriesLegacyDefaultRootUserWithoutUsernameAfterAuthFailure(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	_, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "redis-1",
+		Name: "Redis Saved",
+		Config: connection.ConnectionConfig{
+			ID:       "redis-1",
+			Type:     "redis",
+			Host:     "redis.local",
+			Port:     6379,
+			User:     "root",
+			Password: "redis-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	CloseAllRedisClients()
+	connectCalls := make([]connection.ConnectionConfig, 0, 2)
+	clients := []redislib.RedisClient{
+		&scriptedRedisClient{
+			connectErr:   errors.New("WRONGPASS invalid username-password pair"),
+			connectCalls: &connectCalls,
+		},
+		&scriptedRedisClient{
+			connectCalls: &connectCalls,
+		},
+	}
+	clientIndex := 0
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		CloseAllRedisClients()
+	}()
+	newRedisClientFunc = func() redislib.RedisClient {
+		if clientIndex >= len(clients) {
+			t.Fatalf("unexpected Redis client allocation #%d", clientIndex+1)
+		}
+		client := clients[clientIndex]
+		clientIndex++
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	result := app.RedisConnect(connection.ConnectionConfig{
+		ID:   "redis-1",
+		Type: "redis",
+		Host: "redis.local",
+		Port: 6379,
+		User: "root",
+	})
+	if !result.Success {
+		t.Fatalf("RedisConnect returned failure after fallback: %+v", result)
+	}
+	if len(connectCalls) != 2 {
+		t.Fatalf("expected RedisConnect to retry exactly once after auth failure, got %d attempts", len(connectCalls))
+	}
+	if connectCalls[0].User != "root" {
+		t.Fatalf("expected first Redis connect attempt to keep root user, got %q", connectCalls[0].User)
+	}
+	if connectCalls[1].User != "" {
+		t.Fatalf("expected fallback Redis connect attempt to clear legacy root user, got %q", connectCalls[1].User)
 	}
 }

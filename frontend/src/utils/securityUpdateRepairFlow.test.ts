@@ -6,6 +6,7 @@ import {
   resolveSecurityUpdateFocusState,
   resolveSecurityUpdateRepairEntry,
   resolveSecurityUpdateSettingsFocusTarget,
+  shouldRefreshSecurityUpdateDetailsFocus,
   shouldReopenSecurityUpdateDetails,
   shouldRetrySecurityUpdateAfterRepairSave,
 } from './securityUpdateRepairFlow';
@@ -135,5 +136,20 @@ describe('securityUpdateRepairFlow', () => {
     expect(shouldRetrySecurityUpdateAfterRepairSave('proxy')).toBe(false);
     expect(shouldRetrySecurityUpdateAfterRepairSave('ai')).toBe(false);
     expect(shouldRetrySecurityUpdateAfterRepairSave(null)).toBe(false);
+  });
+
+  it('does not force a new focus pulse when the details modal is already open and only the round result is refreshing', () => {
+    expect(shouldRefreshSecurityUpdateDetailsFocus({
+      requestedOpen: true,
+      wasOpen: true,
+    })).toBe(false);
+    expect(shouldRefreshSecurityUpdateDetailsFocus({
+      requestedOpen: true,
+      wasOpen: false,
+    })).toBe(true);
+    expect(shouldRefreshSecurityUpdateDetailsFocus({
+      requestedOpen: false,
+      wasOpen: true,
+    })).toBe(false);
   });
 });

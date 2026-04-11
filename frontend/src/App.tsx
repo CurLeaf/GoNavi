@@ -48,6 +48,7 @@ import {
   hasSecurityUpdateRecentResult,
   resolveSecurityUpdateRepairEntry,
   resolveSecurityUpdateSettingsFocusTarget,
+  shouldRefreshSecurityUpdateDetailsFocus,
   shouldReopenSecurityUpdateDetails,
   shouldRetrySecurityUpdateAfterRepairSave,
   type SecurityUpdateRepairSource,
@@ -276,6 +277,7 @@ function App() {
       status?: Partial<SecurityUpdateStatus> | null,
       options?: {
           openSettings?: boolean;
+          refreshFocus?: boolean;
           resetBannerDismissed?: boolean;
       },
   ) => {
@@ -287,8 +289,10 @@ function App() {
           setIsSecurityUpdateBannerDismissed(false);
       }
       if (options?.openSettings) {
-          setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
-          setSecurityUpdateSettingsFocusRequest((current) => current + 1);
+          if (options.refreshFocus !== false) {
+              setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
+              setSecurityUpdateSettingsFocusRequest((current) => current + 1);
+          }
           setIsSecurityUpdateSettingsOpen(true);
       }
       return nextStatus;
@@ -845,12 +849,16 @@ function App() {
       const stageText = mode === 'retry'
           ? '正在校验更新结果'
           : '正在更新安全存储';
+      const detailsWereOpen = isSecurityUpdateSettingsOpen;
       setSecurityUpdateProgressStage(stageText);
       setIsSecurityUpdateProgressOpen(true);
       setIsSecurityUpdateIntroOpen(false);
+      setIsSecurityUpdateSettingsOpen(false);
 
+      let nextStatus: SecurityUpdateStatus | null = null;
+      let shouldOpenSettings = false;
+      let refreshSettingsFocus = false;
       try {
-          let nextStatus: SecurityUpdateStatus | null = null;
           if (mode === 'start') {
               const result = await startSecurityUpdateFromBootstrap({
                   backend: backendApp,
@@ -891,29 +899,44 @@ function App() {
               }, nextStatus);
           }
 
-          const shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
-          applySecurityUpdateStatus(nextStatus, {
-              openSettings: shouldOpenSettings,
+          shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
+          refreshSettingsFocus = shouldRefreshSecurityUpdateDetailsFocus({
+              requestedOpen: shouldOpenSettings,
+              wasOpen: detailsWereOpen,
           });
-
-          if (nextStatus.overallStatus === 'completed') {
-              setSecurityUpdateHasLegacySensitiveItems(false);
-              setSecurityUpdateRawPayload(null);
-              setIsSecurityUpdateSettingsOpen(false);
-              void message.success('已保存配置已完成安全更新');
-          } else if (nextStatus.overallStatus === 'needs_attention') {
-              void message.warning('更新尚未完成，有少量配置需要你处理');
-          } else if (nextStatus.overallStatus === 'rolled_back') {
-              void message.warning('本次更新未完成，系统已保留当前可用配置');
-          }
       } catch (err: any) {
           console.warn('Failed to execute security update round', err);
-          void message.error(err?.message || '安全更新未完成，请稍后重试');
-      } finally {
           setIsSecurityUpdateProgressOpen(false);
+          if (detailsWereOpen) {
+              setIsSecurityUpdateSettingsOpen(true);
+          }
+          void message.error(err?.message || '安全更新未完成，请稍后重试');
+          return;
+      }
+
+      if (!nextStatus) {
+          setIsSecurityUpdateProgressOpen(false);
+          return;
+      }
+      setIsSecurityUpdateProgressOpen(false);
+      applySecurityUpdateStatus(nextStatus, {
+          openSettings: shouldOpenSettings,
+          refreshFocus: refreshSettingsFocus,
+      });
+
+      if (nextStatus.overallStatus === 'completed') {
+          setSecurityUpdateHasLegacySensitiveItems(false);
+          setSecurityUpdateRawPayload(null);
+          setIsSecurityUpdateSettingsOpen(false);
+          void message.success('已保存配置已完成安全更新');
+      } else if (nextStatus.overallStatus === 'needs_attention') {
+          void message.warning('更新尚未完成，有少量配置需要你处理');
+      } else if (nextStatus.overallStatus === 'rolled_back') {
+          void message.warning('本次更新未完成，系统已保留当前可用配置');
       }
   }, [
       applySecurityUpdateStatus,
+      isSecurityUpdateSettingsOpen,
       normalizeSecurityUpdateStatus,
       replaceConnections,
       replaceGlobalProxy,
@@ -2355,6 +2378,7 @@ function App() {
                   status={securityUpdateStatus}
                   darkMode={darkMode}
                   overlayTheme={overlayTheme}
+                  surfaceOpacity={effectiveOpacity}
                   onStart={handleStartSecurityUpdate}
                   onRetry={handleRetrySecurityUpdate}
                   onRestart={handleRestartSecurityUpdate}
@@ -2501,6 +2525,7 @@ function App() {
             loading={isSecurityUpdateProgressOpen}
             darkMode={darkMode}
             overlayTheme={overlayTheme}
+            surfaceOpacity={effectiveOpacity}
             onStart={handleStartSecurityUpdate}
             onPostpone={handlePostponeSecurityUpdate}
             onViewDetails={() => handleOpenSecurityUpdateSettings()}
@@ -2509,6 +2534,7 @@ function App() {
             open={isSecurityUpdateSettingsOpen}
             darkMode={darkMode}
             overlayTheme={overlayTheme}
+            surfaceOpacity={effectiveOpacity}
             status={securityUpdateStatus}
             focusTarget={securityUpdateSettingsFocusTarget}
             focusRequest={securityUpdateSettingsFocusRequest}
@@ -2522,6 +2548,7 @@ function App() {
             open={isSecurityUpdateProgressOpen}
             stageText={securityUpdateProgressStage}
             overlayTheme={overlayTheme}
+            surfaceOpacity={effectiveOpacity}
           />
           <AISettingsModal
             open={isAISettingsOpen}

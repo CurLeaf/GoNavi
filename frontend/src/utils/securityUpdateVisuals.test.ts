@@ -62,6 +62,17 @@ describe('securityUpdateVisuals', () => {
     });
   });
 
+  it('can scale shell surface alpha with the current appearance opacity so reminder layers stay visually consistent', () => {
+    const lightTheme = buildOverlayWorkbenchTheme(false);
+    const fadedShell = getSecurityUpdateShellSurfaceStyle(lightTheme, 0.5);
+    const fadedBanner = getSecurityUpdateBannerSurfaceStyle(lightTheme, 0.5);
+
+    expect(fadedShell.background).not.toBe(lightTheme.shellBg);
+    expect(fadedShell.border).not.toBe(lightTheme.shellBorder);
+    expect(fadedShell.background).toContain('0.49');
+    expect(fadedBanner.background).toContain('0.49');
+  });
+
   it('can emphasize a section surface for transient focus and recent-result highlighting', () => {
     const lightTheme = buildOverlayWorkbenchTheme(false);
     const darkTheme = buildOverlayWorkbenchTheme(true);

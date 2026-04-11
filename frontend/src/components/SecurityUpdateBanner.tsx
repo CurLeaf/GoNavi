@@ -15,6 +15,7 @@ interface SecurityUpdateBannerProps {
   status: SecurityUpdateStatus;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  surfaceOpacity?: number;
   onStart: () => void;
   onRetry: () => void;
   onRestart: () => void;
@@ -74,6 +75,7 @@ const SecurityUpdateBanner = ({
   status,
   darkMode,
   overlayTheme,
+  surfaceOpacity = 1,
   onStart,
   onRetry,
   onRestart,
@@ -92,7 +94,7 @@ const SecurityUpdateBanner = ({
         margin: '12px 12px 0',
         padding: '14px 16px',
         borderRadius: 16,
-        ...getSecurityUpdateBannerSurfaceStyle(overlayTheme),
+        ...getSecurityUpdateBannerSurfaceStyle(overlayTheme, surfaceOpacity),
         display: 'flex',
         alignItems: 'center',
         gap: 16,

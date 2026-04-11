@@ -7,6 +7,7 @@ import {
   SECURITY_UPDATE_ACTION_BUTTON_CLASS,
   SECURITY_UPDATE_MODAL_CLASS,
   getSecurityUpdateActionButtonStyle,
+  getSecurityUpdateShellSurfaceStyle,
 } from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateIntroModalProps {
@@ -14,6 +15,7 @@ interface SecurityUpdateIntroModalProps {
   loading?: boolean;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  surfaceOpacity?: number;
   onStart: () => void;
   onPostpone: () => void;
   onViewDetails: () => void;
@@ -30,6 +32,7 @@ const SecurityUpdateIntroModal = ({
   loading = false,
   darkMode,
   overlayTheme,
+  surfaceOpacity = 1,
   onStart,
   onPostpone,
   onViewDetails,
@@ -71,12 +74,7 @@ const SecurityUpdateIntroModal = ({
       onCancel={onPostpone}
       width={560}
       styles={{
-        content: {
-          background: overlayTheme.shellBg,
-          border: overlayTheme.shellBorder,
-          boxShadow: overlayTheme.shellShadow,
-          backdropFilter: overlayTheme.shellBackdropFilter,
-        },
+        content: getSecurityUpdateShellSurfaceStyle(overlayTheme, surfaceOpacity),
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
         body: { paddingTop: 8 },
         footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },

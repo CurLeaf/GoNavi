@@ -113,6 +113,14 @@ export const shouldReopenSecurityUpdateDetails = (
   repairSource: SecurityUpdateRepairSource | null | undefined,
 ): boolean => repairSource === 'connection' || repairSource === 'proxy' || repairSource === 'ai';
 
+export const shouldRefreshSecurityUpdateDetailsFocus = ({
+  requestedOpen,
+  wasOpen,
+}: {
+  requestedOpen: boolean;
+  wasOpen: boolean;
+}): boolean => requestedOpen && !wasOpen;
+
 export const shouldRetrySecurityUpdateAfterRepairSave = (
   repairSource: SecurityUpdateRepairSource | null | undefined,
 ): boolean => repairSource === 'connection';

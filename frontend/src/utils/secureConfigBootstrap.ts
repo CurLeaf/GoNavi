@@ -193,6 +193,7 @@ export const mergeSecurityUpdateStatusWithLegacySource = (
     },
     issues: Array.isArray(status?.issues) ? status.issues : [],
   };
+  const hasActiveMigrationRound = String(base.migrationId || '').trim() !== '';
   const baseNonLegacyIssues = base.issues.filter((issue) => !isLocalLegacyIssue(issue));
 
   const legacy = buildLegacyPendingDetails(rawPayload);
@@ -231,6 +232,9 @@ export const mergeSecurityUpdateStatusWithLegacySource = (
   }
 
   if (base.overallStatus === 'rolled_back' || base.overallStatus === 'needs_attention') {
+    if (hasActiveMigrationRound) {
+      return base;
+    }
     return {
       ...base,
       summary: hasMeaningfulSummary(base.summary) || legacy.hasLegacyItems ? legacySummary.summary : legacy.summary,

@@ -10,6 +10,25 @@ export const SECURITY_UPDATE_RESULT_CARD_ACTIVE_CLASS = 'security-update-result-
 
 type SecurityUpdateSectionSurfaceOptions = {
   emphasized?: boolean;
+  surfaceOpacity?: number;
+};
+
+const clampOpacity = (value: number): number => Math.min(1, Math.max(0.1, value));
+
+const formatAlpha = (value: number): string => (
+  Number(value.toFixed(3)).toString()
+);
+
+const applySurfaceOpacity = (token: string, surfaceOpacity = 1): string => {
+  const normalizedOpacity = clampOpacity(surfaceOpacity);
+  if (normalizedOpacity >= 0.999) {
+    return token;
+  }
+
+  return token.replace(
+    /rgba\(\s*([^)]+?)\s*,\s*([0-9]*\.?[0-9]+)\s*\)/g,
+    (_, channels: string, alpha: string) => `rgba(${channels}, ${formatAlpha(Number(alpha) * normalizedOpacity)})`,
+  );
 };
 
 const getSecurityUpdateHighlightBorder = (overlayTheme: OverlayWorkbenchTheme): string => (
@@ -40,17 +59,19 @@ export const getSecurityUpdateActionButtonStyle = (): CSSProperties => ({
 
 export const getSecurityUpdateShellSurfaceStyle = (
   overlayTheme: OverlayWorkbenchTheme,
+  surfaceOpacity = 1,
 ): CSSProperties => ({
-  border: overlayTheme.shellBorder,
-  background: overlayTheme.shellBg,
-  boxShadow: overlayTheme.shellShadow,
+  border: applySurfaceOpacity(overlayTheme.shellBorder, surfaceOpacity),
+  background: applySurfaceOpacity(overlayTheme.shellBg, surfaceOpacity),
+  boxShadow: applySurfaceOpacity(overlayTheme.shellShadow, surfaceOpacity),
   backdropFilter: overlayTheme.shellBackdropFilter,
 });
 
 export const getSecurityUpdateBannerSurfaceStyle = (
   overlayTheme: OverlayWorkbenchTheme,
+  surfaceOpacity = 1,
 ): CSSProperties => ({
-  ...getSecurityUpdateShellSurfaceStyle(overlayTheme),
+  ...getSecurityUpdateShellSurfaceStyle(overlayTheme, surfaceOpacity),
   boxShadow: 'none',
 });
 
@@ -58,8 +79,16 @@ export const getSecurityUpdateSectionSurfaceStyle = (
   overlayTheme: OverlayWorkbenchTheme,
   options: SecurityUpdateSectionSurfaceOptions = {},
 ): CSSProperties => ({
-  border: options.emphasized ? getSecurityUpdateHighlightBorder(overlayTheme) : overlayTheme.sectionBorder,
-  background: options.emphasized ? getSecurityUpdateHighlightBackground(overlayTheme) : overlayTheme.sectionBg,
-  boxShadow: options.emphasized ? getSecurityUpdateHighlightShadow(overlayTheme) : 'none',
+  border: applySurfaceOpacity(
+    options.emphasized ? getSecurityUpdateHighlightBorder(overlayTheme) : overlayTheme.sectionBorder,
+    options.surfaceOpacity,
+  ),
+  background: applySurfaceOpacity(
+    options.emphasized ? getSecurityUpdateHighlightBackground(overlayTheme) : overlayTheme.sectionBg,
+    options.surfaceOpacity,
+  ),
+  boxShadow: options.emphasized
+    ? applySurfaceOpacity(getSecurityUpdateHighlightShadow(overlayTheme), options.surfaceOpacity)
+    : 'none',
   transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
 });

@@ -2,13 +2,17 @@ import { Modal, Spin } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-import { SECURITY_UPDATE_MODAL_CLASS } from '../utils/securityUpdateVisuals';
+import {
+  SECURITY_UPDATE_MODAL_CLASS,
+  getSecurityUpdateShellSurfaceStyle,
+} from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateProgressModalProps {
   open: boolean;
   stageText: string;
   detailText?: string;
   overlayTheme: OverlayWorkbenchTheme;
+  surfaceOpacity?: number;
 }
 
 const SecurityUpdateProgressModal = ({
@@ -16,6 +20,7 @@ const SecurityUpdateProgressModal = ({
   stageText,
   detailText,
   overlayTheme,
+  surfaceOpacity = 1,
 }: SecurityUpdateProgressModalProps) => {
   return (
     <Modal
@@ -28,12 +33,7 @@ const SecurityUpdateProgressModal = ({
       width={420}
       centered
       styles={{
-        content: {
-          background: overlayTheme.shellBg,
-          border: overlayTheme.shellBorder,
-          boxShadow: overlayTheme.shellShadow,
-          backdropFilter: overlayTheme.shellBackdropFilter,
-        },
+        content: getSecurityUpdateShellSurfaceStyle(overlayTheme, surfaceOpacity),
         header: { display: 'none' },
         body: { padding: 28 },
       }}

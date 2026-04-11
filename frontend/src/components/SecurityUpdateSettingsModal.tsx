@@ -31,6 +31,7 @@ interface SecurityUpdateSettingsModalProps {
   open: boolean;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  surfaceOpacity?: number;
   status: SecurityUpdateStatus;
   focusTarget?: SecurityUpdateSettingsFocusTarget | null;
   focusRequest?: number;
@@ -43,11 +44,15 @@ interface SecurityUpdateSettingsModalProps {
 
 const sectionStyle = (
   overlayTheme: OverlayWorkbenchTheme,
+  surfaceOpacity: number,
   options?: { emphasized?: boolean },
 ) => ({
   borderRadius: 14,
   padding: 16,
-  ...getSecurityUpdateSectionSurfaceStyle(overlayTheme, options),
+  ...getSecurityUpdateSectionSurfaceStyle(overlayTheme, {
+    ...options,
+    surfaceOpacity,
+  }),
 });
 
 const EMPTY_FOCUS_STATE: SecurityUpdateFocusState = {
@@ -59,6 +64,7 @@ const SecurityUpdateSettingsModal = ({
   open,
   darkMode,
   overlayTheme,
+  surfaceOpacity = 1,
   status,
   focusTarget = null,
   focusRequest = 0,
@@ -174,7 +180,7 @@ const SecurityUpdateSettingsModal = ({
       ]}
       width={760}
       styles={{
-        content: getSecurityUpdateShellSurfaceStyle(overlayTheme),
+        content: getSecurityUpdateShellSurfaceStyle(overlayTheme, surfaceOpacity),
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
         body: { paddingTop: 8, maxHeight: 640, overflowY: 'auto' },
         footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
@@ -184,7 +190,7 @@ const SecurityUpdateSettingsModal = ({
         <div
           ref={statusSectionRef}
           tabIndex={-1}
-          style={sectionStyle(overlayTheme, { emphasized: activeFocus.target === 'status' })}
+          style={sectionStyle(overlayTheme, surfaceOpacity, { emphasized: activeFocus.target === 'status' })}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
@@ -211,7 +217,7 @@ const SecurityUpdateSettingsModal = ({
           </div>
         </div>
 
-        <div style={sectionStyle(overlayTheme)}>
+        <div style={sectionStyle(overlayTheme, surfaceOpacity)}>
           <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 12 }}>
             影响范围
           </div>
@@ -226,9 +232,8 @@ const SecurityUpdateSettingsModal = ({
               <div
                 key={item.label}
                 style={{
-                  border: overlayTheme.sectionBorder,
+                  ...getSecurityUpdateSectionSurfaceStyle(overlayTheme, { surfaceOpacity }),
                   borderRadius: 12,
-                  background: overlayTheme.sectionBg,
                   padding: '12px 10px',
                 }}
               >
@@ -239,7 +244,7 @@ const SecurityUpdateSettingsModal = ({
           </div>
         </div>
 
-        <div style={sectionStyle(overlayTheme)}>
+        <div style={sectionStyle(overlayTheme, surfaceOpacity)}>
           <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 12 }}>
             待处理清单
           </div>
@@ -258,7 +263,7 @@ const SecurityUpdateSettingsModal = ({
                   <div
                     key={issue.id}
                     style={{
-                      ...getSecurityUpdateSectionSurfaceStyle(overlayTheme),
+                      ...getSecurityUpdateSectionSurfaceStyle(overlayTheme, { surfaceOpacity }),
                       borderRadius: 12,
                       padding: 14,
                       display: 'flex',
@@ -306,7 +311,7 @@ const SecurityUpdateSettingsModal = ({
               SECURITY_UPDATE_RESULT_CARD_CLASS,
               activeFocus.target === 'recent_result' ? SECURITY_UPDATE_RESULT_CARD_ACTIVE_CLASS : '',
             ].filter(Boolean).join(' ')}
-            style={sectionStyle(overlayTheme, { emphasized: activeFocus.target === 'recent_result' })}
+            style={sectionStyle(overlayTheme, surfaceOpacity, { emphasized: activeFocus.target === 'recent_result' })}
           >
             <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 8 }}>
               最近一次结果

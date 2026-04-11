@@ -297,6 +297,71 @@ describe('secureConfigBootstrap', () => {
     ]));
   });
 
+  it('does not merge local legacy pending items back into an active migration round that already reports needs_attention', () => {
+    const status = mergeSecurityUpdateStatusWithLegacySource({
+      migrationId: 'migration-active-1',
+      overallStatus: 'needs_attention',
+      summary: { total: 3, updated: 2, pending: 1, skipped: 0, failed: 0 },
+      issues: [
+        {
+          id: 'ai-provider-openai-main',
+          scope: 'ai_provider',
+          refId: 'openai-main',
+          title: 'OpenAI',
+          severity: 'medium',
+          status: 'needs_attention',
+          reasonCode: 'secret_missing',
+          action: 'open_ai_settings',
+          message: 'AI 提供商配置需要补充后才能完成安全更新。',
+        },
+      ],
+    }, legacyPayload);
+
+    expect(status.overallStatus).toBe('needs_attention');
+    expect(status.summary).toEqual({
+      total: 3,
+      updated: 2,
+      pending: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(status.issues).toEqual([
+      expect.objectContaining({ id: 'ai-provider-openai-main', scope: 'ai_provider', refId: 'openai-main' }),
+    ]);
+  });
+
+  it('does not merge local legacy pending items back into a rolled_back migration round', () => {
+    const status = mergeSecurityUpdateStatusWithLegacySource({
+      migrationId: 'migration-active-2',
+      overallStatus: 'rolled_back',
+      summary: { total: 3, updated: 1, pending: 0, skipped: 0, failed: 2 },
+      issues: [
+        {
+          id: 'system-blocked',
+          scope: 'system',
+          title: '系统回滚',
+          severity: 'high',
+          status: 'failed',
+          reasonCode: 'environment_blocked',
+          action: 'view_details',
+          message: '后端已回滚本轮更新，需要处理后重试。',
+        },
+      ],
+    }, legacyPayload);
+
+    expect(status.overallStatus).toBe('rolled_back');
+    expect(status.summary).toEqual({
+      total: 3,
+      updated: 1,
+      pending: 0,
+      skipped: 0,
+      failed: 2,
+    });
+    expect(status.issues).toEqual([
+      expect.objectContaining({ id: 'system-blocked', scope: 'system' }),
+    ]);
+  });
+
   it('loads backend secure config directly when no legacy source exists', async () => {
     const storage = createMemoryStorage();
     const replaceConnections = vi.fn();

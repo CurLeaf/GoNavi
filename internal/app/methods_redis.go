@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,16 +63,76 @@ func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisCli
 	}
 
 	logger.Infof("创建 Redis 客户端实例：缓存Key=%s", shortKey)
-	client := newRedisClientFunc()
-	if err := client.Connect(connectConfig); err != nil {
-		wrapped := wrapConnectError(effectiveConfig, err)
-		logger.Error(wrapped, "Redis 连接失败：%s 缓存Key=%s", formatRedisConnSummary(effectiveConfig), shortKey)
+	client, connectedConfig, connectErr := connectRedisClientWithLegacyRootFallback(connectConfig)
+	if connectErr != nil {
+		wrapped := wrapConnectError(connectedConfig, connectErr)
+		logger.Error(wrapped, "Redis 连接失败：%s 缓存Key=%s", formatRedisConnSummary(connectedConfig), shortKey)
 		return nil, wrapped
 	}
 
 	redisCache[key] = client
-	logger.Infof("Redis 连接成功并写入缓存：%s 缓存Key=%s", formatRedisConnSummary(effectiveConfig), shortKey)
+	logger.Infof("Redis 连接成功并写入缓存：%s 缓存Key=%s", formatRedisConnSummary(connectedConfig), shortKey)
 	return client, nil
+}
+
+func connectRedisClientWithLegacyRootFallback(config connection.ConnectionConfig) (redis.RedisClient, connection.ConnectionConfig, error) {
+	client := newRedisClientFunc()
+	if err := client.Connect(config); err == nil {
+		return client, config, nil
+	} else {
+		client.Close()
+		if !shouldRetryRedisWithClearedLegacyRoot(config, err) {
+			return nil, config, err
+		}
+
+		fallbackConfig := config
+		fallbackConfig.User = ""
+		logger.Warnf("Redis 使用用户名 root 认证失败，已按历史默认值回退为空用户名重试：%s", formatRedisConnSummary(config))
+
+		fallbackClient := newRedisClientFunc()
+		if retryErr := fallbackClient.Connect(fallbackConfig); retryErr != nil {
+			fallbackClient.Close()
+			return nil, fallbackConfig, retryErr
+		}
+		return fallbackClient, fallbackConfig, nil
+	}
+}
+
+func shouldRetryRedisWithClearedLegacyRoot(config connection.ConnectionConfig, err error) bool {
+	if err == nil || strings.ToLower(strings.TrimSpace(config.Type)) != "redis" {
+		return false
+	}
+	if strings.TrimSpace(config.User) != "root" {
+		return false
+	}
+	if _, ok := extractExplicitRedisUsername(config.URI); ok {
+		return false
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(lower, "wrongpass") ||
+		strings.Contains(lower, "invalid username-password pair") ||
+		strings.Contains(lower, "auth failed") ||
+		strings.Contains(lower, "wrong number of arguments for 'auth' command") ||
+		strings.Contains(lower, "authentication failed")
+}
+
+func extractExplicitRedisUsername(rawURI string) (string, bool) {
+	trimmed := strings.TrimSpace(rawURI)
+	if trimmed == "" {
+		return "", false
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.User == nil {
+		return "", false
+	}
+
+	username := strings.TrimSpace(parsed.User.Username())
+	if username == "" {
+		return "", false
+	}
+	return username, true
 }
 
 func getRedisClientCacheKey(config connection.ConnectionConfig) string {
