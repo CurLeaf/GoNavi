@@ -37,6 +37,37 @@ body, #root {
   padding-right: 8px;
 }
 
+.sidebar-tree-scroll-shell {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.sidebar-tree-scroll-shell .ant-tree {
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder,
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder-inner {
+  min-width: max-content;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-treenode {
+  width: max-content;
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-node-content-wrapper {
+  width: max-content !important;
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-title {
+  flex: 0 0 auto;
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .redis-viewer-workbench .ant-tree {
     background: transparent;
 }

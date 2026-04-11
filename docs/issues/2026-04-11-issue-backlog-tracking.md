@@ -22,9 +22,10 @@
 | #317 | 驱动管理增加导入 jar 功能 | Blocked | - |
 | #318 | mysql,bit 列，修改成 1 失败 | Fixed | `bee78be` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
-| #320 | 无法连接达梦数据库 | Fixed | Pending |
+| #320 | 无法连接达梦数据库 | Fixed | `dc17133` |
 | #327 | SHOW DATABASES 报错 | Fixed | `5ac0221` |
 | #328 | [Bug] 安装更新失败 | Fixed | `436f130` |
+| #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | Pending |
 
 ## Notes
 
@@ -63,6 +64,12 @@
 - 根因：Windows 更新脚本在批处理执行、错误码读取和重启命令上不够稳，`cmd /C start`、LF 行尾和块内 `%ERRORLEVEL%` 在实际环境下容易引发安装失败。
 - 处理：更新脚本统一输出为 CRLF，块内错误码改为延迟展开，旧文件回退路径统一为 `TARGET_OLD`，并将脚本启动方式收敛为 `cmd.exe /D /C call <script>`。
 - 验证：补充 `internal/app/methods_update_windows_script_test.go`，覆盖批处理语法、Win10 回退路径、CRLF 行尾、延迟展开和启动命令构造。
+
+### #329
+
+- 根因：侧边栏连接树被全局 Tree 样式固定为 `width: 100%`，标题同时启用了省略截断，导致缩窄侧栏后长节点无法形成横向溢出。
+- 处理：为 Sidebar 树增加专用横向滚动容器，并在 Sidebar 作用域内覆写 Tree 宽度与标题截断规则，让节点宽度随内容扩展且保留最小占满。
+- 验证：执行 `frontend` 下 `npm run build`，确认 TS/CSS 改动编译通过且仅作用于 Sidebar 树。
 
 ## Next
 

@@ -3787,29 +3787,31 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             </Tooltip>
         </div>
 
-        <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-            <Tree
-                showIcon
-                draggable={{
-                    icon: false,
-                    nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
-                }}
-                onDrop={handleDrop}
-                loadData={onLoadData}
-                treeData={displayTreeData}
-                onDoubleClick={onDoubleClick}
-                onSelect={onSelect}
-                titleRender={titleRender}
-                expandedKeys={expandedKeys}
-                onExpand={onExpand}
-                loadedKeys={loadedKeys}
-                onLoad={setLoadedKeys}
-                autoExpandParent={autoExpandParent}
-                selectedKeys={selectedKeys}
-                blockNode
-                height={treeHeight}
-                onRightClick={onRightClick}
-            />
+        <div ref={treeContainerRef} className="sidebar-tree-scroll-shell" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <div className="sidebar-tree-scroll-content">
+                <Tree
+                    showIcon
+                    draggable={{
+                        icon: false,
+                        nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
+                    }}
+                    onDrop={handleDrop}
+                    loadData={onLoadData}
+                    treeData={displayTreeData}
+                    onDoubleClick={onDoubleClick}
+                    onSelect={onSelect}
+                    titleRender={titleRender}
+                    expandedKeys={expandedKeys}
+                    onExpand={onExpand}
+                    loadedKeys={loadedKeys}
+                    onLoad={setLoadedKeys}
+                    autoExpandParent={autoExpandParent}
+                    selectedKeys={selectedKeys}
+                    blockNode
+                    height={treeHeight}
+                    onRightClick={onRightClick}
+                />
+            </div>
         </div>
 
         {contextMenu && (
