@@ -22,9 +22,9 @@
 | #317 | 驱动管理增加导入 jar 功能 | Blocked | - |
 | #318 | mysql,bit 列，修改成 1 失败 | Fixed | `bee78be` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
-| #320 | 无法连接达梦数据库 | Investigating | - |
+| #320 | 无法连接达梦数据库 | Fixed | Pending |
 | #327 | SHOW DATABASES 报错 | Fixed | `5ac0221` |
-| #328 | [Bug] 安装更新失败 | Fixed | Pending |
+| #328 | [Bug] 安装更新失败 | Fixed | `436f130` |
 
 ## Notes
 
@@ -48,7 +48,9 @@
 ### #320
 
 - 达梦当前走可选 Go 驱动代理安装链路，不支持 JAR 导入属于既有架构边界。
-- “卡在 20%” 初步定位在驱动下载阶段前的占位进度，后续需要补充下载链路诊断与失败可观测性后再落地修复。
+- 根因：驱动 release 资产缓存把 `GoNavi-DriverAgents.zip` 里的 bundle 条目也混进了“顶层已发布 asset”集合，导致安装链路误以为存在单独的 `dameng-driver-agent-*.exe` 下载地址。
+- 处理：缓存层区分真实 release 顶层 asset 与 bundle index 条目，安装 URL 解析仅在真实顶层 asset 存在时才走直链；bundle-only 驱动改为直接进入总包提取回退，不再先卡在 20% 试无效 URL。
+- 验证：补充 `internal/app/methods_driver_version_test.go` 回归测试，覆盖 bundle-only 达梦驱动跳过伪直链，并回归 Mongo 历史版本与本地导入链路。
 
 ### #327
 

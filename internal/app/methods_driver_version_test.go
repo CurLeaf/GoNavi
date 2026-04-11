@@ -129,6 +129,27 @@ func TestResolveOptionalDriverAgentDownloadURLsDoesNotFallbackForHistoricalVersi
 	}
 }
 
+func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *testing.T) {
+	definition, ok := resolveDriverDefinition("dameng")
+	if !ok {
+		t.Fatal("expected dameng driver definition")
+	}
+
+	version := normalizeVersion(definition.PinnedVersion)
+	assetName := optionalDriverReleaseAssetNameForVersion("dameng", version)
+	seedReleaseAssetCacheEntry(t, "tag:v"+version, map[string]int64{
+		assetName: 23 << 20,
+	}, nil)
+	seedReleaseAssetCacheEntry(t, "latest", map[string]int64{
+		assetName: 23 << 20,
+	}, nil)
+
+	urls := resolveOptionalDriverAgentDownloadURLs(definition, "builtin://activate/dameng", version)
+	if len(urls) != 0 {
+		t.Fatalf("expected bundle-only dameng install to skip direct asset URLs, got %v", urls)
+	}
+}
+
 func TestDownloadDriverPackageRejectsUnsupportedMongoVersion(t *testing.T) {
 	app := &App{}
 
@@ -219,11 +240,18 @@ func TestInstallOptionalDriverAgentFromLocalPathSupportsMongoV1ZipImport(t *test
 func seedReleaseAssetSizeCache(t *testing.T, cacheKey string, sizeByKey map[string]int64) {
 	t.Helper()
 
+	seedReleaseAssetCacheEntry(t, cacheKey, sizeByKey, sizeByKey)
+}
+
+func seedReleaseAssetCacheEntry(t *testing.T, cacheKey string, sizeByKey map[string]int64, publishedAssets map[string]int64) {
+	t.Helper()
+
 	driverReleaseSizeMu.Lock()
 	original := cloneReleaseAssetSizeCache(driverReleaseSizeMap)
 	driverReleaseSizeMap[cacheKey] = driverReleaseAssetSizeCacheEntry{
-		LoadedAt:  time.Now(),
-		SizeByKey: cloneInt64Map(sizeByKey),
+		LoadedAt:        time.Now(),
+		SizeByKey:       cloneInt64Map(sizeByKey),
+		PublishedAssets: cloneBoolMapFromSizes(publishedAssets),
 	}
 	driverReleaseSizeMu.Unlock()
 
@@ -238,10 +266,33 @@ func cloneReleaseAssetSizeCache(src map[string]driverReleaseAssetSizeCacheEntry)
 	cloned := make(map[string]driverReleaseAssetSizeCacheEntry, len(src))
 	for key, value := range src {
 		cloned[key] = driverReleaseAssetSizeCacheEntry{
-			LoadedAt:  value.LoadedAt,
-			SizeByKey: cloneInt64Map(value.SizeByKey),
-			Err:       value.Err,
+			LoadedAt:        value.LoadedAt,
+			SizeByKey:       cloneInt64Map(value.SizeByKey),
+			PublishedAssets: cloneBoolMap(value.PublishedAssets),
+			Err:             value.Err,
 		}
+	}
+	return cloned
+}
+
+func cloneBoolMap(src map[string]bool) map[string]bool {
+	if len(src) == 0 {
+		return map[string]bool{}
+	}
+	cloned := make(map[string]bool, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneBoolMapFromSizes(src map[string]int64) map[string]bool {
+	if len(src) == 0 {
+		return map[string]bool{}
+	}
+	cloned := make(map[string]bool, len(src))
+	for key := range src {
+		cloned[key] = true
 	}
 	return cloned
 }

@@ -235,9 +235,10 @@ type driverVersionOptionItem struct {
 }
 
 type driverReleaseAssetSizeCacheEntry struct {
-	LoadedAt  time.Time
-	SizeByKey map[string]int64
-	Err       string
+	LoadedAt        time.Time
+	SizeByKey       map[string]int64
+	PublishedAssets map[string]bool
+	Err             string
 }
 
 type goModuleLatestVersionCacheEntry struct {
@@ -666,7 +667,7 @@ func (a *App) GetDriverVersionPackageSize(driverType string, version string) con
 	tag := "v" + normalizedVersion
 	sizeBytes := int64(0)
 	sizeSource := ""
-	if sizeByAsset, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
+	if sizeByAsset, _, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
 		return fetchReleaseByTag(tag)
 	}); err == nil {
 		sizeBytes = resolveOptionalDriverAssetSizeForVersion(sizeByAsset, normalizedType, normalizedVersion)
@@ -676,7 +677,7 @@ func (a *App) GetDriverVersionPackageSize(driverType string, version string) con
 	}
 	allowLatestFallback := sameDriverVersion(normalizedVersion, definition.PinnedVersion) || sameDriverVersion(normalizedVersion, latestDriverVersionMap[normalizedType])
 	if sizeBytes <= 0 && allowLatestFallback {
-		if sizeByAsset, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
+		if sizeByAsset, _, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
 			sizeBytes = resolveOptionalDriverAssetSizeForVersion(sizeByAsset, normalizedType, normalizedVersion)
 			if sizeBytes > 0 {
 				sizeSource = "latest"
@@ -1785,23 +1786,23 @@ func resolvePublishedDriverReleaseAssetName(driverType string, version string, t
 	}
 
 	cacheKey := "tag:" + strings.TrimSpace(tag)
-	if sizeByAsset, ok := readReleaseAssetSizesFromCache(cacheKey); ok {
+	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache(cacheKey); ok {
 		for _, assetName := range assetNames {
-			if sizeByAsset[assetName] > 0 {
+			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
 				return assetName, true
 			}
 		}
 		return "", false
 	}
 
-	sizeByAsset, err := loadReleaseAssetSizesCached(cacheKey, func() (*githubRelease, error) {
+	sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached(cacheKey, func() (*githubRelease, error) {
 		return fetchReleaseByTag(tag)
 	})
 	if err != nil {
 		return "", false
 	}
 	for _, assetName := range assetNames {
-		if sizeByAsset[assetName] > 0 {
+		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
 			return assetName, true
 		}
 	}
@@ -1827,13 +1828,13 @@ func resolveDriverVersionPackageSizeBytes(definition driverDefinition, option dr
 	}
 
 	tag := "v" + version
-	if sizeByAsset, ok := readReleaseAssetSizesFromCache("tag:" + tag); ok {
+	if sizeByAsset, _, ok := readReleaseAssetSizesFromCache("tag:" + tag); ok {
 		return resolveOptionalDriverAssetSizeForVersion(sizeByAsset, driverType, version)
 	}
 
 	// 下拉版本列表要求快速返回：仅复用已有缓存，不在这里触发网络请求。
 	if strings.EqualFold(strings.TrimSpace(option.Source), "latest") {
-		if sizeByAsset, ok := readReleaseAssetSizesFromCache("latest"); ok {
+		if sizeByAsset, _, ok := readReleaseAssetSizesFromCache("latest"); ok {
 			return resolveOptionalDriverAssetSizeForVersion(sizeByAsset, driverType, version)
 		}
 	}
@@ -1942,7 +1943,7 @@ func triggerDriverVersionMetadataWarmup(definitions []driverDefinition) {
 	go func(paths []string) {
 		defer finishDriverVersionMetadataWarmup()
 		// 预热 latest 资产索引，便于版本列表命中大小缓存。
-		_, _ = loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
+		_, _, _ = loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
 		for _, modulePath := range paths {
 			_ = fetchGoModuleVersionMetasCached(modulePath)
 		}
@@ -3687,7 +3688,6 @@ func resolveOptionalDriverBundleDownloadURLs() []string {
 }
 
 func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL string, selectedVersion string) []string {
-	driverType := normalizeDriverType(definition.Type)
 	candidates := make([]string, 0, 3)
 	seen := make(map[string]struct{}, 3)
 	appendURL := func(value string) {
@@ -3712,15 +3712,14 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 		return candidates
 	}
 
-	assetNames := optionalDriverReleaseAssetNames(driverType)
 	currentVersion := normalizeVersion(getCurrentVersion())
 	if currentVersion != "" && currentVersion != "0.0.0" {
-		for _, assetName := range assetNames {
-			appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/download/v%s/%s", currentVersion, assetName))
+		if publishedURL, ok := resolvePublishedDriverDownloadURL(definition, currentVersion); ok {
+			appendURL(publishedURL)
 		}
 	}
-	for _, assetName := range assetNames {
-		appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/latest/download/%s", assetName))
+	if publishedURL, ok := resolveLatestPublishedDriverDownloadURL(definition); ok {
+		appendURL(publishedURL)
 	}
 	return candidates
 }
@@ -3967,7 +3966,7 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 
 	pending := needed
 	if tag != "" {
-		if sizeByAsset, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
+		if sizeByAsset, _, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
 			return fetchReleaseByTag(tag)
 		}); err == nil {
 			pending = fillFromSizes(sizeByAsset, pending)
@@ -3976,16 +3975,16 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 	if len(pending) == 0 {
 		return result
 	}
-	if sizeByAsset, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
+	if sizeByAsset, _, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
 		_ = fillFromSizes(sizeByAsset, pending)
 	}
 	return result
 }
 
-func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, error)) (map[string]int64, error) {
+func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, error)) (map[string]int64, map[string]bool, error) {
 	key := strings.TrimSpace(cacheKey)
 	if key == "" {
-		return nil, fmt.Errorf("缓存 key 为空")
+		return nil, nil, fmt.Errorf("缓存 key 为空")
 	}
 
 	driverReleaseSizeMu.RLock()
@@ -3998,21 +3997,23 @@ func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, 
 		}
 		if time.Since(cached.LoadedAt) < ttl {
 			if strings.TrimSpace(cached.Err) != "" {
-				return nil, errors.New(strings.TrimSpace(cached.Err))
+				return nil, nil, errors.New(strings.TrimSpace(cached.Err))
 			}
-			return cached.SizeByKey, nil
+			return cached.SizeByKey, cached.PublishedAssets, nil
 		}
 	}
 
 	release, err := fetch()
 	entry := driverReleaseAssetSizeCacheEntry{
-		LoadedAt:  time.Now(),
-		SizeByKey: map[string]int64{},
+		LoadedAt:        time.Now(),
+		SizeByKey:       map[string]int64{},
+		PublishedAssets: map[string]bool{},
 	}
 	if err != nil {
 		entry.Err = err.Error()
 	} else {
 		entry.SizeByKey = buildReleaseAssetSizeMap(release)
+		entry.PublishedAssets = buildReleaseAssetNameMap(release)
 		if indexSizes, indexErr := fetchDriverBundleAssetSizeIndex(release); indexErr == nil {
 			for name, size := range indexSizes {
 				trimmedName := strings.TrimSpace(name)
@@ -4029,22 +4030,22 @@ func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, 
 	driverReleaseSizeMu.Unlock()
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return entry.SizeByKey, nil
+	return entry.SizeByKey, entry.PublishedAssets, nil
 }
 
-func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, bool) {
+func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, map[string]bool, bool) {
 	key := strings.TrimSpace(cacheKey)
 	if key == "" {
-		return nil, false
+		return nil, nil, false
 	}
 
 	driverReleaseSizeMu.RLock()
 	cached, ok := driverReleaseSizeMap[key]
 	driverReleaseSizeMu.RUnlock()
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 
 	ttl := driverReleaseAssetSizeCacheTTL
@@ -4052,12 +4053,12 @@ func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, bool) {
 		ttl = driverReleaseAssetSizeErrorCacheTTL
 	}
 	if time.Since(cached.LoadedAt) >= ttl {
-		return nil, false
+		return nil, nil, false
 	}
 	if strings.TrimSpace(cached.Err) != "" {
-		return nil, false
+		return nil, nil, false
 	}
-	return cached.SizeByKey, true
+	return cached.SizeByKey, cached.PublishedAssets, true
 }
 
 func buildReleaseAssetSizeMap(release *githubRelease) map[string]int64 {
@@ -4073,6 +4074,21 @@ func buildReleaseAssetSizeMap(release *githubRelease) map[string]int64 {
 		sizes[name] = asset.Size
 	}
 	return sizes
+}
+
+func buildReleaseAssetNameMap(release *githubRelease) map[string]bool {
+	names := make(map[string]bool)
+	if release == nil {
+		return names
+	}
+	for _, asset := range release.Assets {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" {
+			continue
+		}
+		names[name] = true
+	}
+	return names
 }
 
 func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, error) {
@@ -4121,6 +4137,37 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 
 func fetchLatestReleaseForDriverAssets() (*githubRelease, error) {
 	return fetchDriverReleaseByURL(updateAPIURL)
+}
+
+func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (string, bool) {
+	driverType := normalizeDriverType(definition.Type)
+	if driverType == "" {
+		return "", false
+	}
+	assetNames := optionalDriverReleaseAssetNames(driverType)
+	if len(assetNames) == 0 {
+		return "", false
+	}
+
+	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
+		for _, assetName := range assetNames {
+			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+				return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+			}
+		}
+		return "", false
+	}
+
+	sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
+	if err != nil {
+		return "", false
+	}
+	for _, assetName := range assetNames {
+		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+			return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+		}
+	}
+	return "", false
 }
 
 func fetchReleaseByTag(tag string) (*githubRelease, error) {
