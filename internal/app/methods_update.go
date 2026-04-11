@@ -864,7 +864,7 @@ func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error 
 	}
 
 	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, logPath)
-	cmd := exec.Command("cmd", "/C", "start", "", scriptPath)
+	cmd := buildWindowsLaunchCommand(scriptPath)
 	return cmd.Start()
 }
 
@@ -907,6 +907,7 @@ func buildWindowsScript(source, target, stagedDir, logPath string, pid int) stri
 setlocal EnableExtensions EnableDelayedExpansion
 set "SOURCE=__GONAVI_UPDATE_SOURCE__"
 set "TARGET=__GONAVI_UPDATE_TARGET__"
+set "TARGET_OLD=%TARGET%.old"
 set "STAGED=__GONAVI_UPDATE_STAGED__"
 set "LOG_FILE=__GONAVI_UPDATE_LOG__"
 set PID=__GONAVI_UPDATE_PID__
@@ -928,7 +929,7 @@ if /I "%SOURCE_EXT%"==".zip" (
   )
   mkdir "%EXTRACT_DIR%" >> "%LOG_FILE%" 2>&1
   powershell -NoProfile -ExecutionPolicy Bypass -Command "$src=$env:SOURCE; $dst=$env:EXTRACT_DIR; Expand-Archive -LiteralPath $src -DestinationPath $dst -Force" >> "%LOG_FILE%" 2>&1
-  if %ERRORLEVEL% NEQ 0 (
+  if !ERRORLEVEL! NEQ 0 (
     call :log expand zip failed: %SOURCE%
     exit /b 1
   )
@@ -964,15 +965,15 @@ call :log cooldown finished, starting file replace
 set /a RETRY=0
 :move_retry
 call :log attempt !RETRY!: trying rename-then-copy strategy
-ren "%TARGET%" "%TARGET_NAME%.old" >> "%LOG_FILE%" 2>&1
-if %ERRORLEVEL%==0 (
+move /Y "%TARGET%" "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
+if !ERRORLEVEL!==0 (
   copy /Y "%SOURCE_EXE%" "%TARGET%" >> "%LOG_FILE%" 2>&1
   if !ERRORLEVEL!==0 (
-    del /F /Q "%TARGET%.old" >> "%LOG_FILE%" 2>&1
+    del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
     goto move_done
   )
   call :log copy after rename failed, restoring old file
-  ren "%TARGET_NAME%.old" "%TARGET_NAME%" >> "%LOG_FILE%" 2>&1
+  move /Y "%TARGET_OLD%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 )
 
 call :log rename strategy failed, trying direct move
@@ -997,12 +998,12 @@ call :log replace failed after retries (portable mode, no elevation): check dire
 exit /b 1
 
 :move_done
-del /F /Q "%TARGET%.old" >> "%LOG_FILE%" 2>&1
+del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
 start "" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%'" >> "%LOG_FILE%" 2>&1
-  if %ERRORLEVEL% NEQ 0 (
+  if !ERRORLEVEL! NEQ 0 (
     call :log relaunch failed
     exit /b 1
   )
@@ -1021,7 +1022,11 @@ exit /b 0
 		"__GONAVI_UPDATE_STAGED__", stagedDir,
 		"__GONAVI_UPDATE_LOG__", logPath,
 		"__GONAVI_UPDATE_PID__", strconv.Itoa(pid),
-	).Replace(script)
+	).Replace(strings.ReplaceAll(script, "\n", "\r\n"))
+}
+
+func buildWindowsLaunchCommand(scriptPath string) *exec.Cmd {
+	return exec.Command("cmd.exe", "/D", "/C", "call", scriptPath)
 }
 
 func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {

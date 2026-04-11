@@ -23,7 +23,8 @@
 | #318 | mysql,bit 列，修改成 1 失败 | Fixed | `bee78be` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
 | #320 | 无法连接达梦数据库 | Investigating | - |
-| #327 | SHOW DATABASES 报错 | Fixed | Pending |
+| #327 | SHOW DATABASES 报错 | Fixed | `5ac0221` |
+| #328 | [Bug] 安装更新失败 | Fixed | Pending |
 
 ## Notes
 
@@ -54,6 +55,12 @@
 - 根因：低权限 MySQL 账号执行 `SHOW DATABASES` 会直接报错，当前实现没有回退路径。
 - 处理：为数据库列表查询增加 `SELECT DATABASE()` 回退，仅保留当前连接库时也能正常展示。
 - 验证：补充 `internal/db/mysql_metadata_test.go` 回归测试，覆盖有权限、多库和低权限回退场景。
+
+### #328
+
+- 根因：Windows 更新脚本在批处理执行、错误码读取和重启命令上不够稳，`cmd /C start`、LF 行尾和块内 `%ERRORLEVEL%` 在实际环境下容易引发安装失败。
+- 处理：更新脚本统一输出为 CRLF，块内错误码改为延迟展开，旧文件回退路径统一为 `TARGET_OLD`，并将脚本启动方式收敛为 `cmd.exe /D /C call <script>`。
+- 验证：补充 `internal/app/methods_update_windows_script_test.go`，覆盖批处理语法、Win10 回退路径、CRLF 行尾、延迟展开和启动命令构造。
 
 ## Next
 
