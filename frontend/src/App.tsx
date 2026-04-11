@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -38,7 +38,7 @@ import {
   resolveAIEdgeHandleDockStyle,
   resolveAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
-import { SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -1411,6 +1411,11 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
+  const [dataRootInfo, setDataRootInfo] = useState<any>(null);
+  const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
+  const [dataRootLoading, setDataRootLoading] = useState(false);
+  const [dataRootApplying, setDataRootApplying] = useState(false);
   const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
   const aiEntryPlacement = resolveAIEntryPlacement();
   const aiEdgeHandleAttachment = resolveAIEdgeHandleAttachment(aiPanelVisible);
@@ -1467,6 +1472,84 @@ function App() {
           </Button>
       </Tooltip>
   );
+
+  const loadDataRootInfo = useCallback(async () => {
+      setDataRootLoading(true);
+      try {
+          const res = await GetDataRootDirectoryInfo();
+          if (!res?.success) {
+              throw new Error(res?.message || '加载数据目录信息失败');
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedDataRootPath(String(data.path || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`加载数据目录信息失败: ${errMsg}`);
+      } finally {
+          setDataRootLoading(false);
+      }
+  }, []);
+
+  useEffect(() => {
+      if (!isDataRootModalOpen) {
+          return;
+      }
+      void loadDataRootInfo();
+  }, [isDataRootModalOpen, loadDataRootInfo]);
+
+  const handleSelectDataRoot = useCallback(async () => {
+      try {
+          const res = await SelectDataRootDirectory(selectedDataRootPath || dataRootInfo?.path || '');
+          if (!res?.success) {
+              if (String(res?.message || '') !== '已取消') {
+                  throw new Error(res?.message || '选择数据目录失败');
+              }
+              return;
+          }
+          const data = (res?.data || {}) as any;
+          setSelectedDataRootPath(String(data.path || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`选择数据目录失败: ${errMsg}`);
+      }
+  }, [dataRootInfo?.path, selectedDataRootPath]);
+
+  const handleApplyDataRoot = useCallback(async (migrate: boolean, useDefaultPath = false) => {
+      const nextPath = useDefaultPath ? String(dataRootInfo?.defaultPath || '') : String(selectedDataRootPath || '').trim();
+      if (!nextPath) {
+          void message.warning('请先选择有效的数据目录');
+          return;
+      }
+      setDataRootApplying(true);
+      try {
+          const res = await ApplyDataRootDirectory(nextPath, migrate);
+          if (!res?.success) {
+              throw new Error(res?.message || '应用数据目录失败');
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedDataRootPath(String(data.path || nextPath));
+          void message.success(res?.message || '数据目录已更新');
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`应用数据目录失败: ${errMsg}`);
+      } finally {
+          setDataRootApplying(false);
+      }
+  }, [dataRootInfo?.defaultPath, selectedDataRootPath]);
+
+  const handleOpenDataRoot = useCallback(async () => {
+      try {
+          const res = await OpenDataRootDirectory();
+          if (!res?.success) {
+              throw new Error(res?.message || '打开数据目录失败');
+          }
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`打开数据目录失败: ${errMsg}`);
+      }
+  }, []);
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -2180,6 +2263,16 @@ function App() {
                   },
                 },
                 {
+                  key: 'data-root',
+                  icon: <HddOutlined />,
+                  title: '数据目录',
+                  description: '查看、切换或迁移本地数据存储位置。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setIsDataRootModalOpen(true);
+                  },
+                },
+                {
                   key: 'shortcut-settings',
                   icon: <LinkOutlined />,
                   title: '快捷键管理',
@@ -2201,6 +2294,74 @@ function App() {
                 </Button>
               ))}
             </div>
+          </Modal>
+          <Modal
+            title={renderUtilityModalTitle(<HddOutlined />, '数据存储位置', '统一管理连接、代理、AI 配置与驱动等文件型数据的根目录。')}
+            open={isDataRootModalOpen}
+            onCancel={() => setIsDataRootModalOpen(false)}
+            footer={null}
+            width={720}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+          >
+            {dataRootLoading ? (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <Spin />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>当前目录</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <Input readOnly value={dataRootInfo?.path || ''} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>默认目录</div>
+                        <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                      </div>
+                      <div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>驱动目录</div>
+                        <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>切换目标</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <Input
+                      readOnly
+                      value={selectedDataRootPath}
+                      placeholder="选择新的数据目录"
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                        选择目录
+                      </Button>
+                      <Button onClick={() => void handleOpenDataRoot()}>
+                        打开当前目录
+                      </Button>
+                      <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                        恢复默认目录
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>应用方式</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                      仅切换到所选目录
+                    </Button>
+                    <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                      迁移现有数据并切换
+                    </Button>
+                  </div>
+                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                    切换后建议重启应用，以确保 AI 与其他长生命周期模块完全切换到新目录。敏感密码仍保存在系统 secret store，不会随文件目录迁移。
+                  </div>
+                </div>
+              </div>
+            )}
           </Modal>
           <DataSyncModal
             open={isSyncModalOpen}

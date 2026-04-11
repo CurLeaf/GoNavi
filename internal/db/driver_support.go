@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"GoNavi-Wails/internal/appdata"
 )
 
 // coreBuiltinDrivers 是始终内置可用的核心驱动，无需额外安装即可使用。
@@ -110,13 +112,7 @@ func IsBuiltinDriver(driverType string) bool {
 }
 
 func defaultExternalDriverDownloadDirectory() string {
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".gonavi", "drivers")
-	}
-	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
-		return filepath.Join(wd, ".gonavi-drivers")
-	}
-	return ".gonavi-drivers"
+	return appdata.DriverRoot("")
 }
 
 func resolveExternalDriverRoot(downloadDir string) (string, error) {

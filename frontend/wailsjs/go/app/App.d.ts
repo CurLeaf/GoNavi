@@ -6,6 +6,8 @@ import {redis} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
+export function ApplyDataRootDirectory(arg1:string,arg2:boolean):Promise<connection.QueryResult>;
+
 export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
 
 export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResult>;
@@ -86,6 +88,8 @@ export function GenerateQueryID():Promise<string>;
 
 export function GetAppInfo():Promise<connection.QueryResult>;
 
+export function GetDataRootDirectoryInfo():Promise<connection.QueryResult>;
+
 export function GetDriverStatusList(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function GetDriverVersionList(arg1:string,arg2:string):Promise<connection.QueryResult>;
@@ -125,6 +129,8 @@ export function MySQLQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:str
 export function MySQLShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
+
+export function OpenDataRootDirectory():Promise<connection.QueryResult>;
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
@@ -197,6 +203,8 @@ export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<con
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
 export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 

@@ -10,10 +10,12 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
@@ -89,6 +91,7 @@ func (a *App) startup(ctx context.Context) {
 	if strings.TrimSpace(a.configDir) == "" {
 		a.configDir = resolveAppConfigDir()
 	}
+	db.SetExternalDriverDownloadDirectory(appdata.DriverRoot(a.configDir))
 	logger.Init()
 	a.loadPersistedGlobalProxy()
 	installMacNativeWindowDiagnostics(logger.Path())
@@ -134,6 +137,21 @@ func (a *App) Shutdown(ctx context.Context) {
 	CloseAllRedisClients()
 	logger.Infof("资源释放完成，应用已关闭")
 	logger.Close()
+}
+
+func dataRootInfoPayload(activeRoot string) map[string]interface{} {
+	defaultRoot := appdata.DefaultRoot()
+	currentRoot := strings.TrimSpace(activeRoot)
+	if currentRoot == "" {
+		currentRoot = appdata.MustResolveActiveRoot()
+	}
+	return map[string]interface{}{
+		"path":          currentRoot,
+		"defaultPath":   defaultRoot,
+		"driverPath":    appdata.DriverRoot(currentRoot),
+		"isDefaultPath": filepath.Clean(currentRoot) == filepath.Clean(defaultRoot),
+		"bootstrapPath": appdata.BootstrapPath(),
+	}
 }
 
 func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.ConnectionConfig {

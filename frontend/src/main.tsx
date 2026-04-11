@@ -21,6 +21,13 @@ loader.config({ monaco })
 if (typeof window !== 'undefined' && !(window as any).go) {
     const mockConnections: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
+    let mockDataRootInfo: any = {
+        path: 'C:/mock/.gonavi',
+        defaultPath: 'C:/mock/.gonavi',
+        driverPath: 'C:/mock/.gonavi/drivers',
+        isDefaultPath: true,
+        bootstrapPath: 'C:/mock/.gonavi/storage_root.json',
+    };
 
     const upsertMockConnection = (view: any) => {
         const index = mockConnections.findIndex((item) => item.id === view.id);
@@ -118,14 +125,27 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 SaveQuery: async () => null,
                 DeleteQuery: async () => null,
                 GetAppInfo: async () => ({}),
+                GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
                 CheckForUpdates: async () => ({ success: false }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
+                OpenDataRootDirectory: async () => ({ success: true }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
                 ImportLegacyGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
+                SelectDataRootDirectory: async (currentPath: string) => ({ success: true, data: { ...mockDataRootInfo, path: currentPath || mockDataRootInfo.path } }),
+                ApplyDataRootDirectory: async (path: string) => {
+                    const nextPath = String(path || mockDataRootInfo.defaultPath);
+                    mockDataRootInfo = {
+                        ...mockDataRootInfo,
+                        path: nextPath,
+                        driverPath: `${nextPath}/drivers`,
+                        isDefaultPath: nextPath === mockDataRootInfo.defaultPath,
+                    };
+                    return { success: true, message: '数据目录已更新', data: cloneBrowserMockValue(mockDataRootInfo) };
+                },
             }
         }
     };

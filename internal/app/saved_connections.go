@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/secretstore"
 	"github.com/google/uuid"
@@ -38,11 +39,7 @@ type savedConnectionRepository struct {
 }
 
 func resolveAppConfigDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(homeDir) == "" {
-		return "."
-	}
-	return filepath.Join(homeDir, ".gonavi")
+	return appdata.MustResolveActiveRoot()
 }
 
 func newSavedConnectionRepository(configDir string, store secretstore.SecretStore) *savedConnectionRepository {

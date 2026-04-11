@@ -6,6 +6,10 @@ export function ApplyChanges(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ApplyChanges'](arg1, arg2, arg3, arg4);
 }
 
+export function ApplyDataRootDirectory(arg1, arg2) {
+  return window['go']['app']['App']['ApplyDataRootDirectory'](arg1, arg2);
+}
+
 export function CancelQuery(arg1) {
   return window['go']['app']['App']['CancelQuery'](arg1);
 }
@@ -166,6 +170,10 @@ export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
 }
 
+export function GetDataRootDirectoryInfo() {
+  return window['go']['app']['App']['GetDataRootDirectoryInfo']();
+}
+
 export function GetDriverStatusList(arg1, arg2) {
   return window['go']['app']['App']['GetDriverStatusList'](arg1, arg2);
 }
@@ -244,6 +252,10 @@ export function MySQLShowCreateTable(arg1, arg2, arg3) {
 
 export function OpenDownloadedUpdateDirectory() {
   return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
+}
+
+export function OpenDataRootDirectory() {
+  return window['go']['app']['App']['OpenDataRootDirectory']();
 }
 
 export function OpenSQLFile() {
@@ -388,6 +400,10 @@ export function SaveGlobalProxy(arg1) {
 
 export function SelectDatabaseFile(arg1, arg2) {
   return window['go']['app']['App']['SelectDatabaseFile'](arg1, arg2);
+}
+
+export function SelectDataRootDirectory(arg1) {
+  return window['go']['app']['App']['SelectDataRootDirectory'](arg1);
 }
 
 export function SelectDriverDownloadDirectory(arg1) {

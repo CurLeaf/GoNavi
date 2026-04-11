@@ -17,6 +17,7 @@ import (
 	aicontext "GoNavi-Wails/internal/ai/context"
 	"GoNavi-Wails/internal/ai/provider"
 	"GoNavi-Wails/internal/ai/safety"
+	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/secretstore"
 
@@ -1143,11 +1144,7 @@ func (s *Service) AIDeleteSession(sessionID string) error {
 // --- 工具函数 ---
 
 func resolveConfigDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
-	}
-	return filepath.Join(homeDir, ".gonavi")
+	return appdata.MustResolveActiveRoot()
 }
 
 func maskAPIKey(apiKey string) string {
