@@ -304,18 +304,70 @@ func (k *KingbaseDB) Exec(query string) (int64, error) {
 }
 
 func (k *KingbaseDB) GetDatabases() ([]string, error) {
-	// Postgres/Kingbase style
 	data, _, err := k.Query("SELECT datname FROM pg_database WHERE datistemplate = false")
+	if err == nil {
+		dbs := collectKingbaseNames(data, "datname", "database")
+		if len(dbs) > 0 {
+			return dbs, nil
+		}
+	}
+
+	fallbackData, _, fallbackErr := k.Query("SELECT current_database() AS datname")
+	if fallbackErr != nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fallbackErr
+	}
+
+	dbs := collectKingbaseNames(fallbackData, "datname", "database", "current_database", "currentDatabase")
+	if len(dbs) > 0 {
+		return dbs, nil
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	var dbs []string
-	for _, row := range data {
-		if val, ok := row["datname"]; ok {
-			dbs = append(dbs, fmt.Sprintf("%v", val))
+	return nil, fmt.Errorf("未获取到可见数据库列表")
+}
+
+func collectKingbaseNames(rows []map[string]interface{}, keys ...string) []string {
+	result := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(getKingbaseNameFromRow(row, keys...))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		result = append(result, name)
+	}
+	return result
+}
+
+func getKingbaseNameFromRow(row map[string]interface{}, keys ...string) string {
+	if len(row) == 0 {
+		return ""
+	}
+	for _, key := range keys {
+		if value, ok := row[key]; ok {
+			return fmt.Sprintf("%v", value)
 		}
 	}
-	return dbs, nil
+	for existingKey, value := range row {
+		for _, key := range keys {
+			if strings.EqualFold(existingKey, key) {
+				return fmt.Sprintf("%v", value)
+			}
+		}
+	}
+	for _, value := range row {
+		return fmt.Sprintf("%v", value)
+	}
+	return ""
 }
 
 func (k *KingbaseDB) GetTables(dbName string) ([]string, error) {
