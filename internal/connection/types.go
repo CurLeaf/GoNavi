@@ -28,6 +28,7 @@ type HTTPTunnelConfig struct {
 
 // ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。
 type ConnectionConfig struct {
+	ID                   string           `json:"id,omitempty"`
 	Type                 string           `json:"type"`
 	Host                 string           `json:"host"`
 	Port                 int              `json:"port"`

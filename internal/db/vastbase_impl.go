@@ -173,6 +173,17 @@ func (v *VastbaseDB) ExecContext(ctx context.Context, query string) (int64, erro
 	return res.RowsAffected()
 }
 
+func (v *VastbaseDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	if v.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := v.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (v *VastbaseDB) Exec(query string) (int64, error) {
 	if v.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

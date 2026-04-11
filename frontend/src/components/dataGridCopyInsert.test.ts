@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCopyInsertSQL } from './dataGridCopyInsert';
+import {
+  buildCopyDeleteSQL,
+  buildCopyInsertSQL,
+  buildCopyUpdateSQL,
+  resolveUniqueKeyGroupsFromIndexes,
+} from './dataGridCopyInsert';
 
 describe('buildCopyInsertSQL', () => {
   it('normalizes PostgreSQL timestamp values for copy-as-insert and uses PostgreSQL identifier quoting', () => {
@@ -57,5 +62,101 @@ describe('buildCopyInsertSQL', () => {
     expect(sql).toBe(
       `INSERT INTO public.audit_log (payload) VALUES ('2026-01-21T18:32:26+08:00');`,
     );
+  });
+
+  it('groups composite unique indexes by name and sequence order', () => {
+    expect(resolveUniqueKeyGroupsFromIndexes([
+      { name: 'PRIMARY', columnName: 'id', nonUnique: 0, seqInIndex: 1, indexType: 'BTREE' },
+      { name: 'uk_order_code', columnName: 'code', nonUnique: 0, seqInIndex: 2, indexType: 'BTREE' },
+      { name: 'uk_order_code', columnName: 'tenant_id', nonUnique: 0, seqInIndex: 1, indexType: 'BTREE' },
+      { name: 'idx_note', columnName: 'note', nonUnique: 1, seqInIndex: 1, indexType: 'BTREE' },
+    ])).toEqual([
+      ['id'],
+      ['tenant_id', 'code'],
+    ]);
+  });
+
+  it('builds UPDATE SQL with a primary-key WHERE clause and keeps literal formatting aligned with INSERT', () => {
+    const result = buildCopyUpdateSQL({
+      dbType: 'mysql',
+      tableName: 'orders',
+      orderedCols: ['id', 'note', 'deleted_at'],
+      record: {
+        id: 7,
+        note: "O'Brien",
+        deleted_at: null,
+      },
+      pkColumns: ['id'],
+      columnTypesByLowerName: {
+        deleted_at: 'datetime',
+      },
+      allTableColumns: ['id', 'note', 'deleted_at'],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      whereStrategy: 'primary-key',
+      sql: `UPDATE \`orders\` SET \`id\` = '7', \`note\` = 'O''Brien', \`deleted_at\` = NULL WHERE (\`id\` = '7');`,
+    });
+  });
+
+  it('builds DELETE SQL with a composite unique-key WHERE clause when no primary key is available', () => {
+    const result = buildCopyDeleteSQL({
+      dbType: 'postgres',
+      tableName: 'public.audit_log',
+      orderedCols: ['tenant_id', 'code', 'payload'],
+      record: {
+        tenant_id: 'acme',
+        code: 'evt-7',
+        payload: '{"ok":true}',
+      },
+      uniqueKeyGroups: [['tenant_id', 'code']],
+      allTableColumns: ['tenant_id', 'code', 'payload'],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      whereStrategy: 'unique-key',
+      sql: `DELETE FROM public.audit_log WHERE (tenant_id = 'acme' AND code = 'evt-7');`,
+    });
+  });
+
+  it('falls back to all-column matching and uses IS NULL for null values', () => {
+    const result = buildCopyDeleteSQL({
+      dbType: 'sqlserver',
+      tableName: 'dbo.OrderLog',
+      orderedCols: ['id', 'deleted_at', 'flag'],
+      allTableColumns: ['id', 'deleted_at', 'flag'],
+      record: {
+        id: 5,
+        deleted_at: null,
+        flag: true,
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      whereStrategy: 'all-columns',
+      sql: `DELETE FROM [dbo].[OrderLog] WHERE ([id] = '5' AND [deleted_at] IS NULL AND [flag] = 'true');`,
+    });
+  });
+
+  it('refuses to build UPDATE/DELETE SQL when the result set lacks keys and does not cover all table columns', () => {
+    const result = buildCopyDeleteSQL({
+      dbType: 'mysql',
+      tableName: 'orders',
+      orderedCols: ['note'],
+      allTableColumns: ['id', 'note', 'created_at'],
+      record: {
+        note: 'partial row',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected buildCopyDeleteSQL to fail');
+    }
+    expect(result.error).toContain('主键');
+    expect(result.error).toContain('全部字段');
   });
 });

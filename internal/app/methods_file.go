@@ -614,13 +614,23 @@ func parseTemporalString(raw string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
-	layouts := []string{
+	layoutsWithZone := []string{
 		"2006-01-02 15:04:05.999999999 -0700 MST",
 		"2006-01-02 15:04:05 -0700 MST",
 		"2006-01-02 15:04:05.999999999 -0700",
 		"2006-01-02 15:04:05 -0700",
 		time.RFC3339Nano,
 		time.RFC3339,
+	}
+
+	for _, layout := range layoutsWithZone {
+		parsed, err := time.Parse(layout, text)
+		if err == nil {
+			return parsed, true
+		}
+	}
+
+	layoutsWithoutZone := []string{
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02 15:04:05",
 		"2006-01-02",
@@ -628,8 +638,8 @@ func parseTemporalString(raw string) (time.Time, bool) {
 		"15:04:05",
 	}
 
-	for _, layout := range layouts {
-		parsed, err := time.Parse(layout, text)
+	for _, layout := range layoutsWithoutZone {
+		parsed, err := time.ParseInLocation(layout, text, time.Local)
 		if err == nil {
 			return parsed, true
 		}
@@ -975,15 +985,57 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
-// TruncateTables 清空指定表的数据（针对 MySQL 使用 TRUNCATE，MongoDB 使用 delete，否则使用 DELETE）。
-// 注意：MySQL 的 TRUNCATE TABLE 是 DDL 操作，无法事务回滚；批量清空为逐表执行，
-// 如果中途失败，已清空的表无法恢复。错误结果会附带已执行的 SQL 列表供排查。
-func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+type tableDataClearMode string
+
+const (
+	tableDataClearModeTruncate  tableDataClearMode = "truncate"
+	tableDataClearModeDeleteAll tableDataClearMode = "delete_all"
+)
+
+func supportsTruncateTableForDBType(dbType string) bool {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "mysql", "mariadb", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildTableDataClearSQL(config connection.ConnectionConfig, objectName string, mode tableDataClearMode) (string, error) {
+	dbType := resolveDDLDBType(config)
+	quotedObject := quoteQualifiedIdentByType(dbType, objectName)
+
+	switch mode {
+	case tableDataClearModeTruncate:
+		if !supportsTruncateTableForDBType(dbType) {
+			return "", fmt.Errorf("当前数据库类型 %s 不支持截断表，请改用清空表", strings.TrimSpace(dbType))
+		}
+		return fmt.Sprintf("TRUNCATE TABLE %s", quotedObject), nil
+	case tableDataClearModeDeleteAll:
+		if dbType == "mongodb" {
+			return fmt.Sprintf(`{"delete":"%s","deletes":[{"q":{},"limit":0}]}`, objectName), nil
+		}
+		return fmt.Sprintf("DELETE FROM %s", quotedObject), nil
+	default:
+		return "", fmt.Errorf("不支持的表数据清理模式: %s", mode)
+	}
+}
+
+func tableDataClearActionLabels(mode tableDataClearMode) (actionLabel string, progressLabel string) {
+	switch mode {
+	case tableDataClearModeTruncate:
+		return "截断表", "截断"
+	default:
+		return "清空表", "清空"
+	}
+}
+
+func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName string, tableNames []string, mode tableDataClearMode) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
 
 	// 参数校验
 	if len(tableNames) == 0 {
-		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
+		return connection.QueryResult{Success: false, Message: "未指定要处理的表"}
 	}
 
 	objects := make([]string, 0, len(tableNames))
@@ -1001,11 +1053,11 @@ func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, 
 	}
 
 	if len(objects) == 0 {
-		return connection.QueryResult{Success: false, Message: "未指定要清空的表"}
+		return connection.QueryResult{Success: false, Message: "未指定要处理的表"}
 	}
 	const maxBatchSize = 200
 	if len(objects) > maxBatchSize {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("单次最多清空 %d 张表，当前选中 %d 张", maxBatchSize, len(objects))}
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("单次最多处理 %d 张表，当前选中 %d 张", maxBatchSize, len(objects))}
 	}
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -1013,28 +1065,28 @@ func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	// 审计日志：记录清空操作的发起
-	logger.Warnf("TruncateTables 开始：%s db=%s tables=%v（共 %d 张）", formatConnSummary(runConfig), dbName, objects, len(objects))
+	actionLabel, progressLabel := tableDataClearActionLabels(mode)
+	logger.Warnf("%s 开始：%s db=%s tables=%v（共 %d 张）", actionLabel, formatConnSummary(runConfig), dbName, objects, len(objects))
 
-	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
 	var executedSQLs []string
 	for i, objectName := range objects {
-		var sql string
-		if dbType == "mysql" || dbType == "mariadb" {
-			sql = fmt.Sprintf("TRUNCATE TABLE %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
-		} else if dbType == "mongodb" {
-			// MongoDB 使用 delete 命令清空集合中的所有文档
-			// deletes 的 limit 为 0 表示删除所有匹配的文档
-			sql = fmt.Sprintf(`{"delete":"%s","deletes":[{"q":{},"limit":0}]}`, objectName)
-		} else {
-			sql = fmt.Sprintf("DELETE FROM %s", quoteQualifiedIdentByType(runConfig.Type, objectName))
+		sql, sqlErr := buildTableDataClearSQL(runConfig, objectName, mode)
+		if sqlErr != nil {
+			return connection.QueryResult{
+				Success: false,
+				Message: sqlErr.Error(),
+				Data: map[string]interface{}{
+					"executedSQLs": executedSQLs,
+					"count":        len(executedSQLs),
+				},
+			}
 		}
 
 		if _, err := dbInst.Exec(sql); err != nil {
-			logger.Warnf("TruncateTables 第 %d/%d 张表失败：%s table=%s err=%v（已成功清空 %d 张）", i+1, len(objects), formatConnSummary(runConfig), objectName, err, len(executedSQLs))
-			errMsg := fmt.Sprintf("清空 %s 失败: %v", objectName, err)
+			logger.Warnf("%s 第 %d/%d 张表失败：%s table=%s err=%v（已成功%s %d 张）", actionLabel, i+1, len(objects), formatConnSummary(runConfig), objectName, err, progressLabel, len(executedSQLs))
+			errMsg := fmt.Sprintf("%s %s 失败: %v", progressLabel, objectName, err)
 			if len(executedSQLs) > 0 {
-				errMsg += fmt.Sprintf("（注意：前 %d 张表已清空且无法恢复）", len(executedSQLs))
+				errMsg += fmt.Sprintf("（注意：前 %d 张表已%s且无法恢复）", len(executedSQLs), progressLabel)
 			}
 			return connection.QueryResult{
 				Success: false,
@@ -1048,16 +1100,26 @@ func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, 
 		executedSQLs = append(executedSQLs, sql)
 	}
 
-	logger.Warnf("TruncateTables 完成：%s db=%s 共清空 %d 张表", formatConnSummary(runConfig), dbName, len(executedSQLs))
+	logger.Warnf("%s 完成：%s db=%s 共%s %d 张表", actionLabel, formatConnSummary(runConfig), dbName, progressLabel, len(executedSQLs))
 
 	return connection.QueryResult{
 		Success: true,
-		Message: "清空成功",
+		Message: progressLabel + "成功",
 		Data: map[string]interface{}{
 			"executedSQLs": executedSQLs,
 			"count":        len(executedSQLs),
 		},
 	}
+}
+
+// TruncateTables 截断指定表的数据；仅在明确支持 TRUNCATE TABLE 的数据库类型上执行。
+func (a *App) TruncateTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+	return a.runTableDataClear(config, dbName, tableNames, tableDataClearModeTruncate)
+}
+
+// ClearTables 清空指定表的数据；关系型数据库使用 DELETE FROM，MongoDB 使用 delete 命令。
+func (a *App) ClearTables(config connection.ConnectionConfig, dbName string, tableNames []string) connection.QueryResult {
+	return a.runTableDataClear(config, dbName, tableNames, tableDataClearModeDeleteAll)
 }
 
 func quoteIdentByType(dbType string, ident string) string {
@@ -2212,9 +2274,9 @@ func formatExportCellText(val interface{}) string {
 		return text
 	default:
 		text := fmt.Sprintf("%v", val)
-		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）格式化为本地时区 yyyy-MM-dd HH:mm:ss
+		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）统一格式化为 yyyy-MM-dd HH:mm:ss
 		if parsed, ok := parseTemporalString(text); ok {
-			return parsed.Local().Format("2006-01-02 15:04:05")
+			return parsed.Format("2006-01-02 15:04:05")
 		}
 		return text
 	}
@@ -2227,15 +2289,15 @@ func normalizeExportJSONValue(val interface{}) interface{} {
 
 	switch v := val.(type) {
 	case time.Time:
-		return v.Local().Format("2006-01-02 15:04:05")
+		return v.Format("2006-01-02 15:04:05")
 	case *time.Time:
 		if v == nil {
 			return nil
 		}
-		return v.Local().Format("2006-01-02 15:04:05")
+		return v.Format("2006-01-02 15:04:05")
 	case string:
 		if parsed, ok := parseTemporalString(v); ok {
-			return parsed.Local().Format("2006-01-02 15:04:05")
+			return parsed.Format("2006-01-02 15:04:05")
 		}
 		return v
 	case float32:

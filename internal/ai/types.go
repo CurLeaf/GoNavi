@@ -69,6 +69,8 @@ type ProviderConfig struct {
 	Type        string            `json:"type"` // openai | anthropic | gemini | custom
 	Name        string            `json:"name"`
 	APIKey      string            `json:"apiKey"`
+	SecretRef   string            `json:"secretRef,omitempty"`
+	HasSecret   bool              `json:"hasSecret,omitempty"`
 	BaseURL     string            `json:"baseUrl"`
 	Model       string            `json:"model"`
 	Models      []string          `json:"models,omitempty"`

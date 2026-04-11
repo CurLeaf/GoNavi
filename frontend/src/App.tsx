@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Tooltip } from 'antd';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined } from '@ant-design/icons';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -11,12 +11,16 @@ import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
-import { useStore } from './store';
+import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
+import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
+import { LEGACY_PERSIST_KEY, readLegacyPersistedSecrets, stripLegacyPersistedSecrets } from './utils/legacyConnectionStorage';
+import { getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -35,7 +39,7 @@ import {
   resolveAIEdgeHandleDockStyle,
   resolveAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
-import { ConfigureGlobalProxy, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 
 const { Sider, Content } = Layout;
@@ -59,11 +63,30 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
+
+const toLegacySavedConnectionInput = (item: any) => ({
+  id: typeof item?.id === 'string' ? item.id : '',
+  name: typeof item?.name === 'string' ? item.name : '',
+  config: (item?.config && typeof item.config === 'object') ? item.config : {},
+  includeDatabases: Array.isArray(item?.includeDatabases) ? item.includeDatabases : undefined,
+  includeRedisDatabases: Array.isArray(item?.includeRedisDatabases) ? item.includeRedisDatabases : undefined,
+  iconType: typeof item?.iconType === 'string' ? item.iconType : '',
+  iconColor: typeof item?.iconColor === 'string' ? item.iconColor : '',
+});
+
+const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
+  const merged = new Map<string, SavedConnection>();
+  current.forEach((conn) => merged.set(conn.id, conn));
+  imported.forEach((conn) => merged.set(conn.id, conn));
+  return Array.from(merged.values());
+};
+
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
+  const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
   const appearance = useStore(state => state.appearance);
@@ -76,6 +99,8 @@ function App() {
   const setStartupFullscreen = useStore(state => state.setStartupFullscreen);
   const globalProxy = useStore(state => state.globalProxy);
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
+  const replaceConnections = useStore(state => state.replaceConnections);
+  const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -96,18 +121,33 @@ function App() {
   const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const effectiveBlur = normalizeBlurForPlatform(resolvedAppearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
-  const windowCornerRadius = 14;
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
-  const [hasAppliedInitialGlobalProxy, setHasAppliedInitialGlobalProxy] = useState(false);
+  const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const globalProxyInvalidHintShownRef = React.useRef(false);
-  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasAppliedInitialGlobalProxy);
+  const windowDiagSequenceRef = React.useRef(0);
+  const windowDiagLastSignatureRef = React.useRef('');
+  const windowDiagLastAtRef = React.useRef(0);
+  const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
+
+  const windowCornerRadius = 14;
+  useEffect(()=>{
+    switch(windowState){
+        case 'fullscreen':
+        case 'maximized':
+            document.body.setAttribute('--gonavi-border-radius', '0px');
+            break;
+        default:
+            document.body.setAttribute('--gonavi-border-radius', `${windowCornerRadius}px`);
+            break;
+    }
+  }, [windowState]);
 
   // 同步 macOS 窗口透明度：opacity=1.0 且 blur=0 时关闭 NSVisualEffectView，
   // 避免 GPU 持续计算窗口背后的模糊合成
@@ -167,6 +207,90 @@ function App() {
           return;
       }
 
+      let cancelled = false;
+      const loadSecureConfig = async () => {
+          const backendApp = (window as any).go?.app?.App;
+          const persistedPayload = typeof window !== 'undefined'
+              ? window.localStorage.getItem(LEGACY_PERSIST_KEY)
+              : null;
+          const legacy = readLegacyPersistedSecrets(persistedPayload);
+
+          let importedLegacyConnections = false;
+          let importedLegacyGlobalProxy = false;
+
+          if (legacy.connections.length > 0) {
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  try {
+                      await backendApp.ImportLegacyConnections(
+                          legacy.connections.map(toLegacySavedConnectionInput)
+                      );
+                      importedLegacyConnections = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy saved connections', err);
+                  }
+              } else {
+                  replaceConnections(legacy.connections);
+              }
+          }
+
+          if (legacy.globalProxy) {
+              if (typeof backendApp?.ImportLegacyGlobalProxy === 'function') {
+                  try {
+                      await backendApp.ImportLegacyGlobalProxy(toSaveGlobalProxyInput(legacy.globalProxy));
+                      importedLegacyGlobalProxy = true;
+                  } catch (err) {
+                      console.warn('Failed to import legacy global proxy', err);
+                  }
+              } else {
+                  replaceGlobalProxy(createGlobalProxyDraft(legacy.globalProxy));
+              }
+          }
+
+          if ((importedLegacyConnections || importedLegacyGlobalProxy) && persistedPayload && typeof window !== 'undefined') {
+              const sanitizedPayload = stripLegacyPersistedSecrets(persistedPayload);
+              if (sanitizedPayload && sanitizedPayload !== persistedPayload) {
+                  window.localStorage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
+              }
+          }
+
+          if (typeof backendApp?.GetSavedConnections === 'function') {
+              try {
+                  const savedConnections = await backendApp.GetSavedConnections();
+                  if (!cancelled && Array.isArray(savedConnections)) {
+                      replaceConnections(savedConnections);
+                  }
+              } catch (err) {
+                  console.warn('Failed to load saved connections from backend', err);
+              }
+          }
+
+          if (typeof backendApp?.GetGlobalProxyConfig === 'function') {
+              try {
+                  const proxyResult = await backendApp.GetGlobalProxyConfig();
+                  if (!cancelled && proxyResult?.success && proxyResult.data) {
+                      replaceGlobalProxy(createGlobalProxyDraft(proxyResult.data));
+                  }
+              } catch (err) {
+                  console.warn('Failed to load global proxy from backend', err);
+              }
+          }
+
+          if (!cancelled) {
+              setHasLoadedSecureConfig(true);
+          }
+      };
+
+      void loadSecureConfig();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+
+  useEffect(() => {
+      if (!isStoreHydrated || !hasLoadedSecureConfig) {
+          return;
+      }
+
       const host = String(globalProxy.host || '').trim();
       const port = Number(globalProxy.port);
       const portValid = Number.isFinite(port) && port > 0 && port <= 65535;
@@ -180,57 +304,44 @@ function App() {
               });
               globalProxyInvalidHintShownRef.current = true;
           }
-      } else {
-          globalProxyInvalidHintShownRef.current = false;
-          void message.destroy('global-proxy-invalid');
+          return;
       }
 
-      const enabledForBackend = globalProxy.enabled && !invalidWhenEnabled;
-      let cancelled = false;
-      try {
-          ConfigureGlobalProxy(enabledForBackend, {
-              type: globalProxy.type,
-              host,
-              port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
-              user: String(globalProxy.user || '').trim(),
-              password: globalProxy.password || '',
-          })
-              .then((res) => {
-                  if (cancelled || res?.success) {
-                      return;
-                  }
-                  void message.error({
-                      content: '全局代理配置失败: ' + (res?.message || '未知错误'),
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .catch((err) => {
-                  if (cancelled) {
-                      return;
-                  }
-                  const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
-                  void message.error({
-                      content: '全局代理配置失败: ' + errMsg,
-                      key: 'global-proxy-sync-error',
-                  });
-              })
-              .finally(() => {
-                  if (!cancelled) {
-                      setHasAppliedInitialGlobalProxy(true);
-                  }
-              });
-      } catch (e) {
-          if (!cancelled) {
-              setHasAppliedInitialGlobalProxy(true);
-          }
-          console.warn("Wails API: ConfigureGlobalProxy unavailable", e);
+      globalProxyInvalidHintShownRef.current = false;
+      void message.destroy('global-proxy-invalid');
+
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SaveGlobalProxy !== 'function') {
+          return;
       }
+
+      let cancelled = false;
+      Promise.resolve(
+          backendApp.SaveGlobalProxy(
+              toSaveGlobalProxyInput({
+                  ...globalProxy,
+                  host,
+                  port: portValid ? port : (globalProxy.type === 'http' ? 8080 : 1080),
+              })
+          )
+      )
+          .catch((err) => {
+              if (cancelled) {
+                  return;
+              }
+              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+              void message.error({
+                  content: '全局代理配置失败: ' + errMsg,
+                  key: 'global-proxy-sync-error',
+              });
+          });
 
       return () => {
           cancelled = true;
       };
   }, [
       isStoreHydrated,
+      hasLoadedSecureConfig,
       globalProxy.enabled,
       globalProxy.type,
       globalProxy.host,
@@ -374,6 +485,10 @@ function App() {
               const store = useStore.getState();
               const newState = isFs ? 'fullscreen' : (isMax ? 'maximized' : 'normal');
               if (store.windowState !== newState) {
+                  void emitWindowDiagnostic('transition:windowState', {
+                      from: store.windowState,
+                      to: newState,
+                  });
                   store.setWindowState(newState);
               }
 
@@ -389,15 +504,18 @@ function App() {
               const h = Math.trunc(Number(size.h || 0));
               const x = Math.trunc(Number(pos.x || 0));
               const y = Math.trunc(Number(pos.y || 0));
-              if (w < 400 || h < 300) return;
+               if (w < 400 || h < 300) return;
 
-              const key = `${w},${h},${x},${y}`;
-              if (key === lastSaved) return;
-              lastSaved = key;
-              store.setWindowBounds({ width: w, height: h, x, y });
-          } catch (e) {
-              // 静默忽略
-          }
+               const key = `${w},${h},${x},${y}`;
+               if (key === lastSaved) return;
+               lastSaved = key;
+               if (Math.abs(x) > 5000 || Math.abs(y) > 5000) {
+                   void emitWindowDiagnostic('anomaly:windowBounds', { width: w, height: h, x, y });
+               }
+               store.setWindowBounds({ width: w, height: h, x, y });
+            } catch (e) {
+                // 静默忽略
+            }
       };
 
       const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
@@ -417,7 +535,7 @@ function App() {
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-      const fixWindowScaleIfNeeded = async () => {
+      const fixWindowScaleIfNeeded = async (reason: 'activation' | 'ratio-change') => {
           if (cancelled || inFlight) return;
           const now = Date.now();
           if (now - lastFixAt < 700) return;
@@ -428,8 +546,8 @@ function App() {
                   WindowIsMaximised().catch(() => false),
               ]);
 
-              // 避免在全屏/最大化状态下强制改尺寸；这两种状态通常能自行保持 DPI 同步。
-              if (isFullscreen || isMaximised) {
+              // 全屏状态下只广播 resize，避免破坏用户的全屏上下文。
+              if (isFullscreen) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
@@ -438,13 +556,46 @@ function App() {
               const size = await WindowGetSize().catch(() => null);
               const width = Math.trunc(Number(size?.w || 0));
               const height = Math.trunc(Number(size?.h || 0));
+              const hasViewportScaleDrift = hasWindowsViewportScaleDrift({
+                  windowWidth: width,
+                  innerWidth: window.innerWidth,
+                  devicePixelRatio: Number(window.devicePixelRatio) || 1,
+                  visualViewportScale: window.visualViewport?.scale,
+              });
+
+              if (isMaximised) {
+                  if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                      window.dispatchEvent(new Event('resize'));
+                      lastFixAt = Date.now();
+                      return;
+                  }
+
+                  try {
+                      WindowToggleMaximise();
+                      await wait(48);
+                      WindowToggleMaximise();
+                      await wait(64);
+                  } catch (e) {
+                      console.warn("Wails Window maximise toggle unavailable in fixWindowScaleIfNeeded", e);
+                  }
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
               if (width <= 0 || height <= 0) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
               }
 
-              const nudgedWidth = width > 480 ? width - 1 : width + 1;
+              if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                  window.dispatchEvent(new Event('resize'));
+                  lastFixAt = Date.now();
+                  return;
+              }
+
+              const nudgedWidth = getWindowsScaleFixNudgedWidth(width);
               try {
                   WindowSetSize(nudgedWidth, height);
                   await wait(28);
@@ -466,7 +617,7 @@ function App() {
               return;
           }
           lastRatio = currentRatio;
-          void fixWindowScaleIfNeeded();
+          void fixWindowScaleIfNeeded('ratio-change');
       };
 
       const scheduleActivationFix = () => {
@@ -477,7 +628,7 @@ function App() {
           activationTimer = window.setTimeout(() => {
               activationTimer = null;
               if (cancelled) return;
-              void fixWindowScaleIfNeeded();
+              void fixWindowScaleIfNeeded('activation');
           }, 80);
       };
 
@@ -676,7 +827,6 @@ function App() {
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
   const connections = useStore(state => state.connections);
-  const addConnection = useStore(state => state.addConnection);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const updateCheckInFlightRef = React.useRef(false);
@@ -748,6 +898,63 @@ function App() {
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
 
+  const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
+      if (!isMacRuntime) {
+          return;
+      }
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.LogWindowDiagnostic !== 'function') {
+          return;
+      }
+      try {
+          const [isFullscreen, isMaximised, isMinimised, isNormal, size, position] = await Promise.all([
+              WindowIsFullscreen().catch(() => false),
+              WindowIsMaximised().catch(() => false),
+              WindowIsMinimised().catch(() => false),
+              WindowIsNormal().catch(() => false),
+              WindowGetSize().catch(() => null),
+              WindowGetPosition().catch(() => null),
+          ]);
+          const payload = {
+              seq: ++windowDiagSequenceRef.current,
+              ts: new Date().toISOString(),
+              stage,
+              nativeControls: useNativeMacWindowControls,
+              documentVisible: document.visibilityState,
+              documentHasFocus: document.hasFocus(),
+              devicePixelRatio: Number(window.devicePixelRatio) || 1,
+              windowState: {
+                  isFullscreen,
+                  isMaximised,
+                  isMinimised,
+                  isNormal,
+              },
+              size: size ? { w: Math.trunc(Number(size.w || 0)), h: Math.trunc(Number(size.h || 0)) } : null,
+              position: position ? { x: Math.trunc(Number(position.x || 0)), y: Math.trunc(Number(position.y || 0)) } : null,
+              extra,
+          };
+          const signature = JSON.stringify({
+              stage,
+              nativeControls: payload.nativeControls,
+              visible: payload.documentVisible,
+              focus: payload.documentHasFocus,
+              state: payload.windowState,
+              size: payload.size,
+              position: payload.position,
+              extra,
+          });
+          const now = Date.now();
+          if (signature === windowDiagLastSignatureRef.current && now-windowDiagLastAtRef.current < 250) {
+              return;
+          }
+          windowDiagLastSignatureRef.current = signature;
+          windowDiagLastAtRef.current = now;
+          await backendApp.LogWindowDiagnostic(stage, JSON.stringify(payload));
+      } catch (error) {
+          console.warn('Failed to emit window diagnostic', error);
+      }
+  }, [isMacRuntime, useNativeMacWindowControls]);
+
   useEffect(() => {
       if (!isStoreHydrated || !isMacRuntime) {
           return;
@@ -759,6 +966,104 @@ function App() {
           console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
       }
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
+
+  useEffect(() => {
+      if (!isMacRuntime) {
+          return;
+      }
+
+      let cancelled = false;
+      let pollTimer: number | null = null;
+      let burstTimer: number | null = null;
+
+      const stopBurst = () => {
+          if (pollTimer !== null) {
+              window.clearInterval(pollTimer);
+              pollTimer = null;
+          }
+          if (burstTimer !== null) {
+              window.clearTimeout(burstTimer);
+              burstTimer = null;
+          }
+      };
+
+      const startBurst = (reason: string, extra: Record<string, unknown> = {}) => {
+          if (cancelled) {
+              return;
+          }
+          void emitWindowDiagnostic(`burst:start:${reason}`, extra);
+          if (pollTimer === null) {
+              pollTimer = window.setInterval(() => {
+                  void emitWindowDiagnostic(`burst:tick:${reason}`);
+              }, 250);
+          }
+          if (burstTimer !== null) {
+              window.clearTimeout(burstTimer);
+          }
+          burstTimer = window.setTimeout(() => {
+              stopBurst();
+              void emitWindowDiagnostic(`burst:stop:${reason}`);
+          }, 6000);
+      };
+
+      const handleFocus = () => {
+          void emitWindowDiagnostic('event:focus');
+      };
+      const handleBlur = () => {
+          void emitWindowDiagnostic('event:blur');
+      };
+      const handleResize = () => {
+          void emitWindowDiagnostic('event:resize');
+      };
+      const handleVisibilityChange = () => {
+          void emitWindowDiagnostic('event:visibilitychange', { visibility: document.visibilityState });
+      };
+      const handleEditableKeydown = (event: KeyboardEvent) => {
+          if (!isEditableElement(event.target)) {
+              return;
+          }
+          const key = String(event.key || '');
+          const maybeFullscreenKey = key === 'Escape' || key.toLowerCase() === 'f' || key === 'Process';
+          const hasModifier = event.ctrlKey || event.metaKey || event.altKey;
+          startBurst('editable-keydown', {
+              key,
+              code: String(event.code || ''),
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              shiftKey: event.shiftKey,
+              maybeFullscreenKey,
+              hasModifier,
+          });
+      };
+      const handleCompositionStart = () => {
+          startBurst('compositionstart');
+      };
+      const handleCompositionEnd = () => {
+          startBurst('compositionend');
+      };
+
+      void emitWindowDiagnostic('session:start');
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('blur', handleBlur);
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('keydown', handleEditableKeydown, true);
+      window.addEventListener('compositionstart', handleCompositionStart, true);
+      window.addEventListener('compositionend', handleCompositionEnd, true);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+          cancelled = true;
+          stopBurst();
+          window.removeEventListener('focus', handleFocus);
+          window.removeEventListener('blur', handleBlur);
+          window.removeEventListener('resize', handleResize);
+          window.removeEventListener('keydown', handleEditableKeydown, true);
+          window.removeEventListener('compositionstart', handleCompositionStart, true);
+          window.removeEventListener('compositionend', handleCompositionEnd, true);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+  }, [emitWindowDiagnostic, isMacRuntime]);
 
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
@@ -1091,20 +1396,29 @@ function App() {
       if (res.success) {
           try {
               const imported = JSON.parse(res.data);
-              if (Array.isArray(imported)) {
-                  let count = 0;
-                  imported.forEach((conn: any) => {
-                      if (!connections.some(c => c.id === conn.id)) {
-                          addConnection(conn);
-                          count++;
-                      }
-                  });
-                  void message.success(`成功导入 ${count} 个连接`);
-              } else {
+              if (!Array.isArray(imported)) {
                   void message.error("文件格式错误：需要 JSON 数组");
+                  return;
               }
-          } catch (e) {
-              void message.error("解析 JSON 失败");
+
+              const normalizedItems = imported.map(toLegacySavedConnectionInput);
+              const backendApp = (window as any).go?.app?.App;
+
+              if (typeof backendApp?.ImportLegacyConnections === 'function') {
+                  const importedViews = await backendApp.ImportLegacyConnections(normalizedItems);
+                  if (!Array.isArray(importedViews)) {
+                      throw new Error('导入失败：后端未返回连接列表');
+                  }
+                  replaceConnections(mergeSavedConnections(connections, importedViews));
+                  void message.success(`成功导入 ${importedViews.length} 个连接`);
+                  return;
+              }
+
+              const fallbackItems = normalizedItems as SavedConnection[];
+              replaceConnections(mergeSavedConnections(connections, fallbackItems));
+              void message.success(`成功导入 ${fallbackItems.length} 个连接`);
+          } catch (e: any) {
+              void message.error(e?.message || "解析 JSON 失败");
           }
       } else if (res.message !== "已取消") {
           void message.error("导入失败: " + res.message);
@@ -1116,7 +1430,7 @@ function App() {
           void message.warning("没有连接可导出");
           return;
       }
-      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases'], "connections", "json");
+      const res = await (window as any).go.app.App.ExportData(connections, ['id','name','config','includeDatabases','includeRedisDatabases','iconType','iconColor'], "connections", "json");
       if (res.success) {
           void message.success("导出成功");
       } else if (res.message !== "已取消") {
@@ -1131,6 +1445,11 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
+  const [dataRootInfo, setDataRootInfo] = useState<any>(null);
+  const [selectedDataRootPath, setSelectedDataRootPath] = useState('');
+  const [dataRootLoading, setDataRootLoading] = useState(false);
+  const [dataRootApplying, setDataRootApplying] = useState(false);
   const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
   const aiEntryPlacement = resolveAIEntryPlacement();
   const aiEdgeHandleAttachment = resolveAIEdgeHandleAttachment(aiPanelVisible);
@@ -1187,6 +1506,84 @@ function App() {
           </Button>
       </Tooltip>
   );
+
+  const loadDataRootInfo = useCallback(async () => {
+      setDataRootLoading(true);
+      try {
+          const res = await GetDataRootDirectoryInfo();
+          if (!res?.success) {
+              throw new Error(res?.message || '加载数据目录信息失败');
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedDataRootPath(String(data.path || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`加载数据目录信息失败: ${errMsg}`);
+      } finally {
+          setDataRootLoading(false);
+      }
+  }, []);
+
+  useEffect(() => {
+      if (!isDataRootModalOpen) {
+          return;
+      }
+      void loadDataRootInfo();
+  }, [isDataRootModalOpen, loadDataRootInfo]);
+
+  const handleSelectDataRoot = useCallback(async () => {
+      try {
+          const res = await SelectDataRootDirectory(selectedDataRootPath || dataRootInfo?.path || '');
+          if (!res?.success) {
+              if (String(res?.message || '') !== '已取消') {
+                  throw new Error(res?.message || '选择数据目录失败');
+              }
+              return;
+          }
+          const data = (res?.data || {}) as any;
+          setSelectedDataRootPath(String(data.path || ''));
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`选择数据目录失败: ${errMsg}`);
+      }
+  }, [dataRootInfo?.path, selectedDataRootPath]);
+
+  const handleApplyDataRoot = useCallback(async (migrate: boolean, useDefaultPath = false) => {
+      const nextPath = useDefaultPath ? String(dataRootInfo?.defaultPath || '') : String(selectedDataRootPath || '').trim();
+      if (!nextPath) {
+          void message.warning('请先选择有效的数据目录');
+          return;
+      }
+      setDataRootApplying(true);
+      try {
+          const res = await ApplyDataRootDirectory(nextPath, migrate);
+          if (!res?.success) {
+              throw new Error(res?.message || '应用数据目录失败');
+          }
+          const data = (res?.data || {}) as any;
+          setDataRootInfo(data);
+          setSelectedDataRootPath(String(data.path || nextPath));
+          void message.success(res?.message || '数据目录已更新');
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`应用数据目录失败: ${errMsg}`);
+      } finally {
+          setDataRootApplying(false);
+      }
+  }, [dataRootInfo?.defaultPath, selectedDataRootPath]);
+
+  const handleOpenDataRoot = useCallback(async () => {
+      try {
+          const res = await OpenDataRootDirectory();
+          if (!res?.success) {
+              throw new Error(res?.message || '打开数据目录失败');
+          }
+      } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+          void message.error(`打开数据目录失败: ${errMsg}`);
+      }
+  }, []);
 
 
   // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
@@ -1258,15 +1655,19 @@ function App() {
 
   const handleTitleBarWindowToggle = async () => {
       try {
+          void emitWindowDiagnostic('action:titlebar-toggle:before');
           if (await WindowIsFullscreen()) {
               await WindowUnfullscreen();
+              void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
           if (useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
+              void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
           await WindowToggleMaximise();
+          void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
       } catch (_) {
           // ignore
       }
@@ -1625,8 +2026,8 @@ function App() {
             display: 'flex', 
             flexDirection: 'column',
             background: 'transparent',
-            borderRadius: showLinuxResizeHandles ? 0 : windowCornerRadius,
-            clipPath: showLinuxResizeHandles ? 'none' : `inset(0 round ${windowCornerRadius}px)`,
+            borderRadius: showLinuxResizeHandles ? 0 : 'var(--gonavi-border-radius)',
+            clipPath: showLinuxResizeHandles ? 'none' : 'inset(0 round var(--gonavi-border-radius))',
             backdropFilter: blurFilter,
             WebkitBackdropFilter: blurFilter,
         }}>
@@ -1811,7 +2212,7 @@ function App() {
           </Sider>
            <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
              <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'row', position: 'relative' }}>
-               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? windowCornerRadius : 0, clipPath: isLogPanelOpen ? `inset(0 round ${windowCornerRadius}px)` : 'none' }}>
+               <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager />
                </div>
                {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'content-shell' && (
@@ -1896,6 +2297,16 @@ function App() {
                   },
                 },
                 {
+                  key: 'data-root',
+                  icon: <HddOutlined />,
+                  title: '数据目录',
+                  description: '查看、切换或迁移本地数据存储位置。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setIsDataRootModalOpen(true);
+                  },
+                },
+                {
                   key: 'shortcut-settings',
                   icon: <LinkOutlined />,
                   title: '快捷键管理',
@@ -1917,6 +2328,74 @@ function App() {
                 </Button>
               ))}
             </div>
+          </Modal>
+          <Modal
+            title={renderUtilityModalTitle(<HddOutlined />, '数据存储位置', '统一管理连接、代理、AI 配置与驱动等文件型数据的根目录。')}
+            open={isDataRootModalOpen}
+            onCancel={() => setIsDataRootModalOpen(false)}
+            footer={null}
+            width={720}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+          >
+            {dataRootLoading ? (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <Spin />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>当前目录</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <Input readOnly value={dataRootInfo?.path || ''} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>默认目录</div>
+                        <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                      </div>
+                      <div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>驱动目录</div>
+                        <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>切换目标</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    <Input
+                      readOnly
+                      value={selectedDataRootPath}
+                      placeholder="选择新的数据目录"
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                        选择目录
+                      </Button>
+                      <Button onClick={() => void handleOpenDataRoot()}>
+                        打开当前目录
+                      </Button>
+                      <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                        恢复默认目录
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                <div style={utilityPanelStyle}>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>应用方式</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                      仅切换到所选目录
+                    </Button>
+                    <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                      迁移现有数据并切换
+                    </Button>
+                  </div>
+                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                    切换后建议重启应用，以确保 AI 与其他长生命周期模块完全切换到新目录。敏感密码仍保存在系统 secret store，不会随文件目录迁移。
+                  </div>
+                </div>
+              </div>
+            )}
           </Modal>
           <DataSyncModal
             open={isSyncModalOpen}
@@ -2194,6 +2673,33 @@ function App() {
                                       </div>
                                   </div>
                               </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>数据表显示</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                          <div>
+                                              <div style={{ fontWeight: 500 }}>显示数据表竖向分隔线</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>仅作用于数据表页面 DataGrid，不影响其他表格组件。</div>
+                                          </div>
+                                          <Switch
+                                              checked={appearance.showDataTableVerticalBorders === true}
+                                              onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
+                                          />
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>数据表列宽模式</div>
+                                          <Segmented
+                                              block
+                                              options={DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS}
+                                              value={appearance.dataTableColumnWidthMode}
+                                              onChange={(value) => setAppearance({ dataTableColumnWidthMode: sanitizeDataTableColumnWidthMode(value) })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              标准模式默认列宽 200px；紧凑模式默认列宽 140px。已手动拖拽调整的列宽优先保留。
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
                               {isMacRuntime ? (
                                   <div style={utilityPanelStyle}>
                                       <div style={{ marginBottom: 8, fontWeight: 500 }}>macOS 窗口控制</div>
@@ -2227,7 +2733,7 @@ function App() {
                                        onClick={() => {
                                            setUiScale(DEFAULT_UI_SCALE);
                                            setFontSize(DEFAULT_FONT_SIZE);
-                                           setAppearance({ enabled: true, opacity: 1.0, blur: 0, useNativeMacWindowControls: false });
+                                           setAppearance({ ...DEFAULT_APPEARANCE });
                                        }}
                                    >
                                        恢复默认

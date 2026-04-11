@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -71,6 +72,62 @@ func normalizeMySQLAddress(host string, port int) string {
 		p = defaultMySQLPort
 	}
 	return fmt.Sprintf("%s:%d", h, p)
+}
+
+var mysqlDatabaseQueries = []string{
+	"SHOW DATABASES",
+	"SELECT DATABASE() AS `Database`",
+}
+
+func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, []string, error)) ([]string, error) {
+	if queryFn == nil {
+		return nil, fmt.Errorf("查询函数为空")
+	}
+
+	names := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	var lastErr error
+
+	appendNames := func(rows []map[string]interface{}) {
+		for _, row := range rows {
+			for _, key := range []string{"Database", "database"} {
+				val, ok := row[key]
+				if !ok || val == nil {
+					continue
+				}
+				name := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if name == "" || strings.EqualFold(name, "<nil>") {
+					continue
+				}
+				if _, exists := seen[name]; exists {
+					continue
+				}
+				seen[name] = struct{}{}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+
+	for _, sqlText := range mysqlDatabaseQueries {
+		rows, _, err := queryFn(sqlText)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		appendNames(rows)
+		if len(names) > 0 {
+			return names, nil
+		}
+	}
+
+	if len(names) > 0 {
+		return names, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("未获取到可用数据库")
 }
 
 func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConfig {
@@ -363,19 +420,7 @@ func (m *MySQLDB) Exec(query string) (int64, error) {
 }
 
 func (m *MySQLDB) GetDatabases() ([]string, error) {
-	data, _, err := m.Query("SHOW DATABASES")
-	if err != nil {
-		return nil, err
-	}
-	var dbs []string
-	for _, row := range data {
-		if val, ok := row["Database"]; ok {
-			dbs = append(dbs, fmt.Sprintf("%v", val))
-		} else if val, ok := row["database"]; ok {
-			dbs = append(dbs, fmt.Sprintf("%v", val))
-		}
-	}
-	return dbs, nil
+	return collectMySQLDatabaseNames(m.Query)
 }
 
 func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
@@ -731,6 +776,9 @@ func (m *MySQLDB) loadColumnTypeMap(tableName string) map[string]string {
 
 func normalizeMySQLValueForInsert(columnName string, value interface{}, columnTypeMap map[string]string) (interface{}, bool) {
 	columnType := strings.ToLower(strings.TrimSpace(columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]))
+	if isMySQLBitColumnType(columnType) {
+		return normalizeMySQLBitValue(value), false
+	}
 	if !isMySQLTemporalColumnType(columnType) {
 		return normalizeMySQLComplexValue(value), false
 	}
@@ -744,6 +792,9 @@ func normalizeMySQLValueForInsert(columnName string, value interface{}, columnTy
 
 func normalizeMySQLValueForWrite(columnName string, value interface{}, columnTypeMap map[string]string) interface{} {
 	columnType := strings.ToLower(strings.TrimSpace(columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]))
+	if isMySQLBitColumnType(columnType) {
+		return normalizeMySQLBitValue(value)
+	}
 	if !isMySQLTemporalColumnType(columnType) {
 		return value
 	}
@@ -767,6 +818,154 @@ func isMySQLTemporalColumnType(columnType string) bool {
 		base = base[:idx]
 	}
 	return base == "date" || base == "time" || base == "year"
+}
+
+func isMySQLBitColumnType(columnType string) bool {
+	raw := strings.ToLower(strings.TrimSpace(columnType))
+	if raw == "" {
+		return false
+	}
+	base := raw
+	if idx := strings.IndexAny(base, "( "); idx >= 0 {
+		base = base[:idx]
+	}
+	return base == "bit"
+}
+
+func normalizeMySQLBitValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return v
+	case bool:
+		if v {
+			return []byte{1}
+		}
+		return []byte{0}
+	case string:
+		if bitValue, ok := parseMySQLBitString(v); ok {
+			return bitValue
+		}
+		return value
+	case int:
+		if v >= 0 {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case int8:
+		if v >= 0 {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case int16:
+		if v >= 0 {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case int32:
+		if v >= 0 {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case int64:
+		if v >= 0 {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case uint:
+		if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+			return bitValue
+		}
+	case uint8:
+		if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+			return bitValue
+		}
+	case uint16:
+		if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+			return bitValue
+		}
+	case uint32:
+		if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+			return bitValue
+		}
+	case uint64:
+		if bitValue, ok := mysqlBitBytesFromUint64(v); ok {
+			return bitValue
+		}
+	case float32:
+		if v >= 0 && math.Trunc(float64(v)) == float64(v) {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	case float64:
+		if v >= 0 && math.Trunc(v) == v {
+			if bitValue, ok := mysqlBitBytesFromUint64(uint64(v)); ok {
+				return bitValue
+			}
+		}
+	}
+	return value
+}
+
+func parseMySQLBitString(text string) ([]byte, bool) {
+	raw := strings.TrimSpace(text)
+	if raw == "" {
+		return nil, false
+	}
+
+	switch strings.ToLower(raw) {
+	case "true":
+		return []byte{1}, true
+	case "false":
+		return []byte{0}, true
+	}
+
+	if len(raw) > 3 && (raw[0] == 'b' || raw[0] == 'B') && raw[1] == '\'' && raw[len(raw)-1] == '\'' {
+		value, err := strconv.ParseUint(raw[2:len(raw)-1], 2, 64)
+		if err == nil {
+			return mysqlBitBytesFromUint64OrZero(value), true
+		}
+		return nil, false
+	}
+
+	if len(raw) > 2 && (strings.HasPrefix(raw, "0b") || strings.HasPrefix(raw, "0B")) {
+		value, err := strconv.ParseUint(raw[2:], 2, 64)
+		if err == nil {
+			return mysqlBitBytesFromUint64OrZero(value), true
+		}
+		return nil, false
+	}
+
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return nil, false
+	}
+	return mysqlBitBytesFromUint64OrZero(value), true
+}
+
+func mysqlBitBytesFromUint64(value uint64) ([]byte, bool) {
+	return mysqlBitBytesFromUint64OrZero(value), true
+}
+
+func mysqlBitBytesFromUint64OrZero(value uint64) []byte {
+	if value == 0 {
+		return []byte{0}
+	}
+	var buf [8]byte
+	index := len(buf)
+	for value > 0 {
+		index--
+		buf[index] = byte(value)
+		value >>= 8
+	}
+	return append([]byte(nil), buf[index:]...)
 }
 
 func hasTimezoneOffset(text string) bool {

@@ -1,0 +1,59 @@
+package app
+
+import (
+	"strings"
+	"testing"
+
+	"GoNavi-Wails/internal/connection"
+)
+
+func TestBuildTableDataClearSQL_TruncateUsesNativeStatementForSupportedDialect(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "mysql"}, "sales.orders", tableDataClearModeTruncate)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != "TRUNCATE TABLE `sales`.`orders`" {
+		t.Fatalf("unexpected truncate sql: %s", sql)
+	}
+}
+
+func TestBuildTableDataClearSQL_ClearUsesDeleteForCustomMySQLDriver(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "custom", Driver: "mysql"}, "orders", tableDataClearModeDeleteAll)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != "DELETE FROM `orders`" {
+		t.Fatalf("unexpected delete sql for custom mysql driver: %s", sql)
+	}
+}
+
+func TestBuildTableDataClearSQL_ClearUsesMongoDeleteCommand(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "mongodb"}, "logs", tableDataClearModeDeleteAll)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != `{"delete":"logs","deletes":[{"q":{},"limit":0}]}` {
+		t.Fatalf("unexpected mongo clear command: %s", sql)
+	}
+}
+
+func TestBuildTableDataClearSQL_TruncateRejectsUnsupportedDialect(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "sqlite"}, "orders", tableDataClearModeTruncate)
+	if err == nil {
+		t.Fatal("expected truncate to reject sqlite")
+	}
+	if !strings.Contains(err.Error(), "不支持截断表") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

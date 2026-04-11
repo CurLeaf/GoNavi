@@ -7,7 +7,7 @@ html, body, #root {
 }
 
 body, #root {
-  border-radius: 14px; /* Slightly rounded app window corners */
+  border-radius: var(--gonavi-border-radius); /* Slightly rounded app window corners */
 }
 
 /* 侧边栏 Tree 样式优化 */
@@ -35,6 +35,41 @@ body, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
   padding-right: 8px;
+}
+
+.sidebar-tree-scroll-shell {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.sidebar-tree-scroll-content {
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree {
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder,
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-list-holder-inner {
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-treenode {
+  width: auto;
+  min-width: 100%;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-node-content-wrapper {
+  width: auto !important;
+  min-width: 0;
+}
+
+.sidebar-tree-scroll-shell .ant-tree .ant-tree-title {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .redis-viewer-workbench .ant-tree {

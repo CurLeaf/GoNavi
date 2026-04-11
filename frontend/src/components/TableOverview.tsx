@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal } from 'antd';
-import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -147,7 +149,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [searchText, setSearchText] = useState('');
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-    const [viewMode, setViewMode] = useState<ViewMode>('card');
+    const [viewMode, setViewMode] = useState<ViewMode>('list');
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
 
@@ -163,9 +165,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            const dialect = getMetadataDialect(connection.config.type, (connection.config as any)?.driver);
+            const dialect = getMetadataDialect(connection.config.type, connection.config.driver);
             const sql = buildTableStatusSQL(dialect, tab.dbName || '', (tab as any).schemaName);
-            const res = await DBQuery(config as any, tab.dbName || '', sql);
+            const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
                 setTables(parseTableStats(dialect, res.data));
             } else {
@@ -239,7 +241,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const handleCopyStructure = useCallback(async (tableName: string) => {
         const config = buildConfig();
         if (!config) return;
-        const res = await DBShowCreateTable(config as any, tab.dbName || '', tableName);
+        const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
         if (res.success) {
             navigator.clipboard.writeText(res.data as string);
             message.success('表结构已复制到剪贴板');
@@ -252,7 +254,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const config = buildConfig();
         if (!config) return;
         const hide = message.loading(`正在导出 ${tableName} 为 ${format.toUpperCase()}...`, 0);
-        const res = await ExportTable(config as any, tab.dbName || '', tableName, format);
+        const res = await ExportTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, format);
         hide();
         if (res.success) {
             message.success('导出成功');
@@ -269,12 +271,46 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             content: `确定删除表 "${tableName}" 吗？该操作不可恢复。`,
             okButtonProps: { danger: true },
             onOk: async () => {
-                const res = await DropTable(config as any, tab.dbName || '', tableName);
+                const res = await DropTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
                 if (res.success) {
                     message.success('表删除成功');
                     loadData();
                 } else {
                     message.error('删除失败: ' + res.message);
+                }
+            },
+        });
+    }, [buildConfig, tab.dbName, loadData]);
+
+    const handleTableDataDangerAction = useCallback((tableName: string, action: TableDataDangerActionKind) => {
+        const config = buildConfig();
+        if (!config) return;
+
+        const { label, progressLabel } = getTableDataDangerActionMeta(action);
+        Modal.confirm({
+            title: `确认${label}`,
+            content: `${label}会永久删除表 "${tableName}" 中的所有数据，操作不可逆，是否继续？`,
+            okText: '继续',
+            cancelText: '取消',
+            okButtonProps: { danger: true },
+            onOk: async () => {
+                const app = (window as any).go.app.App;
+                const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
+                const hide = message.loading(`正在${progressLabel} ${tableName}...`, 0);
+                try {
+                    const res = await app[methodName](buildRpcConnectionConfig(config) as any, tab.dbName || '', [tableName]);
+                    hide();
+                    if (res.success) {
+                        message.success(`${progressLabel}成功`);
+                        loadData();
+                    } else {
+                        message.error(`${progressLabel}失败: ${res.message}`);
+                        return Promise.reject();
+                    }
+                } catch (e: any) {
+                    hide();
+                    message.error(`${progressLabel}失败: ${e?.message || String(e)}`);
+                    return Promise.reject();
                 }
             },
         });
@@ -299,7 +335,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 const trimmed = newName.trim();
                 if (!trimmed) { message.error('表名不能为空'); return Promise.reject(); }
                 if (trimmed === tableName) { message.warning('新旧表名相同'); return; }
-                const res = await RenameTable(config as any, tab.dbName || '', tableName, trimmed);
+                const res = await RenameTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, trimmed);
                 if (res.success) {
                     message.success('表重命名成功');
                     loadData();
@@ -337,6 +373,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     const totalRows = tables.reduce((s, t) => s + t.rows, 0);
     const totalSize = tables.reduce((s, t) => s + t.dataSize + t.indexSize, 0);
+    const maxCombinedSize = sortedFiltered.reduce((max, table) => {
+        return Math.max(max, table.dataSize + table.indexSize);
+    }, 0);
+    const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
 
     if (loading) {
         return (
@@ -432,7 +472,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
                                         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                         { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                        { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) },
+                                        { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                            ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
+                                            { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
+                                            { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
+                                        ]},
                                         { type: 'divider' },
                                         { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
                                             { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
@@ -483,113 +527,145 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         ))}
                     </div>
                 ) : (
-                    /* ========== 列表/表格视图 ========== */
-                    <div style={{ borderRadius: 8, border: `1px solid ${cardBorder}`, overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                            <thead>
-                                <tr style={{ background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)' }}>
-                                    {[
-                                        { field: 'name' as SortField, label: '表名', width: undefined },
-                                        { field: null, label: '注释', width: undefined },
-                                        { field: 'rows' as SortField, label: '行数', width: 100 },
-                                        { field: 'dataSize' as SortField, label: '数据大小', width: 110 },
-                                        { field: null, label: '索引大小', width: 110 },
-                                        { field: null, label: '引擎', width: 90 },
-                                    ].map((col, idx) => (
-                                        <th
-                                            key={idx}
-                                            onClick={col.field ? () => toggleSort(col.field!) : undefined}
-                                            style={{
-                                                padding: '10px 14px',
-                                                textAlign: idx >= 2 ? 'right' : 'left',
-                                                fontWeight: 600,
-                                                color: textSecondary,
-                                                borderBottom: `1px solid ${cardBorder}`,
-                                                cursor: col.field ? 'pointer' : 'default',
-                                                userSelect: 'none',
-                                                whiteSpace: 'nowrap',
-                                                width: col.width,
-                                            }}
-                                        >
-                                            {col.label}
-                                            {col.field && sortField === col.field && (
-                                                <span style={{ marginLeft: 4, fontSize: 11 }}>
-                                                    {sortOrder === 'asc' ? '↑' : '↓'}
-                                                </span>
-                                            )}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {sortedFiltered.map((t, rowIdx) => (
-                                    <Dropdown
-                                        key={t.name}
-                                        trigger={['contextMenu']}
-                                        menu={{
-                                            items: [
-                                                { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
-                                                    setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
-                                                    addTab({
-                                                        id: `query-${Date.now()}`,
-                                                        title: '新建查询',
-                                                        type: 'query',
-                                                        connectionId: tab.connectionId,
-                                                        dbName: tab.dbName,
-                                                        query: `SELECT * FROM ${t.name};`,
-                                                    });
-                                                }},
-                                                { type: 'divider' },
-                                                { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
-                                                { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
-                                                { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
-                                                { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                                { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) },
-                                                { type: 'divider' },
-                                                { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
-                                                    { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
-                                                    { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(t.name, 'xlsx') },
-                                                    { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(t.name, 'json') },
-                                                    { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(t.name, 'md') },
-                                                    { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(t.name, 'html') },
-                                                ]},
-                                            ],
+                    /* ========== 行视图 ========== */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {sortedFiltered.map(t => {
+                            const combinedSize = t.dataSize + t.indexSize;
+                            const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
+                            const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
+                            const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
+                            const rowSecondary = t.comment || (t.engine ? `${t.engine} 表` : '双击打开数据，右键查看更多操作');
+
+                            return (
+                                <Dropdown
+                                    key={t.name}
+                                    trigger={['contextMenu']}
+                                    menu={{
+                                        items: [
+                                            { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
+                                                setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
+                                                addTab({
+                                                    id: `query-${Date.now()}`,
+                                                    title: '新建查询',
+                                                    type: 'query',
+                                                    connectionId: tab.connectionId,
+                                                    dbName: tab.dbName,
+                                                    query: `SELECT * FROM ${t.name};`,
+                                                });
+                                            }},
+                                            { type: 'divider' },
+                                            { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
+                                            { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
+                                            { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
+                                            { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
+                                            { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+                                                ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
+                                                { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
+                                                { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
+                                            ]},
+                                            { type: 'divider' },
+                                            { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
+                                                { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
+                                                { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(t.name, 'xlsx') },
+                                                { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(t.name, 'json') },
+                                                { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(t.name, 'md') },
+                                                { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(t.name, 'html') },
+                                            ]},
+                                        ],
+                                    }}
+                                >
+                                    <div
+                                        onDoubleClick={() => openTable(t.name)}
+                                        style={{
+                                            position: 'relative',
+                                            overflow: 'hidden',
+                                            borderRadius: 10,
+                                            border: `1px solid ${cardBorder}`,
+                                            background: cardBg,
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s ease',
+                                            userSelect: 'none',
                                         }}
+                                        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+                                        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
                                     >
-                                        <tr
-                                            onDoubleClick={() => openTable(t.name)}
+                                        <div
                                             style={{
-                                                cursor: 'pointer',
-                                                transition: 'background 0.12s',
-                                                borderBottom: rowIdx < sortedFiltered.length - 1 ? `1px solid ${cardBorder}` : 'none',
+                                                position: 'absolute',
+                                                top: 0,
+                                                left: 0,
+                                                bottom: 0,
+                                                width: fillWidth,
+                                                background: fillColor,
+                                                pointerEvents: 'none',
+                                                transition: 'width 0.2s ease',
                                             }}
-                                            onMouseEnter={e => { (e.currentTarget as HTMLTableRowElement).style.background = cardHoverBg; }}
-                                            onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                                        />
+                                        <div
+                                            style={{
+                                                position: 'relative',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                gap: 16,
+                                                padding: '14px 16px',
+                                                flexWrap: 'wrap',
+                                            }}
                                         >
-                                            <td style={{ padding: '10px 14px', color: textPrimary, fontWeight: 500 }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                                                     <TableOutlined style={{ fontSize: 13, color: accentColor, flexShrink: 0 }} />
                                                     <Tooltip title={t.name} mouseEnterDelay={0.4}>
-                                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                                                        <span style={{ color: textPrimary, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                            {t.name}
+                                                        </span>
                                                     </Tooltip>
+                                                    {t.engine && (
+                                                        <span
+                                                            style={{
+                                                                flexShrink: 0,
+                                                                padding: '1px 6px',
+                                                                borderRadius: 999,
+                                                                fontSize: 11,
+                                                                color: textMuted,
+                                                                background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                                            }}
+                                                        >
+                                                            {t.engine}
+                                                        </span>
+                                                    )}
                                                 </div>
-                                            </td>
-                                            <td style={{ padding: '10px 14px', color: textSecondary, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {t.comment ? (
-                                                    <Tooltip title={t.comment} mouseEnterDelay={0.4}><span>{t.comment}</span></Tooltip>
-                                                ) : (
-                                                    <span style={{ color: textMuted }}>—</span>
-                                                )}
-                                            </td>
-                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</td>
-                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</td>
-                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textSecondary, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</td>
-                                            <td style={{ padding: '10px 14px', textAlign: 'right', color: textMuted }}>{t.engine || '—'}</td>
-                                        </tr>
-                                    </Dropdown>
-                                ))}
-                            </tbody>
-                        </table>
+                                                <Tooltip title={rowSecondary} mouseEnterDelay={0.4}>
+                                                    <div style={{ marginTop: 6, color: textSecondary, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {rowSecondary}
+                                                    </div>
+                                                </Tooltip>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
+                                                <div style={{ minWidth: 96, textAlign: 'right' }}>
+                                                    <div style={{ color: textMuted }}>行数</div>
+                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</div>
+                                                </div>
+                                                <div style={{ minWidth: 110, textAlign: 'right' }}>
+                                                    <div style={{ color: textMuted }}>数据大小</div>
+                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</div>
+                                                </div>
+                                                <div style={{ minWidth: 110, textAlign: 'right' }}>
+                                                    <div style={{ color: textMuted }}>索引大小</div>
+                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</div>
+                                                </div>
+                                                <div style={{ minWidth: 96, textAlign: 'right' }}>
+                                                    <div style={{ color: textMuted }}>相对大小</div>
+                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                                        {maxCombinedSize > 0 ? `${Math.round(sizeRatio * 100)}%` : '—'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </Dropdown>
+                            );
+                        })}
                     </div>
                 )}
             </div>

@@ -14,6 +14,7 @@ import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import type { AIComposerNotice } from '../utils/aiComposerNotice';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     buildMissingModelNotice,
     buildMissingProviderNotice,
@@ -226,6 +227,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const resizeStartX = useRef(0);
     const resizeStartWidth = useRef(0);
     const toolCallRoundRef = useRef(0); // 连续失败轮次计数
+    const totalToolRoundRef = useRef(0); // 全局工具调用总轮次计数（防止无限循环）
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
     const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
     const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
@@ -259,7 +261,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     const conn = useStore.getState().connections.find(c => c.id === connectionId);
                     if (conn) {
                         import('../../wailsjs/go/app/App').then(({ DBShowCreateTable }) => {
-                            DBShowCreateTable(conn.config as any, dbName, tableName).then(res => {
+                            DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, dbName, tableName).then(res => {
                                 if (res.success && res.data) {
                                     let createSql = '';
                                     if (typeof res.data === 'string') createSql = res.data;
@@ -351,7 +353,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (!activeProvider) return;
         try {
             const Service = (window as any).go?.aiservice?.Service;
-            const payload = { ...activeProvider, model: val };
+            const payload = {
+                ...activeProvider,
+                model: val,
+                apiKey: activeProvider.apiKey || '',
+                hasSecret: activeProvider.hasSecret ?? Boolean(activeProvider.secretRef),
+            };
             await Service?.AISaveProvider?.(payload);
             setActiveProvider(payload);
             setComposerNotice(null);
@@ -673,7 +680,21 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (lastUserMsgIndex >= 0) {
             const userMsg = historyLocal[lastUserMsgIndex];
             truncateAIChatMessages(sid, userMsg.id); 
+
+            // 重置计数器（与 handleSend 保持一致）
+            toolCallRoundRef.current = 0;
+            totalToolRoundRef.current = 0;
+            nudgeCountRef.current = 0;
+
             setSending(true);
+
+            // 插入 connecting 过渡消息（波纹动画），与 handleSend 保持一致
+            const connectingMsg: AIChatMessage = {
+                id: genId(), role: 'assistant', phase: 'connecting', content: '',
+                timestamp: Date.now(), loading: true
+            };
+            addAIChatMessage(sid, connectingMsg);
+
             const truncatedHistory = historyLocal.slice(0, lastUserMsgIndex + 1);
             const messagesPayload = truncatedHistory.map(m => ({ role: m.role, content: m.content, images: m.images }));
             
@@ -783,6 +804,20 @@ SELECT * FROM users WHERE status = 1;
     const toolContextMapRef = useRef<Map<string, { connectionId: string; dbName: string; tables: string[] }>>(new Map());
 
     const executeLocalTools = useCallback(async (toolCalls: AIToolCall[], currentAsstMsgId: string) => {
+        // 【全局轮次熔断】防止模型（如 DeepSeek）在已生成答案后仍无限循环调用工具
+        const MAX_TOOL_CALL_ROUNDS = 15;
+        totalToolRoundRef.current += 1;
+        if (totalToolRoundRef.current > MAX_TOOL_CALL_ROUNDS) {
+            updateAIChatMessage(sid, currentAsstMsgId, { loading: false, phase: 'idle' });
+            useStore.getState().addAIChatMessage(sid, {
+                id: genId(), role: 'assistant',
+                content: `⚠️ 工具调用已达 ${MAX_TOOL_CALL_ROUNDS} 轮上限，自动终止循环。如需继续探索，请发送新的消息。`,
+                timestamp: Date.now(),
+            });
+            setSending(false);
+            return;
+        }
+
         const results: AIChatMessage[] = [];
         // 【串行逐条执行 + 实时写入 store】
         for (const tc of toolCalls) {
@@ -805,7 +840,7 @@ SELECT * FROM users WHERE status = 1;
                         const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
                         if (conn) {
                             try {
-                                const dbRes = await DBGetDatabases(conn.config as any);
+                                const dbRes = await DBGetDatabases(buildRpcConnectionConfig(conn.config) as any);
                                 if (dbRes?.success && Array.isArray(dbRes.data)) {
                                     let dNames = dbRes.data.map((r: any) => r.Database || r.database || Object.values(r)[0]);
                                     if (dNames.length > 50) dNames = [...dNames.slice(0, 50), '...(截断)'];
@@ -826,7 +861,7 @@ SELECT * FROM users WHERE status = 1;
                             try {
                                 const rawDbName = args.dbName || args.database;
                                 const safeDbName = rawDbName ? String(rawDbName).trim() : '';
-                                const tbRes = await DBGetTables(conn.config as any, safeDbName);
+                                const tbRes = await DBGetTables(buildRpcConnectionConfig(conn.config) as any, safeDbName);
                                 if (tbRes?.success && Array.isArray(tbRes.data)) {
                                     let tNames = tbRes.data.map((r: any) => r.Table || r.table || Object.values(r)[0] as string);
                                     if (tNames.length > 150) tNames = [...tNames.slice(0, 150), '...(截断)'];
@@ -852,7 +887,7 @@ SELECT * FROM users WHERE status = 1;
                                 const safeDbName = args.dbName ? String(args.dbName).trim() : '';
                                 const safeTable = args.tableName ? String(args.tableName).trim() : '';
                                 const { DBGetColumns } = await import('../../wailsjs/go/app/App');
-                                const colRes = await DBGetColumns(conn.config as any, safeDbName, safeTable);
+                                const colRes = await DBGetColumns(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
                                 if (colRes?.success && Array.isArray(colRes.data)) {
                                     // 只保留关键字段信息，减少 token 占用
                                     const cols = colRes.data.map((c: any) => {
@@ -883,7 +918,7 @@ SELECT * FROM users WHERE status = 1;
                                 const safeDbName = args.dbName ? String(args.dbName).trim() : '';
                                 const safeTable = args.tableName ? String(args.tableName).trim() : '';
                                 const { DBShowCreateTable } = await import('../../wailsjs/go/app/App');
-                                const ddlRes = await DBShowCreateTable(conn.config as any, safeDbName, safeTable);
+                                const ddlRes = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
                                 if (ddlRes?.success) {
                                     resStr = typeof ddlRes.data === 'string' ? ddlRes.data : JSON.stringify(ddlRes.data);
                                     success = true;
@@ -910,7 +945,14 @@ SELECT * FROM users WHERE status = 1;
                                     }
                                 }
                                 const { DBQuery } = await import('../../wailsjs/go/app/App');
-                                const qRes = await DBQuery(conn.config as any, safeDbName, safeSql + (safeSql.toLowerCase().includes('limit') ? '' : ' LIMIT 50'));
+                                // 只对只读查询自动追加 LIMIT，写操作（UPDATE/DELETE/INSERT等）不追加
+                                const sqlTrimmed = safeSql.replace(/;\s*$/, ''); // 去掉末尾分号防止拼接出 "; LIMIT 50"
+                                const sqlFirstWord = sqlTrimmed.trimStart().split(/\s/)[0]?.toLowerCase() || '';
+                                const isReadQuery = ['select', 'show', 'describe', 'desc', 'explain', 'with'].includes(sqlFirstWord);
+                                const finalSql = (isReadQuery && !sqlTrimmed.toLowerCase().includes('limit'))
+                                    ? sqlTrimmed + ' LIMIT 50'
+                                    : sqlTrimmed;
+                                const qRes = await DBQuery(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeSql + (safeSql.toLowerCase().includes('limit') ? '' : ' LIMIT 50'));
                                 if (qRes?.success) {
                                     const rows = Array.isArray(qRes.data) ? qRes.data : [];
                                     const limitedRows = rows.slice(0, 50);
@@ -1020,11 +1062,16 @@ SELECT * FROM users WHERE status = 1;
             }
 
             const allMessages = [...sysMessages, ...finalMessagesPayload];
+
+            // 【软收敛】超过 10 轮工具调用后，不再传递 tools 参数，从物理层面强制模型只能用文本回答
+            const SOFT_LIMIT_ROUNDS = 10;
+            const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : LOCAL_TOOLS;
+
             const Service = (window as any).go?.aiservice?.Service;
             if (Service?.AIChatStream) {
-                await Service.AIChatStream(sid, allMessages, LOCAL_TOOLS);
+                await Service.AIChatStream(sid, allMessages, chainTools);
             } else if (Service?.AIChatSend) {
-                const result = await Service.AIChatSend(allMessages, LOCAL_TOOLS);
+                const result = await Service.AIChatSend(allMessages, chainTools);
                 const errR = result?.error || '未知错误';
                 const errC = sanitizeErrorMsg(errR);
                 useStore.getState().addAIChatMessage(sid, {
@@ -1057,6 +1104,7 @@ SELECT * FROM users WHERE status = 1;
         setComposerNotice(null);
 
         toolCallRoundRef.current = 0; // 重置工具调用轮次计数
+        totalToolRoundRef.current = 0; // 重置总轮次计数
         nudgeCountRef.current = 0;     // 重置催促计数
 
         const currentImages = [...draftImages];
@@ -1264,7 +1312,8 @@ SELECT * FROM users WHERE status = 1;
     const handleDeleteMessage = useCallback((id: string) => deleteAIChatMessage(sid, id), [sid, deleteAIChatMessage]);
     const activeConnectionConfig = useMemo(() => {
         if (!inferredConnectionId) return undefined;
-        return connections.find(c => c.id === inferredConnectionId)?.config;
+        const connection = connections.find(c => c.id === inferredConnectionId);
+        return connection ? buildRpcConnectionConfig(connection.config) : undefined;
     }, [inferredConnectionId, connections]);
     const contextUsageChars = useMemo(() =>
         messages.reduce((sum, m) => sum + (m.content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0),

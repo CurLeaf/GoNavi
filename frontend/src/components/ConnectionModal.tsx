@@ -5,6 +5,8 @@ import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICO
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
+import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -17,6 +19,43 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
+const noAutoCapInputProps = {
+  autoCapitalize: 'none' as const,
+  autoCorrect: 'off' as const,
+  spellCheck: false,
+};
+
+const applyNoAutoCapAttributes = (element: Element) => {
+  if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
+    return;
+  }
+  element.setAttribute('autocapitalize', 'none');
+  element.setAttribute('autocorrect', 'off');
+  element.setAttribute('spellcheck', 'false');
+};
+
+type ConnectionSecretKey =
+  | 'primaryPassword'
+  | 'sshPassword'
+  | 'proxyPassword'
+  | 'httpTunnelPassword'
+  | 'mysqlReplicaPassword'
+  | 'mongoReplicaPassword'
+  | 'opaqueURI'
+  | 'opaqueDSN';
+
+type ConnectionSecretClearState = Record<ConnectionSecretKey, boolean>;
+
+const createEmptyConnectionSecretClearState = (): ConnectionSecretClearState => ({
+  primaryPassword: false,
+  sshPassword: false,
+  proxyPassword: false,
+  httpTunnelPassword: false,
+  mysqlReplicaPassword: false,
+  mongoReplicaPassword: false,
+  opaqueURI: false,
+  opaqueDSN: false,
+});
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
@@ -122,6 +161,7 @@ const ConnectionModal: React.FC<{
   const [driverStatusLoaded, setDriverStatusLoaded] = useState(false);
   const [selectingDbFile, setSelectingDbFile] = useState(false);
   const [selectingSSHKey, setSelectingSSHKey] = useState(false);
+  const [clearSecrets, setClearSecrets] = useState<ConnectionSecretClearState>(createEmptyConnectionSecretClearState);
   const testInFlightRef = useRef(false);
   const testTimerRef = useRef<number | null>(null);
   const addConnection = useStore((state) => state.addConnection);
@@ -171,6 +211,23 @@ const ConnectionModal: React.FC<{
       border: darkMode ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid rgba(0, 0, 0, 0.06)',
   };
 
+  useEffect(() => {
+      if (!open) return;
+      const applyForConnectionModal = () => {
+          document
+              .querySelectorAll('.connection-modal-wrap input, .connection-modal-wrap textarea')
+              .forEach(applyNoAutoCapAttributes);
+      };
+      applyForConnectionModal();
+      const observer = new MutationObserver(() => {
+          applyForConnectionModal();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      return () => {
+          observer.disconnect();
+      };
+  }, [open]);
+
 
   const modalShellStyle = useMemo(() => ({
       background: overlayTheme.shellBg,
@@ -192,6 +249,51 @@ const ConnectionModal: React.FC<{
       lineHeight: 1.6,
   }), [overlayTheme]);
 
+  const renderStoredSecretControls = ({
+      fieldName,
+      clearKey,
+      hasStoredSecret,
+      clearLabel,
+      description,
+  }: {
+      fieldName: string;
+      clearKey: ConnectionSecretKey;
+      hasStoredSecret?: boolean;
+      clearLabel: string;
+      description: string;
+  }) => {
+      if (!initialValues || !hasStoredSecret) {
+          return null;
+      }
+      return (
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev[fieldName] !== next[fieldName]}>
+              {({ getFieldValue }) => {
+                  const draftValue = getFieldValue(fieldName);
+                  const hasDraftValue = String(draftValue ?? '') !== '';
+                  const cardBorder = darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(16,24,40,0.08)';
+                  const cardBg = darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.03)';
+                  const effectiveChecked = clearSecrets[clearKey] && !hasDraftValue;
+                  return (
+                      <div style={{ marginBottom: 16, padding: '10px 12px', borderRadius: 10, border: cardBorder, background: cardBg }}>
+                          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, marginBottom: 8 }}>
+                              {hasDraftValue ? '已输入新值，保存时会替换当前已保存内容。' : description}
+                          </div>
+                          <Checkbox
+                              checked={effectiveChecked}
+                              disabled={hasDraftValue}
+                              onChange={(event) => {
+                                  const checked = event.target.checked;
+                                  setClearSecrets((prev) => ({ ...prev, [clearKey]: checked }));
+                              }}
+                          >
+                              {clearLabel}
+                          </Checkbox>
+                      </div>
+                  );
+              }}
+          </Form.Item>
+      );
+  };
   const renderConnectionModalTitle = (icon: React.ReactNode, title: string, description: string) => (
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
@@ -749,6 +851,19 @@ const ConnectionModal: React.FC<{
       }
   });
 
+  const createCustomDsnRule = () => ({
+      validator(_: unknown, value: unknown) {
+          const validationMessage = getCustomConnectionDsnValidationMessage({
+              dsnInput: value,
+              hasStoredSecret: initialValues?.hasOpaqueDSN,
+              clearStoredSecret: clearSecrets.opaqueDSN,
+          });
+          return validationMessage
+              ? Promise.reject(new Error(validationMessage))
+              : Promise.resolve();
+      }
+  });
+
   const getUriPlaceholder = () => {
       if (dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx') {
           const defaultPort = getDefaultPortByType(dbType);
@@ -1066,6 +1181,7 @@ const ConnectionModal: React.FC<{
           setUriFeedback(null);
           setCustomIconType(undefined);
           setCustomIconColor(undefined);
+          setClearSecrets(createEmptyConnectionSecretClearState());
           setTypeSelectWarning(null);
           setDriverStatusLoaded(false);
           void refreshDriverStatus();
@@ -1198,6 +1314,107 @@ const ConnectionModal: React.FC<{
       };
   }, []);
 
+  const buildSavedConnectionInput = (config: ConnectionConfig, values: any) => {
+      const connectionId = initialValues?.id || config.id || Date.now().toString();
+      const primaryDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasPrimaryPassword,
+          valueInput: config.password,
+          clearSecret: clearSecrets.primaryPassword,
+          forceClear: values.type === 'mongodb' && values.savePassword === false,
+      });
+      const sshDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasSSHPassword,
+          valueInput: config.ssh?.password,
+          clearSecret: clearSecrets.sshPassword,
+          forceClear: !config.useSSH,
+      });
+      const proxyDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasProxyPassword,
+          valueInput: config.proxy?.password,
+          clearSecret: clearSecrets.proxyPassword,
+          forceClear: !config.useProxy,
+      });
+      const httpTunnelDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasHttpTunnelPassword,
+          valueInput: config.httpTunnel?.password,
+          clearSecret: clearSecrets.httpTunnelPassword,
+          forceClear: !config.useHttpTunnel,
+      });
+      const mysqlReplicaEnabled = (config.type === 'mysql' || config.type === 'mariadb' || config.type === 'diros' || config.type === 'sphinx')
+          && config.topology === 'replica';
+      const mysqlReplicaDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasMySQLReplicaPassword,
+          valueInput: config.mysqlReplicaPassword,
+          clearSecret: clearSecrets.mysqlReplicaPassword,
+          forceClear: !mysqlReplicaEnabled,
+      });
+      const mongoReplicaEnabled = config.type === 'mongodb'
+          && config.topology === 'replica'
+          && values.savePassword !== false;
+      const mongoReplicaDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasMongoReplicaPassword,
+          valueInput: config.mongoReplicaPassword,
+          clearSecret: clearSecrets.mongoReplicaPassword,
+          forceClear: !mongoReplicaEnabled,
+      });
+      const opaqueUriDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasOpaqueURI,
+          valueInput: config.uri,
+          clearSecret: clearSecrets.opaqueURI,
+          forceClear: values.type === 'custom',
+          trimInput: true,
+      });
+      const opaqueDsnDraft = resolveConnectionSecretDraft({
+          hasSecret: initialValues?.hasOpaqueDSN,
+          valueInput: config.dsn,
+          clearSecret: clearSecrets.opaqueDSN,
+          forceClear: values.type !== 'custom',
+          trimInput: true,
+      });
+      const isRedisType = values.type === 'redis';
+      const displayHost = String((config as any).host || values.host || '').trim();
+      const nextName = values.name || (isFileDatabaseType(values.type)
+          ? (values.type === 'duckdb' ? 'DuckDB DB' : 'SQLite DB')
+          : (values.type === 'redis' ? `Redis ${displayHost}` : displayHost));
+
+      return {
+          id: connectionId,
+          name: nextName,
+          config: {
+              ...config,
+              id: connectionId,
+              password: primaryDraft.value,
+              ssh: {
+                  ...(config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }),
+                  password: sshDraft.value,
+              },
+              proxy: {
+                  ...(config.proxy || { type: 'socks5', host: '', port: 1080, user: '', password: '' }),
+                  password: proxyDraft.value,
+              },
+              httpTunnel: {
+                  ...(config.httpTunnel || { host: '', port: 8080, user: '', password: '' }),
+                  password: httpTunnelDraft.value,
+              },
+              uri: opaqueUriDraft.value,
+              dsn: opaqueDsnDraft.value,
+              mysqlReplicaPassword: mysqlReplicaDraft.value,
+              mongoReplicaPassword: mongoReplicaDraft.value,
+          },
+          includeDatabases: values.includeDatabases,
+          includeRedisDatabases: isRedisType ? values.includeRedisDatabases : undefined,
+          iconType: customIconType || '',
+          iconColor: customIconColor || '',
+          clearPrimaryPassword: primaryDraft.clearStoredSecret,
+          clearSSHPassword: sshDraft.clearStoredSecret,
+          clearProxyPassword: proxyDraft.clearStoredSecret,
+          clearHttpTunnelPassword: httpTunnelDraft.clearStoredSecret,
+          clearMySQLReplicaPassword: mysqlReplicaDraft.clearStoredSecret,
+          clearMongoReplicaPassword: mongoReplicaDraft.clearStoredSecret,
+          clearOpaqueURI: opaqueUriDraft.clearStoredSecret,
+          clearOpaqueDSN: opaqueDsnDraft.clearStoredSecret,
+      };
+  };
   const handleOk = async () => {
     try {
       await form.validateFields();
@@ -1211,28 +1428,21 @@ const ConnectionModal: React.FC<{
       setLoading(true);
 
       const config = await buildConfig(values, true);
-      const displayHost = String((config as any).host || values.host || '').trim();
-
-      const isRedisType = values.type === 'redis';
-      const newConn = {
-        id: initialValues ? initialValues.id : Date.now().toString(),
-        name: values.name || (isFileDatabaseType(values.type) ? (values.type === 'duckdb' ? 'DuckDB DB' : 'SQLite DB') : (values.type === 'redis' ? `Redis ${displayHost}` : displayHost)),
-        config: config,
-        includeDatabases: values.includeDatabases,
-        includeRedisDatabases: isRedisType ? values.includeRedisDatabases : undefined,
-        iconType: customIconType,
-        iconColor: customIconColor,
-      };
+      const payload = buildSavedConnectionInput(config, values);
+      const backendApp = (window as any).go?.app?.App;
+      const savedConnection = await backendApp?.SaveConnection?.(payload);
+      if (!savedConnection) {
+          throw new Error('保存连接失败：后端接口不可用');
+      }
 
       if (initialValues) {
-          updateConnection(newConn);
+          updateConnection(savedConnection);
           message.success('配置已更新（未连接）');
       } else {
-          addConnection(newConn);
+          addConnection(savedConnection);
           message.success('配置已保存（未连接）');
       }
 
-      setLoading(false);
       form.resetFields();
       setUseSSL(false);
       setUseSSH(false);
@@ -1240,8 +1450,11 @@ const ConnectionModal: React.FC<{
       setUseHttpTunnel(false);
       setDbType('mysql');
       setStep(1);
+      setClearSecrets(createEmptyConnectionSecretClearState());
       onClose();
-    } catch (e) {
+    } catch (e: any) {
+      message.error(e?.message || '保存失败');
+    } finally {
       setLoading(false);
     }
   };
@@ -1271,6 +1484,30 @@ const ConnectionModal: React.FC<{
       }
   };
 
+  const getBlockingSecretClearMessage = (values: any): string | null => {
+      if (clearSecrets.primaryPassword && values.type !== 'custom' && !isFileDatabaseType(values.type) && String(values.password ?? '') === '') {
+          return '测试连接前请填写新的密码，或取消清除已保存密码';
+      }
+      if (clearSecrets.sshPassword && values.useSSH && String(values.sshPassword ?? '') === '') {
+          return '测试连接前请填写新的 SSH 密码，或取消清除已保存 SSH 密码';
+      }
+      if (clearSecrets.proxyPassword && values.useProxy && !values.useHttpTunnel && String(values.proxyPassword ?? '') === '') {
+          return '测试连接前请填写新的代理密码，或取消清除已保存代理密码';
+      }
+      if (clearSecrets.httpTunnelPassword && values.useHttpTunnel && String(values.httpTunnelPassword ?? '') === '') {
+          return '测试连接前请填写新的隧道密码，或取消清除已保存隧道密码';
+      }
+      if (clearSecrets.mysqlReplicaPassword && (values.type === 'mysql' || values.type === 'mariadb' || values.type === 'diros' || values.type === 'sphinx') && values.mysqlTopology === 'replica' && String(values.mysqlReplicaPassword ?? '') === '') {
+          return '测试连接前请填写新的从库密码，或取消清除已保存从库密码';
+      }
+      if (clearSecrets.mongoReplicaPassword && values.type === 'mongodb' && values.mongoTopology === 'replica' && String(values.mongoReplicaPassword ?? '') === '') {
+          return '测试连接前请填写新的副本集密码，或取消清除已保存副本集密码';
+      }
+      if (values.type === 'mongodb' && values.savePassword === false && initialValues?.hasPrimaryPassword && String(values.password ?? '') === '') {
+          return '测试连接前请填写新的 MongoDB 密码，或重新勾选保存密码';
+      }
+      return null;
+  };
   const buildTestFailureMessage = (reason: unknown, fallback: string) => {
       const text = String(reason ?? '').trim();
       const normalized = text && text !== 'undefined' && text !== 'null' ? text : fallback;
@@ -1290,9 +1527,17 @@ const ConnectionModal: React.FC<{
               promptInstallDriver(values.type, unavailableReason);
               return;
           }
+          const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
+          if (blockingSecretClearMessage) {
+              setTestResult({ type: 'error', message: blockingSecretClearMessage });
+              return;
+          }
           setLoading(true);
           setTestResult(null);
           const config = await buildConfig(values, false);
+          if (initialValues?.id) {
+              config.id = initialValues.id;
+          }
           const timeoutSecondsRaw = Number(values.timeout);
           const timeoutSeconds = Number.isFinite(timeoutSecondsRaw) && timeoutSecondsRaw > 0
               ? Math.min(timeoutSecondsRaw, MAX_TIMEOUT_SECONDS)
@@ -1368,7 +1613,15 @@ const ConnectionModal: React.FC<{
           await form.validateFields();
           const values = form.getFieldsValue(true);
           setDiscoveringMembers(true);
+          const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
+          if (blockingSecretClearMessage) {
+              message.error(blockingSecretClearMessage);
+              return;
+          }
           const config = await buildConfig(values, false);
+          if (initialValues?.id) {
+              config.id = initialValues.id;
+          }
           const result = await MongoDiscoverMembers(config as any);
           if (!result.success) {
               message.error(result.message || '成员发现失败');
@@ -1850,7 +2103,7 @@ const ConnectionModal: React.FC<{
               <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>常用参数集中在左侧，优先完成连接建立所需的最小输入。</div>
 
               <Form.Item name="name" label="连接名称">
-                  <Input placeholder="例如：本地测试库" />
+                  <Input {...noAutoCapInputProps} placeholder="例如：本地测试库" />
               </Form.Item>
 
               {!isCustom && (
@@ -1860,7 +2113,7 @@ const ConnectionModal: React.FC<{
                           label="连接 URI（可复制粘贴）"
                           help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
                       >
-                          <Input.TextArea rows={3} placeholder={getUriPlaceholder()} />
+                          <Input.TextArea {...noAutoCapInputProps} rows={3} placeholder={getUriPlaceholder()} />
                       </Form.Item>
                       <Space size={8} style={{ marginBottom: uriFeedback ? 12 : 16 }} wrap>
                           <Button onClick={handleGenerateURI}>生成 URI</Button>
@@ -1877,17 +2130,31 @@ const ConnectionModal: React.FC<{
                               style={{ marginBottom: 16 }}
                           />
                       )}
+                      {renderStoredSecretControls({
+                          fieldName: 'uri',
+                          clearKey: 'opaqueURI',
+                          hasStoredSecret: initialValues?.hasOpaqueURI,
+                          clearLabel: '清除已保存 URI',
+                          description: '当前已保存连接 URI。留空表示继续沿用，输入新值表示替换。',
+                      })}
                   </>
               )}
 
               {isCustom ? (
                   <>
                       <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
-                          <Input placeholder="例如: mysql, postgres" />
+                          <Input {...noAutoCapInputProps} placeholder="例如: mysql, postgres" />
                       </Form.Item>
-                      <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[{ required: true, message: '请输入连接字符串' }]}> 
-                          <Input.TextArea rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
+                      <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[createCustomDsnRule()]}>
+                          <Input.TextArea {...noAutoCapInputProps} rows={4} placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8" />
                       </Form.Item>
+                      {renderStoredSecretControls({
+                          fieldName: 'dsn',
+                          clearKey: 'opaqueDSN',
+                          hasStoredSecret: initialValues?.hasOpaqueDSN,
+                          clearLabel: '清除已保存 DSN',
+                          description: '当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。',
+                      })}
                   </>
               ) : (
                   <>
@@ -1899,6 +2166,7 @@ const ConnectionModal: React.FC<{
                               style={{ marginBottom: 0 }}
                           >
                               <Input
+                                  {...noAutoCapInputProps}
                                   placeholder={isFileDb ? (dbType === 'duckdb' ? '/path/to/db.duckdb' : '/path/to/db.sqlite') : 'localhost'}
                               />
                           </Form.Item>
@@ -1926,7 +2194,7 @@ const ConnectionModal: React.FC<{
                               label="默认连接数据库（可选）"
                               help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
                           >
-                              <Input placeholder="例如：appdb" />
+                              <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
                           </Form.Item>
                       )}
 
@@ -1937,7 +2205,7 @@ const ConnectionModal: React.FC<{
                               rules={[createUriAwareRequiredRule('请输入 Oracle 服务名（例如 ORCLPDB1）')]}
                               help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
                           >
-                              <Input placeholder="例如：ORCLPDB1" />
+                              <Input {...noAutoCapInputProps} placeholder="例如：ORCLPDB1" />
                           </Form.Item>
                       )}
 
@@ -1962,12 +2230,19 @@ const ConnectionModal: React.FC<{
                                       </Form.Item>
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                           <Form.Item name="mysqlReplicaUser" label="从库用户名（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="留空沿用主库用户名" />
+                                              <Input {...noAutoCapInputProps} placeholder="留空沿用主库用户名" />
                                           </Form.Item>
                                           <Form.Item name="mysqlReplicaPassword" label="从库密码（可选）" style={{ marginBottom: 0 }}>
-                                              <Input.Password placeholder="留空沿用主库密码" />
+                                              <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主库密码" />
                                           </Form.Item>
                                       </div>
+                                      {renderStoredSecretControls({
+                                          fieldName: 'mysqlReplicaPassword',
+                                          clearKey: 'mysqlReplicaPassword',
+                                          hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
+                                          clearLabel: '清除已保存从库密码',
+                                          description: '当前已保存从库密码。留空表示继续沿用，输入新值表示替换。',
+                                      })}
                                   </>
                               )}
                           </>
@@ -2001,15 +2276,22 @@ const ConnectionModal: React.FC<{
                                       </Form.Item>
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                           <Form.Item name="mongoReplicaSet" label="副本集名称（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="例如：rs0" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如：rs0" />
                                           </Form.Item>
                                           <Form.Item name="mongoReplicaUser" label="副本集用户名（可选）" style={{ marginBottom: 0 }}>
-                                              <Input placeholder="留空沿用主用户名" />
+                                              <Input {...noAutoCapInputProps} placeholder="留空沿用主用户名" />
                                           </Form.Item>
                                       </div>
                                       <Form.Item name="mongoReplicaPassword" label="副本集密码（可选）" style={{ marginBottom: 0 }}>
-                                          <Input.Password placeholder="留空沿用主密码" />
+                                          <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主密码" />
                                       </Form.Item>
+                                      {renderStoredSecretControls({
+                                          fieldName: 'mongoReplicaPassword',
+                                          clearKey: 'mongoReplicaPassword',
+                                          hasStoredSecret: initialValues?.hasMongoReplicaPassword,
+                                          clearLabel: '清除已保存副本集密码',
+                                          description: '当前已保存副本集密码。留空表示继续沿用，输入新值表示替换。',
+                                      })}
                                       <Space size={8} style={{ marginTop: 12, marginBottom: 12 }}>
                                           <Button onClick={handleDiscoverMongoMembers} loading={discoveringMembers}>自动发现成员</Button>
                                       </Space>
@@ -2045,7 +2327,7 @@ const ConnectionModal: React.FC<{
                               )}
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="mongoAuthSource" label="认证库 (authSource)" style={{ marginBottom: 0 }}>
-                                      <Input placeholder="默认使用 database 或 admin" />
+                                      <Input {...noAutoCapInputProps} placeholder="默认使用 database 或 admin" />
                                   </Form.Item>
                                   <Form.Item name="mongoReadPreference" label="读偏好 (readPreference)" style={{ marginBottom: 0 }}>
                                       <Select
@@ -2082,8 +2364,15 @@ const ConnectionModal: React.FC<{
                                   </Form.Item>
                               )}
                               <Form.Item name="password" label="密码 (可选)">
-                                  <Input.Password placeholder="Redis 密码（如果设置了 requirepass）" />
+                                  <Input.Password {...noAutoCapInputProps} placeholder="Redis 密码（如果设置了 requirepass）" />
                               </Form.Item>
+                              {renderStoredSecretControls({
+                                  fieldName: 'password',
+                                  clearKey: 'primaryPassword',
+                                  hasStoredSecret: initialValues?.hasPrimaryPassword,
+                                  clearLabel: '清除已保存密码',
+                                  description: '当前已保存 Redis 密码。留空表示继续沿用，输入新值表示替换。',
+                              })}
                               <Form.Item
                                   name="includeRedisDatabases"
                                   label="显示数据库 (留空显示全部)"
@@ -2097,6 +2386,7 @@ const ConnectionModal: React.FC<{
                       )}
 
                       {!isFileDb && !isRedis && (
+                          <>
                           <div style={{ display: 'grid', gridTemplateColumns: dbType === 'mongodb' ? 'minmax(0, 1fr) minmax(0, 1fr) 180px' : 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                               <Form.Item
                                   name="user"
@@ -2104,10 +2394,10 @@ const ConnectionModal: React.FC<{
                                   rules={dbType === 'mongodb' ? [] : [createUriAwareRequiredRule('请输入用户名')]}
                                   style={{ marginBottom: 0 }}
                               >
-                                  <Input />
+                                  <Input {...noAutoCapInputProps} />
                               </Form.Item>
                               <Form.Item name="password" label="密码" style={{ marginBottom: 0 }}>
-                                  <Input.Password />
+                                  <Input.Password {...noAutoCapInputProps} />
                               </Form.Item>
                               {dbType === 'mongodb' && (
                                   <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ marginBottom: 0 }}>
@@ -2124,6 +2414,14 @@ const ConnectionModal: React.FC<{
                                   </Form.Item>
                               )}
                           </div>
+                              {renderStoredSecretControls({
+                                  fieldName: 'password',
+                                  clearKey: 'primaryPassword',
+                                  hasStoredSecret: initialValues?.hasPrimaryPassword,
+                                  clearLabel: '清除已保存密码',
+                                  description: '当前已保存主连接密码。留空表示继续沿用，输入新值表示替换。',
+                              })}
+                          </>
                       )}
 
                       {dbType === 'mongodb' && (
@@ -2183,10 +2481,10 @@ const ConnectionModal: React.FC<{
                                   {dbType === 'dameng' && (
                                       <>
                                           <Form.Item name="sslCertPath" label="客户端证书路径 (SSL_CERT_PATH)" rules={[{ required: true, message: '达梦 SSL 需要证书路径' }]} style={{ marginBottom: 8 }}>
-                                              <Input placeholder="例如: C:\certs\client-cert.pem" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如: C:\certs\client-cert.pem" />
                                           </Form.Item>
                                           <Form.Item name="sslKeyPath" label="客户端私钥路径 (SSL_KEY_PATH)" rules={[{ required: true, message: '达梦 SSL 需要私钥路径' }]} style={{ marginBottom: 8 }}>
-                                              <Input placeholder="例如: C:\certs\client-key.pem" />
+                                              <Input {...noAutoCapInputProps} placeholder="例如: C:\certs\client-key.pem" />
                                           </Form.Item>
                                       </>
                                   )}
@@ -2209,7 +2507,7 @@ const ConnectionModal: React.FC<{
                               <div style={tunnelSectionStyle}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
                                   <Form.Item name="sshHost" label="SSH 主机 (域名或IP)" rules={[{ required: useSSH, message: '请输入SSH主机' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="例如: ssh.example.com 或 192.168.1.100" />
+                                      <Input {...noAutoCapInputProps} placeholder="例如: ssh.example.com 或 192.168.1.100" />
                                   </Form.Item>
                                   <Form.Item name="sshPort" label="端口" rules={[{ required: useSSH, message: '请输入SSH端口' }]} style={{ width: 100 }}>
                                       <InputNumber style={{ width: '100%' }} />
@@ -2217,22 +2515,29 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="sshUser" label="SSH 用户" rules={[{ required: useSSH, message: '请输入SSH用户' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="root" />
+                                      <Input {...noAutoCapInputProps} placeholder="root" />
                                   </Form.Item>
                                   <Form.Item name="sshPassword" label="SSH 密码" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="密码" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="密码" />
                                       </Form.Item>
                                   </div>
                                   <Form.Item label="私钥路径 (可选)" help="例如: /Users/name/.ssh/id_rsa">
                                       <Space.Compact style={{ width: '100%' }}>
                                           <Form.Item name="sshKeyPath" noStyle>
-                                              <Input placeholder="绝对路径" />
+                                              <Input {...noAutoCapInputProps} placeholder="绝对路径" />
                                           </Form.Item>
                                           <Button onClick={handleSelectSSHKeyFile} loading={selectingSSHKey}>
                                               浏览...
                                           </Button>
                                       </Space.Compact>
                                   </Form.Item>
+                                  {renderStoredSecretControls({
+                                      fieldName: 'sshPassword',
+                                      clearKey: 'sshPassword',
+                                      hasStoredSecret: initialValues?.hasSSHPassword,
+                                      clearLabel: '清除已保存 SSH 密码',
+                                      description: '当前已保存 SSH 密码。留空表示继续沿用，输入新值表示替换。',
+                                  })}
                               </div>
                           )}
                       </div>
@@ -2250,7 +2555,7 @@ const ConnectionModal: React.FC<{
                           ) : (
                               <div style={tunnelSectionStyle}>
                               <Form.Item name="proxyHost" label="代理主机" rules={[{ required: useProxy, message: '请输入代理主机' }]}>
-                                  <Input placeholder="例如: 127.0.0.1 或 proxy.company.com" />
+                                  <Input {...noAutoCapInputProps} placeholder="例如: 127.0.0.1 或 proxy.company.com" />
                               </Form.Item>
                               <div style={{ display: 'grid', gridTemplateColumns: '180px 120px', gap: 16 }}>
                                   <Form.Item name="proxyType" label="代理类型" rules={[{ required: useProxy, message: '请选择代理类型' }]} style={{ marginBottom: 0 }}>
@@ -2265,12 +2570,19 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="proxyUser" label="代理用户名（可选）" style={{ flex: 1 }}>
-                                      <Input placeholder="留空表示无认证" />
+                                      <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="proxyPassword" label="代理密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="留空表示无认证" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                       </Form.Item>
                                   </div>
+                                  {renderStoredSecretControls({
+                                      fieldName: 'proxyPassword',
+                                      clearKey: 'proxyPassword',
+                                      hasStoredSecret: initialValues?.hasProxyPassword,
+                                      clearLabel: '清除已保存代理密码',
+                                      description: '当前已保存代理密码。留空表示继续沿用，输入新值表示替换。',
+                                  })}
                               </div>
                           )}
                       </div>
@@ -2288,7 +2600,7 @@ const ConnectionModal: React.FC<{
                           <div style={tunnelSectionStyle}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16 }}>
                                   <Form.Item name="httpTunnelHost" label="隧道主机" rules={[{ required: useHttpTunnel, message: '请输入隧道主机' }]} style={{ flex: 1 }}>
-                                      <Input placeholder="例如: tunnel.company.com 或 127.0.0.1" />
+                                      <Input {...noAutoCapInputProps} placeholder="例如: tunnel.company.com 或 127.0.0.1" />
                                   </Form.Item>
                                   <Form.Item name="httpTunnelPort" label="端口" rules={[{ required: useHttpTunnel, message: '请输入隧道端口' }]} style={{ width: 120 }}>
                                       <InputNumber style={{ width: '100%' }} min={1} max={65535} />
@@ -2296,12 +2608,19 @@ const ConnectionModal: React.FC<{
                               </div>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                                   <Form.Item name="httpTunnelUser" label="隧道用户名（可选）" style={{ flex: 1 }}>
-                                      <Input placeholder="留空表示无认证" />
+                                      <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="httpTunnelPassword" label="隧道密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password placeholder="留空表示无认证" />
+                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                               </div>
+                              {renderStoredSecretControls({
+                                  fieldName: 'httpTunnelPassword',
+                                  clearKey: 'httpTunnelPassword',
+                                  hasStoredSecret: initialValues?.hasHttpTunnelPassword,
+                                  clearLabel: '清除已保存隧道密码',
+                                  description: '当前已保存隧道密码。留空表示继续沿用，输入新值表示替换。',
+                              })}
                               <Text type="secondary" style={{ fontSize: 12 }}>与“使用代理”互斥，启用后将通过 HTTP CONNECT 建立独立隧道。</Text>
                           </div>
                       )}
@@ -2504,7 +2823,7 @@ const ConnectionModal: React.FC<{
                   }
               }}
           >
-              <Form.Item name="type" hidden><Input /></Form.Item>
+              <Form.Item name="type" hidden><Input {...noAutoCapInputProps} /></Form.Item>
               {currentDriverUnavailableReason && (
                   <Alert
                       showIcon
@@ -2832,3 +3151,7 @@ const ConnectionModal: React.FC<{
 };
 
 export default ConnectionModal;
+
+
+
+

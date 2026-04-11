@@ -37,7 +37,7 @@ export const getDbDefaultColor = (type: string): string =>
 
 const BRAND_SVG_TYPES = new Set([
     'mysql', 'mariadb', 'postgres', 'redis', 'mongodb', 'clickhouse', 'sqlite',
-    'diros', 'sphinx', 'duckdb',
+    'diros', 'sphinx', 'duckdb', 'sqlserver',
 ]);
 
 /** 品牌 SVG 图标：用 <img> 加载 /db-icons/*.svg */
@@ -110,7 +110,7 @@ const OracleIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.oracle} label="Or" />
 );
 const SQLServerIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.sqlserver} label="SS" />
+    <BrandSvgIcon type="sqlserver" size={size} color={color} />
 );
 const DorisIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="diros" size={size} color={color} />

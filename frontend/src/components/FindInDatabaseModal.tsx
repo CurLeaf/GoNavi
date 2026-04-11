@@ -5,6 +5,7 @@ import { DBQuery, DBGetTables, DBGetAllColumns } from '../../wailsjs/go/app/App'
 import { quoteIdentPart, escapeLiteral } from '../utils/sql';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface FindInDatabaseModalProps {
     open: boolean;
@@ -106,7 +107,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
 
         try {
             // 1. 获取所有表
-            const tablesRes = await DBGetTables(config as any, dbName);
+            const tablesRes = await DBGetTables(buildRpcConnectionConfig(config) as any, dbName);
             if (!tablesRes.success) {
                 message.error('获取表列表失败: ' + tablesRes.message);
                 setSearching(false);
@@ -124,7 +125,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             setProgress({ current: 0, total: tableNames.length, tableName: '' });
 
             // 2. 获取所有列信息（返回 any[]，含 tableName/name/type 字段）
-            const allColsRes = await DBGetAllColumns(config as any, dbName);
+            const allColsRes = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
             const allColumns: any[] = (allColsRes?.success && Array.isArray(allColsRes.data)) ? allColsRes.data : [];
 
             // 按表名分组
@@ -166,7 +167,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                 const sql = buildLimitedSelectSQL(dbType, baseSql, MAX_MATCH_ROWS_PER_TABLE);
 
                 try {
-                    const res = await DBQuery(config as any, dbName, sql);
+                    const res = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, sql);
                     if (res.success && Array.isArray(res.data) && res.data.length > 0) {
                         // 检查哪些列实际匹配了
                         const matchedCols = new Set<string>();

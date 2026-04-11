@@ -16,7 +16,7 @@ export function getConnectionWorkbenchState(
   if (!hasAppliedInitialGlobalProxy) {
     return {
       ready: false,
-      message: '正在同步全局代理配置...',
+      message: '正在加载安全配置...',
     };
   }
   return {
@@ -24,3 +24,4 @@ export function getConnectionWorkbenchState(
     message: '',
   };
 }
+

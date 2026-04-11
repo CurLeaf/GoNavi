@@ -10,14 +10,17 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
 	proxytunnel "GoNavi-Wails/internal/proxy"
+	"GoNavi-Wails/internal/secretstore"
 	"github.com/google/uuid"
 )
 
@@ -53,14 +56,25 @@ type App struct {
 	updateMu       sync.Mutex
 	updateState    updateState
 	queryMu        sync.RWMutex
+	configDir      string
+	secretStore    secretstore.SecretStore
 	runningQueries map[string]queryContext // queryID -> cancelFunc and start time
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
+	return NewAppWithSecretStore(secretstore.NewKeyringStore())
+}
+
+func NewAppWithSecretStore(store secretstore.SecretStore) *App {
+	if store == nil {
+		store = secretstore.NewUnavailableStore("secret store unavailable")
+	}
 	return &App{
 		dbCache:        make(map[string]cachedDatabase),
 		runningQueries: make(map[string]queryContext),
+		configDir:      resolveAppConfigDir(),
+		secretStore:    store,
 	}
 }
 
@@ -74,7 +88,13 @@ func InitializeLifecycle(a *App, ctx context.Context) {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startedAt = time.Now()
+	if strings.TrimSpace(a.configDir) == "" {
+		a.configDir = resolveAppConfigDir()
+	}
+	db.SetExternalDriverDownloadDirectory(appdata.DriverRoot(a.configDir))
 	logger.Init()
+	a.loadPersistedGlobalProxy()
+	installMacNativeWindowDiagnostics(logger.Path())
 	applyMacWindowTranslucencyFix()
 	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }
@@ -90,6 +110,16 @@ func (a *App) SetWindowTranslucency(opacity float64, blur float64) {
 // On non-macOS platforms this is a no-op.
 func (a *App) SetMacNativeWindowControls(enabled bool) {
 	setMacNativeWindowControls(enabled)
+}
+
+// LogWindowDiagnostic 记录前端采集到的窗口诊断信息，便于排查 macOS 原生全屏异常。
+func (a *App) LogWindowDiagnostic(stage string, payload string) {
+	stage = strings.TrimSpace(stage)
+	payload = strings.TrimSpace(payload)
+	if stage == "" {
+		stage = "unknown"
+	}
+	logger.Warnf("窗口诊断：stage=%s payload=%s", stage, payload)
 }
 
 // Shutdown is called when the app terminates
@@ -109,8 +139,24 @@ func (a *App) Shutdown(ctx context.Context) {
 	logger.Close()
 }
 
+func dataRootInfoPayload(activeRoot string) map[string]interface{} {
+	defaultRoot := appdata.DefaultRoot()
+	currentRoot := strings.TrimSpace(activeRoot)
+	if currentRoot == "" {
+		currentRoot = appdata.MustResolveActiveRoot()
+	}
+	return map[string]interface{}{
+		"path":          currentRoot,
+		"defaultPath":   defaultRoot,
+		"driverPath":    appdata.DriverRoot(currentRoot),
+		"isDefaultPath": filepath.Clean(currentRoot) == filepath.Clean(defaultRoot),
+		"bootstrapPath": appdata.BootstrapPath(),
+	}
+}
+
 func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.ConnectionConfig {
 	normalized := config
+	normalized.ID = ""
 	normalized.Type = strings.ToLower(strings.TrimSpace(normalized.Type))
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0
@@ -216,6 +262,9 @@ func shouldRefreshCachedConnection(err error) bool {
 }
 
 func (a *App) invalidateCachedDatabase(config connection.ConnectionConfig, reason error) bool {
+	if resolvedConfig, err := a.resolveConnectionSecrets(config); err == nil {
+		config = resolvedConfig
+	}
 	effectiveConfig := applyGlobalProxyToConnection(config)
 	key := getCacheKey(effectiveConfig)
 	shortKey := shortCacheKey(key)
@@ -439,7 +488,11 @@ func (a *App) getDatabase(config connection.ConnectionConfig) (db.Database, erro
 }
 
 func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Database, error) {
-	effectiveConfig := applyGlobalProxyToConnection(config)
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		return nil, wrapConnectError(config, err)
+	}
+	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
 	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
@@ -465,7 +518,11 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
-	effectiveConfig := applyGlobalProxyToConnection(config)
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		return nil, wrapConnectError(config, err)
+	}
+	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
 	isFileDB := isFileDatabaseType(effectiveConfig.Type)
 
 	key := getCacheKey(effectiveConfig)
@@ -546,7 +603,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		logger.Infof("未命中文件库连接缓存，开始创建连接：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 	}
 
-	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(config)
+	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -581,6 +638,12 @@ func shortenCacheKey(key string) string {
 }
 
 func (a *App) connectDatabaseWithStartupRetry(rawConfig connection.ConnectionConfig) (db.Database, connection.ConnectionConfig, error) {
+	resolvedConfig, err := a.resolveConnectionSecrets(rawConfig)
+	if err != nil {
+		return nil, rawConfig, wrapConnectError(rawConfig, err)
+	}
+	rawConfig = resolvedConfig
+
 	var lastErr error
 	var lastEffectiveConfig connection.ConnectionConfig
 
@@ -663,8 +726,7 @@ func (a *App) shouldRetryConnect(err error, attempt int) bool {
 			return true
 		}
 	}
-	// Outside startup window, still grant one retry for transient network glitches.
-	return attempt == 1
+	return false
 }
 
 func isTransientStartupConnectError(err error) bool {

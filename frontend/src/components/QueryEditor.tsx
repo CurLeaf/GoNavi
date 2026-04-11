@@ -11,6 +11,7 @@ import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -336,7 +337,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
           };
 
-          const res = await DBGetDatabases(config as any);
+          const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
           if (res.success && Array.isArray(res.data)) {
               let dbs = res.data.map((row: any) => row.Database || row.database);
 
@@ -392,7 +393,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           for (const dbName of visibleDbs) {
               // 获取表
-              const resTables = await DBGetTables(config as any, dbName);
+              const resTables = await DBGetTables(buildRpcConnectionConfig(config) as any, dbName);
               if (resTables.success && Array.isArray(resTables.data)) {
                   const tableNames = resTables.data.map((row: any) => Object.values(row)[0] as string);
                   tableNames.forEach((tableName: string) => {
@@ -401,7 +402,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
 
               // 获取列 (所有数据库类型都支持 DBGetAllColumns)
-              const resCols = await DBGetAllColumns(config as any, dbName);
+              const resCols = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
               if (resCols.success && Array.isArray(resCols.data)) {
                   resCols.data.forEach((col: any) => {
                       allColumns.push({
@@ -577,7 +578,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const config = buildConnConfig();
                   if (!config) return [] as ColumnDefinition[];
 
-                  const res = await DBGetColumns(config as any, dbName, tableIdent);
+                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, dbName, tableIdent);
                   if (res?.success && Array.isArray(res.data)) {
                       const cols = res.data as ColumnDefinition[];
                       sharedColumnsCacheData[key] = cols;
@@ -1555,7 +1556,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           } catch {
               queryId = 'reload-' + Date.now();
           }
-          const res = await DBQueryMulti(config as any, currentDb, sql, queryId);
+          const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, sql, queryId);
           if (!res?.success) {
               message.error('刷新失败: ' + (res?.message || '未知错误'));
               return;
@@ -1643,7 +1644,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
     try {
         const rawSQL = getSelectedSQL() || currentQuery;
-        const dbType = String((config as any).type || 'mysql');
+        const dbType = String((buildRpcConnectionConfig(config) as any).type || 'mysql');
         const normalizedDbType = dbType.trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
 
@@ -1694,7 +1695,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 }
                 setQueryId(queryId);
 
-                const res = await DBQueryWithCancel(config as any, currentDb, executedSql, queryId);
+                const res = await DBQueryWithCancel(buildRpcConnectionConfig(config) as any, currentDb, executedSql, queryId);
                 const duration = Date.now() - startTime;
                 addSqlLog({
                     id: `log-${Date.now()}-query-${idx + 1}`,
@@ -1795,7 +1796,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
             setQueryId(queryId);
 
-            const res = await DBQueryMulti(config as any, currentDb, fullSQL, queryId);
+            const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, fullSQL, queryId);
             const duration = Date.now() - startTime;
 
             addSqlLog({
@@ -1921,7 +1922,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             setActiveResultKey(nextResultSets[0]?.key || '');
 
             pendingPk.forEach(({ resultKey, tableName }) => {
-                DBGetColumns(config as any, currentDb, tableName)
+                DBGetColumns(buildRpcConnectionConfig(config) as any, currentDb, tableName)
                     .then((resCols: any) => {
                         if (runSeqRef.current !== runSeq) return;
                         if (!resCols?.success) {

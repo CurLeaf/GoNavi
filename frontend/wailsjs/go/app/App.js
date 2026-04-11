@@ -6,6 +6,10 @@ export function ApplyChanges(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ApplyChanges'](arg1, arg2, arg3, arg4);
 }
 
+export function ApplyDataRootDirectory(arg1, arg2) {
+  return window['go']['app']['App']['ApplyDataRootDirectory'](arg1, arg2);
+}
+
 export function CancelQuery(arg1) {
   return window['go']['app']['App']['CancelQuery'](arg1);
 }
@@ -20,6 +24,10 @@ export function CheckDriverNetworkStatus() {
 
 export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
+}
+
+export function ClearTables(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ClearTables'](arg1, arg2, arg3);
 }
 
 export function ConfigureDriverRuntimeDirectory(arg1) {
@@ -98,6 +106,10 @@ export function DataSyncPreview(arg1, arg2, arg3) {
   return window['go']['app']['App']['DataSyncPreview'](arg1, arg2, arg3);
 }
 
+export function DeleteConnection(arg1) {
+  return window['go']['app']['App']['DeleteConnection'](arg1);
+}
+
 export function DownloadDriverPackage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DownloadDriverPackage'](arg1, arg2, arg3, arg4);
 }
@@ -120,6 +132,10 @@ export function DropTable(arg1, arg2, arg3) {
 
 export function DropView(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropView'](arg1, arg2, arg3);
+}
+
+export function DuplicateConnection(arg1) {
+  return window['go']['app']['App']['DuplicateConnection'](arg1);
 }
 
 export function ExecuteSQLFile(arg1, arg2, arg3, arg4) {
@@ -158,6 +174,10 @@ export function GetAppInfo() {
   return window['go']['app']['App']['GetAppInfo']();
 }
 
+export function GetDataRootDirectoryInfo() {
+  return window['go']['app']['App']['GetDataRootDirectoryInfo']();
+}
+
 export function GetDriverStatusList(arg1, arg2) {
   return window['go']['app']['App']['GetDriverStatusList'](arg1, arg2);
 }
@@ -174,6 +194,10 @@ export function GetGlobalProxyConfig() {
   return window['go']['app']['App']['GetGlobalProxyConfig']();
 }
 
+export function GetSavedConnections() {
+  return window['go']['app']['App']['GetSavedConnections']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
 }
@@ -186,12 +210,24 @@ export function ImportDataWithProgress(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ImportDataWithProgress'](arg1, arg2, arg3, arg4);
 }
 
-export function InstallLocalDriverPackage(arg1, arg2, arg3) {
-  return window['go']['app']['App']['InstallLocalDriverPackage'](arg1, arg2, arg3);
+export function ImportLegacyConnections(arg1) {
+  return window['go']['app']['App']['ImportLegacyConnections'](arg1);
+}
+
+export function ImportLegacyGlobalProxy(arg1) {
+  return window['go']['app']['App']['ImportLegacyGlobalProxy'](arg1);
+}
+
+export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['InstallLocalDriverPackage'](arg1, arg2, arg3, arg4);
 }
 
 export function InstallUpdateAndRestart() {
   return window['go']['app']['App']['InstallUpdateAndRestart']();
+}
+
+export function LogWindowDiagnostic(arg1, arg2) {
+  return window['go']['app']['App']['LogWindowDiagnostic'](arg1, arg2);
 }
 
 export function MongoDiscoverMembers(arg1) {
@@ -218,8 +254,16 @@ export function MySQLShowCreateTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['MySQLShowCreateTable'](arg1, arg2, arg3);
 }
 
+export function OpenDataRootDirectory() {
+  return window['go']['app']['App']['OpenDataRootDirectory']();
+}
+
 export function OpenDownloadedUpdateDirectory() {
   return window['go']['app']['App']['OpenDownloadedUpdateDirectory']();
+}
+
+export function OpenDriverDownloadDirectory(arg1) {
+  return window['go']['app']['App']['OpenDriverDownloadDirectory'](arg1);
 }
 
 export function OpenSQLFile() {
@@ -352,6 +396,18 @@ export function ResolveDriverPackageDownloadURL(arg1, arg2) {
 
 export function ResolveDriverRepositoryURL(arg1) {
   return window['go']['app']['App']['ResolveDriverRepositoryURL'](arg1);
+}
+
+export function SaveConnection(arg1) {
+  return window['go']['app']['App']['SaveConnection'](arg1);
+}
+
+export function SaveGlobalProxy(arg1) {
+  return window['go']['app']['App']['SaveGlobalProxy'](arg1);
+}
+
+export function SelectDataRootDirectory(arg1) {
+  return window['go']['app']['App']['SelectDataRootDirectory'](arg1);
 }
 
 export function SelectDatabaseFile(arg1, arg2) {

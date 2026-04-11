@@ -2,6 +2,7 @@ package app
 
 import (
 	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,89 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/mod/semver"
 )
+
+var (
+	goBinaryLookPath = exec.LookPath
+	goBinaryStat     = os.Stat
+	goBinaryCommand  = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command(name, arg...)
+	}
+	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		return cmd.Output()
+	}
+)
+
+// resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
+func resolveGoBinaryPath() (string, error) {
+	if goPath, err := goBinaryLookPath("go"); err == nil {
+		return goPath, nil
+	}
+
+	// 修复点：GUI 进程常拿不到终端里的 PATH，这里补充常见安装位置兜底。
+	commonCandidates := []string{
+		"/opt/homebrew/bin/go",
+		"/usr/local/go/bin/go",
+		"/usr/local/bin/go",
+	}
+	for _, candidate := range commonCandidates {
+		if info, err := goBinaryStat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+
+	for _, shell := range candidateShellsForCommandLookup() {
+		cmd := goBinaryCommand(shell, "-lc", "command -v go")
+		output, err := goBinaryCommandOutput(cmd)
+		if err != nil {
+			continue
+		}
+		goPath := resolveExistingPathFromCommandOutput(output)
+		if goPath == "" {
+			continue
+		}
+		if info, err := goBinaryStat(goPath); err == nil && !info.IsDir() {
+			return goPath, nil
+		}
+	}
+
+	return "", exec.ErrNotFound
+}
+
+// resolveExistingPathFromCommandOutput 从命令输出中提取真实存在的路径，避免 shell 启动脚本输出污染探测结果 by AI.Coding
+func resolveExistingPathFromCommandOutput(value []byte) string {
+	for _, line := range bytes.Split(value, []byte{'\n'}) {
+		trimmed := strings.TrimSpace(string(line))
+		if trimmed != "" {
+			if info, err := goBinaryStat(trimmed); err == nil && !info.IsDir() {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+// candidateShellsForCommandLookup 返回可能可用的 shell，用于回收用户登录环境中的 PATH by AI.Coding
+func candidateShellsForCommandLookup() []string {
+	seen := make(map[string]struct{}, 4)
+	result := make([]string, 0, 4)
+	appendShell := func(value string) {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return
+		}
+		if _, ok := seen[trimmed]; ok {
+			return
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+
+	appendShell(os.Getenv("SHELL"))
+	appendShell("/bin/zsh")
+	appendShell("/bin/bash")
+	appendShell("/bin/sh")
+	return result
+}
 
 type driverDefinition struct {
 	Type               string `json:"type"`
@@ -154,9 +238,10 @@ type driverVersionOptionItem struct {
 }
 
 type driverReleaseAssetSizeCacheEntry struct {
-	LoadedAt  time.Time
-	SizeByKey map[string]int64
-	Err       string
+	LoadedAt        time.Time
+	SizeByKey       map[string]int64
+	PublishedAssets map[string]bool
+	Err             string
 }
 
 type goModuleLatestVersionCacheEntry struct {
@@ -200,6 +285,7 @@ const (
 	driverModuleVersionInspectLimit     = 30
 	driverModuleVersionListMaxSize      = 4 << 20
 	driverRecentVersionLimit            = 5
+	driverModuleVersionFetchLimit       = 64
 	driverVersionWarmupMinInterval      = 30 * time.Second
 	driverBundleIndexMaxSize            = 1 << 20
 	driverManifestMaxSize               = 2 << 20
@@ -311,7 +397,8 @@ var driverGoModuleAliasPathMap = map[string][]string{
 }
 
 var driverExtraHistoryLimitMap = map[string]int{
-	"mongodb": 10,
+	"mongodb":  10,
+	"tdengine": 30,
 }
 
 var fallbackRecentDriverVersionsMap = map[string][]goModuleVersionMeta{
@@ -331,6 +418,35 @@ var fallbackRecentDriverVersionsMap = map[string][]goModuleVersionMeta{
 		{Version: "1.17.1"},
 		{Version: "1.17.0"},
 		{Version: "1.16.1"},
+	},
+	"tdengine": {
+		{Version: "3.8.0"},
+		{Version: "3.7.8"},
+		{Version: "3.7.7"},
+		{Version: "3.7.6"},
+		{Version: "3.7.5"},
+		{Version: "3.7.4"},
+		{Version: "3.7.3"},
+		{Version: "3.7.2"},
+		{Version: "3.7.1"},
+		{Version: "3.7.0"},
+		{Version: "3.6.0"},
+		{Version: "3.5.8"},
+		{Version: "3.5.7"},
+		{Version: "3.5.6"},
+		{Version: "3.5.5"},
+		{Version: "3.5.4"},
+		{Version: "3.5.3"},
+		{Version: "3.5.2"},
+		{Version: "3.5.1"},
+		{Version: "3.5.0"},
+		{Version: "3.3.1"},
+		{Version: "3.1.0"},
+		{Version: "3.0.4"},
+		{Version: "3.0.3"},
+		{Version: "3.0.2"},
+		{Version: "3.0.1"},
+		{Version: "3.0.0"},
 	},
 }
 
@@ -429,6 +545,37 @@ func (a *App) SelectDriverPackageDirectory(currentPath string) connection.QueryR
 		selection = abs
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
+}
+
+func (a *App) OpenDriverDownloadDirectory(directory string) connection.QueryResult {
+	resolved, err := resolveDriverDownloadDirectory(directory)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.MkdirAll(resolved, 0o755); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("创建驱动目录失败：%v", err)}
+	}
+
+	var cmd *exec.Cmd
+	switch stdRuntime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", resolved)
+	case "windows":
+		cmd = exec.Command("explorer", resolved)
+	case "linux":
+		cmd = exec.Command("xdg-open", resolved)
+	default:
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前平台暂不支持打开目录：%s", stdRuntime.GOOS)}
+	}
+	if err := cmd.Start(); err != nil {
+		logger.Error(err, "打开驱动目录失败")
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("打开驱动目录失败：%v", err)}
+	}
+	return connection.QueryResult{
+		Success: true,
+		Message: fmt.Sprintf("已打开驱动目录：%s", resolved),
+		Data:    map[string]interface{}{"path": resolved},
+	}
 }
 
 func (a *App) ResolveDriverDownloadDirectory(directory string) connection.QueryResult {
@@ -543,7 +690,10 @@ func (a *App) GetDriverVersionPackageSize(driverType string, version string) con
 	if normalizedVersion == "" {
 		return connection.QueryResult{Success: false, Message: "版本号为空"}
 	}
-	assetName := optionalDriverReleaseAssetName(normalizedType)
+	if err := validateDriverSelectedVersion(definition, normalizedVersion); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	assetName := optionalDriverReleaseAssetNameForVersion(normalizedType, normalizedVersion)
 	if strings.TrimSpace(assetName) == "" {
 		return connection.QueryResult{Success: false, Message: "驱动资产名称为空"}
 	}
@@ -551,17 +701,18 @@ func (a *App) GetDriverVersionPackageSize(driverType string, version string) con
 	tag := "v" + normalizedVersion
 	sizeBytes := int64(0)
 	sizeSource := ""
-	if sizeByAsset, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
+	if sizeByAsset, _, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
 		return fetchReleaseByTag(tag)
 	}); err == nil {
-		sizeBytes = resolveOptionalDriverAssetSize(sizeByAsset, normalizedType)
+		sizeBytes = resolveOptionalDriverAssetSizeForVersion(sizeByAsset, normalizedType, normalizedVersion)
 		if sizeBytes > 0 {
 			sizeSource = "tag"
 		}
 	}
-	if sizeBytes <= 0 {
-		if sizeByAsset, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
-			sizeBytes = resolveOptionalDriverAssetSize(sizeByAsset, normalizedType)
+	allowLatestFallback := sameDriverVersion(normalizedVersion, definition.PinnedVersion) || sameDriverVersion(normalizedVersion, latestDriverVersionMap[normalizedType])
+	if sizeBytes <= 0 && allowLatestFallback {
+		if sizeByAsset, _, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
+			sizeBytes = resolveOptionalDriverAssetSizeForVersion(sizeByAsset, normalizedType, normalizedVersion)
 			if sizeBytes > 0 {
 				sizeSource = "latest"
 			}
@@ -741,7 +892,7 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	}
 }
 
-func (a *App) InstallLocalDriverPackage(driverType string, filePath string, downloadDir string) connection.QueryResult {
+func (a *App) InstallLocalDriverPackage(driverType string, filePath string, downloadDir string, version string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
 		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
@@ -764,7 +915,10 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 	db.SetExternalDriverDownloadDirectory(resolvedDir)
 
 	a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, "开始安装本地驱动包")
-	selectedVersion := resolveDriverInstallVersion(definition.PinnedVersion, "local://manual", definition)
+	selectedVersion := resolveDriverInstallVersion(version, "local://manual", definition)
+	if err := validateDriverSelectedVersion(definition, selectedVersion); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	meta, installErr := installOptionalDriverAgentFromLocalPath(definition, filePath, resolvedDir, selectedVersion)
 	if installErr != nil {
 		errText := normalizeErrorMessage(installErr)
@@ -816,6 +970,9 @@ func (a *App) DownloadDriverPackage(driverType string, version string, downloadU
 		urlText = fmt.Sprintf("builtin://activate/%s", optionalDriverPublicTypeName(definition.Type))
 	}
 	selectedVersion := resolveDriverInstallVersion(version, urlText, definition)
+	if err := validateDriverSelectedVersion(definition, selectedVersion); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 
 	resolvedDir, err := resolveDriverDownloadDirectory(downloadDir)
 	if err != nil {
@@ -1424,6 +1581,11 @@ func resolveDriverVersionOptions(definition driverDefinition, repositoryURL stri
 		if versionText == "" && urlText == "" {
 			return
 		}
+		if versionText != "" {
+			if err := validateDriverSelectedVersion(definition, versionText); err != nil {
+				return
+			}
+		}
 		versionKey := normalizeVersion(versionText)
 		key := ""
 		if versionKey != "" {
@@ -1550,6 +1712,16 @@ func resolveVersionedDriverOption(definition driverDefinition, version string, s
 	if versionText == "" {
 		return "", "", false
 	}
+	if err := validateDriverSelectedVersion(definition, versionText); err != nil {
+		return "", "", false
+	}
+
+	if publishedURL, ok := resolvePublishedDriverDownloadURL(definition, versionText); ok {
+		return versionText, publishedURL, true
+	}
+	if !optionalDriverSourceBuildAvailable(definition, versionText) {
+		return "", "", false
+	}
 
 	urlText := strings.TrimSpace(definition.DefaultDownloadURL)
 	if urlText == "" && effectiveDriverEngine(definition) == driverEngineGo {
@@ -1580,6 +1752,97 @@ func sameDriverVersion(left, right string) bool {
 	return a != "" && a == b
 }
 
+func validateDriverSelectedVersion(definition driverDefinition, version string) error {
+	driverType := normalizeDriverType(definition.Type)
+	versionText := normalizeVersion(strings.TrimSpace(version))
+	if driverType == "" || versionText == "" {
+		return nil
+	}
+
+	switch driverType {
+	case "mongodb":
+		if strings.HasPrefix(versionText, "2.") {
+			return nil
+		}
+		if strings.HasPrefix(versionText, "1.17.") {
+			return nil
+		}
+		return fmt.Errorf("MongoDB 版本 %s 当前不受支持；仅支持 1.17.x 和 2.x", versionText)
+	default:
+		return nil
+	}
+}
+
+func shouldRestrictToExplicitVersionArtifact(definition driverDefinition, selectedVersion string) bool {
+	versionText := normalizeVersion(strings.TrimSpace(selectedVersion))
+	if versionText == "" {
+		return false
+	}
+	return !sameDriverVersion(versionText, definition.PinnedVersion)
+}
+
+func optionalDriverSourceBuildAvailable(definition driverDefinition, selectedVersion string) bool {
+	driverType := normalizeDriverType(definition.Type)
+	if driverType == "" || !db.IsOptionalGoDriver(driverType) {
+		return false
+	}
+	if _, err := optionalDriverBuildTag(driverType, selectedVersion); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		return false
+	}
+	if _, err := locateProjectRootForAgentBuild(); err != nil {
+		return false
+	}
+	return true
+}
+
+func resolvePublishedDriverDownloadURL(definition driverDefinition, version string) (string, bool) {
+	driverType := normalizeDriverType(definition.Type)
+	versionText := normalizeVersion(strings.TrimSpace(version))
+	if driverType == "" || versionText == "" {
+		return "", false
+	}
+
+	tag := "v" + versionText
+	assetName, ok := resolvePublishedDriverReleaseAssetName(driverType, versionText, tag)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, tag, assetName), true
+}
+
+func resolvePublishedDriverReleaseAssetName(driverType string, version string, tag string) (string, bool) {
+	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+	if len(assetNames) == 0 {
+		return "", false
+	}
+
+	cacheKey := "tag:" + strings.TrimSpace(tag)
+	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache(cacheKey); ok {
+		for _, assetName := range assetNames {
+			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+				return assetName, true
+			}
+		}
+		return "", false
+	}
+
+	sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached(cacheKey, func() (*githubRelease, error) {
+		return fetchReleaseByTag(tag)
+	})
+	if err != nil {
+		return "", false
+	}
+	for _, assetName := range assetNames {
+		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+			return assetName, true
+		}
+	}
+	return "", false
+}
+
 func resolveDriverVersionPackageSizeBytes(definition driverDefinition, option driverVersionOptionItem) int64 {
 	driverType := normalizeDriverType(definition.Type)
 	if driverType == "" || definition.BuiltIn {
@@ -1593,20 +1856,20 @@ func resolveDriverVersionPackageSizeBytes(definition driverDefinition, option dr
 	if version == "" {
 		return 0
 	}
-	assetName := optionalDriverReleaseAssetName(driverType)
-	if strings.TrimSpace(assetName) == "" {
+	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+	if len(assetNames) == 0 {
 		return 0
 	}
 
 	tag := "v" + version
-	if sizeByAsset, ok := readReleaseAssetSizesFromCache("tag:" + tag); ok {
-		return resolveOptionalDriverAssetSize(sizeByAsset, driverType)
+	if sizeByAsset, _, ok := readReleaseAssetSizesFromCache("tag:" + tag); ok {
+		return resolveOptionalDriverAssetSizeForVersion(sizeByAsset, driverType, version)
 	}
 
 	// 下拉版本列表要求快速返回：仅复用已有缓存，不在这里触发网络请求。
 	if strings.EqualFold(strings.TrimSpace(option.Source), "latest") {
-		if sizeByAsset, ok := readReleaseAssetSizesFromCache("latest"); ok {
-			return resolveOptionalDriverAssetSize(sizeByAsset, driverType)
+		if sizeByAsset, _, ok := readReleaseAssetSizesFromCache("latest"); ok {
+			return resolveOptionalDriverAssetSizeForVersion(sizeByAsset, driverType, version)
 		}
 	}
 	return 0
@@ -1622,8 +1885,13 @@ func resolveRecentDriverVersionMetas(driverType string, limit int) []goModuleVer
 	}
 	modulePaths := resolveDriverGoModulePaths(normalized)
 	if len(modulePaths) > 0 {
-		result := make([]goModuleVersionMeta, 0, limit)
-		seen := make(map[string]struct{}, limit)
+		extraHistoryLimit := resolveDriverExtraHistoryLimit(normalized)
+		primaryLimit := limit + extraHistoryLimit
+		if primaryLimit <= 0 {
+			primaryLimit = limit
+		}
+		result := make([]goModuleVersionMeta, 0, primaryLimit)
+		seen := make(map[string]struct{}, primaryLimit)
 		appendUnique := func(values []goModuleVersionMeta, maxAppend int) {
 			if maxAppend <= 0 {
 				return
@@ -1648,9 +1916,9 @@ func resolveRecentDriverVersionMetas(driverType string, limit int) []goModuleVer
 			}
 		}
 
-		appendUnique(fetchGoModuleVersionMetasCached(modulePaths[0]), limit)
+		appendUnique(fetchGoModuleVersionMetasCached(modulePaths[0]), primaryLimit)
 
-		extraLimit := resolveDriverExtraHistoryLimit(normalized)
+		extraLimit := extraHistoryLimit
 		for _, modulePath := range modulePaths[1:] {
 			if extraLimit <= 0 {
 				break
@@ -1714,7 +1982,7 @@ func triggerDriverVersionMetadataWarmup(definitions []driverDefinition) {
 	go func(paths []string) {
 		defer finishDriverVersionMetadataWarmup()
 		// 预热 latest 资产索引，便于版本列表命中大小缓存。
-		_, _ = loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
+		_, _, _ = loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
 		for _, modulePath := range paths {
 			_ = fetchGoModuleVersionMetasCached(modulePath)
 		}
@@ -1876,8 +2144,8 @@ func fetchGoModuleVersionMetas(modulePath string) ([]goModuleVersionMeta, error)
 		right := "v" + versions[j]
 		return semver.Compare(left, right) > 0
 	})
-	if len(versions) > driverRecentVersionLimit {
-		versions = versions[:driverRecentVersionLimit]
+	if len(versions) > driverModuleVersionFetchLimit {
+		versions = versions[:driverModuleVersionFetchLimit]
 	}
 
 	metas := make([]goModuleVersionMeta, 0, len(versions))
@@ -1906,19 +2174,23 @@ func resolveDriverVersionOptionsFromReleases(definition driverDefinition) []driv
 		return nil
 	}
 
-	assetName := optionalDriverReleaseAssetName(driverType)
-	assetNames := optionalDriverReleaseAssetNames(driverType)
 	result := make([]driverVersionOptionItem, 0, len(releases))
 	for _, release := range releases {
 		if release.Prerelease {
 			continue
 		}
 		tag := strings.TrimSpace(release.TagName)
-		if tag == "" || !releaseContainsAnyAsset(release, assetNames) {
+		version := normalizeVersion(tag)
+		if tag == "" || version == "" {
+			continue
+		}
+		assetName := optionalDriverReleaseAssetNameForVersion(driverType, version)
+		assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
+		if !releaseContainsAnyAsset(release, assetNames) {
 			continue
 		}
 		result = append(result, driverVersionOptionItem{
-			Version:     normalizeVersion(tag),
+			Version:     version,
 			DownloadURL: fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, tag, assetName),
 			Source:      "release",
 		})
@@ -2511,7 +2783,7 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 	sourceName := filepath.Base(pathText)
 	downloadSource := fmt.Sprintf("local://manual/%s", filepath.Base(pathText))
 	if info.IsDir() {
-		matchedPath, matchedEntry, resolveErr := resolveLocalDriverAgentFromDirectory(pathText, driverType)
+		matchedPath, matchedEntry, resolveErr := resolveLocalDriverAgentFromLocalDirectory(pathText, driverType, selectedVersion)
 		if resolveErr != nil {
 			return installedDriverPackage{}, resolveErr
 		}
@@ -2524,7 +2796,7 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 	}
 
 	if !info.IsDir() && strings.EqualFold(filepath.Ext(pathText), ".zip") {
-		entryName, extractErr := installOptionalDriverAgentFromLocalZip(pathText, definition, executablePath)
+		entryName, extractErr := installOptionalDriverAgentFromLocalZip(pathText, definition, executablePath, selectedVersion)
 		if extractErr != nil {
 			return installedDriverPackage{}, extractErr
 		}
@@ -2563,7 +2835,7 @@ type localDriverCandidate struct {
 	inPlatformDir bool
 }
 
-func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType string) (string, string, error) {
+func resolveLocalDriverAgentFromLocalDirectory(directoryPath string, driverType string, selectedVersion string) (string, string, error) {
 	root := strings.TrimSpace(directoryPath)
 	if root == "" {
 		return "", "", fmt.Errorf("本地驱动目录路径为空")
@@ -2586,9 +2858,9 @@ func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType strin
 	}
 	displayName := resolveDriverDisplayName(displayDefinition)
 	platformDir := optionalDriverBundlePlatformDir(stdRuntime.GOOS)
-	assetNameCandidates := optionalDriverReleaseAssetNames(normalizedType)
-	baseNameCandidates := optionalDriverExecutableBaseNames(normalizedType)
-	assetName := optionalDriverReleaseAssetName(normalizedType)
+	assetNameCandidates := optionalDriverReleaseAssetNamesForVersion(normalizedType, selectedVersion)
+	baseNameCandidates := optionalDriverExecutableBaseNamesForVersion(normalizedType, selectedVersion)
+	assetName := optionalDriverReleaseAssetNameForVersion(normalizedType, selectedVersion)
 
 	exactRelativePath := filepath.ToSlash(filepath.Join(platformDir, assetName))
 	for _, candidateName := range assetNameCandidates {
@@ -2703,7 +2975,7 @@ func resolveLocalDriverAgentFromDirectory(directoryPath string, driverType strin
 	)
 }
 
-func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDefinition, executablePath string) (string, error) {
+func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDefinition, executablePath string, selectedVersion string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
 	reader, err := zip.OpenReader(zipPath)
@@ -2712,9 +2984,9 @@ func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDef
 	}
 	defer reader.Close()
 
-	entryPath := optionalDriverBundleEntryPath(driverType)
-	entryPaths := optionalDriverBundleEntryPaths(driverType)
-	expectedBaseNames := optionalDriverReleaseAssetNames(driverType)
+	entryPath := optionalDriverBundleEntryPathForVersion(driverType, selectedVersion)
+	entryPaths := optionalDriverBundleEntryPathsForVersion(driverType, selectedVersion)
+	expectedBaseNames := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	findEntry := func() *zip.File {
 		for _, file := range reader.File {
 			name := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Name), "./"))
@@ -2791,9 +3063,10 @@ func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDef
 func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, executablePath string, downloadURL string, selectedVersion string) (string, string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
-	forceSourceBuild := shouldForceSourceBuildForVersion(driverType, selectedVersion)
+	forceSourceBuild := shouldForceSourceBuildForResolvedDownload(driverType, selectedVersion, downloadURL)
 	preferSourceBuildBeforeDownload := shouldPreferSourceBuildBeforeDownload(driverType, selectedVersion)
 	skipReuseCandidate := shouldSkipReusableAgentCandidate(driverType, selectedVersion)
+	restrictToExplicitArtifact := shouldRestrictToExplicitVersionArtifact(definition, selectedVersion)
 
 	info, err := os.Stat(executablePath)
 	if err == nil && !info.IsDir() {
@@ -2851,7 +3124,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	}
 
 	if !forceSourceBuild {
-		downloadURLs := resolveOptionalDriverAgentDownloadURLs(definition, downloadURL)
+		downloadURLs := resolveOptionalDriverAgentDownloadURLs(definition, downloadURL, selectedVersion)
 		if len(downloadURLs) > 0 {
 			for _, candidateURL := range downloadURLs {
 				if a != nil {
@@ -2865,7 +3138,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 			}
 		}
 		bundleURLs := resolveOptionalDriverBundleDownloadURLs()
-		if len(bundleURLs) > 0 {
+		if !restrictToExplicitArtifact && len(bundleURLs) > 0 {
 			for _, bundleURL := range bundleURLs {
 				if a != nil {
 					a.emitDriverDownloadProgress(driverType, "downloading", 20, 100, fmt.Sprintf("从驱动总包提取 %s 代理", displayName))
@@ -3061,7 +3334,7 @@ func downloadOptionalDriverAgentFromBundle(a *App, definition driverDefinition, 
 func buildOptionalDriverAgentFromSource(definition driverDefinition, executablePath string, selectedVersion string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
-	goPath, lookErr := exec.LookPath("go")
+	goPath, lookErr := resolveGoBinaryPath()
 	if lookErr != nil {
 		return "", fmt.Errorf("当前环境未安装 Go，且未找到可用的 %s 预编译代理包", displayName)
 	}
@@ -3106,6 +3379,23 @@ func shouldForceSourceBuildForVersion(driverType string, selectedVersion string)
 		return false
 	}
 	return resolveMongoDriverMajorFromVersion(selectedVersion) == 1
+}
+
+func shouldForceSourceBuildForResolvedDownload(driverType string, selectedVersion string, downloadURL string) bool {
+	if !shouldForceSourceBuildForVersion(driverType, selectedVersion) {
+		return false
+	}
+
+	parsed, err := url.Parse(strings.TrimSpace(downloadURL))
+	if err != nil || parsed == nil {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+	case "http", "https":
+		return false
+	default:
+		return true
+	}
 }
 
 func shouldPreferSourceBuildBeforeDownload(driverType string, selectedVersion string) bool {
@@ -3224,11 +3514,80 @@ func optionalDriverReleaseAssetNameForType(typeName string, goos string, goarch 
 	return name
 }
 
-func optionalDriverExecutableBaseNames(driverType string) []string {
+func optionalDriverNameStemCandidates(driverType string, selectedVersion string) []string {
+	candidates := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	appendStem := func(stem string) {
+		trimmed := strings.TrimSpace(stem)
+		if trimmed == "" {
+			return
+		}
+		if _, ok := seen[trimmed]; ok {
+			return
+		}
+		seen[trimmed] = struct{}{}
+		candidates = append(candidates, trimmed)
+	}
+
+	base := fmt.Sprintf("%s-driver-agent", optionalDriverPublicTypeName(driverType))
+	if normalizeDriverType(driverType) == "mongodb" {
+		switch resolveMongoDriverMajorFromVersion(selectedVersion) {
+		case 1:
+			appendStem(base + "-v1")
+			appendStem(base)
+		case 2:
+			appendStem(base)
+			appendStem(base + "-v2")
+		default:
+			appendStem(base)
+		}
+		return candidates
+	}
+
+	appendStem(base)
+	return candidates
+}
+
+func optionalDriverExecutableBaseNamesForVersion(driverType string, selectedVersion string) []string {
 	names := make([]string, 0, 2)
 	seen := make(map[string]struct{}, 2)
-	appendName := func(typeName string) {
-		name := optionalDriverExecutableBaseNameForType(typeName)
+	appendName := func(stem string) {
+		name := strings.TrimSpace(stem)
+		if strings.TrimSpace(name) == "" {
+			return
+		}
+		if stdRuntime.GOOS == "windows" {
+			name += ".exe"
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+
+	for _, stem := range optionalDriverNameStemCandidates(driverType, selectedVersion) {
+		appendName(stem)
+	}
+	return names
+}
+
+func optionalDriverExecutableBaseNames(driverType string) []string {
+	return optionalDriverExecutableBaseNamesForVersion(driverType, "")
+}
+
+func optionalDriverReleaseAssetNamesForVersion(driverType string, selectedVersion string) []string {
+	names := make([]string, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	appendName := func(stem string) {
+		trimmedStem := strings.TrimSpace(stem)
+		if trimmedStem == "" {
+			return
+		}
+		name := fmt.Sprintf("%s-%s-%s", trimmedStem, stdRuntime.GOOS, stdRuntime.GOARCH)
+		if strings.EqualFold(stdRuntime.GOOS, "windows") {
+			name += ".exe"
+		}
 		if strings.TrimSpace(name) == "" {
 			return
 		}
@@ -3239,27 +3598,14 @@ func optionalDriverExecutableBaseNames(driverType string) []string {
 		names = append(names, name)
 	}
 
-	appendName(optionalDriverPublicTypeName(driverType))
+	for _, stem := range optionalDriverNameStemCandidates(driverType, selectedVersion) {
+		appendName(stem)
+	}
 	return names
 }
 
 func optionalDriverReleaseAssetNames(driverType string) []string {
-	names := make([]string, 0, 2)
-	seen := make(map[string]struct{}, 2)
-	appendName := func(typeName string) {
-		name := optionalDriverReleaseAssetNameForType(typeName, stdRuntime.GOOS, stdRuntime.GOARCH)
-		if strings.TrimSpace(name) == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-	}
-
-	appendName(optionalDriverPublicTypeName(driverType))
-	return names
+	return optionalDriverReleaseAssetNamesForVersion(driverType, "")
 }
 
 func optionalDriverExecutableBaseName(driverType string) string {
@@ -3272,6 +3618,14 @@ func optionalDriverExecutableBaseName(driverType string) string {
 
 func optionalDriverReleaseAssetName(driverType string) string {
 	names := optionalDriverReleaseAssetNames(driverType)
+	if len(names) == 0 {
+		return optionalDriverReleaseAssetNameForType("", stdRuntime.GOOS, stdRuntime.GOARCH)
+	}
+	return names[0]
+}
+
+func optionalDriverReleaseAssetNameForVersion(driverType string, selectedVersion string) string {
+	names := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	if len(names) == 0 {
 		return optionalDriverReleaseAssetNameForType("", stdRuntime.GOOS, stdRuntime.GOARCH)
 	}
@@ -3291,9 +3645,9 @@ func optionalDriverBundlePlatformDir(goos string) string {
 	}
 }
 
-func optionalDriverBundleEntryPaths(driverType string) []string {
+func optionalDriverBundleEntryPathsForVersion(driverType string, selectedVersion string) []string {
 	platformDir := optionalDriverBundlePlatformDir(stdRuntime.GOOS)
-	assetNames := optionalDriverReleaseAssetNames(driverType)
+	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	result := make([]string, 0, len(assetNames))
 	seen := make(map[string]struct{}, len(assetNames))
 	for _, assetName := range assetNames {
@@ -3307,12 +3661,20 @@ func optionalDriverBundleEntryPaths(driverType string) []string {
 	return result
 }
 
-func optionalDriverBundleEntryPath(driverType string) string {
-	paths := optionalDriverBundleEntryPaths(driverType)
+func optionalDriverBundleEntryPaths(driverType string) []string {
+	return optionalDriverBundleEntryPathsForVersion(driverType, "")
+}
+
+func optionalDriverBundleEntryPathForVersion(driverType string, selectedVersion string) string {
+	paths := optionalDriverBundleEntryPathsForVersion(driverType, selectedVersion)
 	if len(paths) == 0 {
-		return filepath.ToSlash(filepath.Join(optionalDriverBundlePlatformDir(stdRuntime.GOOS), optionalDriverReleaseAssetName(driverType)))
+		return filepath.ToSlash(filepath.Join(optionalDriverBundlePlatformDir(stdRuntime.GOOS), optionalDriverReleaseAssetNameForVersion(driverType, selectedVersion)))
 	}
 	return paths[0]
+}
+
+func optionalDriverBundleEntryPath(driverType string) string {
+	return optionalDriverBundleEntryPathForVersion(driverType, "")
 }
 
 func resolveOptionalDriverAssetSize(sizeByAsset map[string]int64, driverType string) int64 {
@@ -3320,6 +3682,19 @@ func resolveOptionalDriverAssetSize(sizeByAsset map[string]int64, driverType str
 		return 0
 	}
 	for _, assetName := range optionalDriverReleaseAssetNames(driverType) {
+		sizeBytes := sizeByAsset[assetName]
+		if sizeBytes > 0 {
+			return sizeBytes
+		}
+	}
+	return 0
+}
+
+func resolveOptionalDriverAssetSizeForVersion(sizeByAsset map[string]int64, driverType string, version string) int64 {
+	if len(sizeByAsset) == 0 {
+		return 0
+	}
+	for _, assetName := range optionalDriverReleaseAssetNamesForVersion(driverType, version) {
 		sizeBytes := sizeByAsset[assetName]
 		if sizeBytes > 0 {
 			return sizeBytes
@@ -3351,8 +3726,7 @@ func resolveOptionalDriverBundleDownloadURLs() []string {
 	return candidates
 }
 
-func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL string) []string {
-	driverType := normalizeDriverType(definition.Type)
+func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL string, selectedVersion string) []string {
 	candidates := make([]string, 0, 3)
 	seen := make(map[string]struct{}, 3)
 	appendURL := func(value string) {
@@ -3373,16 +3747,18 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 			appendURL(parsed.String())
 		}
 	}
+	if shouldRestrictToExplicitVersionArtifact(definition, selectedVersion) {
+		return candidates
+	}
 
-	assetNames := optionalDriverReleaseAssetNames(driverType)
 	currentVersion := normalizeVersion(getCurrentVersion())
 	if currentVersion != "" && currentVersion != "0.0.0" {
-		for _, assetName := range assetNames {
-			appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/download/v%s/%s", currentVersion, assetName))
+		if publishedURL, ok := resolvePublishedDriverDownloadURL(definition, currentVersion); ok {
+			appendURL(publishedURL)
 		}
 	}
-	for _, assetName := range assetNames {
-		appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/latest/download/%s", assetName))
+	if publishedURL, ok := resolveLatestPublishedDriverDownloadURL(definition); ok {
+		appendURL(publishedURL)
 	}
 	return candidates
 }
@@ -3629,7 +4005,7 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 
 	pending := needed
 	if tag != "" {
-		if sizeByAsset, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
+		if sizeByAsset, _, err := loadReleaseAssetSizesCached("tag:"+tag, func() (*githubRelease, error) {
 			return fetchReleaseByTag(tag)
 		}); err == nil {
 			pending = fillFromSizes(sizeByAsset, pending)
@@ -3638,16 +4014,16 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 	if len(pending) == 0 {
 		return result
 	}
-	if sizeByAsset, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
+	if sizeByAsset, _, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets); err == nil {
 		_ = fillFromSizes(sizeByAsset, pending)
 	}
 	return result
 }
 
-func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, error)) (map[string]int64, error) {
+func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, error)) (map[string]int64, map[string]bool, error) {
 	key := strings.TrimSpace(cacheKey)
 	if key == "" {
-		return nil, fmt.Errorf("缓存 key 为空")
+		return nil, nil, fmt.Errorf("缓存 key 为空")
 	}
 
 	driverReleaseSizeMu.RLock()
@@ -3660,21 +4036,23 @@ func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, 
 		}
 		if time.Since(cached.LoadedAt) < ttl {
 			if strings.TrimSpace(cached.Err) != "" {
-				return nil, errors.New(strings.TrimSpace(cached.Err))
+				return nil, nil, errors.New(strings.TrimSpace(cached.Err))
 			}
-			return cached.SizeByKey, nil
+			return cached.SizeByKey, cached.PublishedAssets, nil
 		}
 	}
 
 	release, err := fetch()
 	entry := driverReleaseAssetSizeCacheEntry{
-		LoadedAt:  time.Now(),
-		SizeByKey: map[string]int64{},
+		LoadedAt:        time.Now(),
+		SizeByKey:       map[string]int64{},
+		PublishedAssets: map[string]bool{},
 	}
 	if err != nil {
 		entry.Err = err.Error()
 	} else {
 		entry.SizeByKey = buildReleaseAssetSizeMap(release)
+		entry.PublishedAssets = buildReleaseAssetNameMap(release)
 		if indexSizes, indexErr := fetchDriverBundleAssetSizeIndex(release); indexErr == nil {
 			for name, size := range indexSizes {
 				trimmedName := strings.TrimSpace(name)
@@ -3691,22 +4069,22 @@ func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, 
 	driverReleaseSizeMu.Unlock()
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return entry.SizeByKey, nil
+	return entry.SizeByKey, entry.PublishedAssets, nil
 }
 
-func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, bool) {
+func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, map[string]bool, bool) {
 	key := strings.TrimSpace(cacheKey)
 	if key == "" {
-		return nil, false
+		return nil, nil, false
 	}
 
 	driverReleaseSizeMu.RLock()
 	cached, ok := driverReleaseSizeMap[key]
 	driverReleaseSizeMu.RUnlock()
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 
 	ttl := driverReleaseAssetSizeCacheTTL
@@ -3714,12 +4092,12 @@ func readReleaseAssetSizesFromCache(cacheKey string) (map[string]int64, bool) {
 		ttl = driverReleaseAssetSizeErrorCacheTTL
 	}
 	if time.Since(cached.LoadedAt) >= ttl {
-		return nil, false
+		return nil, nil, false
 	}
 	if strings.TrimSpace(cached.Err) != "" {
-		return nil, false
+		return nil, nil, false
 	}
-	return cached.SizeByKey, true
+	return cached.SizeByKey, cached.PublishedAssets, true
 }
 
 func buildReleaseAssetSizeMap(release *githubRelease) map[string]int64 {
@@ -3735,6 +4113,21 @@ func buildReleaseAssetSizeMap(release *githubRelease) map[string]int64 {
 		sizes[name] = asset.Size
 	}
 	return sizes
+}
+
+func buildReleaseAssetNameMap(release *githubRelease) map[string]bool {
+	names := make(map[string]bool)
+	if release == nil {
+		return names
+	}
+	for _, asset := range release.Assets {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" {
+			continue
+		}
+		names[name] = true
+	}
+	return names
 }
 
 func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, error) {
@@ -3783,6 +4176,37 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 
 func fetchLatestReleaseForDriverAssets() (*githubRelease, error) {
 	return fetchDriverReleaseByURL(updateAPIURL)
+}
+
+func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (string, bool) {
+	driverType := normalizeDriverType(definition.Type)
+	if driverType == "" {
+		return "", false
+	}
+	assetNames := optionalDriverReleaseAssetNames(driverType)
+	if len(assetNames) == 0 {
+		return "", false
+	}
+
+	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
+		for _, assetName := range assetNames {
+			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+				return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+			}
+		}
+		return "", false
+	}
+
+	sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
+	if err != nil {
+		return "", false
+	}
+	for _, assetName := range assetNames {
+		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+			return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+		}
+	}
+	return "", false
 }
 
 func fetchReleaseByTag(tag string) (*githubRelease, error) {

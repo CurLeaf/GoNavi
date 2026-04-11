@@ -279,7 +279,44 @@ func (c *ClickHouseDB) Ping() error {
 	}
 	ctx, cancel := utils.ContextWithTimeout(timeout)
 	defer cancel()
-	return c.conn.PingContext(ctx)
+	if err := c.conn.PingContext(ctx); err != nil {
+		return err
+	}
+	return c.validateQueryPath()
+}
+
+func (c *ClickHouseDB) validateQueryPath() error {
+	if c.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	timeout := c.pingTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := utils.ContextWithTimeout(timeout)
+	defer cancel()
+
+	rows, err := c.conn.QueryContext(ctx, "SELECT currentDatabase()")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("连接查询验证未返回结果")
+	}
+
+	var current sql.NullString
+	if err := rows.Scan(&current); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *ClickHouseDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
@@ -330,22 +367,58 @@ func (c *ClickHouseDB) Exec(query string) (int64, error) {
 
 func (c *ClickHouseDB) GetDatabases() ([]string, error) {
 	data, _, err := c.Query("SELECT name FROM system.databases ORDER BY name")
-	if err != nil {
-		return nil, err
+	if err == nil {
+		result := make([]string, 0, len(data))
+		for _, row := range data {
+			if val, ok := getClickHouseValueFromRow(row, "name", "database"); ok {
+				result = append(result, fmt.Sprintf("%v", val))
+				continue
+			}
+			for _, value := range row {
+				result = append(result, fmt.Sprintf("%v", value))
+				break
+			}
+		}
+		if len(result) > 0 {
+			return result, nil
+		}
 	}
 
-	result := make([]string, 0, len(data))
-	for _, row := range data {
-		if val, ok := getClickHouseValueFromRow(row, "name", "database"); ok {
-			result = append(result, fmt.Sprintf("%v", val))
+	fallbackData, _, fallbackErr := c.Query("SELECT currentDatabase() AS name")
+	if fallbackErr != nil {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fallbackErr
+	}
+
+	result := make([]string, 0, len(fallbackData))
+	for _, row := range fallbackData {
+		if val, ok := getClickHouseValueFromRow(row, "name", "database", "currentDatabase"); ok {
+			name := strings.TrimSpace(fmt.Sprintf("%v", val))
+			if name != "" {
+				result = append(result, name)
+			}
 			continue
 		}
 		for _, value := range row {
-			result = append(result, fmt.Sprintf("%v", value))
+			name := strings.TrimSpace(fmt.Sprintf("%v", value))
+			if name != "" {
+				result = append(result, name)
+			}
 			break
 		}
 	}
-	return result, nil
+	if len(result) > 0 {
+		return result, nil
+	}
+	if current := strings.TrimSpace(c.database); current != "" {
+		return []string{current}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("未获取到 ClickHouse 数据库列表")
 }
 
 func (c *ClickHouseDB) GetTables(dbName string) ([]string, error) {

@@ -17,7 +17,9 @@ import (
 	aicontext "GoNavi-Wails/internal/ai/context"
 	"GoNavi-Wails/internal/ai/provider"
 	"GoNavi-Wails/internal/ai/safety"
+	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/secretstore"
 
 	"github.com/google/uuid"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -32,7 +34,8 @@ type Service struct {
 	safetyLevel    ai.SQLPermissionLevel
 	contextLevel   ai.ContextLevel
 	guard          *safety.Guard
-	configDir      string                        // 配置存储目录
+	configDir      string // 配置存储目录
+	secretStore    secretstore.SecretStore
 	cancelFuncs    map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 }
 
@@ -97,11 +100,19 @@ var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 
 // NewService 创建 AI Service 实例
 func NewService() *Service {
+	return NewServiceWithSecretStore(secretstore.NewKeyringStore())
+}
+
+func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
+	if store == nil {
+		store = secretstore.NewUnavailableStore("secret store unavailable")
+	}
 	return &Service{
 		providers:    make([]ai.ProviderConfig, 0),
 		safetyLevel:  ai.PermissionReadOnly,
 		contextLevel: ai.ContextSchemaOnly,
 		guard:        safety.NewGuard(ai.PermissionReadOnly),
+		secretStore:  store,
 		cancelFuncs:  make(map[string]context.CancelFunc),
 	}
 }
@@ -127,35 +138,80 @@ func (s *Service) AIGetProviders() []ai.ProviderConfig {
 	defer s.mu.RUnlock()
 
 	result := make([]ai.ProviderConfig, len(s.providers))
-	copy(result, s.providers)
-	for i := range result {
-		result[i] = normalizeProviderConfig(result[i])
+	for i := range s.providers {
+		result[i] = providerMetadataView(s.providers[i])
 	}
 	return result
 }
 
 // AISaveProvider 保存/更新 Provider 配置
 func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
-	fmt.Printf("[AISaveProvider DEBUG] ID: %s, Model: %s\n", config.ID, config.Model)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	config = normalizeProviderConfig(config)
-
 	if strings.TrimSpace(config.ID) == "" {
 		config.ID = "provider-" + uuid.New().String()[:8]
 	}
 
+	var existing ai.ProviderConfig
 	found := false
-	for i, p := range s.providers {
-		if p.ID == config.ID {
-			s.providers[i] = config
+	for _, providerConfig := range s.providers {
+		if providerConfig.ID == config.ID {
+			existing = providerConfig
 			found = true
 			break
 		}
 	}
-	if !found {
-		s.providers = append(s.providers, config)
+
+	meta, bundle := splitProviderSecrets(config)
+	var runtimeConfig ai.ProviderConfig
+	switch {
+	case bundle.hasAny():
+		mergedBundle := bundle
+		if found && existing.HasSecret {
+			_, existingBundle := splitProviderSecrets(existing)
+			mergedBundle = mergeProviderSecretBundles(existingBundle, bundle)
+		}
+		if found && strings.TrimSpace(meta.SecretRef) == "" {
+			meta.SecretRef = existing.SecretRef
+		}
+		storedMeta, err := s.persistProviderSecretBundle(meta, mergedBundle)
+		if err != nil {
+			return fmt.Errorf("保存 Provider secret 失败: %w", err)
+		}
+		runtimeConfig = mergeProviderSecrets(storedMeta, mergedBundle)
+	case found && (config.HasSecret || existing.HasSecret):
+		meta.SecretRef = existing.SecretRef
+		meta.HasSecret = config.HasSecret || existing.HasSecret
+		resolved, err := s.resolveProviderConfigSecrets(meta)
+		if err != nil {
+			return fmt.Errorf("读取已保存 Provider secret 失败: %w", err)
+		}
+		runtimeConfig = resolved
+	default:
+		runtimeConfig = meta
+	}
+
+	if !runtimeConfig.HasSecret && found && strings.TrimSpace(existing.SecretRef) != "" {
+		if err := s.secretStore.Delete(existing.SecretRef); err != nil {
+			return fmt.Errorf("删除 Provider secret 失败: %w", err)
+		}
+	}
+	if !runtimeConfig.HasSecret {
+		runtimeConfig.SecretRef = ""
+	}
+
+	runtimeConfig = normalizeProviderConfig(runtimeConfig)
+	if found {
+		for i := range s.providers {
+			if s.providers[i].ID == runtimeConfig.ID {
+				s.providers[i] = runtimeConfig
+				break
+			}
+		}
+	} else {
+		s.providers = append(s.providers, runtimeConfig)
 	}
 
 	return s.saveConfig()
@@ -167,9 +223,19 @@ func (s *Service) AIDeleteProvider(id string) error {
 	defer s.mu.Unlock()
 
 	newProviders := make([]ai.ProviderConfig, 0, len(s.providers))
-	for _, p := range s.providers {
-		if p.ID != id {
-			newProviders = append(newProviders, p)
+	var removed ai.ProviderConfig
+	removedFound := false
+	for _, providerConfig := range s.providers {
+		if providerConfig.ID == id {
+			removed = providerConfig
+			removedFound = true
+			continue
+		}
+		newProviders = append(newProviders, providerConfig)
+	}
+	if removedFound && strings.TrimSpace(removed.SecretRef) != "" {
+		if err := s.secretStore.Delete(removed.SecretRef); err != nil {
+			return fmt.Errorf("删除 Provider secret 失败: %w", err)
 		}
 	}
 	s.providers = newProviders
@@ -186,17 +252,29 @@ func (s *Service) AIDeleteProvider(id string) error {
 
 // AITestProvider 测试 Provider 配置是否可用，仅测试端点连通性与密钥，不实际调用对话
 func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{} {
-	// 如果传入脱敏的 key，使用已保存的 key
-	s.mu.RLock()
 	if isMaskedAPIKey(config.APIKey) {
-		for _, p := range s.providers {
-			if p.ID == config.ID {
-				config.APIKey = p.APIKey
-				break
+		config.APIKey = ""
+		config.HasSecret = true
+	}
+	if strings.TrimSpace(config.APIKey) == "" && (config.HasSecret || strings.TrimSpace(config.SecretRef) != "") {
+		s.mu.RLock()
+		if strings.TrimSpace(config.SecretRef) == "" {
+			for _, providerConfig := range s.providers {
+				if providerConfig.ID == config.ID {
+					config.SecretRef = providerConfig.SecretRef
+					config.HasSecret = config.HasSecret || providerConfig.HasSecret
+					break
+				}
 			}
 		}
+		s.mu.RUnlock()
+
+		resolved, err := s.resolveProviderConfigSecrets(config)
+		if err != nil {
+			return map[string]interface{}{"success": false, "message": fmt.Sprintf("连接测试失败: %s", err.Error())}
+		}
+		config = resolved
 	}
-	s.mu.RUnlock()
 
 	config = normalizeProviderConfig(config)
 	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
@@ -842,11 +920,33 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 
 // --- 配置持久化 ---
 
+const aiConfigSchemaVersion = 2
+
 type aiConfig struct {
+	SchemaVersion  int                 `json:"schemaVersion,omitempty"`
 	Providers      []ai.ProviderConfig `json:"providers"`
 	ActiveProvider string              `json:"activeProvider"`
 	SafetyLevel    string              `json:"safetyLevel"`
 	ContextLevel   string              `json:"contextLevel"`
+}
+
+func (s *Service) loadRuntimeProviderConfig(config ai.ProviderConfig) (ai.ProviderConfig, bool, error) {
+	meta, bundle := splitProviderSecrets(config)
+	if bundle.hasAny() {
+		storedMeta, err := s.persistProviderSecretBundle(meta, bundle)
+		if err != nil {
+			meta.HasSecret = false
+			meta.SecretRef = ""
+			return meta, true, err
+		}
+		return mergeProviderSecrets(storedMeta, bundle), true, nil
+	}
+
+	resolved, err := s.resolveProviderConfigSecrets(meta)
+	if err != nil {
+		return meta, false, err
+	}
+	return resolved, false, nil
 }
 
 func (s *Service) loadConfig() {
@@ -862,13 +962,22 @@ func (s *Service) loadConfig() {
 		return
 	}
 
-	s.providers = cfg.Providers
-	if s.providers == nil {
-		s.providers = make([]ai.ProviderConfig, 0)
+	providers := make([]ai.ProviderConfig, 0, len(cfg.Providers))
+	shouldRewrite := cfg.SchemaVersion != aiConfigSchemaVersion
+	for _, providerConfig := range cfg.Providers {
+		runtimeConfig, rewritten, err := s.loadRuntimeProviderConfig(normalizeProviderConfig(providerConfig))
+		if err != nil {
+			logger.Error(err, "加载 AI Provider secret 失败，provider=%s", providerConfig.ID)
+		}
+		if rewritten {
+			shouldRewrite = true
+		}
+		providers = append(providers, runtimeConfig)
 	}
-	for i := range s.providers {
-		s.providers[i] = normalizeProviderConfig(s.providers[i])
+	if providers == nil {
+		providers = make([]ai.ProviderConfig, 0)
 	}
+	s.providers = providers
 	s.activeProvider = cfg.ActiveProvider
 
 	switch ai.SQLPermissionLevel(cfg.SafetyLevel) {
@@ -885,11 +994,23 @@ func (s *Service) loadConfig() {
 	default:
 		s.contextLevel = ai.ContextSchemaOnly
 	}
+
+	if shouldRewrite {
+		if err := s.saveConfig(); err != nil {
+			logger.Error(err, "重写 AI 配置失败")
+		}
+	}
 }
 
 func (s *Service) saveConfig() error {
+	providers := make([]ai.ProviderConfig, len(s.providers))
+	for i := range s.providers {
+		providers[i] = providerMetadataView(s.providers[i])
+	}
+
 	cfg := aiConfig{
-		Providers:      s.providers,
+		SchemaVersion:  aiConfigSchemaVersion,
+		Providers:      providers,
 		ActiveProvider: s.activeProvider,
 		SafetyLevel:    string(s.safetyLevel),
 		ContextLevel:   string(s.contextLevel),
@@ -1002,7 +1123,7 @@ func (s *Service) AISaveSession(sessionID string, title string, updatedAt float6
 		Messages:  json.RawMessage(messagesJSON),
 	}
 
-	data, err := json.MarshalIndent(sfd, "", "  ")
+	data, err := json.Marshal(sfd)
 	if err != nil {
 		return fmt.Errorf("序列化会话数据失败: %w", err)
 	}
@@ -1023,11 +1144,7 @@ func (s *Service) AIDeleteSession(sessionID string) error {
 // --- 工具函数 ---
 
 func resolveConfigDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
-	}
-	return filepath.Join(homeDir, ".gonavi")
+	return appdata.MustResolveActiveRoot()
 }
 
 func maskAPIKey(apiKey string) string {

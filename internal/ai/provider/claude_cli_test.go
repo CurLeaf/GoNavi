@@ -3,8 +3,11 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -324,6 +327,26 @@ func TestClaudeCLIProvider_ChatStreamReportsApiRetryAuthenticationFailure(t *tes
 func writeFakeClaudeScript(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
+
+	if runtime.GOOS == "windows" {
+		bashPath, err := resolveClaudeCodeGitBashPath(os.Environ(), runtime.GOOS, exec.LookPath, fileExists)
+		if err != nil {
+			t.Fatalf("failed to resolve git bash for fake claude command: %v", err)
+		}
+
+		scriptPath := filepath.Join(dir, "claude.sh")
+		if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
+			t.Fatalf("failed to write fake claude shell script: %v", err)
+		}
+
+		wrapperPath := filepath.Join(dir, "claude.cmd")
+		wrapper := fmt.Sprintf("@echo off\r\n\"%s\" \"%s\" %%*\r\n", bashPath, scriptPath)
+		if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+			t.Fatalf("failed to write fake claude wrapper: %v", err)
+		}
+		return wrapperPath
+	}
+
 	path := filepath.Join(dir, "claude")
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatalf("failed to write fake claude script: %v", err)
@@ -335,11 +358,18 @@ func overrideClaudeCLIForTest(t *testing.T, fakeClaudePath string) func() {
 	t.Helper()
 
 	originalLookPath := claudeLookPath
+	originalCommandContext := claudeCommandContext
 	claudeLookPath = func(name string) (string, error) {
 		if name == "claude" {
 			return fakeClaudePath, nil
 		}
 		return originalLookPath(name)
+	}
+	claudeCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name == "claude" {
+			return exec.CommandContext(ctx, fakeClaudePath, args...)
+		}
+		return originalCommandContext(ctx, name, args...)
 	}
 
 	originalPath := os.Getenv("PATH")
@@ -349,6 +379,7 @@ func overrideClaudeCLIForTest(t *testing.T, fakeClaudePath string) func() {
 
 	return func() {
 		claudeLookPath = originalLookPath
+		claudeCommandContext = originalCommandContext
 		_ = os.Setenv("PATH", originalPath)
 	}
 }

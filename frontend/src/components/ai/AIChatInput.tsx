@@ -5,6 +5,7 @@ import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice } from '../../utils/aiComposerNotice';
+import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 
 interface AIChatInputProps {
     input: string;
@@ -124,7 +125,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         setContextLoading(true);
         setSelectedDbName(dbName);
         try {
-            const res = await DBGetTables(connConfig, dbName);
+            const res = await DBGetTables(buildRpcConnectionConfig(connConfig), dbName);
             if (res.success && Array.isArray(res.data)) {
                 setContextTables(res.data.map(r => ({ name: Object.values(r)[0] as string })));
             } else {
@@ -155,7 +156,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         
         try {
             // Fetch databases
-            const dbRes = await DBGetDatabases(conn.config as any);
+            const dbRes = await DBGetDatabases(buildRpcConnectionConfig(conn.config) as any);
             if (dbRes.success && Array.isArray(dbRes.data)) {
                 const databases = dbRes.data.map((r: any) => Object.values(r)[0] as string);
                 setDbList(databases);
@@ -164,7 +165,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
             // Fetch tables for the active contextual database
             const initDbName = activeContext.dbName || '';
             setSelectedDbName(initDbName);
-            const tablesRes = await DBGetTables(conn.config as any, initDbName);
+            const tablesRes = await DBGetTables(buildRpcConnectionConfig(conn.config) as any, initDbName);
             if (tablesRes.success && Array.isArray(tablesRes.data)) {
                 setContextTables(tablesRes.data.map((r: any) => ({ name: Object.values(r)[0] as string })));
             } else {
@@ -201,7 +202,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 if (activeContextItems.find(c => c.dbName === dbName && c.tableName === tableName)) {
                     continue;
                 }
-                const res = await DBShowCreateTable(conn.config as any, dbName, tableName);
+                const res = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, dbName, tableName);
                 let createSql = '';
                 if (res.success && res.data) {
                     if (typeof res.data === 'string') {

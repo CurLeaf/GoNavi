@@ -35,3 +35,33 @@ func TestResolveMacNativeWindowControlStateDisabled(t *testing.T) {
 		t.Fatal("expected disabled state to avoid native fullscreen behavior")
 	}
 }
+
+func TestShouldApplyMacNativeWindowStyleAcceptsMainWailsWindow(t *testing.T) {
+	tests := []macWindowIdentity{
+		{ClassName: "WailsWindow", DelegateClassName: "WindowDelegate", Title: "GoNavi"},
+		{ClassName: "WailsWindow", DelegateClassName: "", Title: ""},
+		{ClassName: "", DelegateClassName: "WindowDelegate", Title: ""},
+		{ClassName: "", DelegateClassName: "", Title: "GoNavi"},
+	}
+
+	for _, tt := range tests {
+		if !shouldApplyMacNativeWindowStyle(tt) {
+			t.Fatalf("expected window identity %+v to be treated as main app window", tt)
+		}
+	}
+}
+
+func TestShouldApplyMacNativeWindowStyleRejectsSystemAuxiliaryWindows(t *testing.T) {
+	tests := []macWindowIdentity{
+		{ClassName: "TUINSWindow", DelegateClassName: "TUINSWindow", Title: ""},
+		{ClassName: "NSToolbarFullScreenWindow", DelegateClassName: "", Title: ""},
+		{ClassName: "_NSFullScreenTransitionOverlayWindow", DelegateClassName: "", Title: ""},
+		{ClassName: "NSPanel", DelegateClassName: "", Title: ""},
+	}
+
+	for _, tt := range tests {
+		if shouldApplyMacNativeWindowStyle(tt) {
+			t.Fatalf("expected window identity %+v to be rejected as auxiliary/system window", tt)
+		}
+	}
+}

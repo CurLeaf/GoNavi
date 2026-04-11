@@ -11,6 +11,7 @@ import {
   GetDriverVersionPackageSize,
   GetDriverStatusList,
   InstallLocalDriverPackage,
+  OpenDriverDownloadDirectory,
   RemoveDriverPackage,
   SelectDriverPackageDirectory,
   SelectDriverPackageFile,
@@ -757,6 +758,16 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     };
   }, [appendOperationLog, open]);
 
+  const resolveLocalImportVersion = useCallback((row: DriverStatusRow) => {
+    const options = versionMap[row.type] || [];
+    const selectedKey = selectedVersionMap[row.type];
+    const selectedOption =
+      options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+      options.find((item) => item.recommended) ||
+      options[0];
+    return selectedOption?.version || row.pinnedVersion || '';
+  }, [selectedVersionMap, versionMap]);
+
   const installDriver = useCallback(async (row: DriverStatusRow) => {
     setActionState({ driverType: row.type, kind: 'install' });
     setProgressMap((prev) => ({
@@ -820,9 +831,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         percent: 0,
       },
     }));
-    appendOperationLog(row.type, `[START] 开始本地导入（${sourceLabel}）：${pathText}`);
+    const selectedVersion = resolveLocalImportVersion(row);
+    const versionTip = selectedVersion ? `（${selectedVersion}）` : '';
+    appendOperationLog(row.type, `[START] 开始本地导入${versionTip}（${sourceLabel}）：${pathText}`);
     try {
-      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir);
+      const result = await InstallLocalDriverPackage(row.type, pathText, downloadDir, selectedVersion);
       if (!result?.success) {
         const errText = result?.message || `导入 ${row.name} 本地驱动包失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
@@ -831,9 +844,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         }
         return false;
       }
-      appendOperationLog(row.type, '[DONE] 本地导入安装完成');
+      appendOperationLog(row.type, `[DONE] 本地导入安装完成 ${versionTip}`.trim());
       if (!options?.silentToast) {
-        message.success(`${row.name} 本地驱动包已安装启用`);
+        message.success(`${row.name}${versionTip} 本地驱动包已安装启用`);
       }
       if (!options?.skipRefresh) {
         await refreshStatus(false);
@@ -842,7 +855,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, refreshStatus]);
+  }, [appendOperationLog, downloadDir, refreshStatus, resolveLocalImportVersion]);
 
   const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
     const fileRes = await SelectDriverPackageFile(downloadDir);
@@ -935,6 +948,18 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     }
     message.error(`目录导入失败${forceTip}：失败 ${failCount}${skipTip}`);
   }, [appendOperationLog, downloadDir, forceOverwriteInstalled, installDriverFromLocalPath, refreshStatus, rows]);
+
+  const openDriverDirectory = useCallback(async () => {
+    try {
+      const res = await OpenDriverDownloadDirectory(downloadDir);
+      if (!res?.success) {
+        throw new Error(res?.message || '打开驱动目录失败');
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
+      message.error(`打开驱动目录失败: ${errMsg}`);
+    }
+  }, [downloadDir]);
 
   const openDriverLog = useCallback((driverType: string) => {
     const normalized = String(driverType || '').trim().toLowerCase();
@@ -1067,29 +1092,35 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const options = versionMap[row.type] || [];
           const selectedKey = selectedVersionMap[row.type];
           const selectOptions = buildVersionSelectOptions(options);
+          const mongoHint = row.type === 'mongodb'
+            ? '当前仅支持 MongoDB 1.17.x 和 2.x；更老 1.x 暂不提供安装。'
+            : '';
           return (
-            <Select
-              size="small"
-              style={{ width: '100%' }}
-              loading={!!versionLoadingMap[row.type]}
-              disabled={actionState.driverType === row.type}
-              placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
-              value={selectedKey}
-              options={selectOptions as any}
-              onOpenChange={(open) => {
-                if (open && options.length === 0 && !versionLoadingMap[row.type]) {
-                  void loadVersionOptions(row, true);
-                  return;
-                }
-                if (open && selectedKey) {
-                  void loadVersionPackageSize(row, selectedKey);
-                }
-              }}
-              onChange={(value) => {
-                setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
-                void loadVersionPackageSize(row, value);
-              }}
-            />
+            <div style={{ display: 'grid', gap: 4 }}>
+              <Select
+                size="small"
+                style={{ width: '100%' }}
+                loading={!!versionLoadingMap[row.type]}
+                disabled={actionState.driverType === row.type}
+                placeholder={options.length > 0 ? '选择驱动版本' : '点击展开加载版本'}
+                value={selectedKey}
+                options={selectOptions as any}
+                onOpenChange={(open) => {
+                  if (open && options.length === 0 && !versionLoadingMap[row.type]) {
+                    void loadVersionOptions(row, true);
+                    return;
+                  }
+                  if (open && selectedKey) {
+                    void loadVersionPackageSize(row, selectedKey);
+                  }
+                }}
+                onChange={(value) => {
+                  setSelectedVersionMap((prev) => ({ ...prev, [row.type]: value }));
+                  void loadVersionPackageSize(row, value);
+                }}
+              />
+              {mongoHint ? <Text type="secondary" style={{ fontSize: 12 }}>{mongoHint}</Text> : null}
+            </div>
           );
         },
       },
@@ -1342,10 +1373,14 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
                   children: (
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
                       <Text type="secondary">自动下载和手动导入的驱动都会落盘到以下目录；后续版本升级可重复复用已下载驱动。</Text>
+                      <Text type="secondary">如果应用内下载链路失败，可先手动下载驱动包到该目录，再使用“本地导入”或“导入驱动目录”完成安装。</Text>
                       <Text type="secondary">行内“本地导入”仅用于单个驱动文件/总包（如 `mariadb-driver-agent`、`mariadb-driver-agent.exe`、`GoNavi-DriverAgents.zip`）；批量导入请使用上方“导入驱动目录”。</Text>
                       <Paragraph copyable={{ text: downloadDir || '-' }} style={{ marginBottom: 0 }}>
                         驱动根目录：{downloadDir || '-'}
                       </Paragraph>
+                      <Button icon={<FolderOpenOutlined />} onClick={() => void openDriverDirectory()}>
+                        打开驱动目录
+                      </Button>
                       {networkStatus?.logPath ? (
                         <Paragraph copyable={{ text: networkStatus.logPath }} style={{ marginBottom: 0 }}>
                           运行日志文件：{networkStatus.logPath}
@@ -1374,6 +1409,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
               onChange={(checked) => setForceOverwriteInstalled(checked)}
               disabled={batchDirectoryImporting}
             />
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={() => void openDriverDirectory()}
+            >
+              打开驱动目录
+            </Button>
             <Button
               icon={<FolderOpenOutlined />}
               loading={batchDirectoryImporting}

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Button, Space, message } from 'antd';
 import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
+import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import Editor, { OnMount } from '@monaco-editor/react';
 
 interface RedisCommandEditorProps {
@@ -201,7 +202,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
         for (const cmd of commands) {
             const start = Date.now();
             try {
-                const res = await (window as any).go.app.App.RedisExecuteCommand(config, cmd);
+                const res = await (window as any).go.app.App.RedisExecuteCommand(buildRpcConnectionConfig(config), cmd);
                 newResults.push({
                     command: cmd,
                     result: res.success ? res.data : null,

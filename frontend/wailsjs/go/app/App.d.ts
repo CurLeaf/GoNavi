@@ -6,6 +6,8 @@ import {redis} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
+export function ApplyDataRootDirectory(arg1:string,arg2:boolean):Promise<connection.QueryResult>;
+
 export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
 
 export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResult>;
@@ -13,6 +15,8 @@ export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResu
 export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
 export function CheckForUpdates():Promise<connection.QueryResult>;
+
+export function ClearTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
 
@@ -52,6 +56,8 @@ export function DataSyncAnalyze(arg1:sync.SyncConfig):Promise<connection.QueryRe
 
 export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Promise<connection.QueryResult>;
 
+export function DeleteConnection(arg1:string):Promise<void>;
+
 export function DownloadDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function DownloadUpdate():Promise<connection.QueryResult>;
@@ -63,6 +69,8 @@ export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DuplicateConnection(arg1:string):Promise<connection.SavedConnectionView>;
 
 export function ExecuteSQLFile(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -82,6 +90,8 @@ export function GenerateQueryID():Promise<string>;
 
 export function GetAppInfo():Promise<connection.QueryResult>;
 
+export function GetDataRootDirectoryInfo():Promise<connection.QueryResult>;
+
 export function GetDriverStatusList(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function GetDriverVersionList(arg1:string,arg2:string):Promise<connection.QueryResult>;
@@ -90,15 +100,23 @@ export function GetDriverVersionPackageSize(arg1:string,arg2:string):Promise<con
 
 export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
+export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;
+
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
 export function ImportData(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
-export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string):Promise<connection.QueryResult>;
+export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
+
+export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
+
+export function LogWindowDiagnostic(arg1:string,arg2:string):Promise<void>;
 
 export function MongoDiscoverMembers(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -112,7 +130,11 @@ export function MySQLQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:str
 
 export function MySQLShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function OpenDataRootDirectory():Promise<connection.QueryResult>;
+
 export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
+
+export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
@@ -179,6 +201,12 @@ export function ResolveDriverDownloadDirectory(arg1:string):Promise<connection.Q
 export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function ResolveDriverRepositoryURL(arg1:string):Promise<connection.QueryResult>;
+
+export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
+
+export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectDatabaseFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
