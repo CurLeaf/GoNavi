@@ -33,10 +33,12 @@ func TestResolveGoBinaryPath_FallsBackToKnownLocation(t *testing.T) {
 	originalLookPath := goBinaryLookPath
 	originalStat := goBinaryStat
 	originalCommand := goBinaryCommand
+	originalCommandOutput := goBinaryCommandOutput
 	t.Cleanup(func() {
 		goBinaryLookPath = originalLookPath
 		goBinaryStat = originalStat
 		goBinaryCommand = originalCommand
+		goBinaryCommandOutput = originalCommandOutput
 	})
 
 	goBinaryLookPath = func(file string) (string, error) {
@@ -52,6 +54,10 @@ func TestResolveGoBinaryPath_FallsBackToKnownLocation(t *testing.T) {
 		t.Fatalf("shell fallback should not run when common path exists")
 		return nil
 	}
+	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		t.Fatalf("shell fallback should not run when common path exists")
+		return nil, nil
+	}
 
 	got, err := resolveGoBinaryPath()
 	if err != nil {
@@ -66,11 +72,13 @@ func TestResolveGoBinaryPath_FallsBackToShellOutput(t *testing.T) {
 	originalLookPath := goBinaryLookPath
 	originalStat := goBinaryStat
 	originalCommand := goBinaryCommand
+	originalCommandOutput := goBinaryCommandOutput
 	originalShell := os.Getenv("SHELL")
 	t.Cleanup(func() {
 		goBinaryLookPath = originalLookPath
 		goBinaryStat = originalStat
 		goBinaryCommand = originalCommand
+		goBinaryCommandOutput = originalCommandOutput
 		_ = os.Setenv("SHELL", originalShell)
 	})
 	if err := os.Setenv("SHELL", "/custom/shell"); err != nil {
@@ -89,10 +97,16 @@ func TestResolveGoBinaryPath_FallsBackToShellOutput(t *testing.T) {
 	var called []string
 	goBinaryCommand = func(name string, arg ...string) *exec.Cmd {
 		called = append(called, name)
-		if len(called) == 1 {
-			return exec.Command("/bin/sh", "-c", "printf 'welcome\\n/Users/test/go/bin/go\\n'")
+		return &exec.Cmd{
+			Path: name,
+			Args: append([]string{name}, arg...),
 		}
-		return exec.Command("/bin/sh", "-c", "exit 1")
+	}
+	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		if len(called) == 1 {
+			return []byte("welcome\n/Users/test/go/bin/go\n"), nil
+		}
+		return nil, exec.ErrNotFound
 	}
 
 	got, err := resolveGoBinaryPath()

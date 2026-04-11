@@ -36,6 +36,9 @@ var (
 	goBinaryCommand  = func(name string, arg ...string) *exec.Cmd {
 		return exec.Command(name, arg...)
 	}
+	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
+		return cmd.Output()
+	}
 )
 
 // resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
@@ -58,7 +61,7 @@ func resolveGoBinaryPath() (string, error) {
 
 	for _, shell := range candidateShellsForCommandLookup() {
 		cmd := goBinaryCommand(shell, "-lc", "command -v go")
-		output, err := cmd.Output()
+		output, err := goBinaryCommandOutput(cmd)
 		if err != nil {
 			continue
 		}
