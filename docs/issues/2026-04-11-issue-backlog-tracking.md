@@ -10,23 +10,24 @@
 
 | Issue | Title | Status | Commit |
 | --- | --- | --- | --- |
-| #242 | 希望有自定义数据存储位置功能 | Fixed | `42c5500` |
-| #287 | 建议补充 Sql Server 数据库图标 | Fixed | `ebae05c` |
-| #305 | 金仓数据库设计表新增字段保存失败 | Fixed | `9ecf5be` |
-| #306 | 驱动下载 | Fixed | `c49ed95` |
-| #308 | clickhouse 获取数据库列表失败 | Fixed | `33bbd91` |
-| #310 | 选择库后，右侧行显示各个表 | Fixed | `5bbeba2` |
-| #311 | WIN 系统的执行 500 多条 insert 语句要几分钟 | Fixed | `fd7ec11` |
-| #315 | 窗体内缩放异常 | Fixed | `e19dd82` |
-| #316 | 人大金仓数据库驱动版本过低 | Fixed | `2500183` |
+| #242 | 希望有自定义数据存储位置功能 | Fixed | `1f617f9` |
+| #287 | 建议补充 Sql Server 数据库图标 | Fixed | `60b63d7` |
+| #305 | 金仓数据库设计表新增字段保存失败 | Fixed | `f696f52` |
+| #306 | 驱动下载 | Fixed | `8297829` |
+| #308 | clickhouse 获取数据库列表失败 | Fixed | `5d86ee7` |
+| #310 | 选择库后，右侧行显示各个表 | Fixed | `808c773` |
+| #311 | WIN 系统的执行 500 多条 insert 语句要几分钟 | Fixed | `83fe3d4` |
+| #315 | 窗体内缩放异常 | Fixed | `5038ae5` |
+| #316 | 人大金仓数据库驱动版本过低 | Fixed | `aa1bb5b` |
 | #317 | 驱动管理增加导入 jar 功能 | Blocked | - |
-| #318 | mysql,bit 列，修改成 1 失败 | Fixed | `bee78be` |
+| #318 | mysql,bit 列，修改成 1 失败 | Fixed | `89d79ff` |
 | #319 | 关于运行外部 sql 文件的一些建议 | Deferred | - |
-| #320 | 无法连接达梦数据库 | Fixed | `dc17133` |
-| #325 | 有没有考虑对数据库的驱动版本进行选择或者自定义？ | Fixed | Pending |
-| #327 | SHOW DATABASES 报错 | Fixed | `5ac0221` |
-| #328 | [Bug] 安装更新失败 | Fixed | `436f130` |
-| #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `942ee2f` |
+| #320 | 无法连接达梦数据库 | Fixed | `1c2377b` |
+| #325 | 有没有考虑对数据库的驱动版本进行选择或者自定义？ | Fixed | `af5e842` |
+| #327 | SHOW DATABASES 报错 | Fixed | `fb500ee` |
+| #328 | [Bug] 安装更新失败 | Fixed | `426ef3b` |
+| #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `fcade0f` |
+| #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | Pending |
 
 ## Notes
 
@@ -77,6 +78,12 @@
 - 根因：侧边栏连接树被全局 Tree 样式固定为 `width: 100%`，标题同时启用了省略截断，导致缩窄侧栏后长节点无法形成横向溢出。
 - 处理：为 Sidebar 树增加专用横向滚动容器，并在 Sidebar 作用域内覆写 Tree 宽度与标题截断规则，让节点宽度随内容扩展且保留最小占满。
 - 验证：执行 `frontend` 下 `npm run build`，确认 TS/CSS 改动编译通过且仅作用于 Sidebar 树。
+
+### #331
+
+- 根因：连接失败时存在双层重试叠加。`DBGetDatabases / DBGetTables / DBQuery` 在缓存失效后本来就会主动重建连接一次，而 `connectDatabaseWithStartupRetry` 在稳定期仍会额外放行一次瞬时错误自动重试，导致一次后台探测会被放大成多次真实建连。
+- 处理：将连接自动重试范围收敛到应用启动保护窗口内；稳定期下所有连接探测与重建都只执行一次，避免后台挂起场景持续放大失败流量。
+- 验证：补充并更新 `internal/app/app_startup_connect_retry_test.go`，覆盖稳定期瞬时失败不重试、不再输出重试提示，以及启动期仍保留完整重试预算。
 
 ## Next
 

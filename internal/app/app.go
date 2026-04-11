@@ -726,8 +726,7 @@ func (a *App) shouldRetryConnect(err error, attempt int) bool {
 			return true
 		}
 	}
-	// Outside startup window, still grant one retry for transient network glitches.
-	return attempt == 1
+	return false
 }
 
 func isTransientStartupConnectError(err error) bool {

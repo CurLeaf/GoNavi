@@ -109,7 +109,7 @@ func TestConnectDatabaseWithStartupRetry_RetriesTransientFailureAndReappliesGlob
 	}
 }
 
-func TestConnectDatabaseWithStartupRetry_RetriesOnceOutsideStartupWindow(t *testing.T) {
+func TestConnectDatabaseWithStartupRetry_DoesNotRetryOutsideStartupWindowForTransientError(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
 	defer func() {
@@ -137,8 +137,8 @@ func TestConnectDatabaseWithStartupRetry_RetriesOnceOutsideStartupWindow(t *test
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if connectCalls != 2 {
-		t.Fatalf("expected 2 connect attempts outside startup window, got %d", connectCalls)
+	if connectCalls != 1 {
+		t.Fatalf("expected 1 connect attempt outside startup window, got %d", connectCalls)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestConnectDatabaseWithStartupRetry_DoesNotRetryOutsideStartupWindowForNonT
 	}
 }
 
-func TestConnectDatabaseWithStartupRetry_LogsRetryHintOutsideStartupWindow(t *testing.T) {
+func TestConnectDatabaseWithStartupRetry_DoesNotLogRetryHintOutsideStartupWindow(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
 	defer func() {
@@ -209,11 +209,11 @@ func TestConnectDatabaseWithStartupRetry_LogsRetryHintOutsideStartupWindow(t *te
 	rawConfig := connection.ConnectionConfig{Type: "postgres", Host: "10.1.131.86", Port: 5432, User: "postgres"}
 
 	_, _, err := a.connectDatabaseWithStartupRetry(rawConfig)
-	if err != nil {
-		t.Fatalf("expected success after retry, got error: %v", err)
+	if err == nil {
+		t.Fatal("expected error without retry, got nil")
 	}
-	if connectCalls != 2 {
-		t.Fatalf("expected 2 connect attempts, got %d", connectCalls)
+	if connectCalls != 1 {
+		t.Fatalf("expected 1 connect attempt, got %d", connectCalls)
 	}
 
 	logContent, readErr := os.ReadFile(logPath)
@@ -224,41 +224,15 @@ func TestConnectDatabaseWithStartupRetry_LogsRetryHintOutsideStartupWindow(t *te
 		t.Fatalf("expected log file to grow, before=%d after=%d", beforeSize, len(logContent))
 	}
 	appended := string(logContent[beforeSize:])
-	if !strings.Contains(appended, "检测到瞬时网络失败，准备重试连接") {
-		t.Fatalf("expected retry hint log in appended segment, got: %s", appended)
+	if strings.Contains(appended, "检测到瞬时网络失败，准备重试连接") {
+		t.Fatalf("expected no retry hint log outside startup window, got: %s", appended)
 	}
 }
 
-func TestConnectDatabaseWithStartupRetry_OutsideStartupWindowTransientFailureStopsAfterOneRetry(t *testing.T) {
-	originalNewDatabaseFunc := newDatabaseFunc
-	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
-	defer func() {
-		newDatabaseFunc = originalNewDatabaseFunc
-		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
-	}()
-
-	connectCalls := 0
-	newDatabaseFunc = func(dbType string) (db.Database, error) {
-		return &fakeStartupRetryDB{
-			connect: func(config connection.ConnectionConfig) error {
-				connectCalls++
-				return errors.New("dial tcp 10.1.131.86:5432: connect: no route to host")
-			},
-		}, nil
-	}
-	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
-		return raw, nil
-	}
-
+func TestShouldRetryConnect_OutsideStartupWindowTransientFailureReturnsFalse(t *testing.T) {
 	a := &App{startedAt: time.Now().Add(-startupConnectRetryWindow - time.Second)}
-	rawConfig := connection.ConnectionConfig{Type: "postgres", Host: "10.1.131.86", Port: 5432, User: "postgres"}
-
-	_, _, err := a.connectDatabaseWithStartupRetry(rawConfig)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if connectCalls != 2 {
-		t.Fatalf("expected 2 connect attempts outside startup window for transient error, got %d", connectCalls)
+	if a.shouldRetryConnect(errors.New("dial tcp 10.1.131.86:5432: connect: no route to host"), 1) {
+		t.Fatal("expected outside startup window transient failure to not retry")
 	}
 }
 
