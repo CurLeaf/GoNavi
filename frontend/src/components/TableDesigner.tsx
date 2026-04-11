@@ -9,6 +9,7 @@ import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, Trigg
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
+import { buildAlterTablePreviewSql } from './tableDesignerSchemaSql';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
 interface EditableColumn extends ColumnDefinition {
@@ -2118,105 +2119,44 @@ END;`;
           return;
       }
 
-      const tableName = `\`${isNewTable ? newTableName : tab.tableName}\``;
-      
       if (isNewTable) {
           // CREATE TABLE
           const sql = buildCreateTableSql(isNewTable ? newTableName : tab.tableName || '', columns, charset, collation);
           setPreviewSql(sql);
           setIsPreviewOpen(true);
       } else {
-          // ALTER TABLE (Existing logic)
-          const alters: string[] = [];
-          
-          originalColumns.forEach(orig => {
-              if (!columns.find(c => c._key === orig._key)) {
-                  alters.push(`DROP COLUMN \`${orig.name}\``);
-              }
+          const tableInfo = resolveTableInfo();
+          const sql = buildAlterTablePreviewSql({
+              dbType: tableInfo.dbType,
+              tableName: tableInfo.qualifiedName,
+              originalColumns,
+              columns,
           });
 
-          columns.forEach((curr, index) => {
-              const orig = originalColumns.find(c => c._key === curr._key);
-              const prevCol = index > 0 ? columns[index - 1] : null;
-              const positionSql = prevCol ? `AFTER \`${prevCol.name}\`` : 'FIRST';
-              
-              let extra = curr.extra || "";
-              if (curr.isAutoIncrement) {
-                  if (!extra.toLowerCase().includes('auto_increment')) extra += " AUTO_INCREMENT";
-              } else {
-                  extra = extra.replace(/auto_increment/gi, "").trim();
-              }
-
-              const colDef = `\`${curr.name}\` ${curr.type} ${curr.nullable === 'NO' ? 'NOT NULL' : 'NULL'} ${curr.default ? `DEFAULT '${curr.default}'` : ''} ${extra} COMMENT '${curr.comment}'`;
-
-              if (!orig) {
-                  alters.push(`ADD COLUMN ${colDef} ${positionSql}`);
-              } else {
-                  const origIndex = originalColumns.findIndex(c => c._key === curr._key);
-                  const origPrevCol = origIndex > 0 ? originalColumns[origIndex - 1] : null;
-                  
-                  let positionChanged = false;
-                  if (index === 0 && origIndex !== 0) positionChanged = true;
-                  if (index > 0 && (!origPrevCol || origPrevCol._key !== prevCol?._key)) positionChanged = true;
-
-                  const isNameChanged = orig.name !== curr.name;
-                  const isTypeChanged = orig.type !== curr.type;
-                  const isNullableChanged = orig.nullable !== curr.nullable;
-                  const isDefaultChanged = orig.default !== curr.default;
-                  const isCommentChanged = orig.comment !== curr.comment;
-                  const isAIChanged = orig.isAutoIncrement !== curr.isAutoIncrement;
-
-                  if (isNameChanged || isTypeChanged || isNullableChanged || isDefaultChanged || isCommentChanged || positionChanged || isAIChanged) {
-                      if (isNameChanged) {
-                          alters.push(`CHANGE COLUMN \`${orig.name}\` ${colDef} ${positionSql}`);
-                      } else {
-                          alters.push(`MODIFY COLUMN ${colDef} ${positionSql}`);
-                      }
-                  }
-              }
-          });
-
-          const origPKKeys = originalColumns.filter(c => c.key === 'PRI').map(c => c._key);
-          const newPKKeys = columns.filter(c => c.key === 'PRI').map(c => c._key);
-          const keysChanged = origPKKeys.length !== newPKKeys.length || !origPKKeys.every(k => newPKKeys.includes(k));
-
-          if (keysChanged) {
-              if (origPKKeys.length > 0) alters.push(`DROP PRIMARY KEY`);
-              if (newPKKeys.length > 0) {
-                  const pkNames = columns.filter(c => c.key === 'PRI').map(c => `\`${c.name}\``).join(', ');
-                  alters.push(`ADD PRIMARY KEY (${pkNames})`);
-              }
-          }
-
-          if (alters.length === 0) {
+          if (!sql.trim()) {
               message.info("没有检测到变更");
               return;
           }
-
-          const sql = `ALTER TABLE ${tableName}\n` + alters.join(",\n");
           setPreviewSql(sql);
           setIsPreviewOpen(true);
       }
   };
 
 	  const handleExecuteSave = async () => {
-	      const conn = connections.find(c => c.id === tab.connectionId);
-	      if (!conn) return;
-	      const config = { ...conn.config, port: Number(conn.config.port), password: conn.config.password || "", database: conn.config.database || "", useSSH: conn.config.useSSH || false, ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" } };
-	      const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', previewSql);
-	      if (res.success) {
-	          message.success(isNewTable ? "表创建成功！" : "表结构修改成功！");
-	          setIsPreviewOpen(false);
-	          if (!isNewTable) {
+	      const result = await executeSchemaStatements(previewSql);
+	      if (!result.ok) {
+	          message.error(result.message || "执行失败");
+	          return;
+	      }
+	      message.success(isNewTable ? "表创建成功！" : "表结构修改成功！");
+	      setIsPreviewOpen(false);
+	      if (!isNewTable) {
               fetchData();
           } else {
               // TODO: Close tab or reload sidebar?
               // Ideally, refresh sidebar node.
           }
-      } else {
-          message.error("执行失败: " + res.message);
-      }
-  };
+	  };
 
   // Merge columns with resize handler
   const resizableColumns = useMemo(() => tableColumns.map((col, index) => ({
