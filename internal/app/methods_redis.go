@@ -19,12 +19,20 @@ import (
 var (
 	redisCache   = make(map[string]redis.RedisClient)
 	redisCacheMu sync.Mutex
+	newRedisClientFunc = redis.NewRedisClient
 )
 
 // getRedisClient gets or creates a Redis client from cache
 func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisClient, error) {
-	effectiveConfig := applyGlobalProxyToConnection(config)
-	connectConfig, proxyErr := resolveDialConfigWithProxy(effectiveConfig)
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		wrapped := wrapConnectError(config, err)
+		logger.Error(wrapped, "Redis 密文解析失败：%s", formatRedisConnSummary(config))
+		return nil, wrapped
+	}
+
+	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
+	connectConfig, proxyErr := resolveDialConfigWithProxyFunc(effectiveConfig)
 	if proxyErr != nil {
 		wrapped := wrapConnectError(effectiveConfig, proxyErr)
 		logger.Error(wrapped, "Redis 代理准备失败：%s", formatRedisConnSummary(effectiveConfig))
@@ -54,7 +62,7 @@ func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisCli
 	}
 
 	logger.Infof("创建 Redis 客户端实例：缓存Key=%s", shortKey)
-	client := redis.NewRedisClient()
+	client := newRedisClientFunc()
 	if err := client.Connect(connectConfig); err != nil {
 		wrapped := wrapConnectError(effectiveConfig, err)
 		logger.Error(wrapped, "Redis 连接失败：%s 缓存Key=%s", formatRedisConnSummary(effectiveConfig), shortKey)

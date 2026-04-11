@@ -1,10 +1,26 @@
 import type { ConnectionConfig, SavedConnection } from '../types';
 
 export type ConnectionImportKind = 'encrypted-package' | 'legacy-json' | 'invalid';
+export type ConnectionPackageDialogSnapshot = {
+  open: boolean;
+  mode: 'export' | 'import';
+  password: string;
+  error: string;
+  confirmLoading: boolean;
+};
+export type ConnectionPackageDialogUpdater = (
+  current: ConnectionPackageDialogSnapshot,
+) => ConnectionPackageDialogSnapshot;
+
+export type ConnectionPackageExportResult =
+  | { kind: 'canceled'; nextDialog: ConnectionPackageDialogUpdater }
+  | { kind: 'succeeded' }
+  | { kind: 'failed'; error: string };
 
 type JsonObject = Record<string, unknown>;
 
 const CONNECTION_PACKAGE_KIND = 'gonavi_connection_package';
+const CANCELED_MESSAGE = '已取消';
 
 const isJsonObject = (value: unknown): value is JsonObject => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -68,6 +84,39 @@ export const detectConnectionImportKind = (raw: unknown): ConnectionImportKind =
 };
 
 export const normalizeConnectionPackagePassword = (value: string): string => value.trim();
+
+export const isConnectionPackageExportCanceled = (result: unknown): boolean => (
+  isJsonObject(result)
+  && result.success === false
+  && result.message === CANCELED_MESSAGE
+);
+
+export const resolveConnectionPackageExportResult = (
+  _currentDialog: ConnectionPackageDialogSnapshot,
+  result: unknown,
+): ConnectionPackageExportResult => {
+  if (isConnectionPackageExportCanceled(result)) {
+    return {
+      kind: 'canceled',
+      nextDialog: (current) => ({
+        ...current,
+        confirmLoading: false,
+        error: '',
+      }),
+    };
+  }
+
+  if (isJsonObject(result) && result.success === true) {
+    return { kind: 'succeeded' };
+  }
+
+  return {
+    kind: 'failed',
+    error: isJsonObject(result) && typeof result.message === 'string' && result.message.trim()
+      ? result.message
+      : '导出失败',
+  };
+};
 
 const legacyExportRemovedError = (): never => {
   throw new Error('Legacy connection JSON export has been removed. Use the recovery package flow instead.');

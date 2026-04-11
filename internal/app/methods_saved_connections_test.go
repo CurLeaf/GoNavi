@@ -219,7 +219,7 @@ func TestImportLegacyConnectionsIsIdempotentForSameID(t *testing.T) {
 	}
 }
 
-func TestImportLegacyConnectionsKeepsExistingSecretWhenReimportOmitsPassword(t *testing.T) {
+func TestImportLegacyConnectionsClearsExistingSecretWhenReimportOmitsPassword(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
 
@@ -267,7 +267,7 @@ func TestImportLegacyConnectionsKeepsExistingSecretWhenReimportOmitsPassword(t *
 	if err != nil {
 		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
 	}
-	if resolved.Password != "secret-1" {
-		t.Fatalf("expected original password to be preserved, got %q", resolved.Password)
+	if resolved.Password != "" {
+		t.Fatalf("expected missing import password to clear existing secret, got %q", resolved.Password)
 	}
 }

@@ -24,7 +24,11 @@ import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shou
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
-import { detectConnectionImportKind, normalizeConnectionPackagePassword } from './utils/connectionExport';
+import {
+  detectConnectionImportKind,
+  resolveConnectionPackageExportResult,
+  normalizeConnectionPackagePassword,
+} from './utils/connectionExport';
 import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
@@ -41,10 +45,13 @@ import {
   resolveSecurityUpdateEntryVisibility,
 } from './utils/securityUpdatePresentation';
 import {
+  hasSecurityUpdateRecentResult,
   resolveSecurityUpdateRepairEntry,
+  resolveSecurityUpdateSettingsFocusTarget,
   shouldReopenSecurityUpdateDetails,
   shouldRetrySecurityUpdateAfterRepairSave,
   type SecurityUpdateRepairSource,
+  type SecurityUpdateSettingsFocusTarget,
 } from './utils/securityUpdateRepairFlow';
 import {
   SHORTCUT_ACTION_META,
@@ -175,6 +182,8 @@ function App() {
   const [isSecurityUpdateIntroOpen, setIsSecurityUpdateIntroOpen] = useState(false);
   const [isSecurityUpdateBannerDismissed, setIsSecurityUpdateBannerDismissed] = useState(false);
   const [isSecurityUpdateSettingsOpen, setIsSecurityUpdateSettingsOpen] = useState(false);
+  const [securityUpdateSettingsFocusTarget, setSecurityUpdateSettingsFocusTarget] = useState<SecurityUpdateSettingsFocusTarget | null>(null);
+  const [securityUpdateSettingsFocusRequest, setSecurityUpdateSettingsFocusRequest] = useState(0);
   const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
   const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState('正在检查已保存配置');
   const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
@@ -278,6 +287,8 @@ function App() {
           setIsSecurityUpdateBannerDismissed(false);
       }
       if (options?.openSettings) {
+          setSecurityUpdateSettingsFocusTarget(resolveSecurityUpdateSettingsFocusTarget(nextStatus));
+          setSecurityUpdateSettingsFocusRequest((current) => current + 1);
           setIsSecurityUpdateSettingsOpen(true);
       }
       return nextStatus;
@@ -820,10 +831,15 @@ function App() {
   const connections = useStore(state => state.connections);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
-  const handleOpenSecurityUpdateSettings = useCallback(() => {
+  const openSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
       setIsSecurityUpdateIntroOpen(false);
+      setSecurityUpdateSettingsFocusTarget(focusTarget);
+      setSecurityUpdateSettingsFocusRequest((current) => current + 1);
       setIsSecurityUpdateSettingsOpen(true);
   }, []);
+  const handleOpenSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
+      openSecurityUpdateSettings(focusTarget);
+  }, [openSecurityUpdateSettings]);
   const runSecurityUpdateRound = useCallback(async (mode: 'start' | 'retry' | 'restart') => {
       const backendApp = (window as any).go?.app?.App;
       const stageText = mode === 'retry'
@@ -943,7 +959,7 @@ function App() {
       securityUpdateStatus.summary,
   ]);
   const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => {
-      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections);
+      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus);
       if (repairEntry.type === 'warning') {
           void message.warning(repairEntry.message);
           return;
@@ -973,8 +989,8 @@ function App() {
           return;
       }
       setSecurityUpdateRepairSource(null);
-      setIsSecurityUpdateSettingsOpen(true);
-  }, [connections, runSecurityUpdateRound]);
+      openSecurityUpdateSettings(repairEntry.focusTarget);
+  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus]);
   const updateCheckInFlightRef = React.useRef(false);
   const updateDownloadInFlightRef = React.useRef(false);
   const updateUserDismissedRef = React.useRef(false);
@@ -1216,7 +1232,11 @@ function App() {
       if (!silent) {
           setAboutUpdateStatus('正在检查更新...');
       }
-      const res = await (window as any).go.app.App.CheckForUpdates();
+      const updateAPI = (window as any).go.app.App;
+      const checkFn = silent && typeof updateAPI.CheckForUpdatesSilently === 'function'
+          ? updateAPI.CheckForUpdatesSilently
+          : updateAPI.CheckForUpdates;
+      const res = await checkFn();
       updateCheckInFlightRef.current = false;
       if (!res?.success) {
           if (!silent) {
@@ -1494,8 +1514,13 @@ function App() {
               }
 
               const res = await backendApp.ExportConnectionsPackage(password);
-              if (!res?.success) {
-                  throw new Error(res?.message || '导出失败');
+              const exportResult = resolveConnectionPackageExportResult(connectionPackageDialog, res);
+              if (exportResult.kind === 'canceled') {
+                  setConnectionPackageDialog(exportResult.nextDialog);
+                  return;
+              }
+              if (exportResult.kind === 'failed') {
+                  throw new Error(exportResult.error);
               }
 
               closeConnectionPackageDialog();
@@ -1695,7 +1720,9 @@ function App() {
       const rawStatus = typeof backendApp?.GetSecurityUpdateStatus === 'function'
           ? await backendApp.GetSecurityUpdateStatus()
           : securityUpdateStatus;
-      const nextStatus = mergeSecurityUpdateStatusWithLegacySource(rawStatus, nextRawPayload);
+      const nextStatus = mergeSecurityUpdateStatusWithLegacySource(rawStatus, nextRawPayload, {
+          previousStatus: securityUpdateStatus,
+      });
       const nextHasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(nextRawPayload);
 
       setSecurityUpdateRawPayload(nextRawPayload);
@@ -2322,7 +2349,7 @@ function App() {
                 title="拖动调整宽度"
             />
           </Sider>
-           <Content style={{ background: isLogPanelOpen ? bgContent : 'transparent', overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+           <Content style={{ background: bgContent, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
              {securityUpdateEntryVisibility.showBanner && !isSecurityUpdateBannerDismissed && (
                 <SecurityUpdateBanner
                   status={securityUpdateStatus}
@@ -2331,7 +2358,9 @@ function App() {
                   onStart={handleStartSecurityUpdate}
                   onRetry={handleRetrySecurityUpdate}
                   onRestart={handleRestartSecurityUpdate}
-                  onOpenDetails={handleOpenSecurityUpdateSettings}
+                  onOpenDetails={() => handleOpenSecurityUpdateSettings(
+                      hasSecurityUpdateRecentResult(securityUpdateStatus) ? 'recent_result' : null,
+                  )}
                   onDismiss={() => setIsSecurityUpdateBannerDismissed(true)}
                 />
              )}
@@ -2474,13 +2503,15 @@ function App() {
             overlayTheme={overlayTheme}
             onStart={handleStartSecurityUpdate}
             onPostpone={handlePostponeSecurityUpdate}
-            onViewDetails={handleOpenSecurityUpdateSettings}
+            onViewDetails={() => handleOpenSecurityUpdateSettings()}
           />
           <SecurityUpdateSettingsModal
             open={isSecurityUpdateSettingsOpen}
             darkMode={darkMode}
             overlayTheme={overlayTheme}
             status={securityUpdateStatus}
+            focusTarget={securityUpdateSettingsFocusTarget}
+            focusRequest={securityUpdateSettingsFocusRequest}
             onClose={() => setIsSecurityUpdateSettingsOpen(false)}
             onStart={handleStartSecurityUpdate}
             onRetry={handleRetrySecurityUpdate}

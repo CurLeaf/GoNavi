@@ -3,6 +3,11 @@ import { SafetyCertificateOutlined } from '@ant-design/icons';
 import type { CSSProperties } from 'react';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import {
+  SECURITY_UPDATE_ACTION_BUTTON_CLASS,
+  SECURITY_UPDATE_MODAL_CLASS,
+  getSecurityUpdateActionButtonStyle,
+} from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateIntroModalProps {
   open: boolean;
@@ -15,10 +20,9 @@ interface SecurityUpdateIntroModalProps {
 }
 
 const actionButtonStyle: CSSProperties = {
+  ...getSecurityUpdateActionButtonStyle(),
   height: 38,
-  borderRadius: 12,
   paddingInline: 18,
-  fontWeight: 600,
 };
 
 const SecurityUpdateIntroModal = ({
@@ -32,6 +36,7 @@ const SecurityUpdateIntroModal = ({
 }: SecurityUpdateIntroModalProps) => {
   return (
     <Modal
+      rootClassName={SECURITY_UPDATE_MODAL_CLASS}
       title={(
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div
@@ -77,13 +82,36 @@ const SecurityUpdateIntroModal = ({
         footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
       }}
       footer={[
-        <Button key="details" type="primary" ghost style={actionButtonStyle} onClick={onViewDetails} disabled={loading}>
+        <Button
+          key="details"
+          className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+          type="primary"
+          ghost
+          style={actionButtonStyle}
+          onClick={onViewDetails}
+          disabled={loading}
+        >
           查看详情
         </Button>,
-        <Button key="later" type="primary" ghost style={actionButtonStyle} onClick={onPostpone} disabled={loading}>
+        <Button
+          key="later"
+          className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+          type="primary"
+          ghost
+          style={actionButtonStyle}
+          onClick={onPostpone}
+          disabled={loading}
+        >
           稍后提醒我
         </Button>,
-        <Button key="start" type="primary" style={actionButtonStyle} loading={loading} onClick={onStart}>
+        <Button
+          key="start"
+          className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+          type="primary"
+          style={actionButtonStyle}
+          loading={loading}
+          onClick={onStart}
+        >
           立即更新
         </Button>,
       ]}

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -221,4 +223,75 @@ func TestValidateConnectionPackageKDFSpecRejectsOversizedParams(t *testing.T) {
 			t.Fatalf("oversized parallelism should return unsupported error, got: %v", err)
 		}
 	})
+}
+
+func TestDecryptConnectionPackagePlaintextRejectsOversizedPayload(t *testing.T) {
+	nonce := base64.StdEncoding.EncodeToString(make([]byte, connectionPackageNonceBytes))
+	salt := base64.StdEncoding.EncodeToString(make([]byte, connectionPackageSaltBytes))
+	payload := base64.StdEncoding.EncodeToString(make([]byte, connectionPackageMaxCiphertextBytes+1))
+
+	file := connectionPackageFile{
+		SchemaVersion: connectionPackageSchemaVersion,
+		Kind:          connectionPackageKind,
+		Cipher:        connectionPackageCipher,
+		KDF: connectionPackageKDFSpec{
+			Name:        connectionPackageKDFName,
+			MemoryKiB:   connectionPackageKDFDefaultMemoryKiB,
+			TimeCost:    connectionPackageKDFDefaultTimeCost,
+			Parallelism: connectionPackageKDFDefaultParallelism,
+			Salt:        salt,
+		},
+		Nonce:   nonce,
+		Payload: payload,
+	}
+
+	_, err := decryptConnectionPackagePlaintext(file, "correct-password")
+	if !errors.Is(err, errConnectionPackagePayloadTooLarge) {
+		t.Fatalf("oversized payload should return errConnectionPackagePayloadTooLarge, got: %v", err)
+	}
+}
+
+func TestDecryptConnectionPackagePlaintextRejectsOversizedBase64PayloadBeforeDecode(t *testing.T) {
+	nonce := base64.StdEncoding.EncodeToString(make([]byte, connectionPackageNonceBytes))
+
+	file := connectionPackageFile{
+		SchemaVersion: connectionPackageSchemaVersion,
+		Kind:          connectionPackageKind,
+		Cipher:        connectionPackageCipher,
+		KDF: connectionPackageKDFSpec{
+			Name:        connectionPackageKDFName,
+			MemoryKiB:   connectionPackageKDFDefaultMemoryKiB,
+			TimeCost:    connectionPackageKDFDefaultTimeCost,
+			Parallelism: connectionPackageKDFDefaultParallelism,
+			Salt:        base64.StdEncoding.EncodeToString(make([]byte, connectionPackageSaltBytes)),
+		},
+		Nonce:   nonce,
+		Payload: strings.Repeat("A", connectionPackageMaxPayloadBase64Bytes+4),
+	}
+
+	_, err := decryptConnectionPackagePlaintext(file, "correct-password")
+	if !errors.Is(err, errConnectionPackagePayloadTooLarge) {
+		t.Fatalf("oversized base64 payload should return errConnectionPackagePayloadTooLarge, got: %v", err)
+	}
+}
+
+func TestEncryptConnectionPackageRejectsOversizedPayload(t *testing.T) {
+	_, err := encryptConnectionPackage(connectionPackagePayload{
+		Connections: []connectionPackageItem{
+			{
+				ID:   "conn-large",
+				Name: strings.Repeat("x", connectionPackageMaxCiphertextBytes),
+				Config: connection.ConnectionConfig{
+					ID:   "conn-large",
+					Type: "postgres",
+					Host: "db.large.local",
+					Port: 5432,
+					User: "postgres",
+				},
+			},
+		},
+	}, "correct-password")
+	if !errors.Is(err, errConnectionPackagePayloadTooLarge) {
+		t.Fatalf("oversized export payload should return errConnectionPackagePayloadTooLarge, got: %v", err)
+	}
 }

@@ -15,6 +15,8 @@ export function CheckDriverNetworkStatus():Promise<connection.QueryResult>;
 
 export function CheckForUpdates():Promise<connection.QueryResult>;
 
+export function CheckForUpdatesSilently():Promise<connection.QueryResult>;
+
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):Promise<connection.QueryResult>;

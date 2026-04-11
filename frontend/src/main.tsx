@@ -119,6 +119,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 DeleteQuery: async () => null,
                 GetAppInfo: async () => ({}),
                 CheckForUpdates: async () => ({ success: false }),
+                CheckForUpdatesSilently: async () => ({ success: false }),
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),

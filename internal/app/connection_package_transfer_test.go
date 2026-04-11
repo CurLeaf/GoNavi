@@ -173,7 +173,7 @@ func TestImportConnectionPackagePayloadLatestEntryWinsForSameID(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
 
-	_, err := app.importConnectionPackagePayload(connectionPackagePayload{
+	imported, err := app.importConnectionPackagePayload(connectionPackagePayload{
 		Connections: []connectionPackageItem{
 			{
 				ID:   "conn-dup",
@@ -204,6 +204,12 @@ func TestImportConnectionPackagePayloadLatestEntryWinsForSameID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("importConnectionPackagePayload returned error: %v", err)
 	}
+	if len(imported) != 1 {
+		t.Fatalf("expected duplicate ids to return 1 final imported item, got %d", len(imported))
+	}
+	if imported[0].Name != "Second" {
+		t.Fatalf("expected returned import result to keep latest entry, got %q", imported[0].Name)
+	}
 
 	saved, err := app.GetSavedConnections()
 	if err != nil {
@@ -222,6 +228,153 @@ func TestImportConnectionPackagePayloadLatestEntryWinsForSameID(t *testing.T) {
 	}
 	if resolved.Password != "second-secret" {
 		t.Fatalf("expected latest secret to win, got %q", resolved.Password)
+	}
+}
+
+func TestImportConnectionsPayloadLegacyJSONRollsBackOnSaveFailure(t *testing.T) {
+	failRef, err := secretstore.BuildRef(savedConnectionSecretKind, "legacy-2")
+	if err != nil {
+		t.Fatalf("BuildRef returned error: %v", err)
+	}
+
+	store := newFailOnPutSecretStore(failRef)
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+
+	_, err = app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "legacy-1",
+		Name: "Existing Legacy",
+		Config: connection.ConnectionConfig{
+			ID:       "legacy-1",
+			Type:     "postgres",
+			Host:     "db.old.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: "old-primary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	raw, err := json.Marshal([]connection.LegacySavedConnection{
+		{
+			ID:   "legacy-1",
+			Name: "Imported Existing Legacy",
+			Config: connection.ConnectionConfig{
+				ID:   "legacy-1",
+				Type: "postgres",
+				Host: "db.new.local",
+				Port: 5432,
+				User: "postgres",
+			},
+		},
+		{
+			ID:   "legacy-2",
+			Name: "Imported New Legacy",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-2",
+				Type:     "mysql",
+				Host:     "db.second.local",
+				Port:     3306,
+				User:     "root",
+				Password: "second-primary",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+
+	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	if err == nil {
+		t.Fatal("expected ImportConnectionsPayload to return error")
+	}
+	if imported != nil {
+		t.Fatalf("expected no imported results after rollback, got %#v", imported)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected rollback to restore exactly 1 legacy connection, got %d", len(saved))
+	}
+	if saved[0].ID != "legacy-1" || saved[0].Name != "Existing Legacy" {
+		t.Fatalf("expected rollback to restore original legacy metadata, got %#v", saved[0])
+	}
+	if saved[0].Config.Host != "db.old.local" {
+		t.Fatalf("expected rollback to restore original legacy host, got %q", saved[0].Config.Host)
+	}
+
+	resolved, err := app.resolveConnectionSecrets(saved[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "old-primary" {
+		t.Fatalf("expected rollback to restore original legacy password, got %q", resolved.Password)
+	}
+
+	if _, err := store.Get(failRef); !os.IsNotExist(err) {
+		t.Fatalf("expected rollback to remove partially imported legacy secret ref, got err=%v", err)
+	}
+}
+
+func TestImportLegacyConnectionsRollbackRemovesGeneratedSecretRefs(t *testing.T) {
+	failRef, err := secretstore.BuildRef(savedConnectionSecretKind, "legacy-2")
+	if err != nil {
+		t.Fatalf("BuildRef returned error: %v", err)
+	}
+
+	store := newFailOnPutSecretStore(failRef)
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+
+	imported, err := app.ImportLegacyConnections([]connection.LegacySavedConnection{
+		{
+			Name: "Generated ID Legacy",
+			Config: connection.ConnectionConfig{
+				Type:     "postgres",
+				Host:     "db.generated.local",
+				Port:     5432,
+				User:     "postgres",
+				Password: "generated-secret",
+			},
+		},
+		{
+			ID:   "legacy-2",
+			Name: "Will Fail",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-2",
+				Type:     "mysql",
+				Host:     "db.fail.local",
+				Port:     3306,
+				User:     "root",
+				Password: "fail-secret",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected ImportLegacyConnections to return error")
+	}
+	if imported != nil {
+		t.Fatalf("expected no imported results after rollback, got %#v", imported)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 0 {
+		t.Fatalf("expected rollback to remove generated-id connection, got %d saved connections", len(saved))
+	}
+
+	if got := len(store.base.items); got != 0 {
+		t.Fatalf("expected rollback to remove generated secret refs, got %d remaining items", got)
+	}
+	if _, err := store.Get(failRef); !os.IsNotExist(err) {
+		t.Fatalf("expected rollback to remove failed explicit secret ref, got err=%v", err)
 	}
 }
 
@@ -313,7 +466,7 @@ func TestImportConnectionPackagePayloadRollsBackOnSaveFailure(t *testing.T) {
 	}
 }
 
-func TestImportConnectionsPayloadLegacyJSONKeepsExistingSecretWhenMissing(t *testing.T) {
+func TestImportConnectionsPayloadLegacyJSONClearsExistingSecretWhenMissing(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
 
@@ -365,8 +518,162 @@ func TestImportConnectionsPayloadLegacyJSONKeepsExistingSecretWhenMissing(t *tes
 	if err != nil {
 		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
 	}
-	if resolved.Password != "legacy-secret" {
-		t.Fatalf("expected legacy import to preserve existing secret, got %q", resolved.Password)
+	if resolved.Password != "" {
+		t.Fatalf("expected legacy import to clear existing secret when the imported file omits it, got %q", resolved.Password)
+	}
+}
+
+func TestImportConnectionsPayloadLegacyJSONLatestEntryWinsForSameID(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	raw, err := json.Marshal([]connection.LegacySavedConnection{
+		{
+			ID:   "legacy-dup",
+			Name: "First",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-dup",
+				Type:     "postgres",
+				Host:     "db.first.local",
+				Port:     5432,
+				User:     "postgres",
+				Password: "first-secret",
+			},
+		},
+		{
+			ID:   "legacy-dup",
+			Name: "Second",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-dup",
+				Type:     "postgres",
+				Host:     "db.second.local",
+				Port:     5432,
+				User:     "postgres",
+				Password: "second-secret",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+
+	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected duplicate legacy ids to return 1 final imported item, got %d", len(imported))
+	}
+	if imported[0].Name != "Second" {
+		t.Fatalf("expected returned import result to keep latest legacy entry, got %q", imported[0].Name)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected 1 saved legacy item after duplicate id overwrite, got %d", len(saved))
+	}
+	if saved[0].Name != "Second" {
+		t.Fatalf("expected latest legacy item to win, got %q", saved[0].Name)
+	}
+
+	resolved, err := app.resolveConnectionSecrets(saved[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "second-secret" {
+		t.Fatalf("expected latest legacy secret to win, got %q", resolved.Password)
+	}
+}
+
+func TestImportConnectionsPayloadLegacyJSONLatestEntryWithoutPasswordDoesNotKeepEarlierDuplicateSecret(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	raw, err := json.Marshal([]connection.LegacySavedConnection{
+		{
+			ID:   "legacy-dup",
+			Name: "First",
+			Config: connection.ConnectionConfig{
+				ID:       "legacy-dup",
+				Type:     "postgres",
+				Host:     "db.first.local",
+				Port:     5432,
+				User:     "postgres",
+				Password: "first-secret",
+			},
+		},
+		{
+			ID:   "legacy-dup",
+			Name: "Second",
+			Config: connection.ConnectionConfig{
+				ID:   "legacy-dup",
+				Type: "postgres",
+				Host: "db.second.local",
+				Port: 5432,
+				User: "postgres",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+
+	imported, err := app.ImportConnectionsPayload(string(raw), "ignored")
+	if err != nil {
+		t.Fatalf("ImportConnectionsPayload returned error: %v", err)
+	}
+	if len(imported) != 1 {
+		t.Fatalf("expected duplicate legacy ids to return 1 final imported item, got %d", len(imported))
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatalf("GetSavedConnections returned error: %v", err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected 1 saved legacy item after duplicate id overwrite, got %d", len(saved))
+	}
+	if saved[0].HasPrimaryPassword {
+		t.Fatalf("expected latest legacy item without password to clear earlier duplicate secret, got view=%#v", saved[0])
+	}
+
+	resolved, err := app.resolveConnectionSecrets(saved[0].Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "" {
+		t.Fatalf("expected latest legacy item without password to keep empty secret, got %q", resolved.Password)
+	}
+}
+
+func TestImportConnectionsPayloadEnvelopeRejectsOversizedPayloadWithDedicatedError(t *testing.T) {
+	raw, err := json.Marshal(connectionPackageFile{
+		SchemaVersion: connectionPackageSchemaVersion,
+		Kind:          connectionPackageKind,
+		Cipher:        connectionPackageCipher,
+		KDF: connectionPackageKDFSpec{
+			Name:        connectionPackageKDFName,
+			MemoryKiB:   connectionPackageKDFDefaultMemoryKiB,
+			TimeCost:    connectionPackageKDFDefaultTimeCost,
+			Parallelism: connectionPackageKDFDefaultParallelism,
+			Salt:        "AAAAAAAAAAAAAAAAAAAAAA==",
+		},
+		Nonce:   "AAAAAAAAAAAAAAAA",
+		Payload: strings.Repeat("A", connectionPackageMaxPayloadBase64Bytes+4),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal returned error: %v", err)
+	}
+
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	_, err = app.ImportConnectionsPayload(string(raw), "package-password")
+	if !errors.Is(err, errConnectionPackagePayloadTooLarge) {
+		t.Fatalf("expected errConnectionPackagePayloadTooLarge, got %v", err)
 	}
 }
 

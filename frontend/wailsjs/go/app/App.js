@@ -22,6 +22,10 @@ export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
 }
 
+export function CheckForUpdatesSilently() {
+  return window['go']['app']['App']['CheckForUpdatesSilently']();
+}
+
 export function ConfigureDriverRuntimeDirectory(arg1) {
   return window['go']['app']['App']['ConfigureDriverRuntimeDirectory'](arg1);
 }

@@ -9,6 +9,8 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/secretstore"
+
+	"github.com/google/uuid"
 )
 
 func newConnectionPackageItem(view connection.SavedConnectionView, bundle connectionSecretBundle) connectionPackageItem {
@@ -86,31 +88,108 @@ func newSavedConnectionInputFromPackageItem(item connectionPackageItem) connecti
 	}
 }
 
-func (a *App) importConnectionPackagePayload(payload connectionPackagePayload) ([]connection.SavedConnectionView, error) {
+func dedupeImportedSavedConnectionViews(views []connection.SavedConnectionView) []connection.SavedConnectionView {
+	if len(views) < 2 {
+		return views
+	}
+
+	lastIndexByID := make(map[string]int, len(views))
+	for index, view := range views {
+		id := strings.TrimSpace(view.ID)
+		if id == "" {
+			continue
+		}
+		lastIndexByID[id] = index
+	}
+
+	result := make([]connection.SavedConnectionView, 0, len(views))
+	for index, view := range views {
+		id := strings.TrimSpace(view.ID)
+		if id != "" && lastIndexByID[id] != index {
+			continue
+		}
+		result = append(result, view)
+	}
+	return result
+}
+
+func dedupeImportedSavedConnectionInputs(inputs []connection.SavedConnectionInput) []connection.SavedConnectionInput {
+	if len(inputs) < 2 {
+		return inputs
+	}
+
+	lastIndexByID := make(map[string]int, len(inputs))
+	for index, input := range inputs {
+		id := strings.TrimSpace(input.ID)
+		if id == "" {
+			continue
+		}
+		lastIndexByID[id] = index
+	}
+
+	result := make([]connection.SavedConnectionInput, 0, len(inputs))
+	for index, input := range inputs {
+		id := strings.TrimSpace(input.ID)
+		if id != "" && lastIndexByID[id] != index {
+			continue
+		}
+		result = append(result, input)
+	}
+	return result
+}
+
+func normalizeImportedSavedConnectionInput(input connection.SavedConnectionInput) connection.SavedConnectionInput {
+	if strings.TrimSpace(input.ID) == "" && strings.TrimSpace(input.Config.ID) == "" {
+		input.ID = "conn-" + uuid.New().String()[:8]
+	}
+	if strings.TrimSpace(input.ID) == "" {
+		input.ID = strings.TrimSpace(input.Config.ID)
+	}
+	input.Config.ID = input.ID
+	return input
+}
+
+func (a *App) importSavedConnectionsAtomically(inputs []connection.SavedConnectionInput) ([]connection.SavedConnectionView, error) {
 	repo := a.savedConnectionRepository()
-	rollbackSnapshot, err := captureConnectionPackageImportRollbackSnapshot(a, payload)
+	normalizedInputs := make([]connection.SavedConnectionInput, 0, len(inputs))
+	for _, input := range inputs {
+		normalizedInputs = append(normalizedInputs, normalizeImportedSavedConnectionInput(input))
+	}
+	finalInputs := dedupeImportedSavedConnectionInputs(normalizedInputs)
+	rollbackSnapshot, err := captureConnectionImportRollbackSnapshot(a, finalInputs)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]connection.SavedConnectionView, 0, len(payload.Connections))
-	for _, item := range payload.Connections {
-		view, err := repo.Save(newSavedConnectionInputFromPackageItem(item))
+	result := make([]connection.SavedConnectionView, 0, len(finalInputs))
+	for _, input := range finalInputs {
+		view, err := repo.Save(input)
 		if err != nil {
 			if rollbackErr := rollbackSnapshot.restore(a); rollbackErr != nil {
-				return nil, errors.Join(err, fmt.Errorf("restore connection package rollback: %w", rollbackErr))
+				return nil, errors.Join(err, fmt.Errorf("restore connection import rollback: %w", rollbackErr))
 			}
 			return nil, err
 		}
 		result = append(result, view)
 	}
-	return result, nil
+	return dedupeImportedSavedConnectionViews(result), nil
+}
+
+func (a *App) importConnectionPackagePayload(payload connectionPackagePayload) ([]connection.SavedConnectionView, error) {
+	inputs := make([]connection.SavedConnectionInput, 0, len(payload.Connections))
+	for _, item := range payload.Connections {
+		inputs = append(inputs, newSavedConnectionInputFromPackageItem(item))
+	}
+	return a.importSavedConnectionsAtomically(inputs)
 }
 
 func (a *App) ImportConnectionsPayload(raw string, password string) ([]connection.SavedConnectionView, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, errConnectionPackageUnsupported
+	}
+	if len(trimmed) > connectionImportMaxFileBytes {
+		return nil, errConnectionImportFileTooLarge
 	}
 
 	if isConnectionPackageEnvelope(trimmed) {
@@ -139,7 +218,7 @@ type connectionPackageImportRollbackSnapshot struct {
 	connectionCleanupRefs []string
 }
 
-func captureConnectionPackageImportRollbackSnapshot(a *App, payload connectionPackagePayload) (connectionPackageImportRollbackSnapshot, error) {
+func captureConnectionImportRollbackSnapshot(a *App, inputs []connection.SavedConnectionInput) (connectionPackageImportRollbackSnapshot, error) {
 	snapshot := connectionPackageImportRollbackSnapshot{
 		connectionSecrets: make(map[string]securityUpdateSecretSnapshot),
 	}
@@ -163,9 +242,11 @@ func captureConnectionPackageImportRollbackSnapshot(a *App, payload connectionPa
 
 	cleanupSet := make(map[string]struct{})
 	seenIDs := make(map[string]struct{})
-	for _, item := range payload.Connections {
-		input := newSavedConnectionInputFromPackageItem(item)
+	for _, input := range inputs {
 		connectionID := strings.TrimSpace(input.ID)
+		if connectionID == "" {
+			connectionID = strings.TrimSpace(input.Config.ID)
+		}
 		if connectionID == "" {
 			continue
 		}

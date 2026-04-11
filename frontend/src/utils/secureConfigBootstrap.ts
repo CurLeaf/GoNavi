@@ -54,6 +54,10 @@ type StartSecurityUpdateResult = {
   error: Error | null;
 };
 
+type MergeSecurityUpdateStatusOptions = {
+  previousStatus?: Partial<SecurityUpdateStatus> | null;
+};
+
 const defaultSummary = () => ({
   total: 0,
   updated: 0,
@@ -129,9 +133,56 @@ const mergeSecurityUpdateIssues = (
   };
 };
 
+const isLocalLegacyIssue = (issue: Partial<SecurityUpdateIssue> | null | undefined): boolean => {
+  const issueId = String(issue?.id || '').trim();
+  return issueId.startsWith('legacy-connection-') || issueId === 'legacy-global-proxy-default';
+};
+
+const countLocalLegacyIssues = (issues: SecurityUpdateIssue[]): number => (
+  issues.filter((issue) => isLocalLegacyIssue(issue)).length
+);
+
+const deriveLegacySummary = (
+  base: SecurityUpdateStatus,
+  currentLegacyCount: number,
+  previousStatus?: Partial<SecurityUpdateStatus> | null,
+): {
+  summary: SecurityUpdateSummary;
+  hasContribution: boolean;
+} => {
+  const previousSummary = previousStatus?.summary ?? defaultSummary();
+  const previousIssues = Array.isArray(previousStatus?.issues) ? previousStatus.issues : [];
+  const previousLegacyCount = countLocalLegacyIssues(previousIssues);
+  const previousLegacyTotal = Math.max(
+    0,
+    previousSummary.total - base.summary.total,
+    previousSummary.updated - base.summary.updated + previousLegacyCount,
+    previousLegacyCount,
+  );
+  const previousLegacyUpdated = Math.max(
+    0,
+    Math.min(previousLegacyTotal, previousSummary.updated - base.summary.updated),
+  );
+  const repairedSincePrevious = Math.max(0, previousLegacyCount - currentLegacyCount);
+  const nextLegacyUpdated = Math.min(previousLegacyTotal, previousLegacyUpdated + repairedSincePrevious);
+  const nextLegacyTotal = Math.max(previousLegacyTotal, nextLegacyUpdated + currentLegacyCount);
+
+  return {
+    summary: {
+      total: base.summary.total + nextLegacyTotal,
+      updated: base.summary.updated + nextLegacyUpdated,
+      pending: base.summary.pending + currentLegacyCount,
+      skipped: base.summary.skipped,
+      failed: base.summary.failed,
+    },
+    hasContribution: nextLegacyTotal > 0,
+  };
+};
+
 export const mergeSecurityUpdateStatusWithLegacySource = (
   status: Partial<SecurityUpdateStatus> | undefined,
   rawPayload: string | null,
+  options?: MergeSecurityUpdateStatusOptions,
 ): SecurityUpdateStatus => {
   const base: SecurityUpdateStatus = {
     ...defaultStatus(),
@@ -142,43 +193,48 @@ export const mergeSecurityUpdateStatusWithLegacySource = (
     },
     issues: Array.isArray(status?.issues) ? status.issues : [],
   };
+  const baseNonLegacyIssues = base.issues.filter((issue) => !isLocalLegacyIssue(issue));
 
   const legacy = buildLegacyPendingDetails(rawPayload);
-  if (!legacy.hasLegacyItems) {
+  const legacySummary = deriveLegacySummary(base, legacy.issues.length, options?.previousStatus);
+
+  if (!legacySummary.hasContribution) {
     return base;
   }
 
+  const mergedIssues = mergeSecurityUpdateIssues(baseNonLegacyIssues, legacy.issues).issues;
+
   if (base.overallStatus === 'not_detected') {
+    if (!legacy.hasLegacyItems) {
+      return base;
+    }
     return {
       ...base,
       overallStatus: 'pending',
       reminderVisible: true,
       canStart: true,
       canPostpone: true,
-      summary: legacy.summary,
-      issues: legacy.issues,
+      summary: legacySummary.summary,
+      issues: mergedIssues,
     };
   }
 
   if (base.overallStatus === 'pending' || base.overallStatus === 'postponed') {
-    const mergedIssues = mergeSecurityUpdateIssues(base.issues, legacy.issues);
-    const summary = hasMeaningfulSummary(base.summary)
-      ? {
-          total: base.summary.total + mergedIssues.addedCount,
-          updated: base.summary.updated,
-          pending: base.summary.pending + mergedIssues.addedCount,
-          skipped: base.summary.skipped,
-          failed: base.summary.failed,
-        }
-      : legacy.summary;
-
     return {
       ...base,
-      summary,
-      issues: mergedIssues.issues,
+      summary: hasMeaningfulSummary(base.summary) || legacy.hasLegacyItems ? legacySummary.summary : legacy.summary,
+      issues: mergedIssues,
       canStart: true,
       canPostpone: true,
       reminderVisible: base.overallStatus === 'pending' ? true : base.reminderVisible,
+    };
+  }
+
+  if (base.overallStatus === 'rolled_back' || base.overallStatus === 'needs_attention') {
+    return {
+      ...base,
+      summary: hasMeaningfulSummary(base.summary) || legacy.hasLegacyItems ? legacySummary.summary : legacy.summary,
+      issues: mergedIssues,
     };
   }
 
@@ -344,6 +400,7 @@ export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstr
 
 export type {
   BackendGlobalProxyResult,
+  MergeSecurityUpdateStatusOptions,
   SecurityUpdateBackend,
   SecureConfigBootstrapArgs,
   SecureConfigBootstrapResult,

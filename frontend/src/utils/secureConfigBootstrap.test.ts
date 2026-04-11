@@ -220,6 +220,83 @@ describe('secureConfigBootstrap', () => {
     expect(result.shouldShowBanner).toBe(true);
   });
 
+  it('merges legacy pending items into rolled_back status without overwriting backend system issues', () => {
+    const status = mergeSecurityUpdateStatusWithLegacySource({
+      overallStatus: 'rolled_back',
+      summary: { total: 1, updated: 0, pending: 0, skipped: 0, failed: 1 },
+      issues: [
+        {
+          id: 'system-blocked',
+          scope: 'system',
+          title: '系统回滚',
+          severity: 'high',
+          status: 'failed',
+          reasonCode: 'environment_blocked',
+          action: 'view_details',
+          message: '后端已回滚本轮更新，需要处理后重试。',
+        },
+      ],
+    }, legacyPayload);
+
+    expect(status.overallStatus).toBe('rolled_back');
+    expect(status.summary).toEqual({
+      total: 3,
+      updated: 0,
+      pending: 2,
+      skipped: 0,
+      failed: 1,
+    });
+    expect(status.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'system-blocked', scope: 'system' }),
+      expect.objectContaining({ id: 'legacy-connection-legacy-1', scope: 'connection', refId: 'legacy-1' }),
+      expect.objectContaining({ id: 'legacy-global-proxy-default', scope: 'global_proxy' }),
+    ]));
+  });
+
+  it('merges legacy pending items into needs_attention status without overwriting backend system issues', () => {
+    const status = mergeSecurityUpdateStatusWithLegacySource({
+      overallStatus: 'needs_attention',
+      summary: { total: 2, updated: 1, pending: 0, skipped: 0, failed: 1 },
+      issues: [
+        {
+          id: 'system-partial-failure',
+          scope: 'system',
+          title: '部分失败',
+          severity: 'high',
+          status: 'failed',
+          reasonCode: 'environment_blocked',
+          action: 'view_details',
+          message: '部分项目迁移失败，需要人工处理。',
+        },
+        {
+          id: 'ai-provider-openai-main',
+          scope: 'ai_provider',
+          refId: 'openai-main',
+          title: 'OpenAI',
+          severity: 'medium',
+          status: 'updated',
+          action: 'open_ai_settings',
+          message: 'AI 提供商配置已完成安全更新。',
+        },
+      ],
+    }, legacyPayload);
+
+    expect(status.overallStatus).toBe('needs_attention');
+    expect(status.summary).toEqual({
+      total: 4,
+      updated: 1,
+      pending: 2,
+      skipped: 0,
+      failed: 1,
+    });
+    expect(status.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'system-partial-failure', scope: 'system' }),
+      expect.objectContaining({ id: 'ai-provider-openai-main', scope: 'ai_provider', refId: 'openai-main' }),
+      expect.objectContaining({ id: 'legacy-connection-legacy-1', scope: 'connection', refId: 'legacy-1' }),
+      expect.objectContaining({ id: 'legacy-global-proxy-default', scope: 'global_proxy' }),
+    ]));
+  });
+
   it('loads backend secure config directly when no legacy source exists', async () => {
     const storage = createMemoryStorage();
     const replaceConnections = vi.fn();
@@ -440,18 +517,25 @@ describe('secureConfigBootstrap', () => {
   });
 
   it('reduces legacy pending issues after a single connection is repaired before the first round starts', () => {
+    const initialStatus = mergeSecurityUpdateStatusWithLegacySource({
+      overallStatus: 'not_detected',
+      summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
+      issues: [],
+    }, legacyPayload);
     const nextPayload = stripLegacyPersistedConnectionById(legacyPayload, 'legacy-1');
 
     const status = mergeSecurityUpdateStatusWithLegacySource({
       overallStatus: 'not_detected',
       summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
       issues: [],
-    }, nextPayload);
+    }, nextPayload, {
+      previousStatus: initialStatus,
+    });
 
     expect(status.overallStatus).toBe('pending');
     expect(status.summary).toEqual({
-      total: 1,
-      updated: 0,
+      total: 2,
+      updated: 1,
       pending: 1,
       skipped: 0,
       failed: 0,
@@ -460,6 +544,89 @@ describe('secureConfigBootstrap', () => {
       expect.objectContaining({
         scope: 'global_proxy',
         action: 'open_proxy_settings',
+      }),
+    ]);
+  });
+
+  it('accumulates pre-start repaired progress across multiple connection saves in the same round-free session', () => {
+    const multiConnectionPayload = JSON.stringify({
+      state: {
+        connections: [
+          {
+            id: 'legacy-1',
+            name: 'Legacy 1',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db-1.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret-1',
+            },
+          },
+          {
+            id: 'legacy-2',
+            name: 'Legacy 2',
+            config: {
+              id: 'legacy-2',
+              type: 'postgres',
+              host: 'db-2.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret-2',
+            },
+          },
+          {
+            id: 'legacy-3',
+            name: 'Legacy 3',
+            config: {
+              id: 'legacy-3',
+              type: 'postgres',
+              host: 'db-3.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret-3',
+            },
+          },
+        ],
+      },
+    });
+
+    const backendStatus = {
+      overallStatus: 'not_detected' as const,
+      summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
+      issues: [],
+    };
+    const initialStatus = mergeSecurityUpdateStatusWithLegacySource(backendStatus, multiConnectionPayload);
+    const afterFirstRepairPayload = stripLegacyPersistedConnectionById(multiConnectionPayload, 'legacy-1');
+    const afterFirstRepairStatus = mergeSecurityUpdateStatusWithLegacySource(backendStatus, afterFirstRepairPayload, {
+      previousStatus: initialStatus,
+    });
+    const afterSecondRepairPayload = stripLegacyPersistedConnectionById(afterFirstRepairPayload, 'legacy-2');
+
+    const afterSecondRepairStatus = mergeSecurityUpdateStatusWithLegacySource(backendStatus, afterSecondRepairPayload, {
+      previousStatus: afterFirstRepairStatus,
+    });
+
+    expect(afterFirstRepairStatus.summary).toEqual({
+      total: 3,
+      updated: 1,
+      pending: 2,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(afterSecondRepairStatus.summary).toEqual({
+      total: 3,
+      updated: 2,
+      pending: 1,
+      skipped: 0,
+      failed: 0,
+    });
+    expect(afterSecondRepairStatus.issues).toEqual([
+      expect.objectContaining({
+        id: 'legacy-connection-legacy-3',
+        scope: 'connection',
+        refId: 'legacy-3',
       }),
     ]);
   });

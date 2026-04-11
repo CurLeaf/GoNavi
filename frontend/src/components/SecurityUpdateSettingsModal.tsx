@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Button, Empty, Modal, Tag } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
@@ -9,13 +10,30 @@ import {
   getSecurityUpdateStatusMeta,
   sortSecurityUpdateIssues,
 } from '../utils/securityUpdatePresentation';
+import {
+  hasSecurityUpdateRecentResult,
+  resolveSecurityUpdateFocusState,
+  type SecurityUpdateFocusState,
+  type SecurityUpdateSettingsFocusTarget,
+} from '../utils/securityUpdateRepairFlow';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import {
+  SECURITY_UPDATE_ACTION_BUTTON_CLASS,
+  SECURITY_UPDATE_MODAL_CLASS,
+  SECURITY_UPDATE_RESULT_CARD_ACTIVE_CLASS,
+  SECURITY_UPDATE_RESULT_CARD_CLASS,
+  getSecurityUpdateActionButtonStyle,
+  getSecurityUpdateSectionSurfaceStyle,
+  getSecurityUpdateShellSurfaceStyle,
+} from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateSettingsModalProps {
   open: boolean;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
   status: SecurityUpdateStatus;
+  focusTarget?: SecurityUpdateSettingsFocusTarget | null;
+  focusRequest?: number;
   onClose: () => void;
   onStart: () => void;
   onRetry: () => void;
@@ -23,18 +41,27 @@ interface SecurityUpdateSettingsModalProps {
   onIssueAction: (issue: SecurityUpdateIssue) => void;
 }
 
-const sectionStyle = (overlayTheme: OverlayWorkbenchTheme) => ({
+const sectionStyle = (
+  overlayTheme: OverlayWorkbenchTheme,
+  options?: { emphasized?: boolean },
+) => ({
   borderRadius: 14,
-  border: overlayTheme.sectionBorder,
-  background: overlayTheme.sectionBg,
   padding: 16,
+  ...getSecurityUpdateSectionSurfaceStyle(overlayTheme, options),
 });
+
+const EMPTY_FOCUS_STATE: SecurityUpdateFocusState = {
+  target: null,
+  pulseKey: null,
+};
 
 const SecurityUpdateSettingsModal = ({
   open,
   darkMode,
   overlayTheme,
   status,
+  focusTarget = null,
+  focusRequest = 0,
   onClose,
   onStart,
   onRetry,
@@ -43,12 +70,53 @@ const SecurityUpdateSettingsModal = ({
 }: SecurityUpdateSettingsModalProps) => {
   const statusMeta = getSecurityUpdateStatusMeta(status);
   const sortedIssues = sortSecurityUpdateIssues(status.issues);
+  const showRecentResult = hasSecurityUpdateRecentResult(status);
   const showStart = status.overallStatus === 'pending' || status.overallStatus === 'postponed';
   const showRetry = status.overallStatus === 'needs_attention';
   const showRestart = status.overallStatus === 'needs_attention' || status.overallStatus === 'rolled_back';
+  const actionButtonStyle = getSecurityUpdateActionButtonStyle();
+  const [activeFocus, setActiveFocus] = useState<SecurityUpdateFocusState>(EMPTY_FOCUS_STATE);
+  const statusSectionRef = useRef<HTMLDivElement | null>(null);
+  const recentResultRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const nextFocus = resolveSecurityUpdateFocusState(open, focusTarget, focusRequest);
+    if (!nextFocus.target || !nextFocus.pulseKey) {
+      setActiveFocus(EMPTY_FOCUS_STATE);
+      return undefined;
+    }
+
+    const targetNode = nextFocus.target === 'recent_result'
+      ? recentResultRef.current
+      : statusSectionRef.current;
+    if (!targetNode) {
+      return undefined;
+    }
+
+    setActiveFocus(EMPTY_FOCUS_STATE);
+    const animationFrame = window.requestAnimationFrame(() => {
+      targetNode.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+      targetNode.focus({ preventScroll: true });
+      setActiveFocus(nextFocus);
+    });
+    const highlightTimer = window.setTimeout(() => {
+      setActiveFocus((current) => (
+        current.pulseKey === nextFocus.pulseKey ? EMPTY_FOCUS_STATE : current
+      ));
+    }, 1800);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [focusRequest, focusTarget, open]);
 
   return (
     <Modal
+      rootClassName={SECURITY_UPDATE_MODAL_CLASS}
       title={(
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div
@@ -80,39 +148,44 @@ const SecurityUpdateSettingsModal = ({
       onCancel={onClose}
       footer={[
         showRetry ? (
-          <Button key="retry" onClick={onRetry}>
+          <Button key="retry" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onRetry}>
             重新检查
           </Button>
         ) : null,
         showRestart ? (
-          <Button key="restart" onClick={onRestart}>
+          <Button key="restart" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onRestart}>
             重新开始更新
           </Button>
         ) : null,
         showStart ? (
-          <Button key="start" type="primary" onClick={onStart}>
+          <Button
+            key="start"
+            className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+            style={actionButtonStyle}
+            type="primary"
+            onClick={onStart}
+          >
             开始更新
           </Button>
         ) : null,
-        <Button key="close" onClick={onClose}>
+        <Button key="close" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onClose}>
           关闭
         </Button>,
       ]}
       width={760}
       styles={{
-        content: {
-          background: overlayTheme.shellBg,
-          border: overlayTheme.shellBorder,
-          boxShadow: overlayTheme.shellShadow,
-          backdropFilter: overlayTheme.shellBackdropFilter,
-        },
+        content: getSecurityUpdateShellSurfaceStyle(overlayTheme),
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
         body: { paddingTop: 8, maxHeight: 640, overflowY: 'auto' },
         footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
       }}
     >
       <div style={{ display: 'grid', gap: 14, padding: '12px 0' }}>
-        <div style={sectionStyle(overlayTheme)}>
+        <div
+          ref={statusSectionRef}
+          tabIndex={-1}
+          style={sectionStyle(overlayTheme, { emphasized: activeFocus.target === 'status' })}
+        >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, color: overlayTheme.titleText }}>
@@ -153,8 +226,9 @@ const SecurityUpdateSettingsModal = ({
               <div
                 key={item.label}
                 style={{
+                  border: overlayTheme.sectionBorder,
                   borderRadius: 12,
-                  background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.75)',
+                  background: overlayTheme.sectionBg,
                   padding: '12px 10px',
                 }}
               >
@@ -184,9 +258,8 @@ const SecurityUpdateSettingsModal = ({
                   <div
                     key={issue.id}
                     style={{
+                      ...getSecurityUpdateSectionSurfaceStyle(overlayTheme),
                       borderRadius: 12,
-                      border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
-                      background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.78)',
                       padding: 14,
                       display: 'flex',
                       alignItems: 'flex-start',
@@ -211,6 +284,8 @@ const SecurityUpdateSettingsModal = ({
                       </div>
                     </div>
                     <Button
+                      className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+                      style={actionButtonStyle}
                       type={actionMeta.emphasis === 'primary' ? 'primary' : 'default'}
                       onClick={() => onIssueAction(issue)}
                     >
@@ -223,14 +298,24 @@ const SecurityUpdateSettingsModal = ({
           )}
         </div>
 
-        {status.backupPath ? (
-          <div style={sectionStyle(overlayTheme)}>
+        {showRecentResult ? (
+          <div
+            ref={recentResultRef}
+            tabIndex={-1}
+            className={[
+              SECURITY_UPDATE_RESULT_CARD_CLASS,
+              activeFocus.target === 'recent_result' ? SECURITY_UPDATE_RESULT_CARD_ACTIVE_CLASS : '',
+            ].filter(Boolean).join(' ')}
+            style={sectionStyle(overlayTheme, { emphasized: activeFocus.target === 'recent_result' })}
+          >
             <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 8 }}>
               最近一次结果
             </div>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-              备份位置：<span style={{ color: overlayTheme.titleText }}>{status.backupPath}</span>
-            </div>
+            {status.backupPath ? (
+              <div style={{ fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+                备份位置：<span style={{ color: overlayTheme.titleText }}>{status.backupPath}</span>
+              </div>
+            ) : null}
             {status.lastError ? (
               <div style={{ marginTop: 8, fontSize: 13, color: '#ff7875', lineHeight: 1.7 }}>
                 最近错误：{status.lastError}

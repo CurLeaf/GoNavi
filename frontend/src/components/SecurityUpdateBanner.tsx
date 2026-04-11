@@ -4,6 +4,12 @@ import { CloseOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import type { SecurityUpdateStatus } from '../types';
 import { getSecurityUpdateStatusMeta } from '../utils/securityUpdatePresentation';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import {
+  SECURITY_UPDATE_ACTION_BUTTON_CLASS,
+  SECURITY_UPDATE_BANNER_CLASS,
+  getSecurityUpdateActionButtonStyle,
+  getSecurityUpdateBannerSurfaceStyle,
+} from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateBannerProps {
   status: SecurityUpdateStatus;
@@ -77,20 +83,20 @@ const SecurityUpdateBanner = ({
   const statusMeta = getSecurityUpdateStatusMeta(status);
   const primaryAction = resolvePrimaryAction(status, { onStart, onRetry, onRestart, onOpenDetails });
   const secondaryAction = resolveSecondaryAction(status, { onRetry, onOpenDetails });
+  const actionButtonStyle = getSecurityUpdateActionButtonStyle();
 
   return (
     <div
+      className={SECURITY_UPDATE_BANNER_CLASS}
       style={{
         margin: '12px 12px 0',
         padding: '14px 16px',
         borderRadius: 16,
-        border: overlayTheme.sectionBorder,
-        background: darkMode
-          ? 'linear-gradient(135deg, rgba(255,214,102,0.08) 0%, rgba(255,255,255,0.03) 100%)'
-          : 'linear-gradient(135deg, rgba(255,235,170,0.72) 0%, rgba(255,255,255,0.92) 100%)',
+        ...getSecurityUpdateBannerSurfaceStyle(overlayTheme),
         display: 'flex',
         alignItems: 'center',
         gap: 16,
+        overflow: 'hidden',
       }}
     >
       <div
@@ -118,14 +124,25 @@ const SecurityUpdateBanner = ({
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {secondaryAction ? (
-          <Button onClick={secondaryAction.onClick}>
+          <Button className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={secondaryAction.onClick}>
             {secondaryAction.label}
           </Button>
         ) : null}
-        <Button type="primary" onClick={primaryAction.onClick}>
+        <Button
+          className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+          style={actionButtonStyle}
+          type="primary"
+          onClick={primaryAction.onClick}
+        >
           {primaryAction.label}
         </Button>
-        <Button type="text" icon={<CloseOutlined />} onClick={onDismiss} />
+        <Button
+          className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}
+          style={{ ...actionButtonStyle, width: 36, minWidth: 36, paddingInline: 0 }}
+          type="text"
+          icon={<CloseOutlined />}
+          onClick={onDismiss}
+        />
       </div>
     </div>
   );

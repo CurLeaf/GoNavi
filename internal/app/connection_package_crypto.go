@@ -69,7 +69,13 @@ func encryptConnectionPackage(payload connectionPackagePayload, password string)
 	}
 
 	ciphertext := aead.Seal(nil, nonce, plain, aad)
+	if len(ciphertext) > connectionPackageMaxCiphertextBytes {
+		return connectionPackageFile{}, errConnectionPackagePayloadTooLarge
+	}
 	file.Payload = base64.StdEncoding.EncodeToString(ciphertext)
+	if len(file.Payload) > connectionPackageMaxPayloadBase64Bytes {
+		return connectionPackageFile{}, errConnectionPackagePayloadTooLarge
+	}
 	return file, nil
 }
 
@@ -84,6 +90,9 @@ func decryptConnectionPackage(file connectionPackageFile, password string) (conn
 
 	plain, err := decryptConnectionPackagePlaintext(file, normalizedPassword)
 	if err != nil {
+		if errors.Is(err, errConnectionPackagePayloadTooLarge) {
+			return connectionPackagePayload{}, err
+		}
 		return connectionPackagePayload{}, errConnectionPackageDecryptFailed
 	}
 
@@ -127,9 +136,15 @@ func decryptConnectionPackagePlaintext(file connectionPackageFile, password stri
 	if err != nil || len(nonce) != connectionPackageNonceBytes {
 		return nil, errors.New("invalid nonce")
 	}
+	if len(file.Payload) > connectionPackageMaxPayloadBase64Bytes {
+		return nil, errConnectionPackagePayloadTooLarge
+	}
 	ciphertext, err := base64.StdEncoding.DecodeString(file.Payload)
 	if err != nil || len(ciphertext) == 0 {
 		return nil, errors.New("invalid payload")
+	}
+	if len(ciphertext) > connectionPackageMaxCiphertextBytes {
+		return nil, errConnectionPackagePayloadTooLarge
 	}
 
 	key, err := deriveConnectionPackageKey(password, file.KDF)

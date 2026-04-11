@@ -1,6 +1,11 @@
-import type { SavedConnection, SecurityUpdateIssue } from '../types';
+import type { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
 
 export type SecurityUpdateRepairSource = 'connection' | 'proxy' | 'ai';
+export type SecurityUpdateSettingsFocusTarget = 'recent_result' | 'status';
+export type SecurityUpdateFocusState = {
+  target: SecurityUpdateSettingsFocusTarget | null;
+  pulseKey: string | null;
+};
 
 export type SecurityUpdateRepairEntry =
   | {
@@ -22,15 +27,45 @@ export type SecurityUpdateRepairEntry =
     }
   | {
       type: 'details';
+      focusTarget: SecurityUpdateSettingsFocusTarget;
     }
   | {
       type: 'warning';
       message: string;
     };
 
+export const hasSecurityUpdateRecentResult = (
+  status?: Pick<SecurityUpdateStatus, 'backupPath' | 'lastError'> | null,
+): boolean => Boolean(status?.backupPath || status?.lastError);
+
+export const resolveSecurityUpdateSettingsFocusTarget = (
+  status?: Pick<SecurityUpdateStatus, 'backupPath' | 'lastError'> | null,
+): SecurityUpdateSettingsFocusTarget => (
+  hasSecurityUpdateRecentResult(status) ? 'recent_result' : 'status'
+);
+
+export const resolveSecurityUpdateFocusState = (
+  open: boolean,
+  focusTarget: SecurityUpdateSettingsFocusTarget | null | undefined,
+  focusRequest: number,
+): SecurityUpdateFocusState => {
+  if (!open || !focusTarget) {
+    return {
+      target: null,
+      pulseKey: null,
+    };
+  }
+
+  return {
+    target: focusTarget,
+    pulseKey: `${focusTarget}:${focusRequest}`,
+  };
+};
+
 export const resolveSecurityUpdateRepairEntry = (
   issue: SecurityUpdateIssue,
   connections: SavedConnection[],
+  status?: Pick<SecurityUpdateStatus, 'backupPath' | 'lastError'> | null,
 ): SecurityUpdateRepairEntry => {
   if (issue.action === 'open_connection') {
     const target = connections.find((connection) => connection.id === issue.refId);
@@ -70,6 +105,7 @@ export const resolveSecurityUpdateRepairEntry = (
 
   return {
     type: 'details',
+    focusTarget: resolveSecurityUpdateSettingsFocusTarget(status),
   };
 };
 

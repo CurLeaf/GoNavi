@@ -259,6 +259,22 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+func readImportedConnectionConfigFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > connectionImportMaxFileBytes {
+		return "", errConnectionImportFileTooLarge
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
 func (a *App) ImportConfigFile() connection.QueryResult {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select Config File",
@@ -282,12 +298,12 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	content, err := os.ReadFile(selection)
+	content, err := readImportedConnectionConfigFile(selection)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Data: string(content)}
+	return connection.QueryResult{Success: true, Data: content}
 }
 
 func (a *App) ExportConnectionsPackage(password string) connection.QueryResult {
@@ -319,6 +335,9 @@ func (a *App) ExportConnectionsPackage(password string) connection.QueryResult {
 	content, err := json.MarshalIndent(pkg, "", "  ")
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if len(content) > connectionImportMaxFileBytes {
+		return connection.QueryResult{Success: false, Message: errConnectionImportFileTooLarge.Error()}
 	}
 	if err := os.WriteFile(filename, content, 0o644); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import type { SavedConnection, SecurityUpdateIssue } from '../types';
+import type { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
 import {
+  hasSecurityUpdateRecentResult,
+  resolveSecurityUpdateFocusState,
   resolveSecurityUpdateRepairEntry,
+  resolveSecurityUpdateSettingsFocusTarget,
   shouldReopenSecurityUpdateDetails,
   shouldRetrySecurityUpdateAfterRepairSave,
 } from './securityUpdateRepairFlow';
@@ -17,6 +20,19 @@ const createConnection = (id: string): SavedConnection => ({
     port: 5432,
     user: 'postgres',
   },
+});
+
+const createStatus = (overrides: Partial<SecurityUpdateStatus> = {}): SecurityUpdateStatus => ({
+  overallStatus: 'needs_attention',
+  summary: {
+    total: 1,
+    updated: 0,
+    pending: 1,
+    skipped: 0,
+    failed: 0,
+  },
+  issues: [],
+  ...overrides,
 });
 
 describe('securityUpdateRepairFlow', () => {
@@ -60,6 +76,50 @@ describe('securityUpdateRepairFlow', () => {
     });
     expect(resolveSecurityUpdateRepairEntry({ id: 'retry', action: 'retry_update' }, [])).toEqual({
       type: 'retry',
+    });
+  });
+
+  it('routes view_details actions to the latest result section when a recent result exists', () => {
+    const status = createStatus({
+      backupPath: '/tmp/gonavi-backup.json',
+      lastError: '写入新密钥失败',
+    });
+
+    expect(hasSecurityUpdateRecentResult(status)).toBe(true);
+    expect(resolveSecurityUpdateSettingsFocusTarget(status)).toBe('recent_result');
+    expect(resolveSecurityUpdateRepairEntry({ id: 'details', action: 'view_details' }, [], status)).toEqual({
+      type: 'details',
+      focusTarget: 'recent_result',
+    });
+  });
+
+  it('falls back to the status section when no recent result is available yet', () => {
+    const status = createStatus();
+
+    expect(hasSecurityUpdateRecentResult(status)).toBe(false);
+    expect(resolveSecurityUpdateSettingsFocusTarget(status)).toBe('status');
+    expect(resolveSecurityUpdateRepairEntry({ id: 'details', action: 'view_details' }, [], status)).toEqual({
+      type: 'details',
+      focusTarget: 'status',
+    });
+  });
+
+  it('builds a fresh focus pulse for repeated details clicks and clears it when the modal closes', () => {
+    expect(resolveSecurityUpdateFocusState(true, 'status', 1)).toEqual({
+      target: 'status',
+      pulseKey: 'status:1',
+    });
+    expect(resolveSecurityUpdateFocusState(true, 'status', 2)).toEqual({
+      target: 'status',
+      pulseKey: 'status:2',
+    });
+    expect(resolveSecurityUpdateFocusState(false, 'status', 2)).toEqual({
+      target: null,
+      pulseKey: null,
+    });
+    expect(resolveSecurityUpdateFocusState(true, null, 3)).toEqual({
+      target: null,
+      pulseKey: null,
     });
   });
 

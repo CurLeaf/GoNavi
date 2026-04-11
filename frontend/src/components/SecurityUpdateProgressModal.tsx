@@ -2,6 +2,7 @@ import { Modal, Spin } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { SECURITY_UPDATE_MODAL_CLASS } from '../utils/securityUpdateVisuals';
 
 interface SecurityUpdateProgressModalProps {
   open: boolean;
@@ -18,6 +19,7 @@ const SecurityUpdateProgressModal = ({
 }: SecurityUpdateProgressModalProps) => {
   return (
     <Modal
+      rootClassName={SECURITY_UPDATE_MODAL_CLASS}
       open={open}
       closable={false}
       maskClosable={false}

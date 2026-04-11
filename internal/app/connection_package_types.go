@@ -21,12 +21,18 @@ const (
 	connectionPackageKDFMaxMemoryKiB   = 262144
 	connectionPackageKDFMaxTimeCost    = 10
 	connectionPackageKDFMaxParallelism = 16
+
+	connectionPackageMaxCiphertextBytes    = 16 * 1024 * 1024
+	connectionPackageMaxPayloadBase64Bytes = ((connectionPackageMaxCiphertextBytes + 2) / 3) * 4
+	connectionImportMaxFileBytes           = connectionPackageMaxPayloadBase64Bytes + (1 * 1024 * 1024)
 )
 
 var (
 	errConnectionPackagePasswordRequired = errors.New("恢复包密码不能为空")
 	errConnectionPackageDecryptFailed    = errors.New("文件密码错误或文件已损坏")
 	errConnectionPackageUnsupported      = errors.New("不支持的连接恢复包格式")
+	errConnectionImportFileTooLarge      = errors.New("连接导入文件过大")
+	errConnectionPackagePayloadTooLarge  = errors.New("连接恢复包过大")
 	errConnectionPackageNotImplemented   = errors.New("connection package not implemented")
 )
 
