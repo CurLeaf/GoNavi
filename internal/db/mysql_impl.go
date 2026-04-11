@@ -74,6 +74,62 @@ func normalizeMySQLAddress(host string, port int) string {
 	return fmt.Sprintf("%s:%d", h, p)
 }
 
+var mysqlDatabaseQueries = []string{
+	"SHOW DATABASES",
+	"SELECT DATABASE() AS `Database`",
+}
+
+func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, []string, error)) ([]string, error) {
+	if queryFn == nil {
+		return nil, fmt.Errorf("查询函数为空")
+	}
+
+	names := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	var lastErr error
+
+	appendNames := func(rows []map[string]interface{}) {
+		for _, row := range rows {
+			for _, key := range []string{"Database", "database"} {
+				val, ok := row[key]
+				if !ok || val == nil {
+					continue
+				}
+				name := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if name == "" || strings.EqualFold(name, "<nil>") {
+					continue
+				}
+				if _, exists := seen[name]; exists {
+					continue
+				}
+				seen[name] = struct{}{}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+
+	for _, sqlText := range mysqlDatabaseQueries {
+		rows, _, err := queryFn(sqlText)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		appendNames(rows)
+		if len(names) > 0 {
+			return names, nil
+		}
+	}
+
+	if len(names) > 0 {
+		return names, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("未获取到可用数据库")
+}
+
 func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConfig {
 	uriText := strings.TrimSpace(config.URI)
 	if uriText == "" {
@@ -364,19 +420,7 @@ func (m *MySQLDB) Exec(query string) (int64, error) {
 }
 
 func (m *MySQLDB) GetDatabases() ([]string, error) {
-	data, _, err := m.Query("SHOW DATABASES")
-	if err != nil {
-		return nil, err
-	}
-	var dbs []string
-	for _, row := range data {
-		if val, ok := row["Database"]; ok {
-			dbs = append(dbs, fmt.Sprintf("%v", val))
-		} else if val, ok := row["database"]; ok {
-			dbs = append(dbs, fmt.Sprintf("%v", val))
-		}
-	}
-	return dbs, nil
+	return collectMySQLDatabaseNames(m.Query)
 }
 
 func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
