@@ -553,6 +553,34 @@ const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
   return result;
 };
 
+const hasLegacyConnectionSecrets = (connections: SavedConnection[]): boolean => {
+  return connections.some((connection) => {
+    const config = connection?.config && typeof connection.config === 'object'
+      ? connection.config as unknown as Record<string, unknown>
+      : {};
+    const ssh = config.ssh && typeof config.ssh === 'object'
+      ? config.ssh as Record<string, unknown>
+      : {};
+    const proxy = config.proxy && typeof config.proxy === 'object'
+      ? config.proxy as Record<string, unknown>
+      : {};
+    const httpTunnel = config.httpTunnel && typeof config.httpTunnel === 'object'
+      ? config.httpTunnel as Record<string, unknown>
+      : {};
+
+    return (
+      toTrimmedString(config.password) !== ''
+      || toTrimmedString(ssh.password) !== ''
+      || toTrimmedString(proxy.password) !== ''
+      || toTrimmedString(httpTunnel.password) !== ''
+      || toTrimmedString(config.mysqlReplicaPassword) !== ''
+      || toTrimmedString(config.mongoReplicaPassword) !== ''
+      || toTrimmedString(config.uri) !== ''
+      || toTrimmedString(config.dsn) !== ''
+    );
+  });
+};
+
 const sanitizeTheme = (value: unknown): 'light' | 'dark' => (value === 'dark' ? 'dark' : 'light');
 
 const sanitizeSqlFormatOptions = (value: unknown): { keywordCase: 'upper' | 'lower' } => {
@@ -1242,7 +1270,7 @@ export const useStore = create<AppState>()(
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(persistedState) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
-        nextState.connections = [];
+        nextState.connections = sanitizeConnections(state.connections);
         if (version < 5) {
           nextState.connectionTags = sanitizeConnectionTags(state.connectionTags);
         } else {
@@ -1254,7 +1282,7 @@ export const useStore = create<AppState>()(
         nextState.uiScale = sanitizeUiScale(state.uiScale);
         nextState.fontSize = sanitizeFontSize(state.fontSize);
         nextState.startupFullscreen = sanitizeStartupFullscreen(state.startupFullscreen);
-        nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy, { allowPassword: false });
+        nextState.globalProxy = sanitizeGlobalProxy(state.globalProxy);
         nextState.sqlFormatOptions = sanitizeSqlFormatOptions(state.sqlFormatOptions);
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(state.shortcutOptions);
@@ -1281,7 +1309,7 @@ export const useStore = create<AppState>()(
         return {
           ...currentState,
           ...state,
-          connections: currentState.connections,
+          connections: sanitizeConnections(state.connections),
           connectionTags: sanitizeConnectionTags(state.connectionTags),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           theme: sanitizeTheme(state.theme),
@@ -1289,7 +1317,7 @@ export const useStore = create<AppState>()(
           uiScale: sanitizeUiScale(state.uiScale),
           fontSize: sanitizeFontSize(state.fontSize),
           startupFullscreen: sanitizeStartupFullscreen(state.startupFullscreen),
-          globalProxy: sanitizeGlobalProxy(state.globalProxy, { allowPassword: false }),
+          globalProxy: sanitizeGlobalProxy(state.globalProxy),
           tableSortPreference: sanitizeTableSortPreference(state.tableSortPreference),
           tableColumnOrders: sanitizeTableColumnOrders(state.tableColumnOrders),
           enableColumnOrderMemory: state.enableColumnOrderMemory !== false,
@@ -1309,30 +1337,39 @@ export const useStore = create<AppState>()(
           aiChatSessions: [],
         };
       },
-      partialize: (state) => ({
-        connectionTags: state.connectionTags,
-        savedQueries: state.savedQueries,
-        theme: state.theme,
-        appearance: state.appearance,
-        uiScale: state.uiScale,
-        fontSize: state.fontSize,
-        startupFullscreen: state.startupFullscreen,
-        globalProxy: toPersistedGlobalProxy(state.globalProxy),
-        sqlFormatOptions: state.sqlFormatOptions,
-        queryOptions: state.queryOptions,
-        shortcutOptions: state.shortcutOptions,
-        tableAccessCount: state.tableAccessCount,
-        tableSortPreference: state.tableSortPreference,
-        tableColumnOrders: state.tableColumnOrders,
-        enableColumnOrderMemory: state.enableColumnOrderMemory,
-        tableHiddenColumns: state.tableHiddenColumns,
-        enableHiddenColumnMemory: state.enableHiddenColumnMemory,
-        windowBounds: state.windowBounds,
-        windowState: state.windowState,
-        sidebarWidth: state.sidebarWidth,
+      partialize: (state) => {
+        const partialState: Partial<AppState> = {
+          connectionTags: state.connectionTags,
+          savedQueries: state.savedQueries,
+          theme: state.theme,
+          appearance: state.appearance,
+          uiScale: state.uiScale,
+          fontSize: state.fontSize,
+          startupFullscreen: state.startupFullscreen,
+          globalProxy: toTrimmedString(state.globalProxy.password) !== ''
+            ? { ...state.globalProxy }
+            : toPersistedGlobalProxy(state.globalProxy),
+          sqlFormatOptions: state.sqlFormatOptions,
+          queryOptions: state.queryOptions,
+          shortcutOptions: state.shortcutOptions,
+          tableAccessCount: state.tableAccessCount,
+          tableSortPreference: state.tableSortPreference,
+          tableColumnOrders: state.tableColumnOrders,
+          enableColumnOrderMemory: state.enableColumnOrderMemory,
+          tableHiddenColumns: state.tableHiddenColumns,
+          enableHiddenColumnMemory: state.enableHiddenColumnMemory,
+          windowBounds: state.windowBounds,
+          windowState: state.windowState,
+          sidebarWidth: state.sidebarWidth,
+        };
+
+        if (hasLegacyConnectionSecrets(state.connections)) {
+          partialState.connections = state.connections;
+        }
 
         // AI 会话数据已迁移到后端文件持久化（~/.gonavi/sessions/），不再写入 localStorage
-      }), // Don't persist logs
+        return partialState as AppState;
+      }, // Don't persist logs
     }
   )
 );

@@ -26,6 +26,10 @@ export function CheckForUpdates() {
   return window['go']['app']['App']['CheckForUpdates']();
 }
 
+export function CheckForUpdatesSilently() {
+  return window['go']['app']['App']['CheckForUpdatesSilently']();
+}
+
 export function ClearTables(arg1, arg2, arg3) {
   return window['go']['app']['App']['ClearTables'](arg1, arg2, arg3);
 }
@@ -110,6 +114,10 @@ export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
 }
 
+export function DismissSecurityUpdateReminder() {
+  return window['go']['app']['App']['DismissSecurityUpdateReminder']();
+}
+
 export function DownloadDriverPackage(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DownloadDriverPackage'](arg1, arg2, arg3, arg4);
 }
@@ -140,6 +148,10 @@ export function DuplicateConnection(arg1) {
 
 export function ExecuteSQLFile(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExecuteSQLFile'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportConnectionsPackage(arg1) {
+  return window['go']['app']['App']['ExportConnectionsPackage'](arg1);
 }
 
 export function ExportData(arg1, arg2, arg3, arg4) {
@@ -198,8 +210,16 @@ export function GetSavedConnections() {
   return window['go']['app']['App']['GetSavedConnections']();
 }
 
+export function GetSecurityUpdateStatus() {
+  return window['go']['app']['App']['GetSecurityUpdateStatus']();
+}
+
 export function ImportConfigFile() {
   return window['go']['app']['App']['ImportConfigFile']();
+}
+
+export function ImportConnectionsPayload(arg1, arg2) {
+  return window['go']['app']['App']['ImportConnectionsPayload'](arg1, arg2);
 }
 
 export function ImportData(arg1, arg2, arg3) {
@@ -398,6 +418,14 @@ export function ResolveDriverRepositoryURL(arg1) {
   return window['go']['app']['App']['ResolveDriverRepositoryURL'](arg1);
 }
 
+export function RestartSecurityUpdate(arg1) {
+  return window['go']['app']['App']['RestartSecurityUpdate'](arg1);
+}
+
+export function RetrySecurityUpdateCurrentRound(arg1) {
+  return window['go']['app']['App']['RetrySecurityUpdateCurrentRound'](arg1);
+}
+
 export function SaveConnection(arg1) {
   return window['go']['app']['App']['SaveConnection'](arg1);
 }
@@ -436,6 +464,10 @@ export function SetMacNativeWindowControls(arg1) {
 
 export function SetWindowTranslucency(arg1, arg2) {
   return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2);
+}
+
+export function StartSecurityUpdate(arg1) {
+  return window['go']['app']['App']['StartSecurityUpdate'](arg1);
 }
 
 export function TestConnection(arg1) {

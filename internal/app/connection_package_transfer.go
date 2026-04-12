@@ -1,0 +1,362 @@
+package app
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/secretstore"
+
+	"github.com/google/uuid"
+)
+
+func newConnectionPackageItem(view connection.SavedConnectionView, bundle connectionSecretBundle) connectionPackageItem {
+	return connectionPackageItem{
+		ID:                    view.ID,
+		Name:                  view.Name,
+		IncludeDatabases:      cloneStringSlice(view.IncludeDatabases),
+		IncludeRedisDatabases: cloneIntSlice(view.IncludeRedisDatabases),
+		IconType:              view.IconType,
+		IconColor:             view.IconColor,
+		Config:                view.Config,
+		Secrets:               bundle,
+	}
+}
+
+func (a *App) buildConnectionPackagePayload() (connectionPackagePayload, error) {
+	repo := a.savedConnectionRepository()
+	items, err := repo.List()
+	if err != nil {
+		return connectionPackagePayload{}, err
+	}
+
+	connections := make([]connectionPackageItem, 0, len(items))
+	for _, item := range items {
+		bundle, bundleErr := repo.loadSecretBundle(item)
+		if bundleErr != nil {
+			return connectionPackagePayload{}, bundleErr
+		}
+		connections = append(connections, newConnectionPackageItem(item, bundle))
+	}
+
+	return connectionPackagePayload{
+		ExportedAt:  time.Now().UTC().Format(time.RFC3339),
+		Connections: connections,
+	}, nil
+}
+
+func (a *App) buildExportedConnectionPackage(options ConnectionExportOptions) ([]byte, error) {
+	payload, err := a.buildConnectionPackagePayload()
+	if err != nil {
+		return nil, err
+	}
+
+	if !options.IncludeSecrets {
+		for index := range payload.Connections {
+			payload.Connections[index].Secrets = connectionSecretBundle{}
+		}
+	}
+
+	normalizedPassword := normalizeConnectionPackagePassword(options.FilePassword)
+	if !options.IncludeSecrets || normalizedPassword == "" {
+		file, err := encryptConnectionPackageV2AppManaged(payload)
+		if err != nil {
+			return nil, err
+		}
+		return json.MarshalIndent(file, "", "  ")
+	}
+
+	file, err := encryptConnectionPackageV2Protected(payload, normalizedPassword)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(file, "", "  ")
+}
+
+func newSavedConnectionInputFromPackageItem(item connectionPackageItem) connection.SavedConnectionInput {
+	id := strings.TrimSpace(item.ID)
+	if id == "" {
+		id = strings.TrimSpace(item.Config.ID)
+	}
+
+	config := item.Config
+	config.ID = id
+	config.SavePassword = false
+
+	secrets := item.Secrets
+	config.Password = secrets.Password
+	config.SSH.Password = secrets.SSHPassword
+	config.Proxy.Password = secrets.ProxyPassword
+	config.HTTPTunnel.Password = secrets.HTTPTunnelPassword
+	config.MySQLReplicaPassword = secrets.MySQLReplicaPassword
+	config.MongoReplicaPassword = secrets.MongoReplicaPassword
+	config.URI = secrets.OpaqueURI
+	config.DSN = secrets.OpaqueDSN
+
+	return connection.SavedConnectionInput{
+		ID:                    id,
+		Name:                  item.Name,
+		Config:                config,
+		IncludeDatabases:      cloneStringSlice(item.IncludeDatabases),
+		IncludeRedisDatabases: cloneIntSlice(item.IncludeRedisDatabases),
+		IconType:              item.IconType,
+		IconColor:             item.IconColor,
+		// 连接恢复包以最新导入文件为准；载荷中缺失的密文字段需要显式清空旧值。
+		ClearPrimaryPassword:      strings.TrimSpace(secrets.Password) == "",
+		ClearSSHPassword:          strings.TrimSpace(secrets.SSHPassword) == "",
+		ClearProxyPassword:        strings.TrimSpace(secrets.ProxyPassword) == "",
+		ClearHTTPTunnelPassword:   strings.TrimSpace(secrets.HTTPTunnelPassword) == "",
+		ClearMySQLReplicaPassword: strings.TrimSpace(secrets.MySQLReplicaPassword) == "",
+		ClearMongoReplicaPassword: strings.TrimSpace(secrets.MongoReplicaPassword) == "",
+		ClearOpaqueURI:            strings.TrimSpace(secrets.OpaqueURI) == "",
+		ClearOpaqueDSN:            strings.TrimSpace(secrets.OpaqueDSN) == "",
+	}
+}
+
+func dedupeImportedSavedConnectionViews(views []connection.SavedConnectionView) []connection.SavedConnectionView {
+	if len(views) < 2 {
+		return views
+	}
+
+	lastIndexByID := make(map[string]int, len(views))
+	for index, view := range views {
+		id := strings.TrimSpace(view.ID)
+		if id == "" {
+			continue
+		}
+		lastIndexByID[id] = index
+	}
+
+	result := make([]connection.SavedConnectionView, 0, len(views))
+	for index, view := range views {
+		id := strings.TrimSpace(view.ID)
+		if id != "" && lastIndexByID[id] != index {
+			continue
+		}
+		result = append(result, view)
+	}
+	return result
+}
+
+func dedupeImportedSavedConnectionInputs(inputs []connection.SavedConnectionInput) []connection.SavedConnectionInput {
+	if len(inputs) < 2 {
+		return inputs
+	}
+
+	lastIndexByID := make(map[string]int, len(inputs))
+	for index, input := range inputs {
+		id := strings.TrimSpace(input.ID)
+		if id == "" {
+			continue
+		}
+		lastIndexByID[id] = index
+	}
+
+	result := make([]connection.SavedConnectionInput, 0, len(inputs))
+	for index, input := range inputs {
+		id := strings.TrimSpace(input.ID)
+		if id != "" && lastIndexByID[id] != index {
+			continue
+		}
+		result = append(result, input)
+	}
+	return result
+}
+
+func normalizeImportedSavedConnectionInput(input connection.SavedConnectionInput) connection.SavedConnectionInput {
+	if strings.TrimSpace(input.ID) == "" && strings.TrimSpace(input.Config.ID) == "" {
+		input.ID = "conn-" + uuid.New().String()[:8]
+	}
+	if strings.TrimSpace(input.ID) == "" {
+		input.ID = strings.TrimSpace(input.Config.ID)
+	}
+	input.Config.ID = input.ID
+	return input
+}
+
+func (a *App) importSavedConnectionsAtomically(inputs []connection.SavedConnectionInput) ([]connection.SavedConnectionView, error) {
+	repo := a.savedConnectionRepository()
+	normalizedInputs := make([]connection.SavedConnectionInput, 0, len(inputs))
+	for _, input := range inputs {
+		normalizedInputs = append(normalizedInputs, normalizeImportedSavedConnectionInput(input))
+	}
+	finalInputs := dedupeImportedSavedConnectionInputs(normalizedInputs)
+	rollbackSnapshot, err := captureConnectionImportRollbackSnapshot(a, finalInputs)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]connection.SavedConnectionView, 0, len(finalInputs))
+	for _, input := range finalInputs {
+		view, err := repo.Save(input)
+		if err != nil {
+			if rollbackErr := rollbackSnapshot.restore(a); rollbackErr != nil {
+				return nil, errors.Join(err, fmt.Errorf("restore connection import rollback: %w", rollbackErr))
+			}
+			return nil, err
+		}
+		result = append(result, view)
+	}
+	return dedupeImportedSavedConnectionViews(result), nil
+}
+
+func (a *App) importConnectionPackagePayload(payload connectionPackagePayload) ([]connection.SavedConnectionView, error) {
+	inputs := make([]connection.SavedConnectionInput, 0, len(payload.Connections))
+	for _, item := range payload.Connections {
+		inputs = append(inputs, newSavedConnectionInputFromPackageItem(item))
+	}
+	return a.importSavedConnectionsAtomically(inputs)
+}
+
+func (a *App) ImportConnectionsPayload(raw string, password string) ([]connection.SavedConnectionView, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, errConnectionPackageUnsupported
+	}
+	if len(trimmed) > connectionImportMaxFileBytes {
+		return nil, errConnectionImportFileTooLarge
+	}
+
+	if isConnectionPackageV2AppManaged(trimmed) {
+		var file connectionPackageFileV2
+		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
+			return nil, errConnectionPackageUnsupported
+		}
+		payload, err := decryptConnectionPackageV2AppManaged(file)
+		if err != nil {
+			return nil, err
+		}
+		return a.importConnectionPackagePayload(payload)
+	}
+
+	if isConnectionPackageV2Protected(trimmed) {
+		var file connectionPackageFileV2Protected
+		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
+			return nil, errConnectionPackageUnsupported
+		}
+		payload, err := decryptConnectionPackageV2Protected(file, password)
+		if err != nil {
+			return nil, err
+		}
+		return a.importConnectionPackagePayload(payload)
+	}
+
+	if isConnectionPackageEnvelope(trimmed) {
+		var file connectionPackageFile
+		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
+			return nil, errConnectionPackageUnsupported
+		}
+		payload, err := decryptConnectionPackage(file, password)
+		if err != nil {
+			return nil, err
+		}
+		return a.importConnectionPackagePayload(payload)
+	}
+
+	var legacy []connection.LegacySavedConnection
+	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
+		return nil, errConnectionPackageUnsupported
+	}
+	return a.ImportLegacyConnections(legacy)
+}
+
+type connectionPackageImportRollbackSnapshot struct {
+	connectionsFileExists bool
+	connectionsFileData   []byte
+	connectionSecrets     map[string]securityUpdateSecretSnapshot
+	connectionCleanupRefs []string
+}
+
+func captureConnectionImportRollbackSnapshot(a *App, inputs []connection.SavedConnectionInput) (connectionPackageImportRollbackSnapshot, error) {
+	snapshot := connectionPackageImportRollbackSnapshot{
+		connectionSecrets: make(map[string]securityUpdateSecretSnapshot),
+	}
+
+	repo := a.savedConnectionRepository()
+	connectionFileData, connectionFileExists, err := readOptionalFile(repo.connectionsPath())
+	if err != nil {
+		return snapshot, err
+	}
+	snapshot.connectionsFileExists = connectionFileExists
+	snapshot.connectionsFileData = connectionFileData
+
+	existingConnections, err := repo.load()
+	if err != nil {
+		return snapshot, err
+	}
+	existingConnectionsByID := make(map[string]connection.SavedConnectionView, len(existingConnections))
+	for _, item := range existingConnections {
+		existingConnectionsByID[item.ID] = item
+	}
+
+	cleanupSet := make(map[string]struct{})
+	seenIDs := make(map[string]struct{})
+	for _, input := range inputs {
+		connectionID := strings.TrimSpace(input.ID)
+		if connectionID == "" {
+			connectionID = strings.TrimSpace(input.Config.ID)
+		}
+		if connectionID == "" {
+			continue
+		}
+		if _, alreadySeen := seenIDs[connectionID]; alreadySeen {
+			continue
+		}
+		seenIDs[connectionID] = struct{}{}
+
+		defaultRef, refErr := secretstore.BuildRef(savedConnectionSecretKind, connectionID)
+		if refErr == nil {
+			cleanupSet[defaultRef] = struct{}{}
+		}
+
+		existing, ok := existingConnectionsByID[connectionID]
+		if !ok || !savedConnectionViewHasSecrets(existing) {
+			continue
+		}
+
+		ref := strings.TrimSpace(existing.SecretRef)
+		if ref == "" {
+			ref = defaultRef
+		}
+		if ref == "" {
+			continue
+		}
+
+		secretSnapshot, captureErr := captureSecurityUpdateSecretSnapshot(a.secretStore, ref)
+		if captureErr != nil {
+			return snapshot, captureErr
+		}
+		snapshot.connectionSecrets[ref] = secretSnapshot
+		cleanupSet[ref] = struct{}{}
+	}
+
+	snapshot.connectionCleanupRefs = make([]string, 0, len(cleanupSet))
+	for ref := range cleanupSet {
+		snapshot.connectionCleanupRefs = append(snapshot.connectionCleanupRefs, ref)
+	}
+	return snapshot, nil
+}
+
+func (s connectionPackageImportRollbackSnapshot) restore(a *App) error {
+	repo := a.savedConnectionRepository()
+	if err := restoreOptionalFile(repo.connectionsPath(), s.connectionsFileExists, s.connectionsFileData); err != nil {
+		return err
+	}
+	for ref, secretSnapshot := range s.connectionSecrets {
+		if err := restoreSecurityUpdateSecretSnapshot(a.secretStore, ref, secretSnapshot); err != nil {
+			return err
+		}
+	}
+	for _, ref := range s.connectionCleanupRefs {
+		if _, alreadyRestored := s.connectionSecrets[ref]; alreadyRestored {
+			continue
+		}
+		if err := deleteSecurityUpdateSecretRef(a.secretStore, ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
