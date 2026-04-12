@@ -94,7 +94,9 @@ func (a *App) startup(ctx context.Context) {
 	db.SetExternalDriverDownloadDirectory(appdata.DriverRoot(a.configDir))
 	logger.Init()
 	a.loadPersistedGlobalProxy()
-	installMacNativeWindowDiagnostics(logger.Path())
+	if shouldInstallMacNativeWindowDiagnostics() {
+		installMacNativeWindowDiagnostics(logger.Path())
+	}
 	applyMacWindowTranslucencyFix()
 	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }

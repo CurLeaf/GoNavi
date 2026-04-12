@@ -16,6 +16,7 @@ import { SavedConnection } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
+import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { createGlobalProxyDraft, toSaveGlobalProxyInput } from './utils/globalProxyDraft';
@@ -897,9 +898,10 @@ function App() {
   const isWindowsRuntime = runtimePlatform === 'windows'
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
+  const macWindowDiagnosticsEnabled = shouldEnableMacWindowDiagnostics(isMacRuntime, import.meta.env.DEV);
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
-      if (!isMacRuntime) {
+      if (!macWindowDiagnosticsEnabled) {
           return;
       }
       const backendApp = (window as any).go?.app?.App;
@@ -953,7 +955,7 @@ function App() {
       } catch (error) {
           console.warn('Failed to emit window diagnostic', error);
       }
-  }, [isMacRuntime, useNativeMacWindowControls]);
+  }, [macWindowDiagnosticsEnabled, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!isStoreHydrated || !isMacRuntime) {
@@ -968,7 +970,7 @@ function App() {
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
 
   useEffect(() => {
-      if (!isMacRuntime) {
+      if (!macWindowDiagnosticsEnabled) {
           return;
       }
 
@@ -1063,7 +1065,7 @@ function App() {
           window.removeEventListener('compositionend', handleCompositionEnd, true);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
-  }, [emitWindowDiagnostic, isMacRuntime]);
+  }, [emitWindowDiagnostic, macWindowDiagnosticsEnabled]);
 
   const formatBytes = (bytes?: number) => {
       if (!bytes || bytes <= 0) return '0 B';
