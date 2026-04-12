@@ -2,14 +2,14 @@
 
 感谢你对本项目的贡献。
 
-本项目采用“发布优先（`main` 为默认分支）+ `release/*` 分支发版”的协作模型。为减少分支漂移与 PR 处理成本，请在提交贡献前先阅读本指南。
+本项目当前采用“`dev` 作为默认集成分支，`main` 作为稳定发布分支，`release/*` 负责发版准备”的协作模型。为减少分支漂移与 PR 处理成本，请在提交贡献前先阅读本指南。
 
 ---
 
 ## 分支模型
 
-- `main`：稳定发布分支，也是仓库默认分支
-- `dev`：日常开发集成分支，主要供维护者使用
+- `dev`：默认分支，也是日常开发集成分支
+- `main`：稳定发布分支
 - `release/*`：发布准备分支，主要供维护者使用
 - 外部贡献者建议使用以下分支命名：
   - `fix/*`：问题修复
@@ -25,21 +25,21 @@ feature/* / fix/* -> dev -> release/* -> main -> tag(vX.Y.Z)
 
 ## 外部贡献者如何提 Pull Request
 
-无论是 `fix/*` 还是 `feature/*`，**外部贡献者统一直接向 `main` 发起 Pull Request**。
+无论是 `fix/*` 还是 `feature/*`，**外部贡献者统一直接向 `dev` 发起 Pull Request**。
 
 这样做的原因：
 
-- `main` 是默认分支，PR 入口更直观
-- 合并后贡献会直接体现在默认分支
-- 便于维护者统一做后续同步与发版整理
+- `dev` 是当前日常集成分支，评审与合入路径和维护者开发流程一致
+- 外部贡献会直接进入触发日常校验和 dev 构建的分支
+- 维护者可以直接从 `dev` 切 `release/*`，减少额外同步步骤
 
 建议流程：
 
 1. Fork 本仓库
-2. 从你自己的仓库创建分支（建议命名为 `fix/*` 或 `feature/*`）
+2. 先同步你 fork 中的 `dev`，再从 `dev` 创建分支（建议命名为 `fix/*` 或 `feature/*`）
 3. 完成代码修改，并进行必要自检
 4. 推送到你的远程分支
-5. 向本仓库的 `main` 分支发起 Pull Request
+5. 向本仓库的 `dev` 分支发起 Pull Request
 
 ---
 
@@ -63,33 +63,21 @@ feature/* / fix/* -> dev -> release/* -> main -> tag(vX.Y.Z)
 
 ## PR 合并策略（维护者）
 
-`main` 分支上的 PR 建议使用 **Squash and merge**。
+`dev` 分支上的 PR 建议使用 **Squash and merge**。
 
 原因：
 
-- 保持 `main` 历史干净、线性
-- 每个 PR 在 `main` 上对应一个清晰提交
-- 降低发布排查与回滚成本
+- 保持 `dev` 集成历史清晰、便于审查
+- 每个 PR 在 `dev` 上对应一个明确的集成提交
+- 降低发版前整理与冲突处理成本
 
 ---
 
 ## 维护者同步规则
 
-由于外部 PR 会直接合入 `main`，维护者必须及时将 `main` 的变更同步到开发与发布分支，避免分支漂移。
+由于外部 PR 会直接合入 `dev`，维护者应将 `dev` 作为日常协作与发版准备的主线分支。
 
-### 1. main → dev 同步（必做）
-
-仓库已移除 GitHub Actions 自动回灌 workflow。
-当前统一采用手动方式将 `main` 同步回 `dev`：
-
-```bash
-git checkout dev
-git pull
-git merge main
-git push
-```
-
-### 2. 发版前从 dev 切 release/*
+### 1. 发版前从 dev 切 release/*
 
 发布前由维护者基于 `dev` 创建发布分支，例如：
 
@@ -100,7 +88,7 @@ git checkout -b release/v0.6.0
 git push -u origin release/v0.6.0
 ```
 
-### 3. release/* → main 发版
+### 2. release/* → main 发版
 
 发布准备完成后，将 `release/*` 合并回 `main`，并打标签发布：
 
@@ -113,9 +101,9 @@ git tag v0.6.0
 git push origin v0.6.0
 ```
 
-### 4. main 回流到 dev（发版后必做）
+### 3. main 回流到 dev（发版后必做）
 
-发布完成后，仍沿用同一套自动化流程；如有需要，也可以手动触发 `workflow_dispatch`，或执行以下兜底命令，确保开发线与发布线一致：
+发布完成后，需要将 `main` 回流到 `dev`，确保下一轮开发从已发布代码线继续推进：
 
 ```bash
 git checkout dev

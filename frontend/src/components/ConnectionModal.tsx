@@ -5,6 +5,11 @@ import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICO
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import {
+  getStoredSecretPlaceholder,
+  normalizeConnectionSecretErrorMessage,
+  resolveConnectionTestFailureFeedback,
+} from '../utils/connectionModalPresentation';
 import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
 import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
@@ -135,7 +140,8 @@ const ConnectionModal: React.FC<{
   onClose: () => void;
   initialValues?: SavedConnection | null;
   onOpenDriverManager?: () => void;
-}> = ({ open, onClose, initialValues, onOpenDriverManager }) => {
+  onSaved?: (savedConnection: SavedConnection) => void | Promise<void>;
+}> = ({ open, onClose, initialValues, onOpenDriverManager, onSaved }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [useSSL, setUseSSL] = useState(false);
@@ -1443,6 +1449,13 @@ const ConnectionModal: React.FC<{
           message.success('配置已保存（未连接）');
       }
 
+      if (onSaved) {
+          void Promise.resolve(onSaved(savedConnection)).catch((error: unknown) => {
+              console.warn('Failed to refresh post-save state', error);
+              void message.warning('配置已保存，但安全更新状态暂未刷新，请稍后重新检查');
+          });
+      }
+
       form.resetFields();
       setUseSSL(false);
       setUseSSH(false);
@@ -1453,7 +1466,7 @@ const ConnectionModal: React.FC<{
       setClearSecrets(createEmptyConnectionSecretClearState());
       onClose();
     } catch (e: any) {
-      message.error(e?.message || '保存失败');
+      message.error(normalizeConnectionSecretErrorMessage(e?.message || e, '保存失败'));
     } finally {
       setLoading(false);
     }
@@ -1508,10 +1521,14 @@ const ConnectionModal: React.FC<{
       }
       return null;
   };
-  const buildTestFailureMessage = (reason: unknown, fallback: string) => {
-      const text = String(reason ?? '').trim();
-      const normalized = text && text !== 'undefined' && text !== 'null' ? text : fallback;
-      return `测试失败: ${normalized}`;
+  const applyTestFailureFeedback = (feedback: { message: string; shouldToast: boolean }) => {
+      setTestResult({ type: 'error', message: feedback.message });
+      if (feedback.shouldToast) {
+          void message.error({
+              content: feedback.message,
+              key: 'connection-test-failure',
+          });
+      }
   };
 
   const handleTest = async () => {
@@ -1522,14 +1539,21 @@ const ConnectionModal: React.FC<{
           const values = form.getFieldsValue(true);
           const unavailableReason = await resolveDriverUnavailableReason(values.type);
           if (unavailableReason) {
-              const failMessage = buildTestFailureMessage(unavailableReason, '驱动未安装启用');
-              setTestResult({ type: 'error', message: failMessage });
+              applyTestFailureFeedback(resolveConnectionTestFailureFeedback({
+                  kind: 'driver_unavailable',
+                  reason: unavailableReason,
+                  fallback: '驱动未安装启用',
+              }));
               promptInstallDriver(values.type, unavailableReason);
               return;
           }
           const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
           if (blockingSecretClearMessage) {
-              setTestResult({ type: 'error', message: blockingSecretClearMessage });
+              applyTestFailureFeedback(resolveConnectionTestFailureFeedback({
+                  kind: 'secret_blocked',
+                  reason: blockingSecretClearMessage,
+                  fallback: '连接参数不完整',
+              }));
               return;
           }
           setLoading(true);
@@ -1555,6 +1579,7 @@ const ConnectionModal: React.FC<{
           );
 
 			  if (res.success) {
+                  void message.destroy('connection-test-failure');
 				  setTestResult({ type: 'success', message: res.message });
 				  if (isRedisType) {
 					  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
@@ -1578,27 +1603,33 @@ const ConnectionModal: React.FC<{
 						  }
 					  } else {
 						  setDbList([]);
-						  message.warning(`连接成功，但获取数据库列表失败：${dbRes.message || '未知错误'}`);
+						  message.warning(`连接成功，但获取数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, '未知错误')}`);
 					  }
 				  }
 			  } else {
-              const failMessage = buildTestFailureMessage(
-                  res?.message,
-                  '连接被拒绝或参数无效，请检查后重试'
-              );
-              setTestResult({ type: 'error', message: failMessage });
+              applyTestFailureFeedback(resolveConnectionTestFailureFeedback({
+                  kind: 'runtime',
+                  reason: res?.message,
+                  fallback: '连接被拒绝或参数无效，请检查后重试',
+              }));
           }
       } catch (e: unknown) {
           if (e && typeof e === 'object' && 'errorFields' in e) {
-              const failMessage = '测试失败: 请先完善必填项后再测试连接';
-              setTestResult({ type: 'error', message: failMessage });
+              applyTestFailureFeedback(resolveConnectionTestFailureFeedback({
+                  kind: 'validation',
+                  reason: '',
+                  fallback: '请先完善必填项后再测试连接',
+              }));
               return;
           }
           const reason = e instanceof Error
               ? e.message
               : (typeof e === 'string' ? e : '未知异常');
-          const failMessage = buildTestFailureMessage(reason, '未知异常');
-          setTestResult({ type: 'error', message: failMessage });
+          applyTestFailureFeedback(resolveConnectionTestFailureFeedback({
+              kind: 'runtime',
+              reason,
+              fallback: '未知异常',
+          }));
       } finally {
           testInFlightRef.current = false;
           setLoading(false);
@@ -1624,7 +1655,7 @@ const ConnectionModal: React.FC<{
           }
           const result = await MongoDiscoverMembers(config as any);
           if (!result.success) {
-              message.error(result.message || '成员发现失败');
+              message.error(normalizeConnectionSecretErrorMessage(result.message, '成员发现失败'));
               return;
           }
           const data = (result.data as Record<string, any>) || {};
@@ -1645,7 +1676,7 @@ const ConnectionModal: React.FC<{
           }
           message.success(result.message || `发现 ${members.length} 个成员`);
       } catch (error: any) {
-          message.error(error?.message || '成员发现失败');
+          message.error(normalizeConnectionSecretErrorMessage(error?.message || error, '成员发现失败'));
       } finally {
           setDiscoveringMembers(false);
       }
@@ -2233,7 +2264,14 @@ const ConnectionModal: React.FC<{
                                               <Input {...noAutoCapInputProps} placeholder="留空沿用主库用户名" />
                                           </Form.Item>
                                           <Form.Item name="mysqlReplicaPassword" label="从库密码（可选）" style={{ marginBottom: 0 }}>
-                                              <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主库密码" />
+                                              <Input.Password
+                                                  {...noAutoCapInputProps}
+                                                  placeholder={getStoredSecretPlaceholder({
+                                                      hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
+                                                      emptyPlaceholder: '留空沿用主库密码',
+                                                      retainedLabel: '已保存从库密码',
+                                                  })}
+                                              />
                                           </Form.Item>
                                       </div>
                                       {renderStoredSecretControls({
@@ -2283,7 +2321,14 @@ const ConnectionModal: React.FC<{
                                           </Form.Item>
                                       </div>
                                       <Form.Item name="mongoReplicaPassword" label="副本集密码（可选）" style={{ marginBottom: 0 }}>
-                                          <Input.Password {...noAutoCapInputProps} placeholder="留空沿用主密码" />
+                                          <Input.Password
+                                              {...noAutoCapInputProps}
+                                              placeholder={getStoredSecretPlaceholder({
+                                                  hasStoredSecret: initialValues?.hasMongoReplicaPassword,
+                                                  emptyPlaceholder: '留空沿用主密码',
+                                                  retainedLabel: '已保存副本集密码',
+                                              })}
+                                          />
                                       </Form.Item>
                                       {renderStoredSecretControls({
                                           fieldName: 'mongoReplicaPassword',
@@ -2364,7 +2409,14 @@ const ConnectionModal: React.FC<{
                                   </Form.Item>
                               )}
                               <Form.Item name="password" label="密码 (可选)">
-                                  <Input.Password {...noAutoCapInputProps} placeholder="Redis 密码（如果设置了 requirepass）" />
+                                  <Input.Password
+                                      {...noAutoCapInputProps}
+                                      placeholder={getStoredSecretPlaceholder({
+                                          hasStoredSecret: initialValues?.hasPrimaryPassword,
+                                          emptyPlaceholder: 'Redis 密码（如果设置了 requirepass）',
+                                          retainedLabel: '已保存 Redis 密码',
+                                      })}
+                                  />
                               </Form.Item>
                               {renderStoredSecretControls({
                                   fieldName: 'password',
@@ -2397,7 +2449,14 @@ const ConnectionModal: React.FC<{
                                   <Input {...noAutoCapInputProps} />
                               </Form.Item>
                               <Form.Item name="password" label="密码" style={{ marginBottom: 0 }}>
-                                  <Input.Password {...noAutoCapInputProps} />
+                                  <Input.Password
+                                      {...noAutoCapInputProps}
+                                      placeholder={getStoredSecretPlaceholder({
+                                          hasStoredSecret: initialValues?.hasPrimaryPassword,
+                                          emptyPlaceholder: '密码',
+                                          retainedLabel: '已保存密码',
+                                      })}
+                                  />
                               </Form.Item>
                               {dbType === 'mongodb' && (
                                   <Form.Item name="mongoAuthMechanism" label="验证方式" style={{ marginBottom: 0 }}>
@@ -2518,7 +2577,14 @@ const ConnectionModal: React.FC<{
                                       <Input {...noAutoCapInputProps} placeholder="root" />
                                   </Form.Item>
                                   <Form.Item name="sshPassword" label="SSH 密码" style={{ flex: 1 }}>
-                                      <Input.Password {...noAutoCapInputProps} placeholder="密码" />
+                                      <Input.Password
+                                          {...noAutoCapInputProps}
+                                          placeholder={getStoredSecretPlaceholder({
+                                              hasStoredSecret: initialValues?.hasSSHPassword,
+                                              emptyPlaceholder: '密码',
+                                              retainedLabel: '已保存 SSH 密码',
+                                          })}
+                                      />
                                       </Form.Item>
                                   </div>
                                   <Form.Item label="私钥路径 (可选)" help="例如: /Users/name/.ssh/id_rsa">
@@ -2573,7 +2639,14 @@ const ConnectionModal: React.FC<{
                                       <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="proxyPassword" label="代理密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
+                                      <Input.Password
+                                          {...noAutoCapInputProps}
+                                          placeholder={getStoredSecretPlaceholder({
+                                              hasStoredSecret: initialValues?.hasProxyPassword,
+                                              emptyPlaceholder: '留空表示无认证',
+                                              retainedLabel: '已保存代理密码',
+                                          })}
+                                      />
                                       </Form.Item>
                                   </div>
                                   {renderStoredSecretControls({
@@ -2611,7 +2684,14 @@ const ConnectionModal: React.FC<{
                                       <Input {...noAutoCapInputProps} placeholder="留空表示无认证" />
                                   </Form.Item>
                                   <Form.Item name="httpTunnelPassword" label="隧道密码（可选）" style={{ flex: 1 }}>
-                                      <Input.Password {...noAutoCapInputProps} placeholder="留空表示无认证" />
+                                      <Input.Password
+                                          {...noAutoCapInputProps}
+                                          placeholder={getStoredSecretPlaceholder({
+                                              hasStoredSecret: initialValues?.hasHttpTunnelPassword,
+                                              emptyPlaceholder: '留空表示无认证',
+                                              retainedLabel: '已保存隧道密码',
+                                          })}
+                                      />
                                   </Form.Item>
                               </div>
                               {renderStoredSecretControls({

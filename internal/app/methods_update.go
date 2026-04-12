@@ -30,6 +30,12 @@ const (
 	updateDownloadProgressEvent = "update:download-progress"
 )
 
+var (
+	updateFetchLatestRelease  = fetchLatestRelease
+	updateFetchReleaseSHA256  = fetchReleaseSHA256
+	updateLogCheckError       = func(err error) { logger.Error(err, "检查更新失败") }
+)
+
 type updateState struct {
 	lastCheck   *UpdateInfo
 	downloading bool
@@ -100,9 +106,19 @@ type githubAsset struct {
 }
 
 func (a *App) CheckForUpdates() connection.QueryResult {
+	return a.checkForUpdates(true)
+}
+
+func (a *App) CheckForUpdatesSilently() connection.QueryResult {
+	return a.checkForUpdates(false)
+}
+
+func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
 	info, err := fetchLatestUpdateInfo()
 	if err != nil {
-		logger.Error(err, "检查更新失败")
+		if logFailure {
+			updateLogCheckError(err)
+		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -359,7 +375,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 }
 
 func fetchLatestUpdateInfo() (UpdateInfo, error) {
-	release, err := fetchLatestRelease()
+	release, err := updateFetchLatestRelease()
 	if err != nil {
 		return UpdateInfo{}, err
 	}
@@ -368,6 +384,17 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	latestVersion := normalizeVersion(release.TagName)
 	if latestVersion == "" {
 		return UpdateInfo{}, errors.New("无法解析最新版本号")
+	}
+
+	hasUpdate := compareVersion(currentVersion, latestVersion) < 0
+	if !hasUpdate {
+		return UpdateInfo{
+			HasUpdate:       false,
+			CurrentVersion:  currentVersion,
+			LatestVersion:   latestVersion,
+			ReleaseName:     release.Name,
+			ReleaseNotesURL: release.HTMLURL,
+		}, nil
 	}
 
 	assetVersion := strings.TrimSpace(release.TagName)
@@ -383,7 +410,7 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 		return UpdateInfo{}, err
 	}
 
-	hashMap, err := fetchReleaseSHA256(release.Assets)
+	hashMap, err := updateFetchReleaseSHA256(release.Assets)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
@@ -391,9 +418,6 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	if sha256Value == "" {
 		return UpdateInfo{}, errors.New("SHA256SUMS 未包含当前平台更新包")
 	}
-
-	hasUpdate := compareVersion(currentVersion, latestVersion) < 0
-
 	return UpdateInfo{
 		HasUpdate:       hasUpdate,
 		CurrentVersion:  currentVersion,
@@ -405,6 +429,30 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 		AssetSize:       asset.Size,
 		SHA256:          sha256Value,
 	}, nil
+}
+
+func swapUpdateFetchLatestRelease(next func() (*githubRelease, error)) func() {
+	original := updateFetchLatestRelease
+	updateFetchLatestRelease = next
+	return func() {
+		updateFetchLatestRelease = original
+	}
+}
+
+func swapUpdateFetchReleaseSHA256(next func([]githubAsset) (map[string]string, error)) func() {
+	original := updateFetchReleaseSHA256
+	updateFetchReleaseSHA256 = next
+	return func() {
+		updateFetchReleaseSHA256 = original
+	}
+}
+
+func swapUpdateCheckErrorLogger(next func(error)) func() {
+	original := updateLogCheckError
+	updateLogCheckError = next
+	return func() {
+		updateLogCheckError = original
+	}
 }
 
 func getCurrentAuthor() string {

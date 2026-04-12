@@ -42,6 +42,7 @@ import { getDbIcon } from './DatabaseIcons';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
@@ -119,6 +120,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const autoFetchVisible = useAutoFetchVisibility();
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
 
   // Background Helper (Duplicate logic for now, ideally shared)
@@ -293,6 +295,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [findInDbContext, setFindInDbContext] = useState<{ open: boolean; connectionId: string; dbName: string }>({ open: false, connectionId: '', dbName: '' });
 
   useEffect(() => {
+      if (!autoFetchVisible) {
+          return;
+      }
+
       // Refresh queries for expanded databases
       const findNode = (nodes: TreeNode[], k: React.Key): TreeNode | null => {
           for (const node of nodes) {
@@ -311,7 +317,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               loadTables(node);
           }
       });
-  }, [savedQueries]);
+  }, [autoFetchVisible, savedQueries]);
 
   useEffect(() => {
     setTreeData((prev) => {

@@ -2,14 +2,14 @@
 
 Thank you for contributing to this project.
 
-This repository follows a release-first workflow: `main` is the default public branch, while releases are prepared through `release/*` branches.
+This repository uses `dev` as the default integration branch, while stable releases are published from `main` through `release/*` branches.
 
 ---
 
 ## Branch Model
 
-- `main`: stable release branch and default branch
-- `dev`: day-to-day integration branch for maintainers
+- `dev`: default branch and day-to-day integration branch
+- `main`: stable release branch
 - `release/*`: release preparation branches for maintainers
 - Recommended branch names for external contributors:
   - `fix/*`: bug fixes
@@ -25,21 +25,21 @@ feature/* / fix/* -> dev -> release/* -> main -> tag(vX.Y.Z)
 
 ## How External Contributors Should Open Pull Requests
 
-Whether your branch is `fix/*` or `feature/*`, external contributors should **open pull requests directly against `main`**.
+Whether your branch is `fix/*` or `feature/*`, external contributors should **open pull requests directly against `dev`**.
 
 Reasons:
 
-- `main` is the default branch, so the PR entry point is clearer
-- merged contributions are immediately visible on the default branch
-- maintainers can handle downstream sync and release preparation in one place
+- `dev` is the active integration branch, so changes can be reviewed in the same lane as ongoing work
+- contributors align with the branch that triggers day-to-day validation and dev builds
+- maintainers can cut `release/*` branches from `dev` without re-syncing external changes first
 
 Recommended flow:
 
 1. Fork this repository
-2. Create a branch in your fork (`fix/*` or `feature/*` is recommended)
+2. Sync your fork with `dev` and create a branch from `dev` (`fix/*` or `feature/*` is recommended)
 3. Make your changes and perform basic self-checks
 4. Push the branch to your fork
-5. Open a pull request against the `main` branch of this repository
+5. Open a pull request against the `dev` branch of this repository
 
 ---
 
@@ -63,33 +63,21 @@ Recommended expectations:
 
 ## Merge Strategy for Maintainers
 
-Pull requests merged into `main` should generally use **Squash and merge**.
+Pull requests merged into `dev` should generally use **Squash and merge**.
 
 Reasons:
 
-- keeps `main` history clean and linear
-- maps each PR to a single commit on `main`
-- reduces release, audit, and rollback complexity
+- keeps `dev` history readable and easier to audit during active iteration
+- maps each PR to a single integration commit on `dev`
+- reduces cherry-pick and conflict cost before creating `release/*`
 
 ---
 
 ## Maintainer Sync Rules
 
-Because external pull requests are merged directly into `main`, maintainers must sync `main` back to development and release branches to avoid branch drift.
+Because external pull requests are merged directly into `dev`, maintainers should treat `dev` as the source branch for daily collaboration and release preparation.
 
-### 1. Sync `main` -> `dev` (required)
-
-The automatic GitHub Actions sync workflow has been removed.
-Maintainers should sync `main` back to `dev` manually when needed:
-
-```bash
-git checkout dev
-git pull
-git merge main
-git push
-```
-
-### 2. Create `release/*` from `dev`
+### 1. Create `release/*` from `dev`
 
 Before a release, create a release branch from `dev`, for example:
 
@@ -100,7 +88,7 @@ git checkout -b release/v0.6.0
 git push -u origin release/v0.6.0
 ```
 
-### 3. Release from `release/*` back to `main`
+### 2. Release from `release/*` back to `main`
 
 When release preparation is complete, merge the release branch back into `main` and create a tag:
 
@@ -113,9 +101,9 @@ git tag v0.6.0
 git push origin v0.6.0
 ```
 
-### 4. Sync `main` back to `dev` after release
+### 3. Sync `main` back to `dev` after release
 
-After the release, the same automation still applies. If needed, you can run the workflow manually (`workflow_dispatch`) or execute the fallback commands:
+After the release, sync `main` back into `dev` so the next iteration starts from the released code line:
 
 ```bash
 git checkout dev

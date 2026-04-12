@@ -212,7 +212,7 @@ For the full workflow, branch model, and maintainer sync rules, see:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 
-External contributors should open pull requests directly against `main`.
+External contributors should branch from `dev` and open pull requests against `dev`.
 
 ## Star History
 <a href="https://www.star-history.com/?repos=Syngnat%2FGoNavi&type=date&legend=top-left">

@@ -28,6 +28,7 @@ interface AISettingsModalProps {
     onClose: () => void;
     darkMode: boolean;
     overlayTheme: OverlayWorkbenchTheme;
+    focusProviderId?: string;
 }
 
 // 预设配置：每个预设映射到后端 type（openai/anthropic/gemini/custom）并附带默认 URL 和 Model
@@ -79,7 +80,7 @@ const CONTEXT_OPTIONS: { label: string; value: AIContextLevel; desc: string; ico
     { label: '含查询结果', value: 'with_results', desc: '传递最近的查询结果作为上下文', icon: '📑' },
 ];
 
-const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme }) => {
+const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
     const [safetyLevel, setSafetyLevel] = useState<AISafetyLevel>('readonly');
@@ -134,6 +135,17 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     }, []);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
+
+    useEffect(() => {
+        if (!open || !focusProviderId) {
+            return;
+        }
+        if (!providers.some((provider) => provider.id === focusProviderId)) {
+            return;
+        }
+        setActiveSection('providers');
+        setActiveProviderId(focusProviderId);
+    }, [focusProviderId, open, providers]);
 
     const applyProviderEditorSession = useCallback((session: ProviderEditorSession) => {
         setEditingProvider(session.editingProvider as AIProviderConfig | null);

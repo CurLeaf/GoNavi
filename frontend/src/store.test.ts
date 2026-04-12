@@ -91,4 +91,52 @@ describe('store appearance persistence', () => {
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableColumnWidthMode).toBe('compact');
   });
+
+  it('does not clear persisted legacy connections during hydration migration', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connections: [
+          {
+            id: 'legacy-1',
+            name: 'Legacy',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret',
+            },
+          },
+        ],
+      },
+      version: 7,
+    }));
+
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().connections).toHaveLength(1);
+    expect(useStore.getState().connections[0]?.config.password).toBe('secret');
+  });
+
+  it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        globalProxy: {
+          enabled: true,
+          type: 'http',
+          host: '127.0.0.1',
+          port: 8080,
+          user: 'ops',
+          password: 'proxy-secret',
+        },
+      },
+      version: 7,
+    }));
+
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().globalProxy.password).toBe('proxy-secret');
+    expect(useStore.getState().globalProxy.hasPassword).toBe(true);
+  });
 });
