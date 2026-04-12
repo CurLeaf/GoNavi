@@ -195,7 +195,7 @@ sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0
 
 - [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)
 
-外部贡献者统一直接向 `main` 发起 Pull Request。
+外部贡献者应从 `dev` 拉出分支，并统一向 `dev` 发起 Pull Request。
 
 ## Star History (Star 增长趋势)
 
