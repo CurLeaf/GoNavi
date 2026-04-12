@@ -120,17 +120,17 @@ func mergeProviderSecrets(cfg ai.ProviderConfig, bundle providerSecretBundle) ai
 	return merged
 }
 
-func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
+func persistProviderSecretBundle(store secretstore.SecretStore, meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
 	meta, _ = splitProviderSecrets(meta)
 	if !bundle.hasAny() {
 		meta.HasSecret = false
 		meta.SecretRef = ""
 		return meta, nil
 	}
-	if s.secretStore == nil {
+	if store == nil {
 		return meta, fmt.Errorf("secret store unavailable")
 	}
-	if err := s.secretStore.HealthCheck(); err != nil {
+	if err := store.HealthCheck(); err != nil {
 		return meta, err
 	}
 
@@ -147,7 +147,7 @@ func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle pro
 	if err != nil {
 		return meta, fmt.Errorf("序列化 provider secret bundle 失败: %w", err)
 	}
-	if err := s.secretStore.Put(ref, payload); err != nil {
+	if err := store.Put(ref, payload); err != nil {
 		return meta, err
 	}
 
@@ -156,7 +156,7 @@ func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle pro
 	return meta, nil
 }
 
-func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+func resolveProviderConfigSecrets(store secretstore.SecretStore, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
 	cfg = normalizeProviderConfig(cfg)
 	meta, bundle := splitProviderSecrets(cfg)
 	if bundle.hasAny() {
@@ -165,7 +165,7 @@ func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.Provid
 	if !meta.HasSecret {
 		return meta, nil
 	}
-	if s.secretStore == nil {
+	if store == nil {
 		return meta, fmt.Errorf("secret store unavailable")
 	}
 
@@ -179,7 +179,7 @@ func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.Provid
 		meta.SecretRef = ref
 	}
 
-	payload, err := s.secretStore.Get(ref)
+	payload, err := store.Get(ref)
 	if err != nil {
 		return meta, err
 	}
@@ -189,6 +189,14 @@ func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.Provid
 		return meta, fmt.Errorf("解析 provider secret bundle 失败: %w", err)
 	}
 	return mergeProviderSecrets(meta, stored), nil
+}
+
+func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
+	return persistProviderSecretBundle(s.secretStore, meta, bundle)
+}
+
+func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	return resolveProviderConfigSecrets(s.secretStore, cfg)
 }
 
 func providerMetadataView(cfg ai.ProviderConfig) ai.ProviderConfig {

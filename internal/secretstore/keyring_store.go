@@ -3,7 +3,10 @@ package secretstore
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
+	"strings"
+	"syscall"
 
 	"github.com/99designs/keyring"
 )
@@ -56,17 +59,30 @@ func (s *keyringStore) Delete(ref string) error {
 
 func (s *keyringStore) HealthCheck() error {
 	_, err := s.ring.Get(healthCheckRef)
-	if err == nil || errors.Is(err, keyring.ErrKeyNotFound) {
+	if err == nil || isKeyringSecretNotFound(err) {
 		return nil
 	}
 	return wrapKeyringError(err)
 }
 
 func wrapKeyringError(err error) error {
-	if err == nil || errors.Is(err, keyring.ErrKeyNotFound) || IsUnavailable(err) {
+	if err == nil || IsUnavailable(err) {
 		return err
 	}
+	if isKeyringSecretNotFound(err) {
+		return os.ErrNotExist
+	}
 	return &UnavailableError{Reason: err.Error()}
+}
+
+func isKeyringSecretNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, keyring.ErrKeyNotFound) || errors.Is(err, syscall.Errno(1168)) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(err.Error()), keyring.ErrKeyNotFound.Error())
 }
 
 func keyringConfigFor(goos string) (keyring.Config, error) {

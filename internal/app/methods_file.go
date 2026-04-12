@@ -259,10 +259,30 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+func readImportedConnectionConfigFile(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > connectionImportMaxFileBytes {
+		return "", errConnectionImportFileTooLarge
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
 func (a *App) ImportConfigFile() connection.QueryResult {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select Config File",
 		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "GoNavi Connection Package (*.gonavi-conn)",
+				Pattern:     "*.gonavi-conn",
+			},
 			{
 				DisplayName: "JSON Files (*.json)",
 				Pattern:     "*.json",
@@ -278,12 +298,52 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	content, err := os.ReadFile(selection)
+	content, err := readImportedConnectionConfigFile(selection)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Data: string(content)}
+	return connection.QueryResult{Success: true, Data: content}
+}
+
+func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connection.QueryResult {
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Export Connections",
+		DefaultFilename: "connections" + connectionPackageExtension,
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "GoNavi Connection Package (*.gonavi-conn)",
+				Pattern:     "*.gonavi-conn",
+			},
+		},
+	})
+	if err != nil || strings.TrimSpace(filename) == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	filename = normalizeConnectionPackageExportFilename(filename)
+
+	content, err := a.buildExportedConnectionPackage(options)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if len(content) > connectionImportMaxFileBytes {
+		return connection.QueryResult{Success: false, Message: errConnectionImportFileTooLarge.Error()}
+	}
+	if err := os.WriteFile(filename, content, 0o644); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
+func normalizeConnectionPackageExportFilename(filename string) string {
+	trimmed := strings.TrimSpace(filename)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(filepath.Ext(trimmed), connectionPackageExtension) {
+		return trimmed
+	}
+	return trimmed + connectionPackageExtension
 }
 
 func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {

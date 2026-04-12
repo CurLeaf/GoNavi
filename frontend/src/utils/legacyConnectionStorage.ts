@@ -79,6 +79,11 @@ export function readLegacyPersistedSecrets(payload: string | null | undefined): 
   };
 }
 
+export function hasLegacyMigratableSensitiveItems(payload: string | null | undefined): boolean {
+  const legacy = readLegacyPersistedSecrets(payload);
+  return legacy.connections.length > 0 || legacy.globalProxy !== null;
+}
+
 export function stripLegacyPersistedSecrets(payload: string | null | undefined): string {
   if (!payload || typeof payload !== 'string') {
     return '';
@@ -96,15 +101,42 @@ export function stripLegacyPersistedSecrets(payload: string | null | undefined):
     : parsed;
   state.connections = [];
 
-  if (state.globalProxy && typeof state.globalProxy === 'object') {
-    const proxy = { ...(state.globalProxy as Record<string, unknown>) };
-    const password = toTrimmedString(proxy.password);
-    delete proxy.password;
-    if (password !== '') {
-      proxy.hasPassword = true;
-    }
-    state.globalProxy = proxy;
+  if (state.globalProxy !== undefined) {
+    delete state.globalProxy;
   }
+
+  return JSON.stringify(parsed);
+}
+
+export function stripLegacyPersistedConnectionById(
+  payload: string | null | undefined,
+  connectionId: string,
+): string {
+  if (!payload || typeof payload !== 'string') {
+    return '';
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(payload) as Record<string, unknown>;
+  } catch {
+    return payload;
+  }
+
+  const state = parsed.state && typeof parsed.state === 'object'
+    ? parsed.state as Record<string, unknown>
+    : parsed;
+  const targetId = toTrimmedString(connectionId);
+  if (!targetId || !Array.isArray(state.connections)) {
+    return payload;
+  }
+
+  state.connections = state.connections.filter((item) => {
+    if (!item || typeof item !== 'object') {
+      return true;
+    }
+    return toTrimmedString((item as { id?: unknown }).id) !== targetId;
+  });
 
   return JSON.stringify(parsed);
 }
