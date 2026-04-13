@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,8 @@ import (
 
 const minExportQueryTimeout = 5 * time.Minute
 const minClickHouseExportQueryTimeout = 2 * time.Hour
+
+var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
 
 func (a *App) OpenSQLFile() connection.QueryResult {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
@@ -1601,7 +1604,7 @@ func extractViewCreateSQL(row map[string]interface{}) string {
 	}
 	ddl := exportRowValueCI(row, "create view", "create_statement", "create_sql", "ddl", "sql", "view_definition", "definition")
 	if ddl != "" {
-		return ddl
+		return normalizeMySQLViewCreateSQL(ddl)
 	}
 	for _, value := range row {
 		if value == nil {
@@ -1613,10 +1616,21 @@ func extractViewCreateSQL(row map[string]interface{}) string {
 		}
 		lower := strings.ToLower(text)
 		if strings.HasPrefix(lower, "create ") || strings.HasPrefix(lower, "select ") || strings.HasPrefix(lower, "with ") {
-			return text
+			return normalizeMySQLViewCreateSQL(text)
 		}
 	}
 	return ""
+}
+
+func normalizeMySQLViewCreateSQL(sql string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
+	if trimmed == "" {
+		return ""
+	}
+	if mysqlCreateViewPrefixPattern.MatchString(trimmed) {
+		return mysqlCreateViewPrefixPattern.ReplaceAllString(trimmed, "CREATE OR REPLACE VIEW ")
+	}
+	return trimmed
 }
 
 func exportRowValueCI(row map[string]interface{}, candidates ...string) string {

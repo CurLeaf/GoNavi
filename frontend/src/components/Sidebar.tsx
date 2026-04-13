@@ -95,6 +95,23 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   tag: <TagOutlined />,
 };
 
+const normalizeMySQLViewDDLForEditing = (viewName: string, rawDefinition: unknown): string => {
+  const text = String(rawDefinition || '').trim();
+  if (!text) return '';
+
+  const normalized = text.replace(/\r\n/g, '\n').trim().replace(/;+\s*$/, '');
+  const createViewPrefixPattern = /^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:`[^`]+`|\S+)\s*@\s*(?:`[^`]+`|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+/i;
+  if (createViewPrefixPattern.test(normalized)) {
+    return `${normalized.replace(createViewPrefixPattern, 'CREATE OR REPLACE VIEW ')};`;
+  }
+
+  if (/^\s*(select|with)\b/i.test(normalized)) {
+    return `CREATE OR REPLACE VIEW ${viewName} AS\n${normalized};`;
+  }
+
+  return `${normalized};`;
+};
+
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
@@ -2419,7 +2436,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   const row = result.data[0] as Record<string, any>;
                   const def = row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
                   if (def) {
-                      template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
+                      if (dialect === 'mysql') {
+                          template = `-- 编辑视图 ${viewName}\n${normalizeMySQLViewDDLForEditing(viewName, def)}`;
+                      } else {
+                          template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
+                      }
                   }
               }
           }
