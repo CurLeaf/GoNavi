@@ -45,7 +45,7 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
+import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 
 const { Search } = Input;
 
@@ -1202,7 +1202,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
 	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
 
+	                const dialect = getMetadataDialect(conn as SavedConnection);
+	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
+
 	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
+	                    .filter((bucket) => !(isOracleLike && !bucket.schemaName))
 	                    .sort((a, b) => {
 	                        if (!a.schemaName && !b.schemaName) return 0;
 	                        if (!a.schemaName) return -1;
@@ -1210,8 +1214,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                        return a.schemaName.toLowerCase().localeCompare(b.schemaName.toLowerCase());
 	                    })
 	                    .map((bucket) => {
-	                        const schemaNodeKey = `${key}-schema-${bucket.schemaName || 'default'}`;
-	                        const schemaTitle = bucket.schemaName || '默认模式';
+	                    const schemaNodeKey = `${key}-schema-${bucket.schemaName || 'default'}`;
+	                    const schemaTitle = bucket.schemaName || '默认模式';
 	                        const groupedNodes: TreeNode[] = [
 	                            buildObjectGroup(schemaNodeKey, 'tables', '表', <TableOutlined />, bucket.tables, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'views', '视图', <EyeOutlined />, bucket.views, { schemaName: bucket.schemaName }),
@@ -2141,7 +2145,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
       return buildRpcConnectionConfig(conn.config, {
-          database: clearDatabase ? '' : ((overrideDatabase ?? conn.config.database) || ''),
+          database: resolveSidebarRuntimeDatabase(
+              conn?.config?.type,
+              conn?.config?.driver,
+              conn?.config?.database,
+              overrideDatabase,
+              clearDatabase,
+          ),
       });
   };
 
