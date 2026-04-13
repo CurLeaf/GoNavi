@@ -103,6 +103,8 @@ func normalizeConnectionSecretResolutionError(config connection.ConnectionConfig
 			return fmt.Errorf("未找到已保存连接，可能已被删除，请刷新后重试")
 		}
 		return fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")
 	case strings.Contains(lower, "secret store unavailable"):
 		return fmt.Errorf("系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试")
 	default:

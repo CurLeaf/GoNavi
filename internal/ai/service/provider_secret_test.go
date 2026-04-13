@@ -2,6 +2,7 @@ package aiservice
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,17 @@ import (
 	"GoNavi-Wails/internal/ai"
 	"GoNavi-Wails/internal/secretstore"
 )
+
+func withTestAIGOOS(t *testing.T, goos string) {
+	t.Helper()
+	previous := aiRuntimeGOOS
+	aiRuntimeGOOS = func() string {
+		return goos
+	}
+	t.Cleanup(func() {
+		aiRuntimeGOOS = previous
+	})
+}
 
 func TestSplitProviderSecretsStripsAPIKeyAndSensitiveHeaders(t *testing.T) {
 	input := ai.ProviderConfig{
@@ -41,28 +53,19 @@ func TestSplitProviderSecretsStripsAPIKeyAndSensitiveHeaders(t *testing.T) {
 }
 
 func TestResolveProviderConfigSecretsRestoresStoredSecretBundle(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
-	ref, err := secretstore.BuildRef("ai-provider", "openai-main")
-	if err != nil {
-		t.Fatalf("BuildRef returned error: %v", err)
-	}
-	payload, err := json.Marshal(providerSecretBundle{
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
+	service.configDir = t.TempDir()
+	if err := service.dailySecretStore().PutAIProvider("openai-main", toDailyProviderBundle(providerSecretBundle{
 		APIKey: "sk-test",
 		SensitiveHeaders: map[string]string{
 			"Authorization": "Bearer test",
 		},
-	})
-	if err != nil {
-		t.Fatalf("Marshal returned error: %v", err)
-	}
-	if err := store.Put(ref, payload); err != nil {
-		t.Fatalf("Put returned error: %v", err)
+	})); err != nil {
+		t.Fatalf("PutAIProvider returned error: %v", err)
 	}
 
 	resolved, err := service.resolveProviderConfigSecrets(ai.ProviderConfig{
 		ID:        "openai-main",
-		SecretRef: ref,
 		HasSecret: true,
 		Headers: map[string]string{
 			"X-Team": "db",
@@ -83,8 +86,7 @@ func TestResolveProviderConfigSecretsRestoresStoredSecretBundle(t *testing.T) {
 }
 
 func TestLoadConfigUsesPlaintextProviderSecretsWithoutSilentMigration(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	legacy := aiConfig{
@@ -134,12 +136,15 @@ func TestLoadConfigUsesPlaintextProviderSecretsWithoutSilentMigration(t *testing
 		t.Fatalf("expected runtime provider to keep sensitive header, got %#v", service.providers[0].Headers)
 	}
 
-	ref, err := secretstore.BuildRef("ai-provider", "openai-main")
+	stored, ok, err := service.dailySecretStore().GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("BuildRef returned error: %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	if _, err := store.Get(ref); !os.IsNotExist(err) {
-		t.Fatalf("expected startup load to avoid secret-store migration, got %v", err)
+	if !ok {
+		t.Fatal("expected startup load to migrate plaintext provider secret to daily store")
+	}
+	if stored.APIKey != "sk-test" || stored.SensitiveHeaders["Authorization"] != "Bearer test" {
+		t.Fatalf("unexpected migrated provider bundle: %#v", stored)
 	}
 
 	rewritten, err := os.ReadFile(configPath)
@@ -147,17 +152,16 @@ func TestLoadConfigUsesPlaintextProviderSecretsWithoutSilentMigration(t *testing
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
 	text := string(rewritten)
-	if !strings.Contains(text, "sk-test") {
-		t.Fatalf("expected config file to remain unchanged, got %s", text)
+	if strings.Contains(text, "sk-test") {
+		t.Fatalf("expected config file to be rewritten secretless, got %s", text)
 	}
-	if !strings.Contains(text, "Bearer test") {
-		t.Fatalf("expected config file to keep sensitive header, got %s", text)
+	if strings.Contains(text, "Bearer test") {
+		t.Fatalf("expected config file to remove sensitive header, got %s", text)
 	}
 }
 
 func TestAISaveProviderKeepsLegacyPlaintextSecretAfterStartupLoad(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	legacy := aiConfig{
@@ -205,26 +209,20 @@ func TestAISaveProviderKeepsLegacyPlaintextSecretAfterStartupLoad(t *testing.T) 
 		t.Fatalf("expected runtime provider to keep legacy sensitive header, got %#v", service.providers[0].Headers)
 	}
 
-	ref, err := secretstore.BuildRef("ai-provider", "openai-main")
+	stored, ok, err := service.dailySecretStore().GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("BuildRef returned error: %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	stored, err := store.Get(ref)
-	if err != nil {
-		t.Fatalf("expected save to persist provider secret bundle, got %v", err)
+	if !ok {
+		t.Fatal("expected provider secret to stay in daily store")
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
-	}
-	if bundle.APIKey != "sk-test" {
-		t.Fatalf("expected persisted apiKey, got %q", bundle.APIKey)
+	if stored.APIKey != "sk-test" {
+		t.Fatalf("expected persisted apiKey, got %q", stored.APIKey)
 	}
 }
 
 func TestAITestProviderUsesLegacyPlaintextSecretAfterStartupLoad(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	legacy := aiConfig{
@@ -269,8 +267,7 @@ func TestAITestProviderUsesLegacyPlaintextSecretAfterStartupLoad(t *testing.T) {
 }
 
 func TestAISaveProviderPersistsSecretlessConfigAndReturnsSecretlessView(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	err := service.AISaveProvider(ai.ProviderConfig{
@@ -323,8 +320,7 @@ func TestAISaveProviderPersistsSecretlessConfigAndReturnsSecretlessView(t *testi
 }
 
 func TestAISaveProviderKeepsExistingSecretWhenInputOmitsAPIKey(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	if err := service.AISaveProvider(ai.ProviderConfig{
@@ -377,8 +373,7 @@ func TestAISaveProviderKeepsExistingSecretWhenInputOmitsAPIKey(t *testing.T) {
 }
 
 func TestAISaveProviderMergesStoredSensitiveHeadersWhenUpdatingOnlyAPIKey(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	service := NewServiceWithSecretStore(store)
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
 
 	if err := service.AISaveProvider(ai.ProviderConfig{
@@ -416,19 +411,18 @@ func TestAISaveProviderMergesStoredSensitiveHeadersWhenUpdatingOnlyAPIKey(t *tes
 		t.Fatalf("expected existing sensitive header to be kept, got %#v", service.providers[0].Headers)
 	}
 
-	stored, err := store.Get(service.providers[0].SecretRef)
+	stored, ok, err := service.dailySecretStore().GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("expected merged secret bundle in store, got %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
+	if !ok {
+		t.Fatal("expected merged secret bundle in daily store")
 	}
-	if bundle.APIKey != "sk-updated" {
-		t.Fatalf("expected store to keep updated apiKey, got %q", bundle.APIKey)
+	if stored.APIKey != "sk-updated" {
+		t.Fatalf("expected store to keep updated apiKey, got %q", stored.APIKey)
 	}
-	if bundle.SensitiveHeaders["Authorization"] != "Bearer original" {
-		t.Fatalf("expected store to keep existing sensitive header, got %#v", bundle.SensitiveHeaders)
+	if stored.SensitiveHeaders["Authorization"] != "Bearer original" {
+		t.Fatalf("expected store to keep existing sensitive header, got %#v", stored.SensitiveHeaders)
 	}
 }
 
@@ -463,3 +457,23 @@ func (s *fakeProviderSecretStore) HealthCheck() error {
 }
 
 var _ secretstore.SecretStore = (*fakeProviderSecretStore)(nil)
+
+type failOnUseSecretStore struct{}
+
+func (s failOnUseSecretStore) Put(string, []byte) error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) Get(string) ([]byte, error) {
+	return nil, fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) Delete(string) error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) HealthCheck() error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+var _ secretstore.SecretStore = (*failOnUseSecretStore)(nil)

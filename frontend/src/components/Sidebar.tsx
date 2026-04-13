@@ -45,6 +45,7 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 
 const { Search } = Input;
 
@@ -794,7 +795,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])
                   || getMySQLShowTablesName(row)
                   || getFirstRowValue(row);
-              const fullName = buildQualifiedName(schemaName, viewName);
+              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
               if (!fullName || seen.has(fullName)) return;
               seen.add(fullName);
               views.push(fullName);

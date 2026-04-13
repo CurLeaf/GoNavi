@@ -198,8 +198,8 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 		runtimeConfig = meta
 	}
 
-	if !runtimeConfig.HasSecret && found && strings.TrimSpace(existing.SecretRef) != "" {
-		if err := s.secretStore.Delete(existing.SecretRef); err != nil {
+	if !runtimeConfig.HasSecret && found {
+		if err := s.dailySecretStore().DeleteAIProvider(existing.ID); err != nil {
 			return fmt.Errorf("删除 Provider secret 失败: %w", err)
 		}
 	}
@@ -960,7 +960,7 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 // --- 配置持久化 ---
 
 func (s *Service) loadConfig() {
-	snapshot, err := NewProviderConfigStore(s.configDir, s.secretStore).LoadRuntime()
+	snapshot, err := NewProviderConfigStore(s.configDir, s.secretStore).Load()
 	if err != nil {
 		logger.Error(err, "加载 AI 配置失败")
 		return

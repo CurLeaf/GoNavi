@@ -21,7 +21,7 @@ func newConnectionPackageItem(view connection.SavedConnectionView, bundle connec
 		IncludeRedisDatabases: cloneIntSlice(view.IncludeRedisDatabases),
 		IconType:              view.IconType,
 		IconColor:             view.IconColor,
-		Config:                view.Config,
+		Config:                stripConnectionSecretFields(view.Config),
 		Secrets:               bundle,
 	}
 }
@@ -229,7 +229,11 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		if err != nil {
 			return nil, err
 		}
-		return a.importConnectionPackagePayload(payload)
+		views, err := a.importConnectionPackagePayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return sanitizeSavedConnectionViews(views), nil
 	}
 
 	if isConnectionPackageV2Protected(trimmed) {
@@ -241,7 +245,11 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		if err != nil {
 			return nil, err
 		}
-		return a.importConnectionPackagePayload(payload)
+		views, err := a.importConnectionPackagePayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return sanitizeSavedConnectionViews(views), nil
 	}
 
 	if isConnectionPackageEnvelope(trimmed) {
@@ -253,7 +261,11 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		if err != nil {
 			return nil, err
 		}
-		return a.importConnectionPackagePayload(payload)
+		views, err := a.importConnectionPackagePayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return sanitizeSavedConnectionViews(views), nil
 	}
 
 	var legacy []connection.LegacySavedConnection

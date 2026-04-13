@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 )
 
 func TestSplitConnectionSecretsStripsPasswordsAndOpaqueDSN(t *testing.T) {
+	withTestGOOS(t, "linux")
+
 	input := connection.SavedConnectionInput{
 		ID:   "conn-1",
 		Name: "Primary",
@@ -70,3 +73,23 @@ func (s *fakeAppSecretStore) HealthCheck() error {
 }
 
 var _ secretstore.SecretStore = (*fakeAppSecretStore)(nil)
+
+type failOnUseSecretStore struct{}
+
+func (s failOnUseSecretStore) Put(string, []byte) error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) Get(string) ([]byte, error) {
+	return nil, fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) Delete(string) error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+func (s failOnUseSecretStore) HealthCheck() error {
+	return fmt.Errorf("secret store should not be used")
+}
+
+var _ secretstore.SecretStore = (*failOnUseSecretStore)(nil)

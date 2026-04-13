@@ -22,6 +22,7 @@ import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, is
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
+import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
 import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
@@ -181,6 +182,7 @@ function App() {
   const effectiveBlur = normalizeBlurForPlatform(resolvedAppearance.blur);
   const blurFilter = blurToFilter(effectiveBlur);
   const [runtimePlatform, setRuntimePlatform] = useState('');
+  const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
@@ -219,13 +221,16 @@ function App() {
 
   const windowCornerRadius = 14;
   useEffect(()=>{
+    if (typeof document === 'undefined' || !document.body) {
+        return;
+    }
     switch(windowState){
         case 'fullscreen':
         case 'maximized':
-            document.body.setAttribute('--gonavi-border-radius', '0px');
+            document.body.style.setProperty('--gonavi-border-radius', '0px');
             break;
         default:
-            document.body.setAttribute('--gonavi-border-radius', `${windowCornerRadius}px`);
+            document.body.style.setProperty('--gonavi-border-radius', `${windowCornerRadius}px`);
             break;
     }
   }, [windowState]);
@@ -246,6 +251,7 @@ function App() {
                   if (cancelled) return;
                   const platform = String(env?.platform || '').toLowerCase();
                   setRuntimePlatform(platform);
+                  setRuntimeBuildType(String(env?.buildType || '').toLowerCase());
                   setIsLinuxRuntime(platform === 'linux');
               })
               .catch(() => {
@@ -1089,6 +1095,7 @@ function App() {
   const isAboutOpenRef = React.useRef(false);
   const [aboutLoading, setAboutLoading] = useState(false);
   const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string; communityUrl?: string } | null>(null);
+  const aboutDisplayVersion = resolveAboutDisplayVersion(runtimeBuildType, aboutInfo?.version);
   const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
   const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState<{
@@ -1145,7 +1152,11 @@ function App() {
   const isWindowsRuntime = runtimePlatform === 'windows'
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
-  const macWindowDiagnosticsEnabled = shouldEnableMacWindowDiagnostics(isMacRuntime, import.meta.env.DEV);
+  const macWindowDiagnosticsEnabled = shouldEnableMacWindowDiagnostics(
+      isMacRuntime,
+      import.meta.env.DEV,
+      import.meta.env.VITE_GONAVI_ENABLE_MAC_WINDOW_DIAGNOSTICS,
+  );
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
       if (!macWindowDiagnosticsEnabled) {
@@ -3040,7 +3051,7 @@ function App() {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                             <div>
                                 <div style={{ marginBottom: 6, fontWeight: 600 }}>版本</div>
-                                <div style={utilityMutedTextStyle}>{aboutInfo?.version || '未知'}</div>
+                                <div style={utilityMutedTextStyle}>{aboutDisplayVersion}</div>
                             </div>
                             <div>
                                 <div style={{ marginBottom: 6, fontWeight: 600 }}>作者</div>

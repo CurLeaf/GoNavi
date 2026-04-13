@@ -9,6 +9,7 @@ import (
 
 	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/dailysecret"
 	"GoNavi-Wails/internal/secretstore"
 	"github.com/google/uuid"
 )
@@ -149,39 +150,8 @@ func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.S
 	meta.ID = id
 	meta.SavePassword = false
 
-	bundle := connectionSecretBundle{}
-	if strings.TrimSpace(meta.Password) != "" {
-		bundle.Password = meta.Password
-		meta.Password = ""
-	}
-	if strings.TrimSpace(meta.SSH.Password) != "" {
-		bundle.SSHPassword = meta.SSH.Password
-		meta.SSH.Password = ""
-	}
-	if strings.TrimSpace(meta.Proxy.Password) != "" {
-		bundle.ProxyPassword = meta.Proxy.Password
-		meta.Proxy.Password = ""
-	}
-	if strings.TrimSpace(meta.HTTPTunnel.Password) != "" {
-		bundle.HTTPTunnelPassword = meta.HTTPTunnel.Password
-		meta.HTTPTunnel.Password = ""
-	}
-	if strings.TrimSpace(meta.MySQLReplicaPassword) != "" {
-		bundle.MySQLReplicaPassword = meta.MySQLReplicaPassword
-		meta.MySQLReplicaPassword = ""
-	}
-	if strings.TrimSpace(meta.MongoReplicaPassword) != "" {
-		bundle.MongoReplicaPassword = meta.MongoReplicaPassword
-		meta.MongoReplicaPassword = ""
-	}
-	if strings.TrimSpace(meta.URI) != "" {
-		bundle.OpaqueURI = meta.URI
-		meta.URI = ""
-	}
-	if strings.TrimSpace(meta.DSN) != "" {
-		bundle.OpaqueDSN = meta.DSN
-		meta.DSN = ""
-	}
+	bundle := extractConnectionSecretBundle(meta)
+	meta = stripConnectionSecretFields(meta)
 
 	view := connection.SavedConnectionView{
 		ID:                      id,
@@ -205,6 +175,10 @@ func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.S
 
 func (r *savedConnectionRepository) connectionsPath() string {
 	return filepath.Join(r.configDir, savedConnectionsFileName)
+}
+
+func (r *savedConnectionRepository) dailySecrets() *dailysecret.Store {
+	return dailysecret.NewStore(r.configDir)
 }
 
 func (r *savedConnectionRepository) load() ([]connection.SavedConnectionView, error) {
@@ -269,26 +243,20 @@ func (r *savedConnectionRepository) Save(input connection.SavedConnectionInput) 
 			return connection.SavedConnectionView{}, bundleErr
 		}
 		mergedBundle = mergeConnectionSecretBundles(existingBundle, bundle)
-		view.SecretRef = existing.SecretRef
 	}
 	mergedBundle = applyConnectionSecretClears(mergedBundle, input)
 
 	if mergedBundle.hasAny() {
-		ref, storeErr := r.storeSecretBundle(view.ID, view.SecretRef, mergedBundle)
-		if storeErr != nil {
+		if storeErr := r.saveSecretBundle(view.ID, mergedBundle); storeErr != nil {
 			return connection.SavedConnectionView{}, storeErr
 		}
-		view.SecretRef = ref
-		applyConnectionBundleFlags(&view, mergedBundle)
 	} else {
-		if index >= 0 && strings.TrimSpace(existing.SecretRef) != "" {
-			if deleteErr := r.secretStore.Delete(existing.SecretRef); deleteErr != nil {
-				return connection.SavedConnectionView{}, deleteErr
-			}
+		if deleteErr := r.deleteSecretBundle(view.ID); deleteErr != nil {
+			return connection.SavedConnectionView{}, deleteErr
 		}
-		view.SecretRef = ""
-		applyConnectionBundleFlags(&view, connectionSecretBundle{})
 	}
+	view.SecretRef = ""
+	applyConnectionBundleFlags(&view, mergedBundle)
 
 	if index >= 0 {
 		connections[index] = view
@@ -312,6 +280,14 @@ func (r *savedConnectionRepository) Find(id string) (connection.SavedConnectionV
 		}
 	}
 	return connection.SavedConnectionView{}, fmt.Errorf("saved connection not found: %s", id)
+}
+
+func (r *savedConnectionRepository) saveSecretBundle(id string, bundle connectionSecretBundle) error {
+	return r.dailySecrets().PutConnection(id, toDailyConnectionBundle(bundle))
+}
+
+func (r *savedConnectionRepository) deleteSecretBundle(id string) error {
+	return r.dailySecrets().DeleteConnection(id)
 }
 
 func (r *savedConnectionRepository) storeSecretBundle(id string, existingRef string, bundle connectionSecretBundle) (string, error) {
@@ -340,9 +316,24 @@ func (r *savedConnectionRepository) storeSecretBundle(id string, existingRef str
 }
 
 func (r *savedConnectionRepository) loadSecretBundle(view connection.SavedConnectionView) (connectionSecretBundle, error) {
+	inline := extractConnectionSecretBundle(view.Config)
+	if inline.hasAny() {
+		return inline, nil
+	}
 	if !savedConnectionViewHasSecrets(view) {
 		return connectionSecretBundle{}, nil
 	}
+	bundle, ok, err := r.dailySecrets().GetConnection(view.ID)
+	if err != nil {
+		return connectionSecretBundle{}, err
+	}
+	if ok {
+		return fromDailyConnectionBundle(bundle), nil
+	}
+	return connectionSecretBundle{}, os.ErrNotExist
+}
+
+func (r *savedConnectionRepository) loadSecretBundleFromStore(view connection.SavedConnectionView) (connectionSecretBundle, error) {
 	if r.secretStore == nil {
 		return connectionSecretBundle{}, fmt.Errorf("secret store unavailable")
 	}
@@ -414,10 +405,8 @@ func (r *savedConnectionRepository) Delete(id string) error {
 	filtered := make([]connection.SavedConnectionView, 0, len(connections))
 	for _, item := range connections {
 		if item.ID == strings.TrimSpace(id) {
-			if strings.TrimSpace(item.SecretRef) != "" && r.secretStore != nil {
-				if deleteErr := r.secretStore.Delete(item.SecretRef); deleteErr != nil {
-					return deleteErr
-				}
+			if deleteErr := r.deleteSecretBundle(item.ID); deleteErr != nil {
+				return deleteErr
 			}
 			continue
 		}
@@ -454,16 +443,12 @@ func (r *savedConnectionRepository) Duplicate(id string) (connection.SavedConnec
 		return connection.SavedConnectionView{}, err
 	}
 	if bundle.hasAny() {
-		ref, storeErr := r.storeSecretBundle(duplicate.ID, "", bundle)
-		if storeErr != nil {
+		if storeErr := r.saveSecretBundle(duplicate.ID, bundle); storeErr != nil {
 			return connection.SavedConnectionView{}, storeErr
 		}
-		duplicate.SecretRef = ref
-		applyConnectionBundleFlags(&duplicate, bundle)
-	} else {
-		duplicate.SecretRef = ""
-		applyConnectionBundleFlags(&duplicate, connectionSecretBundle{})
 	}
+	duplicate.SecretRef = ""
+	applyConnectionBundleFlags(&duplicate, bundle)
 
 	connections = append(connections, duplicate)
 	if err := r.saveAll(connections); err != nil {
