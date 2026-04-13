@@ -53,14 +53,11 @@ func (a *App) saveGlobalProxy(input connection.SaveGlobalProxyInput) (connection
 			return connection.GlobalProxyView{}, loadErr
 		}
 		bundle = existingBundle
-		view.SecretRef = existing.SecretRef
 	}
 
 	if !view.Enabled {
-		if strings.TrimSpace(existing.SecretRef) != "" && a.secretStore != nil {
-			if deleteErr := a.secretStore.Delete(existing.SecretRef); deleteErr != nil {
-				return connection.GlobalProxyView{}, deleteErr
-			}
+		if deleteErr := a.dailySecretStore().DeleteGlobalProxy(); deleteErr != nil {
+			return connection.GlobalProxyView{}, deleteErr
 		}
 		view = connection.GlobalProxyView{Enabled: false}
 		if err := a.persistGlobalProxyView(view); err != nil {
@@ -73,21 +70,18 @@ func (a *App) saveGlobalProxy(input connection.SaveGlobalProxyInput) (connection
 	}
 
 	if strings.TrimSpace(bundle.Password) != "" {
-		ref, storeErr := a.storeGlobalProxySecret(view.SecretRef, bundle)
-		if storeErr != nil {
+		if storeErr := a.dailySecretStore().PutGlobalProxy(toDailyGlobalProxyBundle(bundle)); storeErr != nil {
 			return connection.GlobalProxyView{}, storeErr
 		}
-		view.SecretRef = ref
 		view.HasPassword = true
 	} else {
-		if strings.TrimSpace(existing.SecretRef) != "" && a.secretStore != nil {
-			if deleteErr := a.secretStore.Delete(existing.SecretRef); deleteErr != nil {
-				return connection.GlobalProxyView{}, deleteErr
-			}
+		if deleteErr := a.dailySecretStore().DeleteGlobalProxy(); deleteErr != nil {
+			return connection.GlobalProxyView{}, deleteErr
 		}
-		view.SecretRef = ""
 		view.HasPassword = false
 	}
+	view.SecretRef = ""
+	view.Password = ""
 
 	if err := a.persistGlobalProxyView(view); err != nil {
 		return connection.GlobalProxyView{}, err
@@ -101,8 +95,7 @@ func (a *App) saveGlobalProxy(input connection.SaveGlobalProxyInput) (connection
 	}); err != nil {
 		return connection.GlobalProxyView{}, err
 	}
-	view.Password = ""
-	return view, nil
+	return sanitizeGlobalProxyView(view), nil
 }
 
 func (a *App) persistGlobalProxyView(view connection.GlobalProxyView) error {
@@ -129,9 +122,24 @@ func (a *App) loadStoredGlobalProxyView() (connection.GlobalProxyView, error) {
 }
 
 func (a *App) loadGlobalProxySecretBundle(view connection.GlobalProxyView) (globalProxySecretBundle, error) {
+	inline := extractGlobalProxySecretBundle(view)
+	if strings.TrimSpace(inline.Password) != "" {
+		return inline, nil
+	}
 	if !view.HasPassword {
 		return globalProxySecretBundle{}, nil
 	}
+	bundle, ok, err := a.dailySecretStore().GetGlobalProxy()
+	if err != nil {
+		return globalProxySecretBundle{}, err
+	}
+	if ok {
+		return fromDailyGlobalProxyBundle(bundle), nil
+	}
+	return globalProxySecretBundle{}, os.ErrNotExist
+}
+
+func (a *App) loadGlobalProxySecretBundleFromStore(view connection.GlobalProxyView) (globalProxySecretBundle, error) {
 	if a.secretStore == nil {
 		return globalProxySecretBundle{}, fmt.Errorf("secret store unavailable")
 	}

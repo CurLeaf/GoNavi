@@ -64,3 +64,35 @@ func TestGetGlobalProxyConfigReturnsSecretlessView(t *testing.T) {
 	}
 }
 
+func TestLoadPersistedGlobalProxyOnDarwinUsesInlinePassword(t *testing.T) {
+	if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
+		t.Fatalf("setGlobalProxyConfig returned error: %v", err)
+	}
+
+	app := NewAppWithSecretStore(failOnUseSecretStore{})
+	app.configDir = t.TempDir()
+
+	if _, err := app.saveGlobalProxy(connection.SaveGlobalProxyInput{
+		Enabled:  true,
+		Type:     "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		User:     "ops",
+		Password: "proxy-secret",
+	}); err != nil {
+		t.Fatalf("saveGlobalProxy returned error: %v", err)
+	}
+
+	if _, err := setGlobalProxyConfig(false, connection.ProxyConfig{}); err != nil {
+		t.Fatalf("setGlobalProxyConfig reset returned error: %v", err)
+	}
+
+	app.loadPersistedGlobalProxy()
+	snapshot := currentGlobalProxyConfig()
+	if !snapshot.Enabled {
+		t.Fatal("expected persisted global proxy to be restored")
+	}
+	if snapshot.Proxy.Password != "proxy-secret" {
+		t.Fatalf("expected daily-stored global proxy password to be restored, got %q", snapshot.Proxy.Password)
+	}
+}

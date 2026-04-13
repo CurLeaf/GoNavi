@@ -42,6 +42,44 @@ func TestResolveConnectionConfigByIDLoadsSecretsFromStore(t *testing.T) {
 	}
 }
 
+func TestResolveConnectionSecretsOnDarwinUsesInlineSavedSecrets(t *testing.T) {
+	app := NewAppWithSecretStore(failOnUseSecretStore{})
+	app.configDir = t.TempDir()
+
+	if _, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "conn-darwin-inline",
+		Name: "Primary",
+		Config: connection.ConnectionConfig{
+			ID:       "conn-darwin-inline",
+			Type:     "postgres",
+			Host:     "db.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: "postgres-secret",
+			DSN:      "postgres://user:pass@db.local/app",
+		},
+	}); err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+
+	resolved, err := app.resolveConnectionSecrets(connection.ConnectionConfig{
+		ID:   "conn-darwin-inline",
+		Type: "postgres",
+		Host: "db.local",
+		Port: 5432,
+		User: "postgres",
+	})
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.Password != "postgres-secret" {
+		t.Fatalf("expected daily-stored password to be restored, got %q", resolved.Password)
+	}
+	if resolved.DSN != "postgres://user:pass@db.local/app" {
+		t.Fatalf("expected daily-stored DSN to be restored, got %q", resolved.DSN)
+	}
+}
+
 func TestResolveConnectionSecretsReturnsFriendlyMessageWhenSavedSecretSourceIsMissing(t *testing.T) {
 	store := newFakeAppSecretStore()
 	app := NewAppWithSecretStore(store)
@@ -90,6 +128,8 @@ func TestResolveConnectionSecretsFallsBackToInlineSecretsWhenSavedConnectionIsMi
 }
 
 func TestResolveConnectionSecretsFallsBackToInlineSecretsWhenSavedSecretBundleIsMissing(t *testing.T) {
+	withTestGOOS(t, "linux")
+
 	store := newFakeAppSecretStore()
 	app := NewAppWithSecretStore(store)
 	app.configDir = t.TempDir()
@@ -110,11 +150,11 @@ func TestResolveConnectionSecretsFallsBackToInlineSecretsWhenSavedSecretBundleIs
 	if err != nil {
 		t.Fatalf("SaveConnection returned error: %v", err)
 	}
-	if view.SecretRef == "" {
-		t.Fatal("expected saved connection to allocate a secret ref")
+	if view.SecretRef != "" {
+		t.Fatalf("expected saved connection to avoid secret refs, got %q", view.SecretRef)
 	}
-	if err := store.Delete(view.SecretRef); err != nil {
-		t.Fatalf("Delete returned error: %v", err)
+	if err := app.dailySecretStore().DeleteConnection("conn-inline-fallback"); err != nil {
+		t.Fatalf("DeleteConnection returned error: %v", err)
 	}
 
 	resolved, err := app.resolveConnectionSecrets(connection.ConnectionConfig{

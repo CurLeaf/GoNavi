@@ -12,8 +12,7 @@ import (
 )
 
 func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	configStore := newProviderConfigStore(t.TempDir(), store)
+	configStore := newProviderConfigStore(t.TempDir(), failOnUseSecretStore{})
 
 	legacy := aiConfig{
 		Providers: []ai.ProviderConfig{
@@ -52,16 +51,15 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 		t.Fatalf("expected runtime provider to restore sensitive header, got %#v", snapshot.Providers[0].Headers)
 	}
 
-	stored, err := store.Get(snapshot.Providers[0].SecretRef)
+	stored, ok, err := configStore.dailySecrets.GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("expected migrated provider secret bundle, got %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
+	if !ok {
+		t.Fatal("expected migrated provider secret bundle in daily store")
 	}
-	if bundle.APIKey != "sk-test" {
-		t.Fatalf("expected migrated apiKey in store, got %q", bundle.APIKey)
+	if stored.APIKey != "sk-test" {
+		t.Fatalf("expected migrated apiKey in store, got %q", stored.APIKey)
 	}
 
 	rewritten, err := os.ReadFile(filepath.Join(configStore.configDir, aiConfigFileName))
@@ -78,8 +76,7 @@ func TestProviderConfigStoreLoadMigratesPlaintextProviderSecrets(t *testing.T) {
 }
 
 func TestProviderConfigStoreSavePersistsSecretlessMetadata(t *testing.T) {
-	store := newFakeProviderSecretStore()
-	configStore := newProviderConfigStore(t.TempDir(), store)
+	configStore := newProviderConfigStore(t.TempDir(), failOnUseSecretStore{})
 
 	err := configStore.Save(ProviderConfigStoreSnapshot{
 		Providers: []ai.ProviderConfig{
@@ -115,27 +112,24 @@ func TestProviderConfigStoreSavePersistsSecretlessMetadata(t *testing.T) {
 		t.Fatalf("expected config file to remove sensitive headers, got %s", text)
 	}
 
-	ref, err := secretstore.BuildRef(providerSecretKind, "openai-main")
+	stored, ok, err := configStore.dailySecrets.GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("BuildRef returned error: %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	stored, err := store.Get(ref)
-	if err != nil {
-		t.Fatalf("expected provider secret bundle in store, got %v", err)
+	if !ok {
+		t.Fatal("expected provider secret bundle in daily store")
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
+	if stored.APIKey != "sk-test" {
+		t.Fatalf("expected stored apiKey, got %q", stored.APIKey)
 	}
-	if bundle.APIKey != "sk-test" {
-		t.Fatalf("expected stored apiKey, got %q", bundle.APIKey)
-	}
-	if bundle.SensitiveHeaders["Authorization"] != "Bearer test" {
-		t.Fatalf("expected stored sensitive header, got %#v", bundle.SensitiveHeaders)
+	if stored.SensitiveHeaders["Authorization"] != "Bearer test" {
+		t.Fatalf("expected stored sensitive header, got %#v", stored.SensitiveHeaders)
 	}
 }
 
 func TestProviderConfigStoreSaveKeepsExistingSecretRef(t *testing.T) {
+	withTestAIGOOS(t, "linux")
+
 	store := newFakeProviderSecretStore()
 	configStore := newProviderConfigStore(t.TempDir(), store)
 
@@ -178,16 +172,15 @@ func TestProviderConfigStoreSaveKeepsExistingSecretRef(t *testing.T) {
 		t.Fatalf("Save returned error: %v", err)
 	}
 
-	stored, err := store.Get(ref)
+	stored, ok, err := configStore.dailySecrets.GetAIProvider("openai-main")
 	if err != nil {
-		t.Fatalf("expected existing provider secret bundle to remain available, got %v", err)
+		t.Fatalf("GetAIProvider returned error: %v", err)
 	}
-	var bundle providerSecretBundle
-	if err := json.Unmarshal(stored, &bundle); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
+	if !ok {
+		t.Fatal("expected existing provider secret bundle to be migrated to daily store")
 	}
-	if bundle.APIKey != "sk-existing" {
-		t.Fatalf("expected existing apiKey to be kept, got %q", bundle.APIKey)
+	if stored.APIKey != "sk-existing" {
+		t.Fatalf("expected existing apiKey to be kept, got %q", stored.APIKey)
 	}
 
 	snapshot, err := configStore.Load()

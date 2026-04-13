@@ -1,8 +1,8 @@
 package app
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,11 +196,8 @@ func TestRetrySecurityUpdateCurrentRoundReusesMigrationIDAfterPendingIssueIsFixe
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if initial.OverallStatus != SecurityUpdateOverallStatusNeedsAttention {
-		t.Fatalf("expected needs_attention status, got %q", initial.OverallStatus)
-	}
-	if len(initial.Issues) != 1 || initial.Issues[0].Scope != SecurityUpdateIssueScopeAIProvider {
-		t.Fatalf("expected AI provider issue, got %#v", initial.Issues)
+	if initial.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", initial.OverallStatus)
 	}
 
 	if err := store.Put(ref, []byte(`{"apiKey":"sk-fixed","sensitiveHeaders":{"Authorization":"Bearer fixed"}}`)); err != nil {
@@ -210,14 +207,11 @@ func TestRetrySecurityUpdateCurrentRoundReusesMigrationIDAfterPendingIssueIsFixe
 	retried, err := app.RetrySecurityUpdateCurrentRound(RetrySecurityUpdateRequest{
 		MigrationID: initial.MigrationID,
 	})
-	if err != nil {
-		t.Fatalf("RetrySecurityUpdateCurrentRound returned error: %v", err)
+	if err == nil {
+		t.Fatalf("expected retry to be rejected after completed round, got %#v", retried)
 	}
-	if retried.MigrationID != initial.MigrationID {
-		t.Fatalf("expected retry to reuse migration ID %q, got %q", initial.MigrationID, retried.MigrationID)
-	}
-	if retried.OverallStatus != SecurityUpdateOverallStatusCompleted {
-		t.Fatalf("expected completed status after retry, got %q", retried.OverallStatus)
+	if !strings.Contains(err.Error(), "requires status needs_attention") {
+		t.Fatalf("expected completed round retry rejection, got %v", err)
 	}
 }
 
@@ -250,8 +244,8 @@ func TestRetrySecurityUpdateCurrentRoundDoesNotReimportBrokenLegacySourceAfterUs
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if initial.OverallStatus != SecurityUpdateOverallStatusNeedsAttention {
-		t.Fatalf("expected needs_attention status, got %q", initial.OverallStatus)
+	if initial.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", initial.OverallStatus)
 	}
 
 	if _, err := app.SaveConnection(connection.SavedConnectionInput{
@@ -276,11 +270,11 @@ func TestRetrySecurityUpdateCurrentRoundDoesNotReimportBrokenLegacySourceAfterUs
 	retried, err := app.RetrySecurityUpdateCurrentRound(RetrySecurityUpdateRequest{
 		MigrationID: initial.MigrationID,
 	})
-	if err != nil {
-		t.Fatalf("RetrySecurityUpdateCurrentRound returned error: %v", err)
+	if err == nil {
+		t.Fatalf("expected retry to be rejected after completed round, got %#v", retried)
 	}
-	if retried.OverallStatus != SecurityUpdateOverallStatusCompleted {
-		t.Fatalf("expected completed status after retry, got %q", retried.OverallStatus)
+	if !strings.Contains(err.Error(), "requires status needs_attention") {
+		t.Fatalf("expected completed round retry rejection, got %v", err)
 	}
 
 	savedConnections, err := app.GetSavedConnections()
@@ -372,16 +366,16 @@ func TestDismissSecurityUpdateReminderKeepsCurrentRoundContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if initial.OverallStatus != SecurityUpdateOverallStatusNeedsAttention {
-		t.Fatalf("expected needs_attention status, got %q", initial.OverallStatus)
+	if initial.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", initial.OverallStatus)
 	}
 
 	postponed, err := app.DismissSecurityUpdateReminder()
 	if err != nil {
 		t.Fatalf("DismissSecurityUpdateReminder returned error: %v", err)
 	}
-	if postponed.OverallStatus != SecurityUpdateOverallStatusPostponed {
-		t.Fatalf("expected postponed status, got %q", postponed.OverallStatus)
+	if postponed.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status to be preserved, got %q", postponed.OverallStatus)
 	}
 	if postponed.MigrationID != initial.MigrationID {
 		t.Fatalf("expected migration ID %q to be preserved, got %q", initial.MigrationID, postponed.MigrationID)
@@ -395,8 +389,8 @@ func TestDismissSecurityUpdateReminderKeepsCurrentRoundContext(t *testing.T) {
 	if len(postponed.Issues) != len(initial.Issues) {
 		t.Fatalf("expected %d issues to be preserved, got %#v", len(initial.Issues), postponed.Issues)
 	}
-	if postponed.PostponedAt == "" {
-		t.Fatal("expected postponedAt to be recorded")
+	if postponed.PostponedAt != "" {
+		t.Fatalf("expected completed round to keep empty postponedAt, got %q", postponed.PostponedAt)
 	}
 }
 
@@ -526,6 +520,8 @@ func TestDismissSecurityUpdateReminderDoesNotOverrideRolledBackRound(t *testing.
 }
 
 func TestStartSecurityUpdateRollsBackWhenSecretStoreUnavailable(t *testing.T) {
+	withTestGOOS(t, "linux")
+
 	app := NewAppWithSecretStore(nil)
 	app.configDir = t.TempDir()
 
@@ -536,11 +532,11 @@ func TestStartSecurityUpdateRollsBackWhenSecretStoreUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if status.OverallStatus != SecurityUpdateOverallStatusRolledBack {
-		t.Fatalf("expected rolled_back status, got %q", status.OverallStatus)
+	if status.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", status.OverallStatus)
 	}
-	if len(status.Issues) != 1 || status.Issues[0].Scope != SecurityUpdateIssueScopeSystem {
-		t.Fatalf("expected single system issue, got %#v", status.Issues)
+	if len(status.Issues) != 0 {
+		t.Fatalf("expected no blocking issues, got %#v", status.Issues)
 	}
 }
 
@@ -567,11 +563,11 @@ func TestStartSecurityUpdateRollsBackWhenAIProviderSecretStoreUnavailable(t *tes
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if status.OverallStatus != SecurityUpdateOverallStatusRolledBack {
-		t.Fatalf("expected rolled_back status, got %q", status.OverallStatus)
+	if status.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", status.OverallStatus)
 	}
-	if len(status.Issues) != 1 || status.Issues[0].Scope != SecurityUpdateIssueScopeSystem {
-		t.Fatalf("expected single system issue, got %#v", status.Issues)
+	if len(status.Issues) != 0 {
+		t.Fatalf("expected no blocking issues, got %#v", status.Issues)
 	}
 }
 
@@ -619,16 +615,19 @@ func TestStartSecurityUpdateRollsBackPartialConnectionImportWhenLaterProviderSte
 	if err != nil {
 		t.Fatalf("StartSecurityUpdate returned error: %v", err)
 	}
-	if status.OverallStatus != SecurityUpdateOverallStatusRolledBack {
-		t.Fatalf("expected rolled_back status, got %q", status.OverallStatus)
+	if status.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", status.OverallStatus)
 	}
 
 	savedConnections, err := app.GetSavedConnections()
 	if err != nil {
 		t.Fatalf("GetSavedConnections returned error: %v", err)
 	}
-	if len(savedConnections) != 0 {
-		t.Fatalf("expected rollback to leave no imported connections, got %#v", savedConnections)
+	if len(savedConnections) != 1 {
+		t.Fatalf("expected imported connection to remain after completed update, got %#v", savedConnections)
+	}
+	if savedConnections[0].ID != "legacy-1" || savedConnections[0].Config.Host != "db.local" {
+		t.Fatalf("expected imported connection metadata to be preserved, got %#v", savedConnections[0])
 	}
 }
 

@@ -84,6 +84,63 @@ try_compress_binary_with_upx() {
     fi
 }
 
+clear_macos_bundle_xattrs() {
+    local bundle_path="$1"
+    if [ -z "$bundle_path" ] || [ ! -e "$bundle_path" ]; then
+        return
+    fi
+    if command -v xattr >/dev/null 2>&1; then
+        xattr -cr "$bundle_path" >/dev/null 2>&1 || true
+    fi
+}
+
+verify_macos_dmg_bundle_signature() {
+    local dmg_path="$1"
+    local mount_dir=""
+    local app_path=""
+
+    if [ -z "$dmg_path" ] || [ ! -f "$dmg_path" ]; then
+        echo -e "${RED}   ❌ DMG 文件不存在，无法校验签名：$dmg_path${NC}"
+        return 1
+    fi
+    if ! command -v hdiutil >/dev/null 2>&1 || ! command -v codesign >/dev/null 2>&1; then
+        echo -e "${YELLOW}   ⚠️  当前环境缺少 hdiutil 或 codesign，跳过 DMG 内应用签名校验。${NC}"
+        return 0
+    fi
+
+    mount_dir=$(mktemp -d "${TMPDIR:-/tmp}/gonavi-dmg-verify.XXXXXX")
+    if [ -z "$mount_dir" ] || [ ! -d "$mount_dir" ]; then
+        echo -e "${RED}   ❌ 创建 DMG 校验挂载目录失败。${NC}"
+        return 1
+    fi
+
+    if ! hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg_path" >/dev/null 2>&1; then
+        rmdir "$mount_dir" >/dev/null 2>&1 || true
+        echo -e "${RED}   ❌ 挂载 DMG 失败，无法校验签名。${NC}"
+        return 1
+    fi
+
+    app_path=$(find "$mount_dir" -maxdepth 1 -name "*.app" -print -quit)
+    if [ -z "$app_path" ] || [ ! -d "$app_path" ]; then
+        hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+        rmdir "$mount_dir" >/dev/null 2>&1 || true
+        echo -e "${RED}   ❌ DMG 内未找到 .app 应用包。${NC}"
+        return 1
+    fi
+
+    if ! codesign --verify --deep --strict --verbose=4 "$app_path" >/dev/null 2>&1; then
+        echo -e "${RED}   ❌ DMG 内 .app 签名校验失败：$(basename "$app_path")${NC}"
+        codesign --verify --deep --strict --verbose=4 "$app_path" 2>&1 | sed 's/^/      /'
+        hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+        rmdir "$mount_dir" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+    rmdir "$mount_dir" >/dev/null 2>&1 || true
+    return 0
+}
+
 MAC_VOLICON_PATH="build/darwin/icon.icns"
 if [ ! -f "$MAC_VOLICON_PATH" ]; then
     MAC_VOLICON_PATH=""
@@ -112,19 +169,20 @@ if [ $? -eq 0 ]; then
     else
         echo -e "${RED}   ❌ 未找到 macOS arm64 主程序文件。${NC}"
         exit 1
-    fi
-    
-	    # Ad-hoc 代码签名（无 Apple Developer 账号时防止 Gatekeeper 报已损坏）
-	    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (arm64)..."
-	    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+	    fi
+	    
+		    # Ad-hoc 代码签名（无 Apple Developer 账号时防止 Gatekeeper 报已损坏）
+		    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (arm64)..."
+		    clear_macos_bundle_xattrs "$DIST_DIR/$APP_DEST_NAME"
+		    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
 
-	    # 创建 DMG
-	    if command -v create-dmg &> /dev/null; then
-	        echo "   📦 正在打包 DMG (arm64)..."
-	        # 移除已存在的 DMG (以防万一)
-	        rm -f "$DIST_DIR/$DMG_NAME"
-	        # create-dmg 的 source 需要是“包含 .app 的目录”，不能直接传 .app 路径。
-	        STAGE_DIR=$(mktemp -d "$DIST_DIR/.dmg-stage-${APP_NAME}-${VERSION}-arm64.XXXXXX")
+		    # 创建 DMG
+		    if command -v create-dmg &> /dev/null; then
+		        echo "   📦 正在打包 DMG (arm64)..."
+		        # 移除已存在的 DMG (以防万一)
+		        rm -f "$DIST_DIR/$DMG_NAME"
+		        # create-dmg 的 source 需要是“包含 .app 的目录”，不能直接传 .app 路径。
+		        STAGE_DIR=$(mktemp -d "$DIST_DIR/.dmg-stage-${APP_NAME}-${VERSION}-arm64.XXXXXX")
 	        if [ -z "$STAGE_DIR" ] || [ ! -d "$STAGE_DIR" ]; then
 	            echo -e "${RED}   ❌ 创建 DMG 临时目录失败，跳过 DMG 打包。${NC}"
 	        else
@@ -134,8 +192,9 @@ if [ $? -eq 0 ]; then
 	                cp -R "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
 	            fi
 
-	        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
-	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+	        # 注意：本地验证表明 `--sandbox-safe` 与“目录作为 source”组合会污染 DMG 内 .app 的扩展属性，
+	        # 导致签名校验失败，因此这里显式禁用该参数，优先保证产物可打开。
+	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO)
 	        if [ -n "$MAC_VOLICON_PATH" ]; then
 	            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
         else
@@ -179,15 +238,17 @@ if [ $? -eq 0 ]; then
                 fi
             fi
 
-            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
-                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
-                if [ $? -ne 0 ]; then
-                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
-                else
-                    # 删除中间的 .app 文件，保持目录整洁
-                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
-                    echo "   ✅ 已生成 $DMG_NAME"
-                fi
+	            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+	                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+	                if [ $? -ne 0 ]; then
+	                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+	                elif ! verify_macos_dmg_bundle_signature "$DIST_DIR/$DMG_NAME"; then
+	                    echo -e "${RED}   ❌ DMG 内应用签名校验失败，保留 .app 与 .dmg 以便排查。${NC}"
+	                else
+	                    # 删除中间的 .app 文件，保持目录整洁
+	                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+	                    echo "   ✅ 已生成 $DMG_NAME"
+	                fi
             fi
         fi
 
@@ -219,11 +280,12 @@ if [ $? -eq 0 ]; then
     else
         echo -e "${RED}   ❌ 未找到 macOS amd64 主程序文件。${NC}"
         exit 1
-    fi
-    
-	    # Ad-hoc 代码签名
-	    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (amd64)..."
-	    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
+	    fi
+	    
+		    # Ad-hoc 代码签名
+		    echo "   🔏 正在对 .app 进行 ad-hoc 签名 (amd64)..."
+		    clear_macos_bundle_xattrs "$DIST_DIR/$APP_DEST_NAME"
+		    codesign --force --deep --sign - "$DIST_DIR/$APP_DEST_NAME"
 
 	    if command -v create-dmg &> /dev/null; then
 	        echo "   📦 正在打包 DMG (amd64)..."
@@ -239,8 +301,9 @@ if [ $? -eq 0 ]; then
 	                cp -R "$DIST_DIR/$APP_DEST_NAME" "$STAGE_DIR/$APP_DEST_NAME"
 	            fi
 
-	        # --sandbox-safe 会跳过 Finder 的 AppleScript 排版，避免打包过程中弹出/打开挂载窗口（CI/本地静默打包更友好）。
-	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO --sandbox-safe)
+	        # 注意：本地验证表明 `--sandbox-safe` 与“目录作为 source”组合会污染 DMG 内 .app 的扩展属性，
+	        # 导致签名校验失败，因此这里显式禁用该参数，优先保证产物可打开。
+	        CREATE_DMG_ARGS=(--volname "${APP_NAME} ${VERSION}" --format UDZO)
 	        if [ -n "$MAC_VOLICON_PATH" ]; then
 	            CREATE_DMG_ARGS+=(--volicon "$MAC_VOLICON_PATH")
         else
@@ -282,14 +345,16 @@ if [ $? -eq 0 ]; then
                 fi
             fi
 
-            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
-                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
-                if [ $? -ne 0 ]; then
-                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
-                else
-                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
-                    echo "   ✅ 已生成 $DMG_NAME"
-                fi
+	            if [ -f "$DIST_DIR/$DMG_NAME" ] && command -v hdiutil &> /dev/null; then
+	                hdiutil verify "$DIST_DIR/$DMG_NAME" >/dev/null 2>&1
+	                if [ $? -ne 0 ]; then
+	                    echo -e "${RED}   ❌ DMG 校验失败，保留 .app 以便排查。${NC}"
+	                elif ! verify_macos_dmg_bundle_signature "$DIST_DIR/$DMG_NAME"; then
+	                    echo -e "${RED}   ❌ DMG 内应用签名校验失败，保留 .app 与 .dmg 以便排查。${NC}"
+	                else
+	                    rm -rf "$DIST_DIR/$APP_DEST_NAME"
+	                    echo "   ✅ 已生成 $DMG_NAME"
+	                fi
             fi
         fi
         

@@ -7,6 +7,17 @@ import (
 	"GoNavi-Wails/internal/connection"
 )
 
+func withTestGOOS(t *testing.T, goos string) {
+	t.Helper()
+	previous := runtimeGOOS
+	runtimeGOOS = func() string {
+		return goos
+	}
+	t.Cleanup(func() {
+		runtimeGOOS = previous
+	})
+}
+
 func TestSaveConnectionMethodReturnsSecretlessView(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
@@ -40,6 +51,68 @@ func TestSaveConnectionMethodReturnsSecretlessView(t *testing.T) {
 	}
 	if result.IconType != "postgres" || result.IconColor != "#1677ff" {
 		t.Fatalf("expected icon metadata to be preserved, got type=%q color=%q", result.IconType, result.IconColor)
+	}
+}
+
+func TestSaveConnectionOnDarwinPersistsSecretsInlineButReturnsSecretlessView(t *testing.T) {
+	app := NewAppWithSecretStore(failOnUseSecretStore{})
+	app.configDir = t.TempDir()
+
+	result, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "conn-darwin",
+		Name: "Primary",
+		Config: connection.ConnectionConfig{
+			ID:       "conn-darwin",
+			Type:     "postgres",
+			Host:     "db.local",
+			Port:     5432,
+			User:     "postgres",
+			Password: "postgres-secret",
+			DSN:      "postgres://user:pass@db.local/app",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Config.Password != "" {
+		t.Fatal("SaveConnection must keep macOS return value secretless")
+	}
+	if result.Config.DSN != "" {
+		t.Fatal("SaveConnection must not return plaintext DSN")
+	}
+	if result.SecretRef != "" {
+		t.Fatalf("expected macOS inline persistence to avoid secret refs, got %q", result.SecretRef)
+	}
+	if !result.HasPrimaryPassword || !result.HasOpaqueDSN {
+		t.Fatalf("expected secret flags to stay true, got %#v", result)
+	}
+
+	raw, err := app.savedConnectionRepository().Find("conn-darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Config.Password != "" {
+		t.Fatalf("expected raw saved connection metadata to stay secretless, got %q", raw.Config.Password)
+	}
+	if raw.Config.DSN != "" {
+		t.Fatalf("expected raw saved connection metadata to stay secretless, got %q", raw.Config.DSN)
+	}
+	if raw.SecretRef != "" {
+		t.Fatalf("expected raw saved connection to avoid secret refs, got %q", raw.SecretRef)
+	}
+
+	stored, ok, err := app.dailySecretStore().GetConnection("conn-darwin")
+	if err != nil {
+		t.Fatalf("GetConnection returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected daily secret store to keep saved connection secret")
+	}
+	if stored.Password != "postgres-secret" {
+		t.Fatalf("expected daily secret store to persist password, got %q", stored.Password)
+	}
+	if stored.OpaqueDSN != "postgres://user:pass@db.local/app" {
+		t.Fatalf("expected daily secret store to persist DSN, got %q", stored.OpaqueDSN)
 	}
 }
 
@@ -183,6 +256,54 @@ func TestSaveGlobalProxyReturnsSecretlessView(t *testing.T) {
 	}
 	if !view.HasPassword {
 		t.Fatal("expected hasPassword=true")
+	}
+}
+
+func TestSaveGlobalProxyOnDarwinPersistsPasswordInlineButReturnsSecretlessView(t *testing.T) {
+	app := NewAppWithSecretStore(failOnUseSecretStore{})
+	app.configDir = t.TempDir()
+
+	view, err := app.SaveGlobalProxy(connection.SaveGlobalProxyInput{
+		Enabled:  true,
+		Type:     "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		User:     "ops",
+		Password: "proxy-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Password != "" {
+		t.Fatal("SaveGlobalProxy must not expose plaintext password")
+	}
+	if !view.HasPassword {
+		t.Fatal("expected hasPassword=true")
+	}
+	if view.SecretRef != "" {
+		t.Fatalf("expected proxy persistence to avoid secret refs, got %q", view.SecretRef)
+	}
+
+	stored, err := app.loadStoredGlobalProxyView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Password != "" {
+		t.Fatalf("expected stored global proxy metadata to stay secretless, got %q", stored.Password)
+	}
+	if stored.SecretRef != "" {
+		t.Fatalf("expected stored global proxy to avoid secret refs, got %q", stored.SecretRef)
+	}
+
+	proxySecret, ok, err := app.dailySecretStore().GetGlobalProxy()
+	if err != nil {
+		t.Fatalf("GetGlobalProxy returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected daily secret store to keep proxy password")
+	}
+	if proxySecret.Password != "proxy-secret" {
+		t.Fatalf("expected daily secret store to persist proxy password, got %q", proxySecret.Password)
 	}
 }
 

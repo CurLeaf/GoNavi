@@ -320,6 +320,9 @@ jobs:
           echo "ℹ️ macOS 产物不执行 UPX 压缩，保留原始主程序。"
           
           echo "🔏 正在进行 Ad-hoc 签名..."
+          if command -v xattr >/dev/null 2>&1; then
+            xattr -cr "$APP_NAME" || true
+          fi
           codesign --force --deep --sign - "$APP_NAME"
           
           DMG_NAME="${{ matrix.build_name }}.dmg"
@@ -336,6 +339,17 @@ jobs:
             --app-drop-link 600 185 \
             "$DMG_NAME" \
             "$APP_NAME"
+
+          VERIFY_MOUNT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/gonavi-dev-verify.XXXXXX")
+          hdiutil attach -nobrowse -readonly -mountpoint "$VERIFY_MOUNT_DIR" "$DMG_NAME" >/dev/null
+          PACKAGED_APP=$(find "$VERIFY_MOUNT_DIR" -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$PACKAGED_APP" ]; then
+            echo "❌ DMG 内未找到 .app 应用包!"
+            hdiutil detach "$VERIFY_MOUNT_DIR" -quiet >/dev/null 2>&1 || true
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=4 "$PACKAGED_APP"
+          hdiutil detach "$VERIFY_MOUNT_DIR" -quiet >/dev/null 2>&1 || true
             
           mv "$DMG_NAME" "../../$FINAL_NAME"
 
