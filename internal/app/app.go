@@ -55,17 +55,17 @@ type queryContext struct {
 
 // App struct
 type App struct {
-	ctx            context.Context
-	startedAt      time.Time
-	dbCache        map[string]cachedDatabase // Cache for DB connections
+	ctx             context.Context
+	startedAt       time.Time
+	dbCache         map[string]cachedDatabase // Cache for DB connections
 	connectFailures map[string]cachedConnectFailure
-	mu             sync.RWMutex              // Mutex for cache access
-	updateMu       sync.Mutex
-	updateState    updateState
-	queryMu        sync.RWMutex
-	configDir      string
-	secretStore    secretstore.SecretStore
-	runningQueries map[string]queryContext // queryID -> cancelFunc and start time
+	mu              sync.RWMutex // Mutex for cache access
+	updateMu        sync.Mutex
+	updateState     updateState
+	queryMu         sync.RWMutex
+	configDir       string
+	secretStore     secretstore.SecretStore
+	runningQueries  map[string]queryContext // queryID -> cancelFunc and start time
 }
 
 // NewApp creates a new App application struct
@@ -78,11 +78,11 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		store = secretstore.NewUnavailableStore("secret store unavailable")
 	}
 	return &App{
-		dbCache:        make(map[string]cachedDatabase),
+		dbCache:         make(map[string]cachedDatabase),
 		connectFailures: make(map[string]cachedConnectFailure),
-		runningQueries: make(map[string]queryContext),
-		configDir:      resolveAppConfigDir(),
-		secretStore:    store,
+		runningQueries:  make(map[string]queryContext),
+		configDir:       resolveAppConfigDir(),
+		secretStore:     store,
 	}
 }
 
@@ -101,7 +101,13 @@ func (a *App) startup(ctx context.Context) {
 	}
 	db.SetExternalDriverDownloadDirectory(appdata.DriverRoot(a.configDir))
 	logger.Init()
+	if err := migrateDailySecretsIfNeeded(a); err != nil {
+		logger.Warnf("迁移日常密文失败：%v", err)
+	}
 	a.loadPersistedGlobalProxy()
+	if err := migrateLegacyWebKitStorageIfNeeded(a); err != nil {
+		logger.Warnf("迁移旧 WebKit 连接存储失败：%v", err)
+	}
 	if shouldInstallMacNativeWindowDiagnostics() {
 		installMacNativeWindowDiagnostics(logger.Path())
 	}

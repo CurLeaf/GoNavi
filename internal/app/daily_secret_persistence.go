@@ -1,0 +1,107 @@
+package app
+
+import (
+	stdRuntime "runtime"
+
+	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/dailysecret"
+)
+
+var runtimeGOOS = func() string {
+	return stdRuntime.GOOS
+}
+
+func extractConnectionSecretBundle(config connection.ConnectionConfig) connectionSecretBundle {
+	return connectionSecretBundle{
+		Password:             config.Password,
+		SSHPassword:          config.SSH.Password,
+		ProxyPassword:        config.Proxy.Password,
+		HTTPTunnelPassword:   config.HTTPTunnel.Password,
+		MySQLReplicaPassword: config.MySQLReplicaPassword,
+		MongoReplicaPassword: config.MongoReplicaPassword,
+		OpaqueURI:            config.URI,
+		OpaqueDSN:            config.DSN,
+	}
+}
+
+func toDailyConnectionBundle(bundle connectionSecretBundle) dailysecret.ConnectionBundle {
+	return dailysecret.ConnectionBundle{
+		Password:             bundle.Password,
+		SSHPassword:          bundle.SSHPassword,
+		ProxyPassword:        bundle.ProxyPassword,
+		HTTPTunnelPassword:   bundle.HTTPTunnelPassword,
+		MySQLReplicaPassword: bundle.MySQLReplicaPassword,
+		MongoReplicaPassword: bundle.MongoReplicaPassword,
+		OpaqueURI:            bundle.OpaqueURI,
+		OpaqueDSN:            bundle.OpaqueDSN,
+	}
+}
+
+func fromDailyConnectionBundle(bundle dailysecret.ConnectionBundle) connectionSecretBundle {
+	return connectionSecretBundle{
+		Password:             bundle.Password,
+		SSHPassword:          bundle.SSHPassword,
+		ProxyPassword:        bundle.ProxyPassword,
+		HTTPTunnelPassword:   bundle.HTTPTunnelPassword,
+		MySQLReplicaPassword: bundle.MySQLReplicaPassword,
+		MongoReplicaPassword: bundle.MongoReplicaPassword,
+		OpaqueURI:            bundle.OpaqueURI,
+		OpaqueDSN:            bundle.OpaqueDSN,
+	}
+}
+
+func stripConnectionSecretFields(config connection.ConnectionConfig) connection.ConnectionConfig {
+	stripped := config
+	stripped.Password = ""
+	stripped.SSH.Password = ""
+	stripped.Proxy.Password = ""
+	stripped.HTTPTunnel.Password = ""
+	stripped.MySQLReplicaPassword = ""
+	stripped.MongoReplicaPassword = ""
+	stripped.URI = ""
+	stripped.DSN = ""
+	return stripped
+}
+
+func sanitizeSavedConnectionView(view connection.SavedConnectionView) connection.SavedConnectionView {
+	view.Config = stripConnectionSecretFields(view.Config)
+	return view
+}
+
+func sanitizeSavedConnectionViews(items []connection.SavedConnectionView) []connection.SavedConnectionView {
+	if len(items) == 0 {
+		return items
+	}
+	result := make([]connection.SavedConnectionView, 0, len(items))
+	for _, item := range items {
+		result = append(result, sanitizeSavedConnectionView(item))
+	}
+	return result
+}
+
+func extractGlobalProxySecretBundle(view connection.GlobalProxyView) globalProxySecretBundle {
+	return globalProxySecretBundle{
+		Password: view.Password,
+	}
+}
+
+func toDailyGlobalProxyBundle(bundle globalProxySecretBundle) dailysecret.GlobalProxyBundle {
+	return dailysecret.GlobalProxyBundle{Password: bundle.Password}
+}
+
+func fromDailyGlobalProxyBundle(bundle dailysecret.GlobalProxyBundle) globalProxySecretBundle {
+	return globalProxySecretBundle{Password: bundle.Password}
+}
+
+func sanitizeGlobalProxyView(view connection.GlobalProxyView) connection.GlobalProxyView {
+	view.Password = ""
+	return view
+}
+
+func shouldReadLegacySecretStoreForDailySecrets() bool {
+	return runtimeGOOS() != "darwin"
+}
+
+func (a *App) dailySecretStore() *dailysecret.Store {
+	return dailysecret.NewStore(a.configDir)
+}

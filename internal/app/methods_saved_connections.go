@@ -11,11 +11,19 @@ func (a *App) savedConnectionRepository() *savedConnectionRepository {
 }
 
 func (a *App) GetSavedConnections() ([]connection.SavedConnectionView, error) {
-	return a.savedConnectionRepository().List()
+	items, err := a.savedConnectionRepository().List()
+	if err != nil {
+		return nil, err
+	}
+	return sanitizeSavedConnectionViews(items), nil
 }
 
 func (a *App) SaveConnection(input connection.SavedConnectionInput) (connection.SavedConnectionView, error) {
-	return a.savedConnectionRepository().Save(input)
+	view, err := a.savedConnectionRepository().Save(input)
+	if err != nil {
+		return connection.SavedConnectionView{}, err
+	}
+	return sanitizeSavedConnectionView(view), nil
 }
 
 func (a *App) DeleteConnection(id string) error {
@@ -23,7 +31,11 @@ func (a *App) DeleteConnection(id string) error {
 }
 
 func (a *App) DuplicateConnection(id string) (connection.SavedConnectionView, error) {
-	return a.savedConnectionRepository().Duplicate(id)
+	view, err := a.savedConnectionRepository().Duplicate(id)
+	if err != nil {
+		return connection.SavedConnectionView{}, err
+	}
+	return sanitizeSavedConnectionView(view), nil
 }
 
 func (a *App) ImportLegacyConnections(items []connection.LegacySavedConnection) ([]connection.SavedConnectionView, error) {
@@ -40,7 +52,11 @@ func (a *App) ImportLegacyConnections(items []connection.LegacySavedConnection) 
 		input.ClearOpaqueDSN = strings.TrimSpace(item.Config.DSN) == ""
 		inputs = append(inputs, input)
 	}
-	return a.importSavedConnectionsAtomically(inputs)
+	views, err := a.importSavedConnectionsAtomically(inputs)
+	if err != nil {
+		return nil, err
+	}
+	return sanitizeSavedConnectionViews(views), nil
 }
 
 func (a *App) SaveGlobalProxy(input connection.SaveGlobalProxyInput) (connection.GlobalProxyView, error) {

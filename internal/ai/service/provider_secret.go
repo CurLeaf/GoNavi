@@ -3,10 +3,12 @@ package aiservice
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"unicode"
 
 	"GoNavi-Wails/internal/ai"
+	"GoNavi-Wails/internal/dailysecret"
 	"GoNavi-Wails/internal/secretstore"
 )
 
@@ -76,11 +78,6 @@ func splitProviderSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, providerSec
 
 	meta.HasSecret = cfg.HasSecret || bundle.hasAny()
 	meta.SecretRef = strings.TrimSpace(cfg.SecretRef)
-	if meta.HasSecret && meta.SecretRef == "" && strings.TrimSpace(cfg.ID) != "" {
-		if ref, err := secretstore.BuildRef(providerSecretKind, cfg.ID); err == nil {
-			meta.SecretRef = ref
-		}
-	}
 	if !meta.HasSecret {
 		meta.SecretRef = ""
 	}
@@ -108,11 +105,7 @@ func mergeProviderSecrets(cfg ai.ProviderConfig, bundle providerSecretBundle) ai
 	}
 
 	merged.HasSecret = cfg.HasSecret || bundle.hasAny()
-	if merged.HasSecret && strings.TrimSpace(merged.SecretRef) == "" && strings.TrimSpace(merged.ID) != "" {
-		if ref, err := secretstore.BuildRef(providerSecretKind, merged.ID); err == nil {
-			merged.SecretRef = ref
-		}
-	}
+	merged.SecretRef = ""
 	if !merged.HasSecret {
 		merged.SecretRef = ""
 	}
@@ -120,43 +113,73 @@ func mergeProviderSecrets(cfg ai.ProviderConfig, bundle providerSecretBundle) ai
 	return merged
 }
 
-func persistProviderSecretBundle(store secretstore.SecretStore, meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
+func toDailyProviderBundle(bundle providerSecretBundle) dailysecret.ProviderBundle {
+	return dailysecret.ProviderBundle{
+		APIKey:           bundle.APIKey,
+		SensitiveHeaders: cloneStringMap(bundle.SensitiveHeaders),
+	}
+}
+
+func fromDailyProviderBundle(bundle dailysecret.ProviderBundle) providerSecretBundle {
+	return providerSecretBundle{
+		APIKey:           bundle.APIKey,
+		SensitiveHeaders: cloneStringMap(bundle.SensitiveHeaders),
+	}
+}
+
+func persistProviderSecretBundle(store *dailysecret.Store, meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
 	meta, _ = splitProviderSecrets(meta)
 	if !bundle.hasAny() {
 		meta.HasSecret = false
 		meta.SecretRef = ""
-		return meta, nil
+		if store == nil {
+			return meta, nil
+		}
+		return meta, store.DeleteAIProvider(meta.ID)
 	}
 	if store == nil {
-		return meta, fmt.Errorf("secret store unavailable")
+		return meta, fmt.Errorf("daily secret store unavailable")
 	}
-	if err := store.HealthCheck(); err != nil {
+	if err := store.PutAIProvider(meta.ID, toDailyProviderBundle(bundle)); err != nil {
 		return meta, err
 	}
-
-	ref := strings.TrimSpace(meta.SecretRef)
-	if ref == "" {
-		var err error
-		ref, err = secretstore.BuildRef(providerSecretKind, meta.ID)
-		if err != nil {
-			return meta, err
-		}
-	}
-
-	payload, err := json.Marshal(bundle)
-	if err != nil {
-		return meta, fmt.Errorf("序列化 provider secret bundle 失败: %w", err)
-	}
-	if err := store.Put(ref, payload); err != nil {
-		return meta, err
-	}
-
-	meta.SecretRef = ref
+	meta.SecretRef = ""
 	meta.HasSecret = true
 	return meta, nil
 }
 
-func resolveProviderConfigSecrets(store secretstore.SecretStore, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+func resolveProviderConfigSecrets(store *dailysecret.Store, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	cfg = normalizeProviderConfig(cfg)
+	meta, bundle := splitProviderSecrets(cfg)
+	if bundle.hasAny() {
+		return mergeProviderSecrets(meta, bundle), nil
+	}
+	if !meta.HasSecret {
+		return meta, nil
+	}
+	if store == nil {
+		return meta, fmt.Errorf("daily secret store unavailable")
+	}
+	stored, ok, err := store.GetAIProvider(meta.ID)
+	if err != nil {
+		return meta, err
+	}
+	if !ok {
+		return meta, os.ErrNotExist
+	}
+	meta.SecretRef = ""
+	return mergeProviderSecrets(meta, fromDailyProviderBundle(stored)), nil
+}
+
+func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
+	return persistProviderSecretBundle(s.dailySecretStore(), meta, bundle)
+}
+
+func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	return resolveProviderConfigSecrets(s.dailySecretStore(), cfg)
+}
+
+func resolveProviderConfigSecretsFromStore(store secretstore.SecretStore, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
 	cfg = normalizeProviderConfig(cfg)
 	meta, bundle := splitProviderSecrets(cfg)
 	if bundle.hasAny() {
@@ -189,14 +212,6 @@ func resolveProviderConfigSecrets(store secretstore.SecretStore, cfg ai.Provider
 		return meta, fmt.Errorf("解析 provider secret bundle 失败: %w", err)
 	}
 	return mergeProviderSecrets(meta, stored), nil
-}
-
-func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
-	return persistProviderSecretBundle(s.secretStore, meta, bundle)
-}
-
-func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
-	return resolveProviderConfigSecrets(s.secretStore, cfg)
 }
 
 func providerMetadataView(cfg ai.ProviderConfig) ai.ProviderConfig {
