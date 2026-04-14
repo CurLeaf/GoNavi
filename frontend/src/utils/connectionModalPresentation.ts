@@ -41,7 +41,7 @@ export const normalizeConnectionSecretErrorMessage = (
   const lower = text.toLowerCase();
 
   if (lower.includes('saved connection not found:')) {
-    return '未找到当前连接对应的已保存密文，请重新填写密码并保存后再试';
+    return '未找到当前连接对应的已保存密文，请编辑当前连接，并输入密码后保存';
   }
   if (lower.includes('secret store unavailable')) {
     return '系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试';

@@ -1702,7 +1702,7 @@ function App() {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
-          void message.error('文件格式错误：仅支持 GoNavi 恢复包或历史 JSON 连接数组');
+          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组或 MySQL Workbench XML');
           return;
       }
 
