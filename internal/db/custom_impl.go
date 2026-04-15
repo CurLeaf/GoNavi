@@ -114,6 +114,38 @@ func (c *CustomDB) GetDatabases() ([]string, error) {
 	// We'll try a generic query or return empty.
 	// Users using custom might know their DB context is single.
 
+	if c.driver == "mysql" {
+		data, _, err := c.Query("SHOW DATABASES")
+		if err == nil {
+			var dbs []string
+			for _, row := range data {
+				for _, v := range row {
+					name := strings.TrimSpace(fmt.Sprintf("%v", v))
+					if name != "" {
+						dbs = append(dbs, name)
+					}
+					break
+				}
+			}
+			if len(dbs) > 0 {
+				return dbs, nil
+			}
+		}
+
+		// Fallback for restricted accounts: at least expose current database.
+		data, _, fallbackErr := c.Query("SELECT DATABASE() AS database_name")
+		if fallbackErr == nil {
+			for _, row := range data {
+				for _, v := range row {
+					name := strings.TrimSpace(fmt.Sprintf("%v", v))
+					if name != "" && !strings.EqualFold(name, "<nil>") && !strings.EqualFold(name, "null") {
+						return []string{name}, nil
+					}
+				}
+			}
+		}
+	}
+
 	// Best effort:
 	return []string{}, nil
 }
@@ -123,9 +155,12 @@ func (c *CustomDB) GetTables(dbName string) ([]string, error) {
 	query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
 	// If mysql-like
 	if c.driver == "mysql" {
-		query = "SHOW TABLES"
+		query = "SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME"
 		if dbName != "" {
-			query = fmt.Sprintf("SHOW TABLES FROM `%s`", dbName)
+			query = fmt.Sprintf(
+				"SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = '%s' AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
+				strings.ReplaceAll(dbName, "'", "''"),
+			)
 		}
 	} else if c.driver == "postgres" || c.driver == "kingbase" {
 		query = `

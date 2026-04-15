@@ -7,7 +7,7 @@ import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
 import { buildOracleApproximateTotalSql, parseApproximateTableCountRow, resolveApproximateTableCountStrategy } from '../utils/approximateTableCount';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { resolveDataViewerAutoFetchAction } from '../utils/dataViewerAutoFetch';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 
@@ -396,7 +396,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
         ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
     };
 
-    const dbType = config.type || '';
+    const dbType = resolveDataSourceType(config);
     const dbTypeLower = String(dbType || '').trim().toLowerCase();
     const isMySQLFamily = dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'diros';
 
@@ -855,7 +855,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
   const exportSqlWithFilter = useMemo(() => {
     const tableName = String(tab.tableName || '').trim();
-    const dbType = String(currentConnConfig?.type || '').trim();
+    const dbType = resolveDataSourceType(currentConnConfig);
     if (!tableName || !dbType) return '';
 
     const whereSQL = buildWhereSQL(dbType, filterConditions);
@@ -869,7 +869,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
       sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
     }
     return sql;
-  }, [tab.tableName, currentConnConfig?.type, filterConditions, sortInfo, pkColumns]);
+  }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, sortInfo, pkColumns]);
 
   useEffect(() => {
     const action = resolveDataViewerAutoFetchAction({
