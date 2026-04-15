@@ -290,6 +290,10 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 				DisplayName: "JSON Files (*.json)",
 				Pattern:     "*.json",
 			},
+			{
+				DisplayName: "MySQL Workbench Connections (*.xml)",
+				Pattern:     "*.xml",
+			},
 		},
 	})
 
