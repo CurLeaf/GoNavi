@@ -55,10 +55,23 @@ const getMetadataDialect = (connType: string, driver?: string): string => {
 };
 
 const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: string): string => {
-    const escapeLiteral = (s: string) => s.replace(/'/g, "''");
-    switch (dialect) {
+        const escapeLiteral = (s: string) => s.replace(/'/g, "''");
+        switch (dialect) {
         case 'mysql':
-            return `SHOW TABLE STATUS FROM \`${dbName.replace(/`/g, '``')}\``;
+            return `
+SELECT
+    TABLE_NAME AS table_name,
+    TABLE_COMMENT AS table_comment,
+    TABLE_ROWS AS table_rows,
+    DATA_LENGTH AS data_length,
+    INDEX_LENGTH AS index_length,
+    ENGINE AS engine,
+    CREATE_TIME AS create_time,
+    UPDATE_TIME AS update_time
+FROM information_schema.tables
+WHERE table_schema = '${escapeLiteral(dbName)}'
+  AND table_type = 'BASE TABLE'
+ORDER BY table_name`;
         case 'postgres':
         case 'kingbase':
         case 'vastbase':
