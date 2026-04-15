@@ -37,6 +37,7 @@ func (a *App) resolveConnectionSecrets(config connection.ConnectionConfig) (conn
 	}
 	resolved := mergeConnectionSecretBundleIntoConfig(base, bundle)
 	resolved.ID = view.ID
+
 	return resolved, nil
 }
 

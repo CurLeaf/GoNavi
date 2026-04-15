@@ -2,8 +2,10 @@ package app
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -268,6 +270,21 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		return sanitizeSavedConnectionViews(views), nil
 	}
 
+	if isMySQLWorkbenchXML(trimmed) {
+		inputs, err := parseMySQLWorkbenchXML(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("解析 MySQL Workbench XML 失败: %w", err)
+		}
+		if len(inputs) == 0 {
+			return nil, fmt.Errorf("未在 XML 中找到有效的连接配置")
+		}
+		views, err := a.importSavedConnectionsAtomically(inputs)
+		if err != nil {
+			return nil, err
+		}
+		return sanitizeSavedConnectionViews(views), nil
+	}
+
 	var legacy []connection.LegacySavedConnection
 	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
 		return nil, errConnectionPackageUnsupported
@@ -371,4 +388,127 @@ func (s connectionPackageImportRollbackSnapshot) restore(a *App) error {
 		}
 	}
 	return nil
+}
+
+// --- MySQL Workbench XML import ---
+
+func isMySQLWorkbenchXML(content string) bool {
+	return strings.Contains(content, "<data") && strings.Contains(content, "grt_format") && strings.Contains(content, "db.mgmt.Connection")
+}
+
+// mysqlWorkbenchData is the root XML element.
+type mysqlWorkbenchData struct {
+	XMLName xml.Name               `xml:"data"`
+	Value   mysqlWorkbenchTopValue `xml:"value"`
+}
+
+type mysqlWorkbenchTopValue struct {
+	Values []mysqlWorkbenchConnection `xml:"value"`
+}
+
+type mysqlWorkbenchConnection struct {
+	StructName string                    `xml:"struct-name,attr"`
+	Values     []mysqlWorkbenchValue     `xml:"value"`
+	Links      []mysqlWorkbenchLinkValue `xml:"link"`
+}
+
+type mysqlWorkbenchValue struct {
+	Type       string                `xml:"type,attr"`
+	Key        string                `xml:"key,attr"`
+	StructName string                `xml:"struct-name,attr"`
+	Content    string                `xml:",chardata"`
+	Children   []mysqlWorkbenchValue `xml:"value"`
+}
+
+type mysqlWorkbenchLinkValue struct {
+	Key     string `xml:"key,attr"`
+	Content string `xml:",chardata"`
+}
+
+func parseMySQLWorkbenchXML(content string) ([]connection.SavedConnectionInput, error) {
+	var data mysqlWorkbenchData
+	if err := xml.Unmarshal([]byte(content), &data); err != nil {
+		return nil, err
+	}
+
+	var inputs []connection.SavedConnectionInput
+	for _, conn := range data.Value.Values {
+		if conn.StructName != "db.mgmt.Connection" {
+			continue
+		}
+
+		input := parseMySQLWorkbenchConnection(conn)
+		inputs = append(inputs, input)
+	}
+	return inputs, nil
+}
+
+func parseMySQLWorkbenchConnection(conn mysqlWorkbenchConnection) connection.SavedConnectionInput {
+	params := make(map[string]string)
+	connName := ""
+	driverKey := ""
+
+	for _, v := range conn.Values {
+		key := strings.TrimSpace(v.Key)
+		switch {
+		case key == "name" && v.Type == "string":
+			connName = strings.TrimSpace(v.Content)
+		case key == "parameterValues" && v.Type == "dict":
+			for _, child := range v.Children {
+				childKey := strings.TrimSpace(child.Key)
+				if childKey == "" {
+					continue
+				}
+				params[childKey] = strings.TrimSpace(child.Content)
+			}
+		}
+	}
+
+	for _, link := range conn.Links {
+		if strings.TrimSpace(link.Key) == "driver" {
+			driverKey = strings.TrimSpace(link.Content)
+		}
+	}
+
+	host := params["hostName"]
+	port := 3306
+	if p, err := strconv.Atoi(params["port"]); err == nil && p > 0 {
+		port = p
+	}
+	user := params["userName"]
+	schema := params["schema"]
+	password := params["password"]
+
+	useSSL := false
+	if v, err := strconv.Atoi(params["useSSL"]); err == nil && v > 0 {
+		useSSL = true
+	}
+
+	dbType := "mysql"
+	if strings.Contains(driverKey, "mariadb") {
+		dbType = "mariadb"
+	}
+
+	connID := "conn-" + uuid.New().String()[:8]
+
+	config := connection.ConnectionConfig{
+		ID:       connID,
+		Type:     dbType,
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: password,
+		Database: schema,
+		UseSSL:   useSSL,
+	}
+
+	if connName == "" {
+		connName = fmt.Sprintf("%s@%s:%d", user, host, port)
+	}
+
+	return connection.SavedConnectionInput{
+		ID:     connID,
+		Name:   connName,
+		Config: config,
+	}
 }
