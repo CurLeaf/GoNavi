@@ -31,7 +31,7 @@ import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     resolveDataTableColumnWidth,
@@ -4002,7 +4002,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const dbType = config.type || '';
+      const dbType = resolveDataSourceType(config);
       const pkWhere = buildPkWhereSql(records, dbType);
       if (!pkWhere) {
           await exportData(records, format);
@@ -4071,7 +4071,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return;
           }
 
-          const sql = buildCurrentPageSql(config.type || '');
+          const sql = buildCurrentPageSql(resolveDataSourceType(config));
           if (!sql) {
               await exportData(displayData, format);
               return;
