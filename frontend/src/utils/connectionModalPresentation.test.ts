@@ -39,7 +39,7 @@ describe('connectionModalPresentation', () => {
       reason: 'saved connection not found: conn-1',
       fallback: '连接失败',
     })).toEqual({
-      message: '测试失败: 未找到当前连接对应的已保存密文，请编辑当前连接，并输入密码后保存',
+      message: '测试失败: 未找到当前连接对应的已保存密文，请重新填写密码并保存后再试',
       shouldToast: true,
     });
   });
