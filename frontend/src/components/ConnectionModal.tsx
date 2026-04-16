@@ -4,7 +4,7 @@ import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutl
 import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICON_COLORS } from './DatabaseIcons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import {
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
@@ -12,6 +12,7 @@ import {
 } from '../utils/connectionModalPresentation';
 import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
 import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
+import { applyNoAutoCapAttributes, noAutoCapInputProps } from '../utils/inputAutoCap';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -24,21 +25,6 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
-const noAutoCapInputProps = {
-  autoCapitalize: 'none' as const,
-  autoCorrect: 'off' as const,
-  spellCheck: false,
-};
-
-const applyNoAutoCapAttributes = (element: Element) => {
-  if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) {
-    return;
-  }
-  element.setAttribute('autocapitalize', 'none');
-  element.setAttribute('autocorrect', 'off');
-  element.setAttribute('spellcheck', 'false');
-};
-
 type ConnectionSecretKey =
   | 'primaryPassword'
   | 'sshPassword'
@@ -177,6 +163,7 @@ const ConnectionModal: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const disableLocalBackdropFilter = isMacLikePlatform();
   const mysqlTopology = Form.useWatch('mysqlTopology', form) || 'single';
   const mongoTopology = Form.useWatch('mongoTopology', form) || 'single';
   const mongoSrv = Form.useWatch('mongoSrv', form) || false;
@@ -207,7 +194,10 @@ const ConnectionModal: React.FC<{
   const step1SidebarDividerColor = darkMode ? STEP1_SIDEBAR_DIVIDER_DARK : STEP1_SIDEBAR_DIVIDER_LIGHT;
   const step1SidebarActiveBg = darkMode ? 'rgba(246, 196, 83, 0.20)' : '#e6f4ff';
   const step1SidebarActiveColor = darkMode ? '#ffd666' : '#1677ff';
-  const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
+  const overlayTheme = useMemo(
+      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
+      [darkMode, disableLocalBackdropFilter],
+  );
 
   const tunnelSectionStyle: React.CSSProperties = {
       padding: '12px',
@@ -3231,7 +3221,5 @@ const ConnectionModal: React.FC<{
 };
 
 export default ConnectionModal;
-
-
 
 

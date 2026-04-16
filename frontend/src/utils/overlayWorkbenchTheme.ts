@@ -1,3 +1,5 @@
+import { resolveTextInputSafeBackdropFilter } from './appearance';
+
 type OverlayWorkbenchTheme = {
   isDark: boolean;
   shellBg: string;
@@ -16,14 +18,22 @@ type OverlayWorkbenchTheme = {
   divider: string;
 };
 
-export const buildOverlayWorkbenchTheme = (darkMode: boolean): OverlayWorkbenchTheme => {
+export const buildOverlayWorkbenchTheme = (
+  darkMode: boolean,
+  options?: { disableBackdropFilter?: boolean },
+): OverlayWorkbenchTheme => {
+  const shellBackdropFilter = resolveTextInputSafeBackdropFilter(
+    darkMode ? 'blur(18px)' : 'none',
+    options?.disableBackdropFilter ?? false,
+  );
+
   if (darkMode) {
     return {
       isDark: true,
       shellBg: 'linear-gradient(180deg, rgba(15, 15, 17, 0.96) 0%, rgba(11, 11, 13, 0.98) 100%)',
       shellBorder: '1px solid rgba(255,255,255,0.08)',
       shellShadow: '0 24px 56px rgba(0,0,0,0.34)',
-      shellBackdropFilter: 'blur(18px)',
+      shellBackdropFilter,
       sectionBg: 'rgba(255,255,255,0.03)',
       sectionBorder: '1px solid rgba(255,255,255,0.08)',
       mutedText: 'rgba(255,255,255,0.5)',
@@ -42,7 +52,7 @@ export const buildOverlayWorkbenchTheme = (darkMode: boolean): OverlayWorkbenchT
     shellBg: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
     shellBorder: '1px solid rgba(16,24,40,0.08)',
     shellShadow: '0 18px 42px rgba(15,23,42,0.12)',
-    shellBackdropFilter: 'none',
+    shellBackdropFilter,
     sectionBg: 'rgba(255,255,255,0.84)',
     sectionBorder: '1px solid rgba(16,24,40,0.08)',
     mutedText: 'rgba(16,24,40,0.55)',

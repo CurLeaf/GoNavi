@@ -6,6 +6,7 @@ import { quoteIdentPart, escapeLiteral } from '../utils/sql';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { isMacLikePlatform } from '../utils/appearance';
 
 interface FindInDatabaseModalProps {
     open: boolean;
@@ -67,14 +68,15 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
+    const disableLocalBackdropFilter = isMacLikePlatform();
 
     const conn = useMemo(() => connections.find(c => c.id === connectionId), [connections, connectionId]);
     const dbType = useMemo(() => (conn?.config?.type || 'mysql').toLowerCase(), [conn]);
 
     const wt = useMemo(() => {
         const isDark = theme === 'dark';
-        return buildOverlayWorkbenchTheme(isDark);
-    }, [theme]);
+        return buildOverlayWorkbenchTheme(isDark, { disableBackdropFilter: disableLocalBackdropFilter });
+    }, [disableLocalBackdropFilter, theme]);
 
     const buildConfig = useCallback(() => {
         if (!conn) return null;

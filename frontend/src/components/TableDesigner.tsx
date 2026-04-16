@@ -11,6 +11,7 @@ import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, D
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildAlterTablePreviewSql } from './tableDesignerSchemaSql';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -546,7 +547,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
               key: 'name', 
               width: 180,
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <Input value={text} onChange={e => handleColumnChange(record._key, 'name', e.target.value)} variant="borderless" />
+                  <Input {...noAutoCapInputProps} value={text} onChange={e => handleColumnChange(record._key, 'name', e.target.value)} variant="borderless" />
               )
           },
           { 
@@ -2492,6 +2493,7 @@ END;`;
             {isNewTable && (
                 <>
                     <Input 
+                        {...noAutoCapInputProps}
                         placeholder="请输入表名" 
                         value={newTableName} 
                         onChange={e => setNewTableName(e.target.value)} 
@@ -2805,6 +2807,7 @@ END;`;
                     已选择字段：{selectedColumns.length}
                 </div>
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder="请输入目标表名"
                     value={copyTableName}
                     onChange={e => setCopyTableName(e.target.value)}
@@ -2865,6 +2868,7 @@ END;`;
         >
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder={indexForm.kind === 'PRIMARY' ? '主键索引固定名称：PRIMARY' : '索引名（例如 idx_user_name）'}
                     value={indexForm.name}
                     onChange={(e) => setIndexForm(prev => ({ ...prev, name: e.target.value }))}
@@ -2934,6 +2938,7 @@ END;`;
         >
             <Space direction="vertical" size={10} style={{ width: '100%' }}>
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder="外键约束名（例如 fk_order_user）"
                     value={foreignKeyForm.constraintName}
                     onChange={(e) => setForeignKeyForm(prev => ({ ...prev, constraintName: e.target.value }))}
@@ -2949,6 +2954,7 @@ END;`;
                     style={{ width: '100%' }}
                 />
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder="参考表（支持 db.table）"
                     value={foreignKeyForm.refTableName}
                     onChange={(e) => setForeignKeyForm(prev => ({ ...prev, refTableName: e.target.value }))}

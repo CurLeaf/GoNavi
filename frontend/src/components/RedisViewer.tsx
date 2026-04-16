@@ -6,7 +6,14 @@ import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from '@monaco-editor/react';
 import type { DataNode } from 'antd/es/tree';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import {
+    blurToFilter,
+    isMacLikePlatform,
+    normalizeBlurForPlatform,
+    normalizeOpacityForPlatform,
+    resolveAppearanceValues,
+    resolveTextInputSafeBackdropFilter,
+} from '../utils/appearance';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     applyRenamedRedisKeyState,
@@ -19,6 +26,8 @@ import {
     type RedisTreeDataNode,
 } from './redisViewerTree';
 import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
+import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput } from '../utils/redisSearchPattern';
 
 const { Search } = Input;
 
@@ -283,8 +292,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const resolvedAppearance = resolveAppearanceValues(appearance);
     const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
     const blur = normalizeBlurForPlatform(resolvedAppearance.blur);
+    const disableLocalBackdropFilter = isMacLikePlatform();
     const connection = connections.find(c => c.id === connectionId);
-    const workbenchTheme = useMemo(() => buildRedisWorkbenchTheme({ darkMode, opacity, blur }), [blur, darkMode, opacity]);
+    const workbenchTheme = useMemo(
+        () => buildRedisWorkbenchTheme({ darkMode, opacity, blur, disableBackdropFilter: disableLocalBackdropFilter }),
+        [blur, darkMode, disableLocalBackdropFilter, opacity],
+    );
+    const workbenchBackdropFilter = useMemo(
+        () => resolveTextInputSafeBackdropFilter(blurToFilter(blur), disableLocalBackdropFilter),
+        [blur, disableLocalBackdropFilter],
+    );
     const keyAccentColor = workbenchTheme.accent;
     const jsonAccentColor = darkMode ? '#f6c453' : '#1890ff';
     const valueToolbarBg = workbenchTheme.panelBgStrong;
@@ -293,6 +310,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
+    const [searchInput, setSearchInput] = useState('');
     const [searchPattern, setSearchPattern] = useState('*');
     const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
@@ -467,13 +485,29 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     useEffect(() => {
         loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
-    }, [redisDB]);
+    }, [loadKeys, redisDB]);
+
+    const executeSearch = useCallback((value: string) => {
+        const normalized = normalizeRedisSearchInput(value);
+        setSearchInput(normalized.keyword);
+        setSearchPattern(normalized.pattern);
+        setCursor('0');
+        loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
+    }, [loadKeys]);
 
     const handleSearch = (value: string) => {
-        const pattern = value.trim() || '*';
-        setSearchPattern(pattern);
+        executeSearch(value);
+    };
+
+    const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const normalized = normalizeRedisSearchDraftChange(event.target.value);
+        setSearchInput(normalized.keyword);
+        if (!normalized.shouldSearchImmediately) {
+            return;
+        }
+        setSearchPattern(normalized.pattern);
         setCursor('0');
-        loadKeys(pattern, '0', false, getRedisScanLoadCount(pattern, false));
+        loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
     };
 
     const handleLoadMore = () => {
@@ -1214,9 +1248,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 title: '添加字段',
                                 content: (
                                     <Form id="add-hash-field-form" layout="vertical">
-                                        <Form.Item label="字段名" name="field" rules={[{ required: true }]}>
-                                            <Input id="new-hash-field" />
-                                        </Form.Item>
+	                                        <Form.Item label="字段名" name="field" rules={[{ required: true }]}>
+	                                            <Input id="new-hash-field" {...noAutoCapInputProps} />
+	                                        </Form.Item>
                                         <Form.Item label="值" name="value" rules={[{ required: true }]}>
                                             <Input.TextArea id="new-hash-value" rows={4} />
                                         </Form.Item>
@@ -1888,7 +1922,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     <div>
                                         <div style={{ marginBottom: 8 }}>
                                             <label>ID（可选，默认 *）：</label>
-                                            <Input id="new-stream-id" placeholder="例如: * 或 1723110000000-0" />
+	                                            <Input id="new-stream-id" {...noAutoCapInputProps} placeholder="例如: * 或 1723110000000-0" />
                                         </div>
                                         <div>
                                             <label>字段 JSON：</label>
@@ -2050,7 +2084,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     }
 
     return (
-        <div className="redis-viewer-workbench" style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: blurToFilter(blur), WebkitBackdropFilter: blurToFilter(blur) }}>
+        <div className="redis-viewer-workbench" style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: workbenchBackdropFilter, WebkitBackdropFilter: workbenchBackdropFilter }}>
             {/* Left: Key List */}
             <div ref={leftPanelRef} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
                 <div style={{ ...workbenchCardStyle, padding: 12 }}>
@@ -2063,9 +2097,12 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
                         <Search
-                            placeholder="搜索 Key (支持 * 通配符)"
-                            defaultValue="*"
+                            {...noAutoCapInputProps}
+                            placeholder="搜索 Key"
+                            value={searchInput}
+                            onChange={handleSearchInputChange}
                             onSearch={handleSearch}
+                            allowClear
                             enterButton={<SearchOutlined />}
                         />
                     </Space.Compact>
@@ -2177,7 +2214,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             >
                 <Form form={newKeyForm} layout="vertical" initialValues={{ ttl: -1 }}>
                     <Form.Item name="key" label="Key" rules={[{ required: true, message: '请输入 Key' }]}>
-                        <Input placeholder="key name" />
+                        <Input {...noAutoCapInputProps} placeholder="key name" />
                     </Form.Item>
                     <Form.Item name="value" label="值" rules={[{ required: true, message: '请输入值' }]}>
                         <Input.TextArea rows={4} placeholder="value" />
@@ -2207,7 +2244,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         rules={[{ required: true, message: '请输入新的 Key 名称' }]}
                         extra={renameTargetKey ? `原始 Key：${renameTargetKey}` : undefined}
                     >
-                        <Input placeholder="new:key:name" />
+                        <Input {...noAutoCapInputProps} placeholder="new:key:name" />
                     </Form.Item>
                 </Form>
             </Modal>

@@ -6,6 +6,7 @@ import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from 
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
 
 interface TableOverviewProps {
@@ -344,6 +345,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             title: '重命名表',
             content: (
                 <Input
+                    {...noAutoCapInputProps}
                     defaultValue={tableName}
                     onChange={e => { newName = e.target.value; }}
                     placeholder="输入新表名"
@@ -417,6 +419,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 </span>
                 <div style={{ flex: 1 }} />
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder="搜索表名或注释..."
                     prefix={<SearchOutlined style={{ color: textMuted }} />}
                     value={searchText}

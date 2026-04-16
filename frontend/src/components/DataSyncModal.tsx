@@ -5,7 +5,7 @@ import { useStore } from '../store';
 import { DBGetDatabases, DBGetTables, DataSync, DataSyncAnalyze, DataSyncPreview } from '../../wailsjs/go/app/App';
 import { SavedConnection } from '../types';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues, resolveTextInputSafeBackdropFilter } from '../utils/appearance';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 
@@ -190,6 +190,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   const darkMode = themeMode === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const disableLocalBackdropFilter = isMacLikePlatform();
   
   // Step 1: Config
   const [sourceConnId, setSourceConnId] = useState<string>('');
@@ -630,8 +631,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           : 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.98) 100%)',
       border: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(16,24,40,0.08)',
       boxShadow: darkMode ? '0 24px 56px rgba(0,0,0,0.36)' : '0 18px 44px rgba(15,23,42,0.14)',
-      backdropFilter: darkMode ? 'blur(18px)' : 'none',
-  }), [darkMode]);
+      backdropFilter: resolveTextInputSafeBackdropFilter(darkMode ? 'blur(18px)' : 'none', disableLocalBackdropFilter),
+  }), [darkMode, disableLocalBackdropFilter]);
 
   const shellCardStyle = useMemo<React.CSSProperties>(() => ({
       borderRadius: 18,

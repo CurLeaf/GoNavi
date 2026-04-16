@@ -41,11 +41,13 @@ import { getDbIcon } from './DatabaseIcons';
 	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
-  import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+  import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { resolveConnectionHostTokens } from '../utils/tabDisplay';
 
 const { Search } = Input;
 
@@ -138,6 +140,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
 
@@ -151,7 +154,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   };
   const bgMain = getBg('#141414');
-  const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
+  const overlayTheme = useMemo(
+      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
+      [darkMode, disableLocalBackdropFilter],
+  );
   const modalPanelStyle = useMemo(() => ({
       background: overlayTheme.shellBg,
       border: overlayTheme.shellBorder,
@@ -2858,51 +2864,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       );
   }, [darkMode, overlayTheme, searchScopes]);
 
-  const parseHostOnlyToken = (value: unknown): string[] => {
-      const raw = String(value || '').trim();
-      if (!raw) {
-          return [];
-      }
-      let text = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
-      if (text.includes('/')) {
-          text = text.split('/')[0];
-      }
-      if (text.includes('?')) {
-          text = text.split('?')[0];
-      }
-      if (text.includes('@')) {
-          text = text.split('@').pop() || '';
-      }
-      return text
-          .split(',')
-          .map((entry) => {
-              const token = entry.trim();
-              if (!token) return '';
-              if (token.startsWith('[')) {
-                  const rightBracketIndex = token.indexOf(']');
-                  if (rightBracketIndex > 0) {
-                      return token.slice(0, rightBracketIndex + 1).toLowerCase();
-                  }
-              }
-              const colonIndex = token.lastIndexOf(':');
-              if (colonIndex > 0) {
-                  return token.slice(0, colonIndex).toLowerCase();
-              }
-              return token.toLowerCase();
-          })
-          .filter(Boolean);
-  };
-
   const getConnectionHostSearchText = (node: TreeNode): string => {
       if (node.type !== 'connection') return '';
       const config = node.dataRef?.config || {};
-      const hostTokens = [
-          ...parseHostOnlyToken(config.host),
-          ...(Array.isArray(config.hosts) ? config.hosts.flatMap((entry: string) => parseHostOnlyToken(entry)) : []),
-          ...parseHostOnlyToken(config.uri),
-      ];
-      const uniqueHosts = Array.from(new Set(hostTokens));
-      return uniqueHosts.join(' ');
+      return resolveConnectionHostTokens(config).join(' ');
   };
 
   const getConnectionNameSearchText = (node: TreeNode): string => {
@@ -3110,7 +3075,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     onClick: () => {
                         addTab({
                             id: `redis-cmd-${node.key}-${Date.now()}`,
-                            title: `命令 - ${node.title}`,
+                            title: '命令 - db0',
                             type: 'redis-command',
                             connectionId: node.key,
                             redisDB: 0
@@ -3124,7 +3089,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     onClick: () => {
                         addTab({
                             id: `redis-monitor-${node.key}-${Date.now()}`,
-                            title: `监控: ${node.title}`,
+                            title: '监控 - db0',
                             type: 'redis-monitor',
                             connectionId: node.key,
                             redisDB: 0
@@ -3386,7 +3351,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 onClick: () => {
                     addTab({
                         id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
-                        title: `监控: ${connections.find(c => c.id === id)?.name || id}`,
+                        title: `监控 - db${redisDB}`,
                         type: 'redis-monitor',
                         connectionId: id,
                         redisDB: redisDB
@@ -3835,6 +3800,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
             <Input
+                {...noAutoCapInputProps}
                 ref={searchInputRef}
                 placeholder="搜索..."
                 onChange={onSearch}
@@ -4026,7 +3992,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={createDbForm} layout="vertical">
                 <Form.Item name="name" label="数据库名称" rules={[{ required: true, message: '请输入名称' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
                 {/* Charset option could be added here */}
             </Form>
@@ -4044,7 +4010,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameDbForm} layout="vertical">
                 <Form.Item name="newName" label="新数据库名称" rules={[{ required: true, message: '请输入新数据库名称' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>
@@ -4061,7 +4027,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameTableForm} layout="vertical">
                 <Form.Item name="newName" label="新表名" rules={[{ required: true, message: '请输入新表名' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>
@@ -4078,7 +4044,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameViewForm} layout="vertical">
                 <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>

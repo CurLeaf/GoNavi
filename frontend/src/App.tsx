@@ -18,7 +18,7 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
@@ -812,7 +812,11 @@ function App() {
       whiteSpace: 'nowrap',
       fontSize: isSidebarCompact ? 13 : 14,
   }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
-  const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
+  const disableLocalBackdropFilter = isMacLikePlatform();
+  const overlayTheme = useMemo(
+      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
+      [darkMode, disableLocalBackdropFilter],
+  );
 
   const sidebarQuickActionBaseStyle = useMemo(() => ({
       height: Math.max(34, Math.round(36 * effectiveUiScale)),

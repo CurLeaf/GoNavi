@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from './appearance';
+import {
+  blurToFilter,
+  normalizeBlurForPlatform,
+  normalizeOpacityForPlatform,
+  resolveAppearanceValues,
+  resolveTextInputSafeBackdropFilter,
+} from './appearance';
 
 describe('appearance helpers', () => {
   it('falls back to opaque non-blurred appearance when disabled', () => {
@@ -19,5 +25,11 @@ describe('appearance helpers', () => {
     expect(normalizeBlurForPlatform(-4)).toBe(0);
     expect(blurToFilter(0)).toBeUndefined();
     expect(blurToFilter(8)).toBe('blur(8px)');
+  });
+
+  it('disables local backdrop blur for text-entry surfaces on macOS', () => {
+    expect(resolveTextInputSafeBackdropFilter('blur(18px)', true)).toBe('none');
+    expect(resolveTextInputSafeBackdropFilter('blur(18px)', false)).toBe('blur(18px)');
+    expect(resolveTextInputSafeBackdropFilter(undefined, true)).toBe('none');
   });
 });

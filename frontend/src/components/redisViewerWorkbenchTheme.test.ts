@@ -25,4 +25,9 @@ describe('buildRedisWorkbenchTheme', () => {
     expect(lightTheme.statusTagBg).not.toBe(lightTheme.statusTagMutedBg);
     expect(lightTheme.backdropFilter).toBe('none');
   });
+
+  it('can disable redis workbench blur for macOS text-entry compatibility', () => {
+    const darkTheme = buildRedisWorkbenchTheme({ darkMode: true, opacity: 0.72, blur: 14, disableBackdropFilter: true });
+    expect(darkTheme.backdropFilter).toBe('none');
+  });
 });

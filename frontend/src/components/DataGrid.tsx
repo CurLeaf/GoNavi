@@ -50,6 +50,7 @@ import {
 } from './dataGridCopyInsert';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
+import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -2234,6 +2235,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
+  const filterPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
       const nextConditions = normalizeGridFilterConditions(appliedFilterConditions);
@@ -2241,6 +2243,30 @@ const DataGrid: React.FC<DataGridProps> = ({
       const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
       setNextFilterId(Math.max(1, maxId + 1));
   }, [appliedFilterConditions, normalizeGridFilterConditions]);
+
+  useEffect(() => {
+      if (!showFilter) {
+          return;
+      }
+      const root = filterPanelRef.current;
+      if (!root) {
+          return;
+      }
+      const apply = () => {
+          applyNoAutoCapAttributesWithin(root);
+      };
+      apply();
+      if (typeof MutationObserver === 'undefined') {
+          return;
+      }
+      const observer = new MutationObserver(() => {
+          apply();
+      });
+      observer.observe(root, { childList: true, subtree: true });
+      return () => {
+          observer.disconnect();
+      };
+  }, [showFilter]);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
@@ -5135,7 +5161,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 	          </div>
 
        {showFilter && (
-           <div style={{
+           <div ref={filterPanelRef} style={{
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
@@ -5184,6 +5210,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
                        {cond.op === 'CUSTOM' ? (
                            <Input.TextArea
+                               {...noAutoCapInputProps}
                                style={{ flex: 1 }}
                                autoSize={{ minRows: 1, maxRows: 4 }}
                                value={cond.value}
@@ -5192,6 +5219,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                            />
                        ) : isListOp(cond.op) ? (
                            <Input.TextArea
+                               {...noAutoCapInputProps}
                                style={{ flex: 1 }}
                                autoSize={{ minRows: 1, maxRows: 4 }}
                                value={cond.value}
@@ -5201,12 +5229,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                        ) : isBetweenOp(cond.op) ? (
                            <>
                                <Input
+                                   {...noAutoCapInputProps}
                                    style={{ width: 220 }}
                                    value={cond.value}
                                    onChange={e => updateFilter(cond.id, 'value', e.target.value)}
                                    placeholder="开始值"
                                />
                                <Input
+                                   {...noAutoCapInputProps}
                                    style={{ width: 220 }}
                                    value={cond.value2 || ''}
                                    onChange={e => updateFilter(cond.id, 'value2', e.target.value)}
@@ -5214,9 +5244,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                                />
                            </>
                        ) : isNoValueOp(cond.op) ? (
-                           <Input style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
+                           <Input {...noAutoCapInputProps} style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
                        ) : (
                            <Input
+                               {...noAutoCapInputProps}
                                style={{ width: 280 }}
                                value={cond.value}
                                onChange={e => updateFilter(cond.id, 'value', e.target.value)}
