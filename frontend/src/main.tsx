@@ -131,6 +131,9 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 OpenDownloadedUpdateDirectory: async () => ({ success: false }),
                 OpenDriverDownloadDirectory: async (path: string) => ({ success: true, data: { path } }),
                 OpenDataRootDirectory: async () => ({ success: true }),
+                SelectSQLDirectory: async (currentPath: string) => ({ success: false, message: currentPath ? '已取消' : '已取消' }),
+                ListSQLDirectory: async () => ({ success: true, data: [] }),
+                ReadSQLFile: async () => ({ success: false, message: '已取消' }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
                 ImportConnectionsPayload: async (raw: string, _password?: string) => {

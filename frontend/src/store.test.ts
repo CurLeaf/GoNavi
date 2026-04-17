@@ -139,4 +139,52 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().globalProxy.password).toBe('proxy-secret');
     expect(useStore.getState().globalProxy.hasPassword).toBe(true);
   });
+
+  it('persists external SQL directories and restores valid items after reload', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-1',
+      name: 'scripts',
+      path: 'D:/sql/scripts',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 1,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.externalSQLDirectories).toEqual([
+      {
+        id: 'ext-1',
+        name: 'scripts',
+        path: 'D:/sql/scripts',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 1,
+      },
+    ]);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        externalSQLDirectories: [
+          persisted.state.externalSQLDirectories[0],
+          { path: '', name: 'broken' },
+        ],
+      },
+      version: 7,
+    }));
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().externalSQLDirectories).toEqual([
+      {
+        id: 'ext-1',
+        name: 'scripts',
+        path: 'D:/sql/scripts',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 1,
+      },
+    ]);
+  });
 });

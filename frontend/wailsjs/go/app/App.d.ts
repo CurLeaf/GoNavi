@@ -149,7 +149,11 @@ export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.Quer
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
+export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
+
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
+
+export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -218,6 +222,8 @@ export function RestartSecurityUpdate(arg1:app.RestartSecurityUpdateRequest):Pro
 export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 
 export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
+
+export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 

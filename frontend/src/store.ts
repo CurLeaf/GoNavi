@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage, AIContextItem, GlobalProxyConfig } from './types';
+import { ConnectionConfig, ProxyConfig, SavedConnection, TabData, SavedQuery, ConnectionTag, AIChatMessage, AIContextItem, GlobalProxyConfig, ExternalSQLDirectory } from './types';
 import {
   ShortcutAction,
   ShortcutBinding,
@@ -9,6 +9,7 @@ import {
   cloneShortcutOptions,
   sanitizeShortcutOptions,
 } from './utils/shortcuts';
+import { buildExternalSQLDirectoryId } from './utils/externalSqlTree';
 import { toPersistedGlobalProxy } from './utils/globalProxyDraft';
 import {
   DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -430,6 +431,7 @@ interface AppState {
   activeTabId: string | null;
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
+  externalSQLDirectories: ExternalSQLDirectory[];
   theme: 'light' | 'dark';
   appearance: AppearanceSettings;
   uiScale: number;
@@ -488,6 +490,8 @@ interface AppState {
 
   saveQuery: (query: SavedQuery) => void;
   deleteQuery: (id: string) => void;
+  saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
+  deleteExternalSQLDirectory: (id: string) => void;
 
   setTheme: (theme: 'light' | 'dark') => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
@@ -545,6 +549,29 @@ const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
       id,
       name: toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
       sql,
+      connectionId,
+      dbName,
+      createdAt: Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now(),
+    });
+  });
+  return result;
+};
+
+const sanitizeExternalSQLDirectories = (value: unknown): ExternalSQLDirectory[] => {
+  if (!Array.isArray(value)) return [];
+  const result: ExternalSQLDirectory[] = [];
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const raw = entry as Record<string, unknown>;
+    const path = toTrimmedString(raw.path);
+    const connectionId = toTrimmedString(raw.connectionId);
+    const dbName = toTrimmedString(raw.dbName);
+    if (!path || !connectionId || !dbName) return;
+    const fallbackName = path.split(/[\\/]/).filter(Boolean).pop() || `SQL目录-${index + 1}`;
+    result.push({
+      id: toTrimmedString(raw.id, buildExternalSQLDirectoryId(connectionId, dbName, path)) || buildExternalSQLDirectoryId(connectionId, dbName, path),
+      name: toTrimmedString(raw.name, fallbackName) || fallbackName,
+      path,
       connectionId,
       dbName,
       createdAt: Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now(),
@@ -809,6 +836,7 @@ export const useStore = create<AppState>()(
       activeTabId: null,
       activeContext: null,
       savedQueries: [],
+      externalSQLDirectories: [],
       theme: 'light',
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
@@ -1022,6 +1050,43 @@ export const useStore = create<AppState>()(
       }),
 
       deleteQuery: (id) => set((state) => ({ savedQueries: state.savedQueries.filter(q => q.id !== id) })),
+
+      saveExternalSQLDirectory: (directory) => set((state) => {
+        const path = toTrimmedString(directory.path);
+        const connectionId = toTrimmedString(directory.connectionId);
+        const dbName = toTrimmedString(directory.dbName);
+        if (!path || !connectionId || !dbName) {
+          return state;
+        }
+        const nextDirectory: ExternalSQLDirectory = {
+          id: toTrimmedString(directory.id, buildExternalSQLDirectoryId(connectionId, dbName, path)) || buildExternalSQLDirectoryId(connectionId, dbName, path),
+          name: toTrimmedString(directory.name, path.split(/[\\/]/).filter(Boolean).pop() || 'SQL目录') || 'SQL目录',
+          path,
+          connectionId,
+          dbName,
+          createdAt: Number.isFinite(Number(directory.createdAt)) ? Number(directory.createdAt) : Date.now(),
+        };
+        const existingIndex = state.externalSQLDirectories.findIndex((item) =>
+          item.id === nextDirectory.id
+          || (
+            item.connectionId === nextDirectory.connectionId
+            && item.dbName === nextDirectory.dbName
+            && item.path === nextDirectory.path
+          ),
+        );
+        if (existingIndex === -1) {
+          return { externalSQLDirectories: [...state.externalSQLDirectories, nextDirectory] };
+        }
+        return {
+          externalSQLDirectories: state.externalSQLDirectories.map((item, index) =>
+            index === existingIndex ? nextDirectory : item,
+          ),
+        };
+      }),
+
+      deleteExternalSQLDirectory: (id) => set((state) => ({
+        externalSQLDirectories: state.externalSQLDirectories.filter((item) => item.id !== id),
+      })),
 
       setTheme: (theme) => set({ theme }),
       setAppearance: (appearance) => set((state) => ({ appearance: { ...state.appearance, ...appearance } })),
@@ -1277,6 +1342,7 @@ export const useStore = create<AppState>()(
           nextState.connectionTags = sanitizeConnectionTags(state.connectionTags);
         }
         nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
+        nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(state.externalSQLDirectories);
         nextState.theme = sanitizeTheme(state.theme);
         nextState.appearance = sanitizeAppearance(state.appearance, version);
         nextState.uiScale = sanitizeUiScale(state.uiScale);
@@ -1312,6 +1378,7 @@ export const useStore = create<AppState>()(
           connections: sanitizeConnections(state.connections),
           connectionTags: sanitizeConnectionTags(state.connectionTags),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
+          externalSQLDirectories: sanitizeExternalSQLDirectories(state.externalSQLDirectories),
           theme: sanitizeTheme(state.theme),
           appearance: sanitizeAppearance(state.appearance, PERSIST_VERSION),
           uiScale: sanitizeUiScale(state.uiScale),
@@ -1341,6 +1408,7 @@ export const useStore = create<AppState>()(
         const partialState: Partial<AppState> = {
           connectionTags: state.connectionTags,
           savedQueries: state.savedQueries,
+          externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
           appearance: state.appearance,
           uiScale: state.uiScale,
