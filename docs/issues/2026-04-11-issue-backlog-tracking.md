@@ -38,6 +38,7 @@
 | #346 | TDEngine只显示子表不显示超级表 | Fixed | Pending |
 | #348 | [Bug] sql查询同名字段，结果集不会自动添加别名 | Fixed | Pending |
 | #349 | [Bug] postgres对于表名大小写敏感，且为大写时，通过选中表右键新建查询时生成的sql语句没有自动带上引号"" | Fixed | Pending |
+| #363 | [Bug] 日期字段无法设置值 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -143,6 +144,12 @@
 - 根因：表节点“新建查询”模板在 Sidebar 与 TableOverview 两处都直接拼接 `SELECT * FROM ${tableName};`，没有复用现有的标识符引用逻辑。对 PostgreSQL 这类未加引号会把标识符折叠为小写的数据库，遇到大写表名时生成的 SQL 会直接指向错误对象。
 - 处理：抽出统一的 `buildTableSelectQuery` helper，内部复用 `quoteQualifiedIdent` 按数据库方言生成表引用；并将 Sidebar、TableOverview 的三个“新建查询”入口统一接到该 helper，保证 PostgreSQL/Kingbase 等方言在大写或特殊字符表名场景下自动补双引号。
 - 验证：新增 `frontend/src/utils/objectQueryTemplates.test.ts` 回归测试，覆盖 PostgreSQL `public.MyTable` 自动生成 `SELECT * FROM public.\"MyTable\";`，并执行 `frontend` 下 `npm exec vitest run src/utils/objectQueryTemplates.test.ts` 与 `npm run build`。
+
+### #363
+
+- 根因：表格内日期类单元格的内联编辑在 `DatePicker/TimePicker` 的 `onChange` 时立即调用 `save()`，但保存逻辑只从 Form store 读取当前字段值。日期 picker 选值后存在一个短暂窗口，picker 已经产出新值而 Form 还没同步完成，结果保存路径把“未同步的空值”当成真实值，最终写成 `NULL`。
+- 处理：抽出 `dataGridTemporal` helper，统一时间字段的 picker 类型、格式化和保存决策；单元格保存时优先使用 picker 回调里实时拿到的值，再回退到 Form store，避免 `date/time/year` 场景把刚选中的值误判为空。
+- 验证：新增 `frontend/src/components/dataGridTemporal.test.ts` 回归测试，覆盖“picker 已选中日期、Form 仍为空”时仍保存 `YYYY-MM-DD`；并执行 `frontend` 下 `npm exec vitest run src/components/dataGridTemporal.test.ts` 与 `npm run build`。
 
 ### #330
 
