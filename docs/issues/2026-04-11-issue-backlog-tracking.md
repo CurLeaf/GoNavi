@@ -39,6 +39,7 @@
 | #348 | [Bug] sql查询同名字段，结果集不会自动添加别名 | Fixed | Pending |
 | #349 | [Bug] postgres对于表名大小写敏感，且为大写时，通过选中表右键新建查询时生成的sql语句没有自动带上引号"" | Fixed | Pending |
 | #363 | [Bug] 日期字段无法设置值 | Fixed | Pending |
+| #368 | [Bug] 窗口状态问题 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -150,6 +151,12 @@
 - 根因：表格内日期类单元格的内联编辑在 `DatePicker/TimePicker` 的 `onChange` 时立即调用 `save()`，但保存逻辑只从 Form store 读取当前字段值。日期 picker 选值后存在一个短暂窗口，picker 已经产出新值而 Form 还没同步完成，结果保存路径把“未同步的空值”当成真实值，最终写成 `NULL`。
 - 处理：抽出 `dataGridTemporal` helper，统一时间字段的 picker 类型、格式化和保存决策；单元格保存时优先使用 picker 回调里实时拿到的值，再回退到 Form store，避免 `date/time/year` 场景把刚选中的值误判为空。
 - 验证：新增 `frontend/src/components/dataGridTemporal.test.ts` 回归测试，覆盖“picker 已选中日期、Form 仍为空”时仍保存 `YYYY-MM-DD`；并执行 `frontend` 下 `npm exec vitest run src/components/dataGridTemporal.test.ts` 与 `npm run build`。
+
+### #368
+
+- 根因：Windows 窗口激活修复逻辑在窗口已最大化时过于激进。应用从后台切回前台时，`activation` 路径只要判定出 viewport drift 就会直接执行两次 `WindowToggleMaximise()`，导致“重新做一遍放大动画”；与此同时，标题栏最大化按钮图标一直写死为 `BorderOutlined`，即使窗口已最大化也不会切成还原态。
+- 处理：抽出 `windowStateUi` 规则 helper，将“最大化窗口的 scale-fix toggle”收敛为仅在 `ratio-change` 且确实存在 drift 时才执行；激活返回时只广播 `resize`，不再重做最大化动画。并让标题栏按钮根据 `windowState` 动态切换 maximize/restore 图标，同时在标题栏切换动作后立即同步 store 中的窗口状态。
+- 验证：新增 `frontend/src/utils/windowStateUi.test.ts`，覆盖“activation 不应重 toggle 最大化窗口”和“maximized 状态切换为 restore 图标”两条规则，并执行 `frontend` 下 `npm exec vitest run src/utils/windowStateUi.test.ts` 与 `npm run build`。
 
 ### #330
 
