@@ -8,10 +8,12 @@ import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
+import { buildDataSyncRequest, type SourceDatasetMode, validateDataSyncSelection } from './dataSyncRequest';
 
 const { Title, Text } = Typography;
 const { Step } = Steps;
 const { Option } = Select;
+const { TextArea } = Input;
 
 type SyncLogEvent = { jobId: string; level?: string; message?: string; ts?: number };
 type SyncProgressEvent = { jobId: string; percent?: number; current?: number; total?: number; table?: string; stage?: string };
@@ -213,6 +215,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   // Step 2: Tables
   const [allTables, setAllTables] = useState<string[]>([]);
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
+  const [sourceDatasetMode, setSourceDatasetMode] = useState<SourceDatasetMode>('table');
+  const [sourceQuery, setSourceQuery] = useState<string>('');
 
   // Options
   const [workflowType, setWorkflowType] = useState<WorkflowType>('sync');
@@ -293,7 +297,10 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
         setTargetConnId('');
         setSourceDb('');
         setTargetDb('');
+        setAllTables([]);
         setSelectedTables([]);
+        setSourceDatasetMode('table');
+        setSourceQuery('');
         setWorkflowType('sync');
         setSyncContent('data');
         setSyncMode('insert_update');
@@ -341,6 +348,28 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       }
   }, [workflowType]);
 
+  useEffect(() => {
+      if (sourceDatasetMode !== 'query') return;
+      if (workflowType !== 'sync') {
+          setWorkflowType('sync');
+      }
+      if (syncContent !== 'data') {
+          setSyncContent('data');
+      }
+      if (targetTableStrategy !== 'existing_only') {
+          setTargetTableStrategy('existing_only');
+      }
+      if (createIndexes) {
+          setCreateIndexes(false);
+      }
+      if (autoAddColumns) {
+          setAutoAddColumns(false);
+      }
+      if (selectedTables.length > 1) {
+          setSelectedTables(selectedTables.slice(0, 1));
+      }
+  }, [sourceDatasetMode, workflowType, syncContent, targetTableStrategy, createIndexes, autoAddColumns, selectedTables]);
+
   const handleSourceConnChange = async (connId: string) => {
       setSourceConnId(connId);
       setSourceDb('');
@@ -386,10 +415,12 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 
       setLoading(true);
       try {
-          const conn = connections.find(c => c.id === sourceConnId);
+          const connId = isSourceQueryMode ? targetConnId : sourceConnId;
+          const dbName = isSourceQueryMode ? targetDb : sourceDb;
+          const conn = connections.find(c => c.id === connId);
           if (conn) {
-	          const config = normalizeConnConfig(conn, sourceDb);
-	          const res = await DBGetTables(config as any, sourceDb);
+	          const config = normalizeConnConfig(conn, dbName);
+	          const res = await DBGetTables(config as any, dbName);
 	          if (res.success) {
 	              // DBGetTables returns [{Table: "name"}, ...]
 	              const tableRows = Array.isArray(res.data) ? res.data : [];
@@ -397,6 +428,13 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 	                  .map((row: any) => row?.Table || row?.table || row?.TABLE_NAME || Object.values(row || {})[0])
 	                  .filter((name: any) => typeof name === 'string' && name.trim() !== '');
 	              setAllTables(tables as string[]);
+                  setSelectedTables(prev => {
+                      const existing = prev.filter((name) => tables.includes(name));
+                      if (isSourceQueryMode) {
+                          return existing.slice(0, 1);
+                      }
+                      return existing;
+                  });
 	              setCurrentStep(1);
 	          } else {
                   message.error(res.message);
@@ -414,7 +452,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   };
 
   const analyzeDiff = async () => {
-      if (selectedTables.length === 0) return;
+      const selectionError = validateDataSyncSelection({ sourceDatasetMode, selectedTables, sourceQuery, syncContent });
+      if (selectionError) return message.error(selectionError);
       if (!sourceConnId || !targetConnId) return message.error("Select connections first");
       if (!sourceDb || !targetDb) return message.error("Select databases first");
 
@@ -431,18 +470,20 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       autoScrollRef.current = true;
       setSyncProgress({ percent: 0, current: 0, total: selectedTables.length, table: '', stage: '差异分析' });
 
-      const config = {
+      const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
-          tables: selectedTables,
-          content: syncContent,
-          mode: "insert_update",
+          selectedTables,
+          sourceDatasetMode,
+          sourceQuery,
+          syncContent,
+          syncMode: "insert_update",
           autoAddColumns,
           targetTableStrategy,
           createIndexes,
-          mongoCollectionName: mongoCollectionName.trim(),
+          mongoCollectionName,
           jobId,
-      };
+      });
 
       try {
           const res = await DataSyncAnalyze(config as any);
@@ -484,17 +525,19 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       setPreviewLoading(true);
       setPreviewData(null);
 
-      const config = {
+      const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
-          tables: selectedTables,
-          content: syncContent,
-          mode: "insert_update",
+          selectedTables,
+          sourceDatasetMode,
+          sourceQuery,
+          syncContent,
+          syncMode: "insert_update",
           autoAddColumns,
           targetTableStrategy,
           createIndexes,
-          mongoCollectionName: mongoCollectionName.trim(),
-      };
+          mongoCollectionName,
+      });
 
       try {
           const res = await DataSyncPreview(config as any, table, 200);
@@ -511,6 +554,11 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
   };
 
   const runSync = async () => {
+      const selectionError = validateDataSyncSelection({ sourceDatasetMode, selectedTables, sourceQuery, syncContent });
+      if (selectionError) {
+          message.error(selectionError);
+          return;
+      }
       if (syncContent !== 'schema' && diffTables.length === 0) {
           message.error("请先对比差异，再开始同步");
           return;
@@ -549,19 +597,21 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           stage: '准备开始',
       });
       
-      const config = {
+      const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
-          tables: selectedTables,
-          content: syncContent,
-          mode: syncMode,
+          selectedTables,
+          sourceDatasetMode,
+          sourceQuery,
+          syncContent,
+          syncMode,
           autoAddColumns,
           targetTableStrategy,
           createIndexes,
-          mongoCollectionName: mongoCollectionName.trim(),
+          mongoCollectionName,
           tableOptions,
           jobId,
-      };
+      });
 
       try {
           const res = await DataSync(config as any);
@@ -627,6 +677,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       return Array.from(new Set(items));
   }, [diffTables]);
 
+  const isSourceQueryMode = sourceDatasetMode === 'query';
   const isMigrationWorkflow = workflowType === 'migration';
   const sourceConn = useMemo(() => connections.find(c => c.id === sourceConnId), [connections, sourceConnId]);
   const targetConn = useMemo(() => connections.find(c => c.id === targetConnId), [connections, targetConnId]);
@@ -859,7 +910,13 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                       <Form.Item label="功能类型">
                           <Select value={workflowType} onChange={setWorkflowType}>
                               <Option value="sync">数据同步（基于已有目标表做差异同步）</Option>
-                              <Option value="migration">跨库迁移（可自动建表后导入）</Option>
+                              <Option value="migration" disabled={isSourceQueryMode}>跨库迁移（可自动建表后导入）</Option>
+                          </Select>
+                      </Form.Item>
+                      <Form.Item label="源数据方式">
+                          <Select value={sourceDatasetMode} onChange={setSourceDatasetMode}>
+                              <Option value="table">按表同步</Option>
+                              <Option value="query">按 SQL 结果集同步</Option>
                           </Select>
                       </Form.Item>
                       <Alert
@@ -870,11 +927,19 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                               ? '当前为“跨库迁移”模式：适合将表迁移到另一数据源，可自动建表并导入数据。'
                               : '当前为“数据同步”模式：适合目标表已存在时做增量同步或覆盖导入。'}
                       />
+                      {isSourceQueryMode && (
+                          <Alert
+                              type="info"
+                              showIcon
+                              style={{ marginBottom: 12 }}
+                              message="SQL 结果集同步当前只支持：源端自定义 SQL -> 单个已存在目标表；查询结果需包含目标表主键列。"
+                          />
+                      )}
                       <Form.Item label={isMigrationWorkflow ? '迁移内容' : '同步内容'}>
                           <Select value={syncContent} onChange={setSyncContent}>
                               <Option value="data">仅同步数据</Option>
-                              <Option value="schema">仅同步结构</Option>
-                              <Option value="both">同步结构 + 数据</Option>
+                              <Option value="schema" disabled={isSourceQueryMode}>仅同步结构</Option>
+                              <Option value="both" disabled={isSourceQueryMode}>同步结构 + 数据</Option>
                           </Select>
                       </Form.Item>
                       <Form.Item label={isMigrationWorkflow ? '迁移模式' : '同步模式'}>
@@ -885,7 +950,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                           </Select>
                       </Form.Item>
                       <Form.Item label={isMigrationWorkflow ? '目标表处理策略' : '目标表要求'}>
-                          <Select value={targetTableStrategy} onChange={setTargetTableStrategy} disabled={!isMigrationWorkflow}>
+                          <Select value={targetTableStrategy} onChange={setTargetTableStrategy} disabled={!isMigrationWorkflow || isSourceQueryMode}>
                               <Option value="existing_only">仅使用已有目标表</Option>
                               <Option value="auto_create_if_missing">目标表不存在时自动建表后导入</Option>
                               <Option value="smart">智能模式（存在则直接导入，不存在则自动建表）</Option>
@@ -908,12 +973,12 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                           </Form.Item>
                       )}
                       <Form.Item>
-                          <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)}>
-                              自动补齐目标表缺失字段（当前支持 MySQL 目标及 MySQL → Kingbase）
+                          <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)} disabled={isSourceQueryMode}>
+                              自动补齐目标表缺失字段（当前支持 MySQL 目标及 MySQL → Kingbase；SQL 结果集模式暂不支持）
                           </Checkbox>
                       </Form.Item>
                       <Form.Item>
-                          <Checkbox checked={createIndexes} onChange={(e) => setCreateIndexes(e.target.checked)} disabled={!isMigrationWorkflow || targetTableStrategy === 'existing_only'}>
+                          <Checkbox checked={createIndexes} onChange={(e) => setCreateIndexes(e.target.checked)} disabled={!isMigrationWorkflow || targetTableStrategy === 'existing_only' || isSourceQueryMode}>
                               自动迁移可兼容的普通索引/唯一索引（仅自动建表模式生效）
                           </Checkbox>
                       </Form.Item>
@@ -949,21 +1014,56 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       {currentStep === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={quietPanelStyle}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <Text type="secondary">请选择需要同步的表：</Text>
-                  <Checkbox checked={showSameTables} onChange={(e) => setShowSameTables(e.target.checked)}>
-                      显示相同表
-                  </Checkbox>
-                  </div>
-                  <Transfer
-                dataSource={allTables.map(t => ({ key: t, title: t }))}
-                titles={['源表', '已选表']}
-                targetKeys={selectedTables}
-                onChange={(keys) => setSelectedTables(keys as string[])}
-                render={item => item.title}
-                listStyle={{ width: 390, height: 320, marginTop: 0, borderRadius: 14, overflow: 'hidden' }}
-                locale={{ itemUnit: '项', itemsUnit: '项', searchPlaceholder: '搜索表…', notFoundContent: '暂无数据' }}
-              />
+                  {!isSourceQueryMode && (
+                      <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                              <Text type="secondary">请选择需要同步的表：</Text>
+                              <Checkbox checked={showSameTables} onChange={(e) => setShowSameTables(e.target.checked)}>
+                                  显示相同表
+                              </Checkbox>
+                          </div>
+                          <Transfer
+                              dataSource={allTables.map(t => ({ key: t, title: t }))}
+                              titles={['源表', '已选表']}
+                              targetKeys={selectedTables}
+                              onChange={(keys) => setSelectedTables(keys as string[])}
+                              render={item => item.title}
+                              listStyle={{ width: 390, height: 320, marginTop: 0, borderRadius: 14, overflow: 'hidden' }}
+                              locale={{ itemUnit: '项', itemsUnit: '项', searchPlaceholder: '搜索表…', notFoundContent: '暂无数据' }}
+                          />
+                      </>
+                  )}
+                  {isSourceQueryMode && (
+                      <Form layout="vertical">
+                          <Alert
+                              type="info"
+                              showIcon
+                              style={{ marginBottom: 12 }}
+                              message="请输入源查询 SQL，并选择一个目标表。差异分析会直接基于该结果集与目标表对比。"
+                          />
+                          <Form.Item label="源查询 SQL">
+                              <TextArea
+                                  value={sourceQuery}
+                                  onChange={(e) => setSourceQuery(e.target.value)}
+                                  rows={8}
+                                  placeholder="例如：SELECT id, name, email FROM users WHERE status = 'active'"
+                                  spellCheck={false}
+                              />
+                          </Form.Item>
+                          <Form.Item label="目标表">
+                              <Select
+                                  value={selectedTables[0]}
+                                  onChange={(value) => setSelectedTables(value ? [value] : [])}
+                                  showSearch
+                                  allowClear
+                                  placeholder="请选择一个目标表"
+                                  optionFilterProp="children"
+                              >
+                                  {allTables.map((table) => <Option key={table} value={table}>{table}</Option>)}
+                              </Select>
+                          </Form.Item>
+                      </Form>
+                  )}
               </div>
 
               {diffTables.length > 0 && (
@@ -1156,14 +1256,14 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 	          {currentStep === 1 && (
 	              <>
 	                <Button onClick={() => setCurrentStep(0)} style={{ marginRight: 8 }}>上一步</Button>
-	                <Button onClick={analyzeDiff} loading={loading} disabled={syncContent === 'schema' || selectedTables.length === 0 || analyzing} style={{ marginRight: 8 }}>
+	                <Button onClick={analyzeDiff} loading={loading} disabled={syncContent === 'schema' || selectedTables.length === 0 || analyzing || (isSourceQueryMode && !sourceQuery.trim())} style={{ marginRight: 8 }}>
 	                    对比差异
 	                </Button>
 	                <Button
 	                    type="primary"
 	                    onClick={runSync}
                     loading={loading}
-                    disabled={selectedTables.length === 0 || (syncContent !== 'schema' && diffTables.length === 0)}
+                    disabled={selectedTables.length === 0 || (isSourceQueryMode && !sourceQuery.trim()) || (syncContent !== 'schema' && diffTables.length === 0)}
                 >
                     开始同步
                 </Button>

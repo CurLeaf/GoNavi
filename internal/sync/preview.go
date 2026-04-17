@@ -46,6 +46,9 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	if isMongoToRedisKeyspacePair(config) {
 		return s.previewMongoToRedis(config, tableName, limit)
 	}
+	if hasSourceQuery(config) {
+		return s.previewSourceQuery(config, limit)
+	}
 
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {

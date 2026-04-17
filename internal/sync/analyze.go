@@ -39,6 +39,9 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 	if isMongoToRedisKeyspacePair(config) {
 		return s.analyzeMongoToRedis(config)
 	}
+	if hasSourceQuery(config) {
+		return s.analyzeSourceQuery(config)
+	}
 
 	contentRaw := strings.ToLower(strings.TrimSpace(config.Content))
 	syncSchema := false

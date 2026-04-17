@@ -172,6 +172,17 @@
 - 处理：将 MySQL 分支拆分为 rename 与 redefine 两条路径。列名发生变化时使用 `CHANGE COLUMN 原列名 新列定义`，其余类型/默认值/注释/自增等普通变更继续走 `MODIFY COLUMN`，保留原有位置子句（`FIRST` / `AFTER`）。
 - 验证：补充 `frontend/src/components/tableDesignerSchemaSql.test.ts` 回归测试，覆盖 MySQL 重命名列时必须生成 `CHANGE COLUMN` 而不是 `MODIFY COLUMN`，并执行 `frontend` 下 `npm exec vitest run src/components/tableDesignerSchemaSql.test.ts` 与 `npm run build`。
 
+### #375
+
+- 复核结论：该问题已在 `origin/dev` 落地，不应继续作为待修复 backlog 处理。
+- 已有关联提交：`7378966 fix(mysql): 表列表排除视图 refs bug#375`、`c631fee fix(ui): 表概览排除视图 refs bug#375`。
+- 后续动作：本地重复修复提交不计入有效成果，整理分支时剔除；后续 issue 一律先核对 `gh` timeline 与 `origin/dev` 关联提交，再决定是否动手。
+
+### #321
+
+- 根因：现有数据同步链路只支持“按源表列表”推进，前端无法录入源 SQL；后端 `Analyze / Preview / RunSync` 也默认从源表 `SELECT *` 读取数据，不能把查询结果集当作同步源。
+- 处理：新增 `sourceQuery` 同步分支。前端 `DataSyncModal` 增加“按 SQL 结果集同步”模式，限定为“源 SQL -> 单个已存在目标表”；后端在 `Analyze / Preview / RunSync` 中直接执行源 SQL，并按目标表主键复用现有差异计算、预览与应用逻辑。
+- 验证：新增 `internal/sync/source_query_sync_test.go` 与 `frontend/src/components/dataSyncRequest.test.ts`，并执行 `go test ./internal/sync -count=1`、`frontend` 下 `npm exec vitest run src/components/dataSyncRequest.test.ts`、`npm run build`。
 ### #330
 
 - 根因：查询结果表格已经支持拖拽调整列宽，但 resize handle 没有提供双击自适应逻辑，导致用户只能靠手工拖拽慢慢试宽度。

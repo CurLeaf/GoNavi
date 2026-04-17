@@ -15,6 +15,7 @@ type SyncConfig struct {
 	SourceConfig        connection.ConnectionConfig `json:"sourceConfig"`
 	TargetConfig        connection.ConnectionConfig `json:"targetConfig"`
 	Tables              []string                    `json:"tables"`
+	SourceQuery         string                      `json:"sourceQuery,omitempty"`
 	Content             string                      `json:"content,omitempty"` // "data", "schema", "both"
 	Mode                string                      `json:"mode"`              // "insert_update", "insert_only", "full_overwrite"
 	JobID               string                      `json:"jobId,omitempty"`
@@ -53,6 +54,9 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 	}
 	if isMongoToRedisKeyspacePair(config) {
 		return s.runMongoToRedisSync(config, result)
+	}
+	if hasSourceQuery(config) {
+		return s.runSourceQuerySync(config)
 	}
 
 	totalTables := len(config.Tables)
