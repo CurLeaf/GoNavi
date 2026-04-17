@@ -752,10 +752,42 @@ const buildMongoDeleteCommand = (
   return JSON.stringify(command);
 };
 
+const convertMongoShellShortcutCommand = (raw: string): ShellConvertResult | null => {
+  const normalized = String(raw || '')
+    .replace(/[;；]+\s*$/, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === 'show dbs' || normalized === 'show databases') {
+    return {
+      recognized: true,
+      command: JSON.stringify({ listDatabases: 1, nameOnly: true }),
+    };
+  }
+
+  if (normalized === 'show collections' || normalized === 'show tables') {
+    return {
+      recognized: true,
+      command: JSON.stringify({ listCollections: 1, filter: {}, nameOnly: true }),
+    };
+  }
+
+  return null;
+};
+
 export const convertMongoShellToJsonCommand = (raw: string): ShellConvertResult => {
   let input = String(raw || '').trim();
   input = input.replace(/^[\s]*(\/\/[^\n]*\n)+/g, '').trim();
   input = input.replace(/[;；]+\s*$/, '');
+  const shortcut = convertMongoShellShortcutCommand(input);
+  if (shortcut) {
+    return shortcut;
+  }
   if (!/^db\./i.test(input)) {
     return { recognized: false };
   }
