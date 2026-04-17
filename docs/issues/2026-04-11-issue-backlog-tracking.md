@@ -32,6 +32,7 @@
 | #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | `ca76440` |
 | #333 | AI 功能添加供应商测试正常，但问答显示失败 | Fixed | Pending |
 | #337 | 自动更新无效 | Fixed | Pending |
+| #338 | 连接clickhouse不能通过8132端口 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -101,6 +102,12 @@
 - 根因：Linux 自动更新链路有两个断点。其一，更新资产名只按 `linux/amd64` 固定选择 `GoNavi-<ver>-Linux-Amd64.tar.gz`，没有根据当前运行的是 `WebKit41` 变体去选 `-WebKit41` 包；其二，Linux 安装脚本解压后优先查找固定文件名 `GoNavi`，而 release tar.gz 实际打包的是构建产物名，导致替换阶段经常找不到新二进制。
 - 处理：为更新资产解析新增“基于当前可执行文件路径推断 Linux 变体”的后缀选择逻辑；同时调整 Linux 更新脚本，解压后优先搜索与当前运行二进制同名的文件，再回退查找 `GoNavi`。
 - 验证：补充 `internal/app/methods_update_test.go` 回归测试，覆盖 Linux `WebKit41` 资产名选择与更新脚本目标名解析，并执行 `go test ./internal/app -run 'Test(ExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix|BuildLinuxScriptPrefersTargetExecutableBasename|TestFetchLatestUpdateInfo|TestCheckForUpdates|TestBuildWindowsScript)' -count=1`。
+
+### #338
+
+- 根因：ClickHouse 连接协议识别只把 `8123/8443` 视为 HTTP 端口，`8132` 会被误判为 native，导致连接阶段优先走错协议。
+- 处理：将 `8132` 纳入 ClickHouse HTTP 端口识别，并同步更新自动切换日志和错误提示中的端口说明，避免排障信息继续误导。
+- 验证：补充 `internal/db/clickhouse_impl_test.go` 回归测试，覆盖 `8132`、`8123`、`8443` 的 HTTP 判定以及 `9000/9440` 的 native 判定，并执行 `go test -tags gonavi_clickhouse_driver ./internal/db -run 'TestClickHouse(PingValidatesQueryPath|GetDatabasesFallsBackToCurrentDatabase|DetectClickHouseProtocolTreatsHTTPPortsAsHTTP)' -count=1`。
 
 ### #330
 
