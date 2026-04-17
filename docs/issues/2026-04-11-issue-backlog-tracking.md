@@ -35,6 +35,7 @@
 | #338 | 连接clickhouse不能通过8132端口 | Fixed | Pending |
 | #342 | 数据同步功能不能用，mysql数据库8.4版本选了结构同步，最后没同步成功 | Fixed | Pending |
 | #343 | redis删除hash类型中的key报错 | Fixed | Pending |
+| #346 | TDEngine只显示子表不显示超级表 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -122,6 +123,12 @@
 - 根因：前端 Redis hash 字段删除调用把单个字段 `string` 直接传给 `RedisDeleteHashField`，而后端/Wails 绑定签名要求的是 `[]string`，导致在参数反序列化阶段直接报 `json: cannot unmarshal string into Go value of type []string`。
 - 处理：前端改为传单元素数组；后端再增加一层参数归一化，兼容单字符串、字符串数组和 `[]interface{}` 三种形态，避免旧调用或异常入参再次在绑定层直接失败。
 - 验证：新增 `internal/app/methods_redis_test.go` 回归测试，覆盖单字符串与字符串数组两种调用形态，并执行 `go test ./internal/app -count=1` 与 `frontend` 下 `npm run build`。
+
+### #346
+
+- 根因：`TDengineDB.GetTables` 只查询 `SHOW TABLES`，没有把 `SHOW STABLES` 的超级表结果并入返回列表，导致 Sidebar 和依赖表列表的导出链路都只能看到子表。
+- 处理：为 TDEngine 表列表查询补充 `SHOW STABLES`，与 `SHOW TABLES` 结果统一去重合并后返回，保证普通表和超级表同时可见。
+- 验证：新增 `internal/db/tdengine_applychanges_test.go` 回归测试，覆盖 `GetTables` 返回普通表 + 超级表，并执行 `go test -tags gonavi_tdengine_driver ./internal/db -count=1`。
 
 ### #330
 

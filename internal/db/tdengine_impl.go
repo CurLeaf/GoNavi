@@ -202,13 +202,17 @@ func (t *TDengineDB) GetDatabases() ([]string, error) {
 }
 
 func (t *TDengineDB) GetTables(dbName string) ([]string, error) {
-	queries := make([]string, 0, 2)
+	queries := make([]string, 0, 4)
 	if strings.TrimSpace(dbName) != "" {
 		queries = append(queries, fmt.Sprintf("SHOW TABLES FROM `%s`", escapeBacktickIdent(dbName)))
+		queries = append(queries, fmt.Sprintf("SHOW STABLES FROM `%s`", escapeBacktickIdent(dbName)))
 	}
 	queries = append(queries, "SHOW TABLES")
+	queries = append(queries, "SHOW STABLES")
 
 	var lastErr error
+	tableSet := make(map[string]struct{})
+	tables := make([]string, 0)
 	for _, query := range queries {
 		data, _, err := t.Query(query)
 		if err != nil {
@@ -216,17 +220,35 @@ func (t *TDengineDB) GetTables(dbName string) ([]string, error) {
 			continue
 		}
 
-		var tables []string
 		for _, row := range data {
 			if val, ok := getValueFromRow(row, "table_name", "tablename", "name", "Table", "table"); ok {
-				tables = append(tables, fmt.Sprintf("%v", val))
+				tableName := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if tableName == "" {
+					continue
+				}
+				if _, exists := tableSet[tableName]; exists {
+					continue
+				}
+				tableSet[tableName] = struct{}{}
+				tables = append(tables, tableName)
 				continue
 			}
 			for _, val := range row {
-				tables = append(tables, fmt.Sprintf("%v", val))
+				tableName := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if tableName == "" {
+					break
+				}
+				if _, exists := tableSet[tableName]; exists {
+					break
+				}
+				tableSet[tableName] = struct{}{}
+				tables = append(tables, tableName)
 				break
 			}
 		}
+	}
+	if len(tables) > 0 {
+		sort.Strings(tables)
 		return tables, nil
 	}
 
