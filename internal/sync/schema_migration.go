@@ -127,12 +127,42 @@ func buildSchemaMigrationPlanLegacy(config SyncConfig, tableName string, sourceD
 		if len(missing) > 0 {
 			plan.Warnings = append(plan.Warnings, fmt.Sprintf("目标表缺失字段 %d 个：%s", len(missing), strings.Join(missing, ", ")))
 		}
-		if config.AutoAddColumns && isMySQLLikeSourceType(sourceType) && normalizeMigrationDBType(targetType) == "kingbase" {
-			addSQL, addWarnings := buildMySQLToKingbaseAddColumnSQL(plan.TargetQueryTable, sourceCols, targetCols)
-			plan.PreDataSQL = append(plan.PreDataSQL, addSQL...)
-			plan.Warnings = append(plan.Warnings, addWarnings...)
-			if len(addSQL) > 0 {
-				plan.PlannedAction = fmt.Sprintf("补齐缺失字段(%d)后导入", len(addSQL))
+		if len(missing) == 0 {
+			plan.PlannedAction = "表结构已一致"
+		} else if config.AutoAddColumns && supportsAutoAddColumnsForPair(sourceType, targetType) {
+			targetSet := make(map[string]struct{}, len(targetCols))
+			for _, col := range targetCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				targetSet[key] = struct{}{}
+			}
+			for _, col := range sourceCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				if _, ok := targetSet[key]; ok {
+					continue
+				}
+				addSQL, err := buildAddColumnSQLForPair(sourceType, targetType, plan.TargetQueryTable, col)
+				if err != nil {
+					plan.Warnings = append(plan.Warnings, fmt.Sprintf("字段 %s 自动补齐 SQL 生成失败：%v", col.Name, err))
+					continue
+				}
+				plan.PreDataSQL = append(plan.PreDataSQL, addSQL)
+			}
+			if len(plan.PreDataSQL) > 0 {
+				plan.PlannedAction = fmt.Sprintf("补齐缺失字段(%d)后导入", len(plan.PreDataSQL))
+			} else {
+				plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，但未生成可执行补齐 SQL", len(missing))
+			}
+		} else {
+			if config.AutoAddColumns {
+				plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，当前库对暂不支持自动补齐", len(missing))
+			} else {
+				plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，未开启自动补齐", len(missing))
 			}
 		}
 		if strategy != "existing_only" {

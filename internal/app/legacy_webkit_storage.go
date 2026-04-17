@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	stdRuntime "runtime"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -44,7 +43,7 @@ func currentBuildType(ctx context.Context) string {
 }
 
 func shouldAttemptLegacyWebKitStorageMigration(buildType string) bool {
-	return stdRuntime.GOOS == "darwin" && strings.EqualFold(strings.TrimSpace(buildType), "dev")
+	return runtimeGOOS() == "darwin" && strings.EqualFold(strings.TrimSpace(buildType), "dev")
 }
 
 func migrateLegacyWebKitStorageIfNeeded(a *App) error {

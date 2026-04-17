@@ -26,6 +26,7 @@ const (
 	defaultClickHouseUser     = "default"
 	defaultClickHouseDatabase = "default"
 	minClickHouseReadTimeout  = 5 * time.Minute
+	clickHouseHTTPPortHint    = "8123/8132/8443"
 )
 
 type ClickHouseDB struct {
@@ -133,10 +134,19 @@ func detectClickHouseProtocol(config connection.ConnectionConfig) clickhouse.Pro
 	if strings.HasPrefix(uriText, "http://") || strings.HasPrefix(uriText, "https://") {
 		return clickhouse.HTTP
 	}
-	if config.Port == 8123 || config.Port == 8443 {
+	if isClickHouseHTTPPort(config.Port) {
 		return clickhouse.HTTP
 	}
 	return clickhouse.Native
+}
+
+func isClickHouseHTTPPort(port int) bool {
+	switch port {
+	case 8123, 8132, 8443:
+		return true
+	default:
+		return false
+	}
 }
 
 func isClickHouseProtocolMismatch(err error) bool {
@@ -246,14 +256,14 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 				logger.Warnf("ClickHouse SSL 优先连接失败，已回退至明文连接")
 			}
 			if pIdx > 0 {
-				logger.Warnf("ClickHouse 已自动切换连接协议为 %s（常见于 8123/8443 HTTP 端口）", protocol.String())
+				logger.Warnf("ClickHouse 已自动切换连接协议为 %s（常见于 %s HTTP 端口）", protocol.String(), clickHouseHTTPPortHint)
 			}
 			return nil
 		}
 	}
 
 	_ = c.Close()
-	return fmt.Errorf("连接建立后验证失败（可检查 ClickHouse 端口与协议是否匹配：Native=9000/9440，HTTP=8123/8443）：%s", strings.Join(failures, "；"))
+	return fmt.Errorf("连接建立后验证失败（可检查 ClickHouse 端口与协议是否匹配：Native=9000/9440，HTTP=%s）：%s", clickHouseHTTPPortHint, strings.Join(failures, "；"))
 }
 
 func (c *ClickHouseDB) Close() error {

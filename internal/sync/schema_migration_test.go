@@ -266,6 +266,54 @@ func TestBuildPGLikeToMySQLPlan_AutoCreateWhenTargetMissing(t *testing.T) {
 	}
 }
 
+func TestBuildSchemaMigrationPlan_MySQLToMySQLAddsMissingColumnsForExistingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"shop.users": {
+				{Name: "id", Type: "bigint", Nullable: "NO", Key: "PRI"},
+				{Name: "name", Type: "varchar(128)", Nullable: "YES"},
+				{Name: "aaaa", Type: "varchar(255)", Nullable: "YES"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"app.users": {
+				{Name: "id", Type: "bigint", Nullable: "NO", Key: "PRI"},
+				{Name: "name", Type: "varchar(128)", Nullable: "YES"},
+			},
+		},
+	}
+	cfg := SyncConfig{
+		SourceConfig:        connection.ConnectionConfig{Type: "mysql", Database: "shop"},
+		TargetConfig:        connection.ConnectionConfig{Type: "mysql", Database: "app"},
+		TargetTableStrategy: "existing_only",
+		AutoAddColumns:      true,
+	}
+
+	plan, sourceCols, targetCols, err := buildSchemaMigrationPlan(cfg, "users", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	if len(sourceCols) != 3 || len(targetCols) != 2 {
+		t.Fatalf("unexpected source/target columns: %d / %d", len(sourceCols), len(targetCols))
+	}
+	if !plan.TargetTableExists {
+		t.Fatalf("expected target table to exist")
+	}
+	if len(plan.PreDataSQL) != 1 {
+		t.Fatalf("expected one pre-data SQL statement, got=%v", plan.PreDataSQL)
+	}
+	if !strings.Contains(plan.PreDataSQL[0], "ALTER TABLE `app`.`users` ADD COLUMN `aaaa` varchar(255) NULL") {
+		t.Fatalf("unexpected add-column SQL: %v", plan.PreDataSQL)
+	}
+	if !strings.Contains(plan.PlannedAction, "补齐缺失字段(1)") {
+		t.Fatalf("unexpected planned action: %s", plan.PlannedAction)
+	}
+}
+
 func TestBuildMySQLToPGLikeCreateTablePlan_GeneratesPostgresDDL(t *testing.T) {
 	t.Parallel()
 

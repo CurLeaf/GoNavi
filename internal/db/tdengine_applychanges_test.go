@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -24,9 +26,10 @@ var (
 )
 
 type tdengineRecordingState struct {
-	mu      sync.Mutex
-	queries []string
-	execErr error
+	mu           sync.Mutex
+	queries      []string
+	execErr      error
+	queryResults map[string]tdengineQueryResult
 }
 
 func (s *tdengineRecordingState) snapshotQueries() []string {
@@ -35,6 +38,12 @@ func (s *tdengineRecordingState) snapshotQueries() []string {
 	queries := make([]string, len(s.queries))
 	copy(queries, s.queries)
 	return queries
+}
+
+type tdengineQueryResult struct {
+	columns []string
+	rows    [][]driver.Value
+	err     error
 }
 
 type tdengineRecordingDriver struct{}
@@ -78,6 +87,50 @@ func (c *tdengineRecordingConn) ExecContext(_ context.Context, query string, arg
 
 var _ driver.ExecerContext = (*tdengineRecordingConn)(nil)
 
+func (c *tdengineRecordingConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if len(args) > 0 {
+		return nil, fmt.Errorf("unexpected query args: %d", len(args))
+	}
+	c.state.mu.Lock()
+	defer c.state.mu.Unlock()
+	c.state.queries = append(c.state.queries, query)
+	if result, ok := c.state.queryResults[query]; ok {
+		if result.err != nil {
+			return nil, result.err
+		}
+		return &tdengineRecordingRows{columns: result.columns, rows: result.rows}, nil
+	}
+	return &tdengineRecordingRows{}, nil
+}
+
+var _ driver.QueryerContext = (*tdengineRecordingConn)(nil)
+
+type tdengineRecordingRows struct {
+	columns []string
+	rows    [][]driver.Value
+	index   int
+}
+
+func (r *tdengineRecordingRows) Columns() []string {
+	return append([]string(nil), r.columns...)
+}
+
+func (r *tdengineRecordingRows) Close() error { return nil }
+
+func (r *tdengineRecordingRows) Next(dest []driver.Value) error {
+	if r.index >= len(r.rows) {
+		return io.EOF
+	}
+	row := r.rows[r.index]
+	for idx := range dest {
+		if idx < len(row) {
+			dest[idx] = row[idx]
+		}
+	}
+	r.index++
+	return nil
+}
+
 func openTDengineRecordingDB(t *testing.T) (*sql.DB, *tdengineRecordingState) {
 	t.Helper()
 	registerTDengineRecordingDriverOnce.Do(func() {
@@ -87,7 +140,7 @@ func openTDengineRecordingDB(t *testing.T) (*sql.DB, *tdengineRecordingState) {
 	tdengineRecordingDriverMu.Lock()
 	tdengineRecordingDriverSeq++
 	dsn := fmt.Sprintf("tdengine-recording-%d", tdengineRecordingDriverSeq)
-	state := &tdengineRecordingState{}
+	state := &tdengineRecordingState{queryResults: map[string]tdengineQueryResult{}}
 	tdengineRecordingDriverStates[dsn] = state
 	tdengineRecordingDriverMu.Unlock()
 
@@ -164,5 +217,37 @@ func TestTDengineApplyChanges_RejectsMixedUpdatesWithoutPartialWrite(t *testing.
 	}
 	if queries := state.snapshotQueries(); len(queries) != 0 {
 		t.Fatalf("期望拒绝 mixed changes 时不执行任何 SQL，实际=%#v", queries)
+	}
+}
+
+func TestTDengineGetTablesIncludesSuperTables(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openTDengineRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults["SHOW TABLES FROM `metrics`"] = tdengineQueryResult{
+		columns: []string{"name"},
+		rows: [][]driver.Value{
+			{"d001"},
+			{"d002"},
+		},
+	}
+	state.queryResults["SHOW STABLES FROM `metrics`"] = tdengineQueryResult{
+		columns: []string{"name"},
+		rows: [][]driver.Value{
+			{"meters"},
+		},
+	}
+	state.mu.Unlock()
+
+	td := &TDengineDB{conn: dbConn}
+	tables, err := td.GetTables("metrics")
+	if err != nil {
+		t.Fatalf("GetTables returned error: %v", err)
+	}
+
+	want := []string{"d001", "d002", "meters"}
+	if !reflect.DeepEqual(tables, want) {
+		t.Fatalf("unexpected tables: got=%v want=%v", tables, want)
 	}
 }

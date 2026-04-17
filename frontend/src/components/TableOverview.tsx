@@ -8,6 +8,7 @@ import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
+import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -167,6 +168,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [viewMode, setViewMode] = useState<ViewMode>('list');
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
+    const metadataDialect = useMemo(
+        () => getMetadataDialect(connection?.config?.type || '', connection?.config?.driver),
+        [connection?.config?.driver, connection?.config?.type]
+    );
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -181,11 +186,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            const dialect = getMetadataDialect(connection.config.type, connection.config.driver);
-            const sql = buildTableStatusSQL(dialect, tab.dbName || '', (tab as any).schemaName);
+            const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', (tab as any).schemaName);
             const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
-                setTables(parseTableStats(dialect, res.data));
+                setTables(parseTableStats(metadataDialect, res.data));
             } else {
                 message.error('获取表信息失败: ' + (res.message || '未知错误'));
             }
@@ -194,7 +198,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         } finally {
             setLoading(false);
         }
-    }, [connection, tab.dbName]);
+    }, [connection, metadataDialect, tab.dbName]);
 
     useEffect(() => {
         if (!autoFetchVisible) {
@@ -487,7 +491,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                                 type: 'query',
                                                 connectionId: tab.connectionId,
                                                 dbName: tab.dbName,
-                                                query: `SELECT * FROM ${t.name};`,
+                                                query: buildTableSelectQuery(metadataDialect, t.name),
                                             });
                                         }},
                                         { type: 'divider' },
@@ -573,7 +577,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                                     type: 'query',
                                                     connectionId: tab.connectionId,
                                                     dbName: tab.dbName,
-                                                    query: `SELECT * FROM ${t.name};`,
+                                                    query: buildTableSelectQuery(metadataDialect, t.name),
                                                 });
                                             }},
                                             { type: 'divider' },

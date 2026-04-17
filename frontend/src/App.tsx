@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -69,6 +69,7 @@ import {
   isShortcutMatch,
   normalizeShortcutCombo,
 } from './utils/shortcuts';
+import { resolveTitleBarToggleIconKey, shouldToggleMaximisedWindowForScaleFix } from './utils/windowStateUi';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
@@ -168,6 +169,9 @@ function App() {
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
   const tokenFontSize = Math.round(effectiveFontSize * effectiveUiScale);
+  const titleBarToggleIconKey = resolveTitleBarToggleIconKey(
+      windowState === 'fullscreen' ? 'fullscreen' : (windowState === 'maximized' ? 'maximized' : 'normal')
+  );
   const tokenFontSizeSM = Math.max(10, Math.round(tokenFontSize * 0.86));
   const tokenFontSizeLG = Math.max(tokenFontSize + 1, Math.round(tokenFontSize * 1.14));
   const tokenControlHeight = Math.max(24, Math.round(32 * effectiveUiScale));
@@ -639,7 +643,7 @@ function App() {
               });
 
               if (isMaximised) {
-                  if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                  if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
                       window.dispatchEvent(new Event('resize'));
                       lastFixAt = Date.now();
                       return;
@@ -2167,19 +2171,34 @@ function App() {
   }, [securityUpdateRepairSource]);
 
   const handleTitleBarWindowToggle = async () => {
+      const syncWindowStateFromRuntime = async () => {
+          try {
+              const [isFullscreen, isMaximised] = await Promise.all([
+                  WindowIsFullscreen().catch(() => false),
+                  WindowIsMaximised().catch(() => false),
+              ]);
+              useStore.getState().setWindowState(isFullscreen ? 'fullscreen' : (isMaximised ? 'maximized' : 'normal'));
+          } catch {
+              // ignore
+          }
+      };
+
       try {
           void emitWindowDiagnostic('action:titlebar-toggle:before');
           if (await WindowIsFullscreen()) {
               await WindowUnfullscreen();
+              await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
           if (useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
+              await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
           await WindowToggleMaximise();
+          await syncWindowStateFromRuntime();
           void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
       } catch (_) {
           // ignore
@@ -2583,7 +2602,7 @@ function App() {
                       />
                       <Button 
                         type="text" 
-                        icon={<BorderOutlined />} 
+                        icon={titleBarToggleIconKey === 'restore' ? <SwitcherOutlined /> : <BorderOutlined />} 
                         style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
                         onClick={() => { void handleTitleBarWindowToggle(); }} 
                       />

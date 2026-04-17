@@ -12,6 +12,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"GoNavi-Wails/internal/connection"
+
+	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 )
 
 const fakeClickHouseDriverName = "gonavi-fake-clickhouse"
@@ -126,6 +130,65 @@ func TestClickHouseGetDatabasesFallsBackToCurrentDatabase(t *testing.T) {
 	}
 	if queries[0] != listSQL || queries[1] != fallbackSQL {
 		t.Fatalf("unexpected query order: %v", queries)
+	}
+}
+
+func TestDetectClickHouseProtocolTreatsHTTPPortsAsHTTP(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   connection.ConnectionConfig
+		expected clickhouse.Protocol
+	}{
+		{
+			name: "http uri",
+			config: connection.ConnectionConfig{
+				URI: "http://127.0.0.1:8132/default",
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "default http port",
+			config: connection.ConnectionConfig{
+				Port: 8123,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "alternate http port 8132",
+			config: connection.ConnectionConfig{
+				Port: 8132,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "https port",
+			config: connection.ConnectionConfig{
+				Port: 8443,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "native port",
+			config: connection.ConnectionConfig{
+				Port: 9000,
+			},
+			expected: clickhouse.Native,
+		},
+		{
+			name: "native tls port",
+			config: connection.ConnectionConfig{
+				Port: 9440,
+			},
+			expected: clickhouse.Native,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if protocol := detectClickHouseProtocol(tt.config); protocol != tt.expected {
+				t.Fatalf("expected protocol %s, got %s", tt.expected.String(), protocol.String())
+			}
+		})
 	}
 }
 

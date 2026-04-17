@@ -153,7 +153,7 @@ export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
-export function RedisDeleteHashField(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
+export function RedisDeleteHashField(arg1:connection.ConnectionConfig,arg2:string,arg3:any):Promise<connection.QueryResult>;
 
 export function RedisDeleteKeys(arg1:connection.ConnectionConfig,arg2:Array<string>):Promise<connection.QueryResult>;
 

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 
 	"GoNavi-Wails/internal/connection"
 )
@@ -11,6 +12,7 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	columns = ensureUniqueQueryColumnNames(columns)
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil || len(colTypes) != len(columns) {
@@ -45,6 +47,46 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, []string, error) {
 		return resultData, columns, err
 	}
 	return resultData, columns, nil
+}
+
+func ensureUniqueQueryColumnNames(columns []string) []string {
+	if len(columns) == 0 {
+		return columns
+	}
+
+	uniqueColumns := make([]string, len(columns))
+	taken := make(map[string]struct{}, len(columns))
+	nextSuffix := make(map[string]int, len(columns))
+
+	for idx, column := range columns {
+		base := column
+		if base == "" {
+			base = fmt.Sprintf("column_%d", idx+1)
+		}
+
+		candidate := base
+		if _, exists := taken[candidate]; exists {
+			suffix := nextSuffix[base]
+			if suffix < 2 {
+				suffix = 2
+			}
+			for {
+				candidate = fmt.Sprintf("%s_%d", base, suffix)
+				if _, exists := taken[candidate]; !exists {
+					break
+				}
+				suffix++
+			}
+			nextSuffix[base] = suffix + 1
+		} else {
+			nextSuffix[base] = 2
+		}
+
+		uniqueColumns[idx] = candidate
+		taken[candidate] = struct{}{}
+	}
+
+	return uniqueColumns
 }
 
 // scanMultiRows 遍历 sql.Rows 中的所有结果集，将每个结果集作为 ResultSetData 返回。

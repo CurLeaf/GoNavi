@@ -51,6 +51,15 @@ import {
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
 import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
+import {
+    TEMPORAL_FORMATS,
+    formatFromDayjs,
+    getTemporalPickerType,
+    isTemporalColumnType,
+    parseToDayjs,
+    resolveTemporalEditorSaveValue,
+    type TemporalPickerType,
+} from './dataGridTemporal';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -165,51 +174,6 @@ const normalizeDateTimeString = (val: string) => {
     trimSimpleCache(normalizedDateTimeCache, DATE_TIME_CACHE_LIMIT);
     normalizedDateTimeCache.set(val, normalized);
     return normalized;
-};
-
-const isTemporalColumnType = (columnType?: string): boolean => {
-    const raw = String(columnType || '').trim().toLowerCase();
-    if (!raw) return false;
-    if (raw.includes('datetime') || raw.includes('timestamp')) return true;
-    const base = raw.split(/[ (]/)[0];
-    return base === 'date' || base === 'time' || base === 'year';
-};
-
-// 根据列类型返回 DatePicker 的 picker 模式
-type TemporalPickerType = 'datetime' | 'date' | 'time' | 'year' | null;
-const getTemporalPickerType = (columnType?: string): TemporalPickerType => {
-    const raw = String(columnType || '').trim().toLowerCase();
-    if (!raw) return null;
-    if (raw.includes('datetime') || raw.includes('timestamp')) return 'datetime';
-    const base = raw.split(/[ (]/)[0];
-    if (base === 'date') return 'date';
-    if (base === 'time') return 'time';
-    if (base === 'year') return 'year';
-    return null;
-};
-
-const TEMPORAL_FORMATS: Record<string, string> = {
-    datetime: 'YYYY-MM-DD HH:mm:ss',
-    date: 'YYYY-MM-DD',
-    time: 'HH:mm:ss',
-    year: 'YYYY',
-};
-
-// 将字符串值转为 dayjs 对象（用于 DatePicker），无效值返回 null
-const parseToDayjs = (val: any, pickerType: TemporalPickerType): dayjs.Dayjs | null => {
-    if (val === null || val === undefined || val === '') return null;
-    const str = String(val).trim();
-    if (!str || /^0{4}-0{2}-0{2}/.test(str)) return null; // 无效日期
-    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
-    const d = dayjs(str, fmt);
-    return d.isValid() ? d : dayjs(str).isValid() ? dayjs(str) : null;
-};
-
-// 将 dayjs 对象格式化为对应格式字符串
-const formatFromDayjs = (val: dayjs.Dayjs | null, pickerType: TemporalPickerType): string => {
-    if (!val || !val.isValid()) return '';
-    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
-    return val.format(fmt);
 };
 
 // --- Helper: Format Value ---
@@ -640,17 +604,14 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     setEditing(!editing);
   };
 
-  const save = async () => {
+  const save = async (pickerValue?: dayjs.Dayjs | null) => {
     try {
       if (!form || !editing) return;
       const fieldName = getCellFieldName(record, dataIndex);
       await form.validateFields([fieldName]);
       let nextValue = form.getFieldValue(fieldName);
-      // 日期时间类型: 将 dayjs 对象转回格式化字符串
-      if (isDateTimeField && nextValue && dayjs.isDayjs(nextValue)) {
-        nextValue = formatFromDayjs(nextValue as dayjs.Dayjs, pickerType);
-      } else if (isDateTimeField && !nextValue) {
-        nextValue = null;
+      if (isDateTimeField) {
+        nextValue = resolveTemporalEditorSaveValue(nextValue, pickerValue, pickerType);
       }
       toggleEdit();
       // 仅当值发生变化时才标记为修改，避免“双击-失焦”导致整行进入 modified 状态（蓝色高亮不清除）。
@@ -689,9 +650,9 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               ref={inputRef}
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
-              onChange={() => setTimeout(save, 0)}
+              onChange={(value) => setTimeout(() => { void save(value); }, 0)}
               onOpenChange={lockTableScroll}
-              onBlur={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(() => { void save(); }, 0)}
               needConfirm={false}
             />
           ) : pickerType === 'datetime' ? (
@@ -712,7 +673,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
                   }}
                 >此刻</a>
               )}
-              onOk={() => setTimeout(save, 0)}
+              onOk={(value) => setTimeout(() => { void save((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
               onOpenChange={(open) => {
                 pickerOpenRef.current = open;
                 lockTableScroll(open);
@@ -732,17 +693,17 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
               picker={pickerType as any}
-              onChange={() => setTimeout(save, 0)}
+              onChange={(value) => setTimeout(() => { void save(value); }, 0)}
               onOpenChange={lockTableScroll}
-              onBlur={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(() => { void save(); }, 0)}
               needConfirm={false}
             />
           )
         ) : (
           <Input
             ref={inputRef}
-            onPressEnter={save}
-            onBlur={save}
+            onPressEnter={() => { void save(); }}
+            onBlur={() => { void save(); }}
             onFocus={(e) => {
               try {
                 (e.target as HTMLInputElement)?.select?.();
