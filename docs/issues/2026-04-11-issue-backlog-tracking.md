@@ -36,6 +36,7 @@
 | #342 | 数据同步功能不能用，mysql数据库8.4版本选了结构同步，最后没同步成功 | Fixed | Pending |
 | #343 | redis删除hash类型中的key报错 | Fixed | Pending |
 | #346 | TDEngine只显示子表不显示超级表 | Fixed | Pending |
+| #348 | [Bug] sql查询同名字段，结果集不会自动添加别名 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -129,6 +130,12 @@
 - 根因：`TDengineDB.GetTables` 只查询 `SHOW TABLES`，没有把 `SHOW STABLES` 的超级表结果并入返回列表，导致 Sidebar 和依赖表列表的导出链路都只能看到子表。
 - 处理：为 TDEngine 表列表查询补充 `SHOW STABLES`，与 `SHOW TABLES` 结果统一去重合并后返回，保证普通表和超级表同时可见。
 - 验证：新增 `internal/db/tdengine_applychanges_test.go` 回归测试，覆盖 `GetTables` 返回普通表 + 超级表，并执行 `go test -tags gonavi_tdengine_driver ./internal/db -count=1`。
+
+### #348
+
+- 根因：查询结果扫描层直接使用数据库返回的原始列名作为 `map[string]interface{}` 键。同名列场景下，后面的值会覆盖前面的值，返回给前端的 `fields/columns` 也保留重复列名，导致结果集既无法自动补别名，也拿不到两列值。
+- 处理：为 `scanRows` 增加稳定列名归一化逻辑。首次出现保留原名，重复列自动追加 `_2`、`_3` 后缀；空列名回退为 `column_N`。返回的列列表和每行数据统一使用同一套唯一列名，避免覆盖。
+- 验证：新增 `internal/db/scan_rows_test.go` 回归测试，覆盖重复列 `id/id/name` 自动归一化为 `id/id_2/name` 且两列值均保留，并执行 `go test ./internal/db -run TestScanRowsRenamesDuplicateColumns -count=1` 与 `go test ./internal/db -count=1`。
 
 ### #330
 
