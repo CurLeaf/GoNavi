@@ -40,6 +40,7 @@
 | #349 | [Bug] postgres对于表名大小写敏感，且为大写时，通过选中表右键新建查询时生成的sql语句没有自动带上引号"" | Fixed | Pending |
 | #363 | [Bug] 日期字段无法设置值 | Fixed | Pending |
 | #368 | [Bug] 窗口状态问题 | Fixed | Pending |
+| #369 | [Bug] AI回复Sql语句时 md 没有正常渲染 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -157,6 +158,12 @@
 - 根因：Windows 窗口激活修复逻辑在窗口已最大化时过于激进。应用从后台切回前台时，`activation` 路径只要判定出 viewport drift 就会直接执行两次 `WindowToggleMaximise()`，导致“重新做一遍放大动画”；与此同时，标题栏最大化按钮图标一直写死为 `BorderOutlined`，即使窗口已最大化也不会切成还原态。
 - 处理：抽出 `windowStateUi` 规则 helper，将“最大化窗口的 scale-fix toggle”收敛为仅在 `ratio-change` 且确实存在 drift 时才执行；激活返回时只广播 `resize`，不再重做最大化动画。并让标题栏按钮根据 `windowState` 动态切换 maximize/restore 图标，同时在标题栏切换动作后立即同步 store 中的窗口状态。
 - 验证：新增 `frontend/src/utils/windowStateUi.test.ts`，覆盖“activation 不应重 toggle 最大化窗口”和“maximized 状态切换为 restore 图标”两条规则，并执行 `frontend` 下 `npm exec vitest run src/utils/windowStateUi.test.ts` 与 `npm run build`。
+
+### #369
+
+- 根因：AI 消息 markdown 渲染链路把模型返回内容原样交给 `react-markdown`，没有对损坏的 fenced code block 做任何预处理。当模型输出 ` ```sqlSELECT ...` 这类“语言标记后缺少换行”的内容时，markdown 解析器会把整段当普通文本/行内代码处理，导致 SQL 代码块和换行都失效。
+- 处理：新增 `aiMarkdown` 预处理 helper，在渲染前补齐 opening fence 后缺失的换行，并为 closing fence 缺少前置换行的场景补齐收尾；`AIMessageBubble` 统一使用规范化后的内容喂给 `react-markdown`，恢复 SQL/代码块的正常渲染。
+- 验证：新增 `frontend/src/utils/aiMarkdown.test.ts`，覆盖 ` ```sqlSELECT ...` 自动归一化为 ` ```sql\\nSELECT ...` 的坏样例，并执行 `frontend` 下 `npm exec vitest run src/utils/aiMarkdown.test.ts` 与 `npm run build`。
 
 ### #330
 
