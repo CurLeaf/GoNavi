@@ -1700,8 +1700,36 @@ func exportInferObjectName(row map[string]interface{}) string {
 	return ""
 }
 
+func trimLeadingSQLComments(sql string) string {
+	trimmed := strings.TrimSpace(sql)
+	for trimmed != "" {
+		switch {
+		case strings.HasPrefix(trimmed, "--"):
+			if newline := strings.IndexByte(trimmed, '\n'); newline >= 0 {
+				trimmed = strings.TrimSpace(trimmed[newline+1:])
+				continue
+			}
+			return ""
+		case strings.HasPrefix(trimmed, "#"):
+			if newline := strings.IndexByte(trimmed, '\n'); newline >= 0 {
+				trimmed = strings.TrimSpace(trimmed[newline+1:])
+				continue
+			}
+			return ""
+		case strings.HasPrefix(trimmed, "/*"):
+			if end := strings.Index(trimmed, "*/"); end >= 0 {
+				trimmed = strings.TrimSpace(trimmed[end+2:])
+				continue
+			}
+			return ""
+		}
+		break
+	}
+	return trimmed
+}
+
 func looksLikeSelectOrWith(sql string) bool {
-	trimmed := strings.TrimSpace(strings.TrimSuffix(sql, ";"))
+	trimmed := trimLeadingSQLComments(strings.TrimSuffix(sql, ";"))
 	if trimmed == "" {
 		return false
 	}
@@ -1947,8 +1975,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	}
 
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
-	lowerQuery := strings.ToLower(strings.TrimSpace(query))
-	if !(strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "with")) {
+	if !looksLikeSelectOrWith(query) {
 		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
 	}
 
