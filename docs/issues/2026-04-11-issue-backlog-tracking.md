@@ -33,6 +33,7 @@
 | #333 | AI 功能添加供应商测试正常，但问答显示失败 | Fixed | Pending |
 | #337 | 自动更新无效 | Fixed | Pending |
 | #338 | 连接clickhouse不能通过8132端口 | Fixed | Pending |
+| #342 | 数据同步功能不能用，mysql数据库8.4版本选了结构同步，最后没同步成功 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -108,6 +109,12 @@
 - 根因：ClickHouse 连接协议识别只把 `8123/8443` 视为 HTTP 端口，`8132` 会被误判为 native，导致连接阶段优先走错协议。
 - 处理：将 `8132` 纳入 ClickHouse HTTP 端口识别，并同步更新自动切换日志和错误提示中的端口说明，避免排障信息继续误导。
 - 验证：补充 `internal/db/clickhouse_impl_test.go` 回归测试，覆盖 `8132`、`8123`、`8443` 的 HTTP 判定以及 `9000/9440` 的 native 判定，并执行 `go test -tags gonavi_clickhouse_driver ./internal/db -run 'TestClickHouse(PingValidatesQueryPath|GetDatabasesFallsBackToCurrentDatabase|DetectClickHouseProtocolTreatsHTTPPortsAsHTTP)' -count=1`。
+
+### #342
+
+- 根因：结构同步现有执行链路统一依赖 `buildSchemaMigrationPlan(...).PreDataSQL`。但 legacy planner 在“目标表已存在”分支里只给 `MySQL -> Kingbase` 生成补字段 SQL，`MySQL -> MySQL` 即使目标表缺列也只记 warning，不会产生任何可执行结构变更；同时前端 schema 模式的预览入口完全按数据差异计数启用，导致结构同步场景无法点开预览。
+- 处理：将 existing-target 分支的自动补字段逻辑改为复用通用 `buildAddColumnSQLForPair`，让 `MySQL -> MySQL` 也能生成并执行缺失字段补齐 SQL；同时为 analyze/preview 响应补充 `schemaDiffCount`、`schemaStatements`、`schemaSummary` 和 warning 信息，前端 schema 模式下可直接查看结构变更语句与风险提示，SQL 预览也会包含结构语句。
+- 验证：新增 `internal/sync/schema_migration_test.go` 回归测试，覆盖 `MySQL -> MySQL` 已存在目标表时生成补字段 SQL，并执行 `go test ./internal/sync -count=1` 与 `frontend` 下 `npm run build`。
 
 ### #330
 

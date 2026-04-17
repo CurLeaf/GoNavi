@@ -24,6 +24,7 @@ type TableDiffSummary = {
   updates?: number;
   deletes?: number;
   same?: number;
+  schemaDiffCount?: number;
   message?: string;
   targetTableExists?: boolean;
   plannedAction?: string;
@@ -123,6 +124,15 @@ const buildSqlPreview = (
     ? previewData.columnTypes as Record<string, string>
     : {};
   const statements: string[] = [];
+  const schemaStatements = Array.isArray(previewData.schemaStatements)
+    ? previewData.schemaStatements
+        .map((item: any) => String(item || '').trim())
+        .filter((item: string) => item.length > 0)
+    : [];
+
+  schemaStatements.forEach((statement: string) => {
+    statements.push(statement.endsWith(';') ? statement : `${statement};`);
+  });
 
   const insertRows = Array.isArray(previewData.inserts) ? previewData.inserts : [];
   const updateRows = Array.isArray(previewData.updates) ? previewData.updates : [];
@@ -478,7 +488,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
           tables: selectedTables,
-          content: "data",
+          content: syncContent,
           mode: "insert_update",
           autoAddColumns,
           targetTableStrategy,
@@ -595,6 +605,18 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       const ops = tableOptions[previewTable] || { insert: true, update: true, delete: false };
       return buildSqlPreview(previewData, previewTable, targetType, ops);
   }, [previewData, previewTable, targetConnId, connections, tableOptions]);
+  const previewHasSchemaStatements = useMemo(
+      () => Array.isArray(previewData?.schemaStatements) && previewData.schemaStatements.length > 0,
+      [previewData],
+  );
+  const previewSchemaWarnings = useMemo(
+      () => Array.isArray(previewData?.schemaWarnings) ? previewData.schemaWarnings as string[] : [],
+      [previewData],
+  );
+  const previewHasDataDiff = useMemo(
+      () => Number(previewData?.totalInserts || 0) + Number(previewData?.totalUpdates || 0) + Number(previewData?.totalDeletes || 0) > 0,
+      [previewData],
+  );
 
   const analysisWarnings = useMemo(() => {
       const items: string[] = [];
@@ -1060,8 +1082,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                   render: (_: any, r: any) => {
                                       const can = !!r.canSync;
                                       const hasDiff = Number(r.inserts || 0) + Number(r.updates || 0) + Number(r.deletes || 0) > 0;
+                                      const hasSchemaDiff = Number(r.schemaDiffCount || 0) > 0;
                                       return (
-                                          <Button size="small" disabled={!can || !hasDiff || analyzing} onClick={() => openPreview(r.table)}>
+                                          <Button size="small" disabled={!can || !(hasDiff || hasSchemaDiff) || analyzing} onClick={() => openPreview(r.table)}>
                                               查看
                                           </Button>
                                       );
@@ -1168,12 +1191,59 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                 <Alert
                     type="info"
                     showIcon
-                    message={`插入 ${previewData.totalInserts || 0}，更新 ${previewData.totalUpdates || 0}，删除 ${previewData.totalDeletes || 0}（预览最多展示 200 条/类型）`}
+                    message={
+                        previewHasDataDiff
+                            ? `插入 ${previewData.totalInserts || 0}，更新 ${previewData.totalUpdates || 0}，删除 ${previewData.totalDeletes || 0}（预览最多展示 200 条/类型）`
+                            : (previewData.schemaSummary || `检测到 ${previewSql.statementCount} 条结构变更语句`)
+                    }
                 />
+                {previewSchemaWarnings.length > 0 && (
+                    <Alert
+                        style={{ marginTop: 12 }}
+                        type="warning"
+                        showIcon
+                        message="结构预览包含风险或降级项"
+                        description={
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {previewSchemaWarnings.slice(0, 8).map((item) => <li key={item}>{item}</li>)}
+                                {previewSchemaWarnings.length > 8 && <li>还有 {previewSchemaWarnings.length - 8} 项未展开</li>}
+                            </ul>
+                        }
+                    />
+                )}
                 <Divider />
                 <Tabs
                     items={[
-                        {
+                        ...(previewHasSchemaStatements ? [{
+                            key: 'schema',
+                            label: `结构(${Array.isArray(previewData.schemaStatements) ? previewData.schemaStatements.length : 0})`,
+                            children: (
+                                <div>
+                                    <Text type="secondary">
+                                        {previewData.schemaSummary || '以下为本次结构同步计划执行的语句。'}
+                                    </Text>
+                                    <pre
+                                        style={{
+                                            marginTop: 8,
+                                            marginBottom: 0,
+                                            padding: 10,
+                                            border: '1px solid #f0f0f0',
+                                            borderRadius: 6,
+                                            background: '#fafafa',
+                                            maxHeight: 420,
+                                            overflow: 'auto',
+                                            whiteSpace: 'pre-wrap',
+                                            wordBreak: 'break-word'
+                                        }}
+                                    >
+                                        {Array.isArray(previewData.schemaStatements) && previewData.schemaStatements.length > 0
+                                            ? previewData.schemaStatements.join('\n')
+                                            : '-- 当前表结构无可执行变更'}
+                                    </pre>
+                                </div>
+                            )
+                        }] : []),
+                        ...(previewHasDataDiff ? [{
                             key: 'insert',
                             label: `插入(${previewData.totalInserts || 0})`,
                             children: (
@@ -1273,7 +1343,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                     />
                                 </div>
                             )
-                        },
+                        }] : []),
                         {
                             key: 'sql',
                             label: `SQL(${previewSql.statementCount})`,
@@ -1282,10 +1352,18 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                     <Alert
                                         type="info"
                                         showIcon
-                                        message="SQL 预览会按当前勾选的插入/更新/删除与行选择范围生成，用于审核确认。"
+                                        message={
+                                            previewHasDataDiff
+                                                ? "SQL 预览会按当前勾选的插入/更新/删除与行选择范围生成，用于审核确认。"
+                                                : "SQL 预览展示将执行的结构变更语句，用于审核确认。"
+                                        }
                                     />
                                     <div style={{ marginTop: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <Text type="secondary">共 {previewSql.statementCount} 条语句（预览数据最多 200 条/类型）</Text>
+                                        <Text type="secondary">
+                                            {previewHasDataDiff
+                                                ? `共 ${previewSql.statementCount} 条语句（预览数据最多 200 条/类型）`
+                                                : `共 ${previewSql.statementCount} 条结构变更语句`}
+                                        </Text>
                                         <Button
                                             size="small"
                                             disabled={!previewSql.sqlText}
@@ -1314,7 +1392,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                                             wordBreak: 'break-word'
                                         }}
                                     >
-                                        {previewSql.sqlText || '-- 当前勾选范围下无 SQL 可预览'}
+                                        {previewSql.sqlText || (previewHasDataDiff ? '-- 当前勾选范围下无 SQL 可预览' : '-- 当前表结构无可执行变更')}
                                     </pre>
                                 </div>
                             )
