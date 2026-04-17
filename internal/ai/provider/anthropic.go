@@ -283,7 +283,15 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		return nil, err
+		if len(req.Tools) > 0 && isHTTP400Error(err) {
+			body.Tools = nil
+			respBody, err = p.doRequest(ctx, body)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	defer respBody.Close()
 
@@ -366,7 +374,15 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		return err
+		if len(req.Tools) > 0 && isHTTP400Error(err) {
+			body.Tools = nil
+			respBody, err = p.doRequest(ctx, body)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 	defer respBody.Close()
 

@@ -30,6 +30,7 @@
 | #329 | 如果调整了左侧导航栏的宽度后，建议左侧导航栏内增加横向滚动查看 | Fixed | `fcade0f` |
 | #330 | 建议在查询结果表格中增加自适应内容列宽的功能 | Fixed | `632e57e` |
 | #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | `ca76440` |
+| #333 | AI 功能添加供应商测试正常，但问答显示失败 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -87,6 +88,12 @@
 - 根因：连接失败时存在双层重试叠加。`DBGetDatabases / DBGetTables / DBQuery` 在缓存失效后本来就会主动重建连接一次，而 `connectDatabaseWithStartupRetry` 在稳定期仍会额外放行一次瞬时错误自动重试，导致一次后台探测会被放大成多次真实建连。
 - 处理：将连接自动重试范围收敛到应用启动保护窗口内；稳定期下所有连接探测与重建都只执行一次，避免后台挂起场景持续放大失败流量。
 - 验证：补充并更新 `internal/app/app_startup_connect_retry_test.go`，覆盖稳定期瞬时失败不重试、不再输出重试提示，以及启动期仍保留完整重试预算。
+
+### #333
+
+- 根因：AI 供应商“测试连接”走的是轻量健康检查，不会带 `tools`；而正式聊天默认会把本地工具定义一起发给模型。当前 `Anthropic` 协议路径缺少和 `OpenAI` 一样的 400 自动降级逻辑，遇到不支持工具调用的兼容端点时会直接报错。
+- 处理：为 `AnthropicProvider.Chat / ChatStream` 补充 400 降级回退。首次带 `tools` 请求若返回 400/422/404，则自动去掉 `tools` 重试一次，允许不支持 function calling 的兼容端点继续完成普通问答。
+- 验证：补充 `internal/ai/provider/anthropic_test.go` 回归测试，覆盖非流式与流式两条链路下“首请求因 tools 返回 400，回退后成功”的场景，并执行 `go test ./internal/ai/provider -count=1`。
 
 ### #330
 
