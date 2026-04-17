@@ -9,7 +9,7 @@ import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, Trigg
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
-import { buildAlterTablePreviewSql } from './tableDesignerSchemaSql';
+import { buildAlterTablePreviewSql, hasAlterTableDraftChanges } from './tableDesignerSchemaSql';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 
@@ -1396,6 +1396,19 @@ ${selectedTrigger.statement}`;
       };
   };
 
+  const hasUnsavedDraftChanges = useMemo(() => {
+      if (isNewTable || readOnly) {
+          return false;
+      }
+      const tableInfo = resolveTableInfo();
+      return hasAlterTableDraftChanges({
+          dbType: tableInfo.dbType,
+          tableName: tableInfo.qualifiedName,
+          originalColumns,
+          columns,
+      });
+  }, [columns, connections, isNewTable, originalColumns, readOnly, tab.connectionId, tab.dbName, tab.tableName]);
+
   const supportsIndexSchemaOps = (): boolean => {
       const dbType = getDbType();
       if (!dbType) return false;
@@ -2143,6 +2156,24 @@ END;`;
       }
   };
 
+  const handleRefreshDesigner = () => {
+      if (!hasUnsavedDraftChanges) {
+          void fetchData();
+          return;
+      }
+
+      Modal.confirm({
+          title: '存在未保存的字段变更',
+          icon: <ExclamationCircleOutlined />,
+          content: '刷新后会丢失当前尚未保存的字段调整，是否仍要刷新并覆盖当前草稿？',
+          okText: '仍然刷新',
+          cancelText: '取消',
+          onOk: async () => {
+              await fetchData();
+          },
+      });
+  };
+
 	  const handleExecuteSave = async () => {
 	      const result = await executeSchemaStatements(previewSql);
 	      if (!result.ok) {
@@ -2519,7 +2550,7 @@ END;`;
                 </>
             )}
             {!readOnly && <Button size="small" icon={<SaveOutlined />} type="primary" onClick={generateDDL}>保存</Button>}
-            {!isNewTable && <Button size="small" icon={<ReloadOutlined />} onClick={fetchData}>刷新</Button>}
+            {!isNewTable && <Button size="small" icon={<ReloadOutlined />} onClick={handleRefreshDesigner}>刷新</Button>}
             {!isNewTable && !readOnly && supportsTableCommentOps() && (
                 <Button size="small" icon={<EditOutlined />} onClick={openTableCommentModal}>表备注</Button>
             )}
@@ -2983,10 +3014,24 @@ END;`;
             okText="执行"
             cancelText="取消"
         >
-            <div style={{ maxHeight: '400px', overflow: 'auto' }}>
-                <pre style={{ background: darkMode ? '#1e1e1e' : '#f5f5f5', color: darkMode ? '#d4d4d4' : 'inherit', padding: '10px', borderRadius: '4px', border: darkMode ? '1px solid #333' : '1px solid #eee', whiteSpace: 'pre-wrap' }}>
-                    {previewSql}
-                </pre>
+            <div style={{ maxHeight: '400px', overflow: 'hidden', borderRadius: 8, border: darkMode ? '1px solid #333' : '1px solid #eee' }}>
+                <Editor
+                    height="360px"
+                    defaultLanguage="sql"
+                    language="sql"
+                    theme={darkMode ? 'transparent-dark' : 'transparent-light'}
+                    value={previewSql}
+                    options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        wordWrap: 'on',
+                        automaticLayout: true,
+                        padding: { top: 8, bottom: 8 },
+                    }}
+                />
             </div>
             <p style={{ marginTop: 10, color: '#faad14' }}>请仔细检查 SQL，执行后不可撤销。</p>
         </Modal>

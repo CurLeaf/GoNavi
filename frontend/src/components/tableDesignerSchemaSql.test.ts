@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAlterTablePreviewSql,
+  hasAlterTableDraftChanges,
   type BuildAlterTablePreviewInput,
   type EditableColumnSnapshot,
 } from './tableDesignerSchemaSql';
@@ -29,6 +30,18 @@ const buildInput = (overrides: Partial<BuildAlterTablePreviewInput>): BuildAlter
 });
 
 describe('tableDesignerSchemaSql', () => {
+  it('detects when alter table drafts contain unsaved column changes', () => {
+    expect(hasAlterTableDraftChanges(buildInput({ dbType: 'mysql' }))).toBe(true);
+    expect(
+      hasAlterTableDraftChanges(
+        buildInput({
+          dbType: 'mysql',
+          columns: [baseColumn({ _key: 'id', name: 'id', key: 'PRI', nullable: 'NO' })],
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps mysql alter preview syntax with column position clauses', () => {
     const sql = buildAlterTablePreviewSql(buildInput({ dbType: 'mysql' }));
 

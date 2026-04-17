@@ -320,6 +320,10 @@ const TabManager: React.FC = () => {
               box-shadow: 0 0 0 2px rgba(9, 109, 217, 0.32);
               background: rgba(9, 109, 217, 0.08);
             }
+            body[data-theme='light'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
+              background: rgba(24, 144, 255, 0.10) !important;
+              border-color: rgba(24, 144, 255, 0.28) !important;
+            }
             body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
               background: rgba(255, 214, 102, 0.12) !important;
               border-color: rgba(255, 214, 102, 0.4) !important;

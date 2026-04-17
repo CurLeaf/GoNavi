@@ -869,8 +869,8 @@ function App() {
       ...sidebarQuickActionBaseStyle,
       flex: '1 1 0',
       border: 'none',
-      background: 'linear-gradient(135deg, rgba(255,214,102,0.96) 0%, rgba(240,183,39,0.92) 100%)',
-      color: '#2a1f00',
+      background: 'linear-gradient(135deg, rgba(34,197,94,0.96) 0%, rgba(22,163,74,0.92) 100%)',
+      color: '#f3fff7',
     }), [sidebarQuickActionBaseStyle]);
 
   const utilityModalShellStyle = useMemo(() => ({
@@ -1855,6 +1855,7 @@ function App() {
   };
 
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
@@ -1888,26 +1889,11 @@ function App() {
               icon: <ToolOutlined />,
               onClick: () => setIsToolsModalOpen(true),
           },
-          proxy: {
-              key: 'proxy',
-              title: '代理',
-              icon: <GlobalOutlined />,
-              onClick: () => {
-                  setSecurityUpdateRepairSource(null);
-                  setIsProxyModalOpen(true);
-              },
-          },
-          theme: {
-              key: 'theme',
-              title: '主题',
-              icon: <SkinOutlined />,
-              onClick: () => setIsThemeModalOpen(true),
-          },
-          about: {
-              key: 'about',
-              title: '关于',
-              icon: <InfoCircleOutlined />,
-              onClick: () => setIsAboutOpen(true),
+          settings: {
+              key: 'settings',
+              title: '设置',
+              icon: <SettingOutlined />,
+              onClick: () => setIsSettingsModalOpen(true),
           },
       } as const;
 
@@ -2648,7 +2634,7 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sidebarUtilityItems.length}, minmax(0, 1fr))`, gap: 8, width: '100%' }}>
                         {sidebarUtilityItems.map((item) => (
                             <Tooltip key={item.key} title={item.title}>
                                 <Button type="text" icon={item.icon} style={utilityButtonStyle} onClick={item.onClick} />
@@ -2658,11 +2644,11 @@ function App() {
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: isSidebarCompact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
-                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
-                            新建查询
-                        </Button>
                         <Button icon={<PlusOutlined />} onClick={handleCreateConnection} title="新建连接" style={sidebarCreateConnectionActionStyle}>
                             新建连接
+                        </Button>
+                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
+                            新建查询
                         </Button>
                     </div>
                 </div>
@@ -2905,6 +2891,71 @@ function App() {
                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
                     <span>{item.title}</span>
                     <span style={utilityActionHintStyle}>{item.description}</span>
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </Modal>
+          <Modal
+            title={renderUtilityModalTitle(<SettingOutlined />, '设置中心', '集中处理代理、主题、AI 与关于等通用配置入口。')}
+            open={isSettingsModalOpen}
+            onCancel={() => setIsSettingsModalOpen(false)}
+            footer={null}
+            width={560}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+          >
+            <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
+              {[
+                {
+                  key: 'theme',
+                  icon: <SkinOutlined />,
+                  title: '主题与外观',
+                  description: '切换亮暗主题并调整界面观感。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setThemeModalSection('theme');
+                    setIsThemeModalOpen(true);
+                  },
+                },
+                {
+                  key: 'proxy',
+                  icon: <GlobalOutlined />,
+                  title: '全局代理',
+                  description: '统一配置更新检查、驱动管理和公共网络出口。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setSecurityUpdateRepairSource(null);
+                    setIsProxyModalOpen(true);
+                  },
+                },
+                {
+                  key: 'ai',
+                  icon: <RobotOutlined />,
+                  title: 'AI 设置',
+                  description: '管理模型供应商、密钥和默认行为。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    handleOpenAISettings();
+                  },
+                },
+                {
+                  key: 'about',
+                  icon: <InfoCircleOutlined />,
+                  title: '关于 GoNavi',
+                  description: '查看版本信息、仓库地址和更新状态。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setIsAboutOpen(true);
+                  },
+                },
+              ].map((item) => (
+                <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
+                  <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                    {item.icon}
+                  </span>
+                  <span style={{ display: 'grid', gap: 4, textAlign: 'left', minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: overlayTheme.titleText }}>{item.title}</span>
+                    <span style={{ fontSize: 12, color: overlayTheme.mutedText, whiteSpace: 'normal' }}>{item.description}</span>
                   </span>
                 </Button>
               ))}

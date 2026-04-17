@@ -260,3 +260,6 @@ export const buildAlterTablePreviewSql = (input: BuildAlterTablePreviewInput): s
   }
   return buildMySqlAlterPreviewSql({ ...input, dbType });
 };
+
+export const hasAlterTableDraftChanges = (input: BuildAlterTablePreviewInput): boolean =>
+  buildAlterTablePreviewSql(input).trim().length > 0;

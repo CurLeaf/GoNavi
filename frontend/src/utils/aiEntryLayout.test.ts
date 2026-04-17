@@ -8,8 +8,8 @@ import {
 } from './aiEntryLayout';
 
 describe('ai entry layout', () => {
-  it('keeps the sidebar utility group free of the AI entry', () => {
-    expect(SIDEBAR_UTILITY_ITEM_KEYS).toEqual(['tools', 'proxy', 'theme', 'about']);
+  it('keeps the sidebar utility group compact and free of the AI entry', () => {
+    expect(SIDEBAR_UTILITY_ITEM_KEYS).toEqual(['tools', 'settings']);
   });
 
   it('anchors the AI entry to the content edge', () => {
