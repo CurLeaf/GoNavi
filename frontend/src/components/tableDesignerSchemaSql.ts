@@ -140,14 +140,21 @@ const buildMySqlAlterPreviewSql = (input: BuildAlterTablePreviewInput): string =
       return;
     }
 
-    if (
-      curr.name !== orig.name ||
+    const definitionChanged =
       curr.type !== orig.type ||
       curr.nullable !== orig.nullable ||
       curr.default !== orig.default ||
       (curr.comment || '') !== (orig.comment || '') ||
-      Boolean(curr.isAutoIncrement) !== Boolean(orig.isAutoIncrement)
-    ) {
+      Boolean(curr.isAutoIncrement) !== Boolean(orig.isAutoIncrement);
+
+    if (curr.name !== orig.name) {
+      alters.push(
+        `CHANGE COLUMN ${quoteIdentifierPart(orig.name, 'mysql')} ${colDef} ${positionSql}`.trim(),
+      );
+      return;
+    }
+
+    if (definitionChanged) {
       alters.push(`MODIFY COLUMN ${colDef} ${positionSql}`.trim());
     }
   });
@@ -253,3 +260,6 @@ export const buildAlterTablePreviewSql = (input: BuildAlterTablePreviewInput): s
   }
   return buildMySqlAlterPreviewSql({ ...input, dbType });
 };
+
+export const hasAlterTableDraftChanges = (input: BuildAlterTablePreviewInput): boolean =>
+  buildAlterTablePreviewSql(input).trim().length > 0;

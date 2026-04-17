@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAlterTablePreviewSql,
+  hasAlterTableDraftChanges,
   type BuildAlterTablePreviewInput,
   type EditableColumnSnapshot,
 } from './tableDesignerSchemaSql';
@@ -29,6 +30,18 @@ const buildInput = (overrides: Partial<BuildAlterTablePreviewInput>): BuildAlter
 });
 
 describe('tableDesignerSchemaSql', () => {
+  it('detects when alter table drafts contain unsaved column changes', () => {
+    expect(hasAlterTableDraftChanges(buildInput({ dbType: 'mysql' }))).toBe(true);
+    expect(
+      hasAlterTableDraftChanges(
+        buildInput({
+          dbType: 'mysql',
+          columns: [baseColumn({ _key: 'id', name: 'id', key: 'PRI', nullable: 'NO' })],
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('keeps mysql alter preview syntax with column position clauses', () => {
     const sql = buildAlterTablePreviewSql(buildInput({ dbType: 'mysql' }));
 
@@ -50,5 +63,17 @@ describe('tableDesignerSchemaSql', () => {
     expect(sql).not.toContain('`');
     expect(sql).not.toContain('AFTER');
     expect(sql).not.toContain(' FIRST');
+  });
+
+  it('uses mysql change column syntax when renaming a column', () => {
+    const sql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'mysql',
+      originalColumns: [baseColumn({ _key: 'name', name: 'name', type: 'varchar(64)', nullable: 'YES' })],
+      columns: [baseColumn({ _key: 'name', name: 'display_name', type: 'varchar(64)', nullable: 'YES' })],
+    }));
+
+    expect(sql).toContain('CHANGE COLUMN `name` `display_name` varchar(64) NULL');
+    expect(sql).toContain('FIRST');
+    expect(sql).not.toContain('MODIFY COLUMN `display_name`');
   });
 });

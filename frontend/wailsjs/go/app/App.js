@@ -290,8 +290,16 @@ export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
 }
 
+export function ListSQLDirectory(arg1) {
+  return window['go']['app']['App']['ListSQLDirectory'](arg1);
+}
+
 export function PreviewImportFile(arg1) {
   return window['go']['app']['App']['PreviewImportFile'](arg1);
+}
+
+export function ReadSQLFile(arg1) {
+  return window['go']['app']['App']['ReadSQLFile'](arg1);
 }
 
 export function RedisConnect(arg1) {
@@ -428,6 +436,10 @@ export function RetrySecurityUpdateCurrentRound(arg1) {
 
 export function SaveConnection(arg1) {
   return window['go']['app']['App']['SaveConnection'](arg1);
+}
+
+export function SelectSQLDirectory(arg1) {
+  return window['go']['app']['App']['SelectSQLDirectory'](arg1);
 }
 
 export function SaveGlobalProxy(arg1) {

@@ -31,7 +31,7 @@ import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     resolveDataTableColumnWidth,
@@ -50,6 +50,16 @@ import {
 } from './dataGridCopyInsert';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
+import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
+import {
+    TEMPORAL_FORMATS,
+    formatFromDayjs,
+    getTemporalPickerType,
+    isTemporalColumnType,
+    parseToDayjs,
+    resolveTemporalEditorSaveValue,
+    type TemporalPickerType,
+} from './dataGridTemporal';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -164,51 +174,6 @@ const normalizeDateTimeString = (val: string) => {
     trimSimpleCache(normalizedDateTimeCache, DATE_TIME_CACHE_LIMIT);
     normalizedDateTimeCache.set(val, normalized);
     return normalized;
-};
-
-const isTemporalColumnType = (columnType?: string): boolean => {
-    const raw = String(columnType || '').trim().toLowerCase();
-    if (!raw) return false;
-    if (raw.includes('datetime') || raw.includes('timestamp')) return true;
-    const base = raw.split(/[ (]/)[0];
-    return base === 'date' || base === 'time' || base === 'year';
-};
-
-// 根据列类型返回 DatePicker 的 picker 模式
-type TemporalPickerType = 'datetime' | 'date' | 'time' | 'year' | null;
-const getTemporalPickerType = (columnType?: string): TemporalPickerType => {
-    const raw = String(columnType || '').trim().toLowerCase();
-    if (!raw) return null;
-    if (raw.includes('datetime') || raw.includes('timestamp')) return 'datetime';
-    const base = raw.split(/[ (]/)[0];
-    if (base === 'date') return 'date';
-    if (base === 'time') return 'time';
-    if (base === 'year') return 'year';
-    return null;
-};
-
-const TEMPORAL_FORMATS: Record<string, string> = {
-    datetime: 'YYYY-MM-DD HH:mm:ss',
-    date: 'YYYY-MM-DD',
-    time: 'HH:mm:ss',
-    year: 'YYYY',
-};
-
-// 将字符串值转为 dayjs 对象（用于 DatePicker），无效值返回 null
-const parseToDayjs = (val: any, pickerType: TemporalPickerType): dayjs.Dayjs | null => {
-    if (val === null || val === undefined || val === '') return null;
-    const str = String(val).trim();
-    if (!str || /^0{4}-0{2}-0{2}/.test(str)) return null; // 无效日期
-    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
-    const d = dayjs(str, fmt);
-    return d.isValid() ? d : dayjs(str).isValid() ? dayjs(str) : null;
-};
-
-// 将 dayjs 对象格式化为对应格式字符串
-const formatFromDayjs = (val: dayjs.Dayjs | null, pickerType: TemporalPickerType): string => {
-    if (!val || !val.isValid()) return '';
-    const fmt = TEMPORAL_FORMATS[pickerType || 'datetime'];
-    return val.format(fmt);
 };
 
 // --- Helper: Format Value ---
@@ -639,17 +604,14 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     setEditing(!editing);
   };
 
-  const save = async () => {
+  const save = async (pickerValue?: dayjs.Dayjs | null) => {
     try {
       if (!form || !editing) return;
       const fieldName = getCellFieldName(record, dataIndex);
       await form.validateFields([fieldName]);
       let nextValue = form.getFieldValue(fieldName);
-      // 日期时间类型: 将 dayjs 对象转回格式化字符串
-      if (isDateTimeField && nextValue && dayjs.isDayjs(nextValue)) {
-        nextValue = formatFromDayjs(nextValue as dayjs.Dayjs, pickerType);
-      } else if (isDateTimeField && !nextValue) {
-        nextValue = null;
+      if (isDateTimeField) {
+        nextValue = resolveTemporalEditorSaveValue(nextValue, pickerValue, pickerType);
       }
       toggleEdit();
       // 仅当值发生变化时才标记为修改，避免“双击-失焦”导致整行进入 modified 状态（蓝色高亮不清除）。
@@ -688,9 +650,9 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               ref={inputRef}
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
-              onChange={() => setTimeout(save, 0)}
+              onChange={(value) => setTimeout(() => { void save(value); }, 0)}
               onOpenChange={lockTableScroll}
-              onBlur={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(() => { void save(); }, 0)}
               needConfirm={false}
             />
           ) : pickerType === 'datetime' ? (
@@ -711,7 +673,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
                   }}
                 >此刻</a>
               )}
-              onOk={() => setTimeout(save, 0)}
+              onOk={(value) => setTimeout(() => { void save((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
               onOpenChange={(open) => {
                 pickerOpenRef.current = open;
                 lockTableScroll(open);
@@ -731,17 +693,17 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               format={TEMPORAL_FORMATS[pickerType]}
               picker={pickerType as any}
-              onChange={() => setTimeout(save, 0)}
+              onChange={(value) => setTimeout(() => { void save(value); }, 0)}
               onOpenChange={lockTableScroll}
-              onBlur={() => setTimeout(save, 0)}
+              onBlur={() => setTimeout(() => { void save(); }, 0)}
               needConfirm={false}
             />
           )
         ) : (
           <Input
             ref={inputRef}
-            onPressEnter={save}
-            onBlur={save}
+            onPressEnter={() => { void save(); }}
+            onBlur={() => { void save(); }}
             onFocus={(e) => {
               try {
                 (e.target as HTMLInputElement)?.select?.();
@@ -2234,6 +2196,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
+  const filterPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
       const nextConditions = normalizeGridFilterConditions(appliedFilterConditions);
@@ -2241,6 +2204,30 @@ const DataGrid: React.FC<DataGridProps> = ({
       const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
       setNextFilterId(Math.max(1, maxId + 1));
   }, [appliedFilterConditions, normalizeGridFilterConditions]);
+
+  useEffect(() => {
+      if (!showFilter) {
+          return;
+      }
+      const root = filterPanelRef.current;
+      if (!root) {
+          return;
+      }
+      const apply = () => {
+          applyNoAutoCapAttributesWithin(root);
+      };
+      apply();
+      if (typeof MutationObserver === 'undefined') {
+          return;
+      }
+      const observer = new MutationObserver(() => {
+          apply();
+      });
+      observer.observe(root, { childList: true, subtree: true });
+      return () => {
+          observer.disconnect();
+      };
+  }, [showFilter]);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
@@ -3260,20 +3247,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       setRowEditorOpen(true);
   }, [canModifyData, mergedDisplayData, data, addedRows, displayColumnNames, rowEditorForm, rowKeyStr, columnMetaMap, columnMetaMapByLowerName]);
 
-  const openRowEditor = useCallback(() => {
-      if (!canModifyData) return;
-      if (selectedRowKeys.length > 1) {
-          void message.info('一次只能编辑一行，请仅选择一行');
-          return;
-      }
-      const keyStr = selectedRowKeys.length === 1 ? rowKeyStr(selectedRowKeys[0]) : undefined;
-      if (!keyStr) {
-          void message.info('请先选择一行（勾选复选框）');
-          return;
-      }
-      openRowEditorByKey(keyStr);
-  }, [canModifyData, selectedRowKeys, rowKeyStr, openRowEditorByKey]);
-
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
       const currentRow = mergedDisplayData[textRecordIndex];
@@ -3290,6 +3263,50 @@ const DataGrid: React.FC<DataGridProps> = ({
       setJsonEditorValue(jsonViewText);
       setJsonEditorOpen(true);
   }, [canModifyData, jsonViewText]);
+
+  const handleViewModeChange = useCallback((nextMode: GridViewMode) => {
+      if (nextMode === 'json' && cellEditMode) {
+          setCellEditMode(false);
+          setSelectedCells(new Set());
+          currentSelectionRef.current = new Set();
+          selectionStartRef.current = null;
+          isDraggingRef.current = false;
+          cellSelectionPointerRef.current = null;
+          if (cellSelectionRafRef.current !== null) {
+              cancelAnimationFrame(cellSelectionRafRef.current);
+              cellSelectionRafRef.current = null;
+          }
+          if (cellSelectionScrollRafRef.current !== null) {
+              cancelAnimationFrame(cellSelectionScrollRafRef.current);
+              cellSelectionScrollRafRef.current = null;
+          }
+          if (cellSelectionAutoScrollRafRef.current !== null) {
+              cancelAnimationFrame(cellSelectionAutoScrollRafRef.current);
+              cellSelectionAutoScrollRafRef.current = null;
+          }
+          updateCellSelection(new Set());
+      }
+
+      if (nextMode === 'text') {
+          const selectedKey = selectedRowKeys[0];
+          if (selectedKey !== undefined) {
+              const idx = mergedDisplayData.findIndex((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === rowKeyStr(selectedKey));
+              if (idx >= 0) {
+                  setTextRecordIndex(idx);
+              }
+          }
+      }
+
+      setViewMode(nextMode);
+  }, [cellEditMode, mergedDisplayData, selectedRowKeys, rowKeyStr, updateCellSelection]);
+
+  const handleOpenContextMenuRowEditor = useCallback(() => {
+      if (!canModifyData) return;
+      const rowKey = cellContextMenu.record?.[GONAVI_ROW_KEY];
+      if (rowKey === undefined || rowKey === null) return;
+      openRowEditorByKey(rowKeyStr(rowKey));
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+  }, [canModifyData, cellContextMenu.record, openRowEditorByKey, rowKeyStr]);
 
   const handleFormatJsonEditor = useCallback(() => {
       try {
@@ -4002,7 +4019,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const dbType = config.type || '';
+      const dbType = resolveDataSourceType(config);
       const pkWhere = buildPkWhereSql(records, dbType);
       if (!pkWhere) {
           await exportData(records, format);
@@ -4071,7 +4088,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return;
           }
 
-          const sql = buildCurrentPageSql(config.type || '');
+          const sql = buildCurrentPageSql(resolveDataSourceType(config));
           if (!sql) {
               await exportData(displayData, format);
               return;
@@ -4881,7 +4898,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     <div className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root`} style={{ flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' }}>
 		       {/* Toolbar + Filter Panel */}
            <div style={{ margin: `${panelOuterGap}px 0 ${panelOuterGap}px 0`, border: `1px solid ${panelFrameColor}`, borderRadius: `${panelRadius}px`, background: bgFilter, overflow: 'hidden', boxSizing: 'border-box' }}>
-		        <div className="data-grid-toolbar-scroll" style={{ padding: showFilter ? `${panelPaddingY}px ${panelPaddingX}px ${toolbarBottomPadding}px ${panelPaddingX}px` : `${panelPaddingY}px ${panelPaddingX}px`, border: 'none', borderRadius: 0, background: 'transparent', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap', minWidth: 0, overflowX: 'auto', overflowY: 'hidden', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch', boxSizing: 'border-box' }}>
+		        <div className="data-grid-toolbar-scroll" data-grid-primary-actions="true" style={{ padding: showFilter ? `${panelPaddingY}px ${panelPaddingX}px ${toolbarBottomPadding}px ${panelPaddingX}px` : `${panelPaddingY}px ${panelPaddingX}px`, border: 'none', borderRadius: 0, background: 'transparent', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap', minWidth: 0, overflowX: 'auto', overflowY: 'hidden', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch', boxSizing: 'border-box' }}>
 	            {onReload && <Button icon={<ReloadOutlined />} disabled={loading} onClick={() => {
 	                setAddedRows([]);
 	                setModifiedRows({});
@@ -4904,13 +4921,6 @@ const DataGrid: React.FC<DataGridProps> = ({
 	               <>
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
 	                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
-	                   <Button
-                           icon={<EditOutlined />}
-                           disabled={selectedRowKeys.length !== 1}
-                           onClick={openRowEditor}
-                       >
-                           编辑行
-                       </Button>
 	                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
 	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
@@ -5060,82 +5070,10 @@ const DataGrid: React.FC<DataGridProps> = ({
            )}
 
            <div style={{ marginLeft: 'auto' }} />
-	           <div style={{ flexShrink: 0 }}>
-	               <Button
-	                   icon={<EditOutlined />}
-	                   type={dataPanelOpen ? 'primary' : 'default'}
-	                   onClick={() => {
-	                       const next = !dataPanelOpen;
-	                       setDataPanelOpen(next);
-	                       if (!next) {
-	                           setFocusedCellInfo(null);
-	                           setDataPanelValue('');
-	                           setDataPanelIsJson(false);
-	                           dataPanelDirtyRef.current = false;
-	                       }
-	                   }}
-	               >
-	                   数据预览
-	               </Button>
-	           </div>
-	           <div style={{ flexShrink: 0 }}>
-	               <Popover
-	                   trigger="click"
-	                   placement="bottomRight"
-	                   content={columnInfoSettingContent}
-	               >
-	                   <Button icon={<FileTextOutlined />}>字段信息</Button>
-	               </Popover>
-	           </div>
-	           <div style={{ flexShrink: 0 }}>
-	               <Segmented
-	                   size="small"
-	                   value={viewMode}
-	                   options={[
-	                       { label: '表格', value: 'table' },
-	                       { label: 'JSON', value: 'json' },
-	                       { label: '文本', value: 'text' }
-	                   ]}
-	                   onChange={(val) => {
-	                       const nextMode = String(val) as GridViewMode;
-	                       if (nextMode === 'json' && cellEditMode) {
-                           setCellEditMode(false);
-                           setSelectedCells(new Set());
-                           currentSelectionRef.current = new Set();
-                           selectionStartRef.current = null;
-                           isDraggingRef.current = false;
-                           cellSelectionPointerRef.current = null;
-                           if (cellSelectionRafRef.current !== null) {
-                               cancelAnimationFrame(cellSelectionRafRef.current);
-                               cellSelectionRafRef.current = null;
-                           }
-                           if (cellSelectionScrollRafRef.current !== null) {
-                               cancelAnimationFrame(cellSelectionScrollRafRef.current);
-                               cellSelectionScrollRafRef.current = null;
-                           }
-                           if (cellSelectionAutoScrollRafRef.current !== null) {
-                               cancelAnimationFrame(cellSelectionAutoScrollRafRef.current);
-                               cellSelectionAutoScrollRafRef.current = null;
-                           }
-                           updateCellSelection(new Set());
-                       }
-	                       if (nextMode === 'text') {
-	                           const selectedKey = selectedRowKeys[0];
-	                           if (selectedKey !== undefined) {
-	                               const idx = mergedDisplayData.findIndex((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === rowKeyStr(selectedKey));
-	                               if (idx >= 0) {
-	                                   setTextRecordIndex(idx);
-	                               }
-	                           }
-	                       }
-	                       setViewMode(nextMode);
-	                   }}
-	               />
-	           </div>
 	          </div>
 
        {showFilter && (
-           <div style={{
+           <div ref={filterPanelRef} style={{
                padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
                background: 'transparent',
                boxSizing: 'border-box',
@@ -5184,6 +5122,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
                        {cond.op === 'CUSTOM' ? (
                            <Input.TextArea
+                               {...noAutoCapInputProps}
                                style={{ flex: 1 }}
                                autoSize={{ minRows: 1, maxRows: 4 }}
                                value={cond.value}
@@ -5192,6 +5131,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                            />
                        ) : isListOp(cond.op) ? (
                            <Input.TextArea
+                               {...noAutoCapInputProps}
                                style={{ flex: 1 }}
                                autoSize={{ minRows: 1, maxRows: 4 }}
                                value={cond.value}
@@ -5201,12 +5141,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                        ) : isBetweenOp(cond.op) ? (
                            <>
                                <Input
+                                   {...noAutoCapInputProps}
                                    style={{ width: 220 }}
                                    value={cond.value}
                                    onChange={e => updateFilter(cond.id, 'value', e.target.value)}
                                    placeholder="开始值"
                                />
                                <Input
+                                   {...noAutoCapInputProps}
                                    style={{ width: 220 }}
                                    value={cond.value2 || ''}
                                    onChange={e => updateFilter(cond.id, 'value2', e.target.value)}
@@ -5214,9 +5156,10 @@ const DataGrid: React.FC<DataGridProps> = ({
                                />
                            </>
                        ) : isNoValueOp(cond.op) ? (
-                           <Input style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
+                           <Input {...noAutoCapInputProps} style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
                        ) : (
                            <Input
+                               {...noAutoCapInputProps}
                                style={{ width: 280 }}
                                value={cond.value}
                                onChange={e => updateFilter(cond.id, 'value', e.target.value)}
@@ -5721,6 +5664,19 @@ const DataGrid: React.FC<DataGridProps> = ({
                 <div
                     style={{
                         padding: '8px 12px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    onClick={handleOpenContextMenuRowEditor}
+                >
+                    <EditOutlined style={{ marginRight: 8 }} />
+                    编辑本行
+                </div>
+                <div
+                    style={{
+                        padding: '8px 12px',
                         cursor: selectedRowKeys.length > 0 ? 'pointer' : 'not-allowed',
                         transition: 'background 0.2s',
                         opacity: selectedRowKeys.length > 0 ? 1 : 0.5,
@@ -5926,6 +5882,58 @@ const DataGrid: React.FC<DataGridProps> = ({
             </div>,
             document.body
         )}
+       </div>
+
+       <div
+           data-grid-secondary-actions="true"
+           style={{
+               display: 'flex',
+               alignItems: 'center',
+               justifyContent: 'space-between',
+               gap: 10,
+               flexWrap: 'wrap',
+               padding: '4px 0 0',
+           }}
+       >
+           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+               <Button
+                   icon={<EditOutlined />}
+                   type={dataPanelOpen ? 'primary' : 'default'}
+                   disabled={viewMode !== 'table'}
+                   onClick={() => {
+                       const next = !dataPanelOpen;
+                       setDataPanelOpen(next);
+                       if (!next) {
+                           setFocusedCellInfo(null);
+                           setDataPanelValue('');
+                           setDataPanelIsJson(false);
+                           dataPanelDirtyRef.current = false;
+                       }
+                   }}
+               >
+                   数据预览
+               </Button>
+               <Popover
+                   trigger="click"
+                   placement="bottomRight"
+                   content={columnInfoSettingContent}
+               >
+                   <Button icon={<FileTextOutlined />}>字段信息</Button>
+               </Popover>
+           </div>
+           <div data-grid-view-switcher="true" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+               <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>结果视图</span>
+               <Segmented
+                   size="small"
+                   value={viewMode}
+                   options={[
+                       { label: '表格', value: 'table' },
+                       { label: 'JSON', value: 'json' },
+                       { label: '文本', value: 'text' }
+                   ]}
+                   onChange={(val) => handleViewModeChange(String(val) as GridViewMode)}
+               />
+           </div>
        </div>
        
        {pagination && (

@@ -150,6 +150,54 @@ func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *tes
 	}
 }
 
+func TestResolveDriverInstallVersionUsesPinnedVersionForBuiltinActivateURL(t *testing.T) {
+	definition, ok := resolveDriverDefinition("sqlserver")
+	if !ok {
+		t.Fatal("expected sqlserver driver definition")
+	}
+	if normalizeVersion(definition.PinnedVersion) == "" {
+		t.Fatal("expected sqlserver default definition to include builtin manifest pinned version")
+	}
+
+	got := resolveDriverInstallVersion("", "builtin://activate/sqlserver", definition)
+	want := normalizeVersion(definition.PinnedVersion)
+	if got != want {
+		t.Fatalf("expected builtin activate URL to fall back to pinned version %q, got %q", want, got)
+	}
+}
+
+func TestBuiltinActivatePinnedVersionDoesNotRestrictBundleFallback(t *testing.T) {
+	definition, ok := resolveDriverDefinition("sqlserver")
+	if !ok {
+		t.Fatal("expected sqlserver driver definition")
+	}
+
+	selectedVersion := resolveDriverInstallVersion("", "builtin://activate/sqlserver", definition)
+	if shouldRestrictToExplicitVersionArtifact(definition, selectedVersion) {
+		t.Fatalf("expected builtin activate default version %q not to restrict bundle fallback", selectedVersion)
+	}
+}
+
+func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
+	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, 1, 2)
+	if !strings.Contains(message, "先尝试 1 个预编译直链") {
+		t.Fatalf("expected direct-download hint, got %q", message)
+	}
+	if !strings.Contains(message, "失败后转入 2 个驱动总包源") {
+		t.Fatalf("expected bundle fallback hint, got %q", message)
+	}
+}
+
+func TestBuildOptionalDriverFallbackProgressMessageReportsBundleFallback(t *testing.T) {
+	message := buildOptionalDriverFallbackProgressMessage("SQL Server", 1, 2, false)
+	if !strings.Contains(message, "预编译直链未命中") {
+		t.Fatalf("expected direct miss hint, got %q", message)
+	}
+	if !strings.Contains(message, "转入驱动总包兜底") {
+		t.Fatalf("expected bundle fallback hint, got %q", message)
+	}
+}
+
 func TestDownloadDriverPackageRejectsUnsupportedMongoVersion(t *testing.T) {
 	app := &App{}
 
@@ -244,6 +292,36 @@ func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
 
 	if shouldForceSourceBuildForResolvedDownload("mongodb", "2.5.0", "builtin://activate/mongodb?channel=latest&version=2.5.0") {
 		t.Fatal("expected mongodb v2 install not to force source build")
+	}
+}
+
+func TestShouldPreferSourceBuildBeforeDownloadDoesNotPreferKingbase(t *testing.T) {
+	if shouldPreferSourceBuildBeforeDownload("kingbase", "0.0.0-20201021123113-29bd62a876c3") {
+		t.Fatal("expected kingbase release install not to prefer source build before download")
+	}
+}
+
+func TestResolveOptionalDriverAgentDownloadURLsIncludesPublishedKingbaseAsset(t *testing.T) {
+	definition, ok := resolveDriverDefinition("kingbase")
+	if !ok {
+		t.Fatal("expected kingbase driver definition")
+	}
+
+	version := normalizeVersion(definition.PinnedVersion)
+	assetName := optionalDriverReleaseAssetNameForVersion("kingbase", version)
+	publishedAssets := map[string]int64{
+		assetName: 18 << 20,
+	}
+	seedReleaseAssetCacheEntry(t, "tag:v"+version, publishedAssets, publishedAssets)
+	seedReleaseAssetCacheEntry(t, "latest", publishedAssets, publishedAssets)
+
+	urls := resolveOptionalDriverAgentDownloadURLs(definition, "builtin://activate/kingbase", version)
+	if len(urls) == 0 {
+		t.Fatal("expected kingbase pinned install to include published download candidates")
+	}
+
+	if !strings.Contains(urls[0], assetName) {
+		t.Fatalf("expected first kingbase download URL to contain %q, got %q", assetName, urls[0])
 	}
 }
 

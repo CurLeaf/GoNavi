@@ -18,4 +18,9 @@ describe('buildOverlayWorkbenchTheme', () => {
     expect(lightTheme.sectionBg).toMatch(/rgba\(255,?\s*255,?\s*255,?\s*0\.84\)/);
     expect(lightTheme.iconColor).toBe('#1677ff');
   });
+
+  it('can disable shell blur for macOS text-entry compatibility', () => {
+    const darkTheme = buildOverlayWorkbenchTheme(true, { disableBackdropFilter: true });
+    expect(darkTheme.shellBackdropFilter).toBe('none');
+  });
 });

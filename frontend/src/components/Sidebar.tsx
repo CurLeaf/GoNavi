@@ -36,16 +36,20 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-	import { SavedConnection } from '../types';
+	import { SavedConnection, ExternalSQLTreeEntry } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView } from '../../wailsjs/go/app/App';
+	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
-  import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+  import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
+import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { resolveConnectionHostTokens } from '../utils/tabDisplay';
+import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
+import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 
 const { Search } = Input;
 
@@ -56,7 +60,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag';
 }
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -95,10 +99,30 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   tag: <TagOutlined />,
 };
 
+const normalizeMySQLViewDDLForEditing = (viewName: string, rawDefinition: unknown): string => {
+  const text = String(rawDefinition || '').trim();
+  if (!text) return '';
+
+  const normalized = text.replace(/\r\n/g, '\n').trim().replace(/;+\s*$/, '');
+  const createViewPrefixPattern = /^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:`[^`]+`|\S+)\s*@\s*(?:`[^`]+`|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+/i;
+  if (createViewPrefixPattern.test(normalized)) {
+    return `${normalized.replace(createViewPrefixPattern, 'CREATE OR REPLACE VIEW ')};`;
+  }
+
+  if (/^\s*(select|with)\b/i.test(normalized)) {
+    return `CREATE OR REPLACE VIEW ${viewName} AS\n${normalized};`;
+  }
+
+  return `${normalized};`;
+};
+
 const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> = ({ onEditConnection }) => {
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
+  const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
   const deleteQuery = useStore(state => state.deleteQuery);
+  const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
+  const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -121,6 +145,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
 
@@ -134,7 +159,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   };
   const bgMain = getBg('#141414');
-  const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
+  const overlayTheme = useMemo(
+      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
+      [darkMode, disableLocalBackdropFilter],
+  );
   const modalPanelStyle = useMemo(() => ({
       background: overlayTheme.shellBg,
       border: overlayTheme.shellBorder,
@@ -300,25 +328,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           return;
       }
 
-      // Refresh queries for expanded databases
-      const findNode = (nodes: TreeNode[], k: React.Key): TreeNode | null => {
-          for (const node of nodes) {
-              if (node.key === k) return node;
-              if (node.children) {
-                  const res = findNode(node.children, k);
-                  if (res) return res;
-              }
-          }
-          return null;
-      };
-
       expandedKeys.forEach(key => {
-          const node = findNode(treeData, key);
+          const node = findTreeNodeByKey(treeData, key);
           if (node && node.type === 'database') {
               loadTables(node);
           }
       });
-  }, [autoFetchVisible, savedQueries]);
+  }, [autoFetchVisible, externalSQLDirectories, savedQueries]);
 
   useEffect(() => {
     setTreeData((prev) => {
@@ -405,6 +421,68 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       }
       return node;
     });
+  };
+
+  const findTreeNodeByKey = (nodes: TreeNode[], targetKey: React.Key): TreeNode | null => {
+    for (const node of nodes) {
+      if (node.key === targetKey) {
+        return node;
+      }
+      if (node.children) {
+        const child = findTreeNodeByKey(node.children, targetKey);
+        if (child) {
+          return child;
+        }
+      }
+    }
+    return null;
+  };
+
+  const decorateExternalSQLTreeNode = (node: ExternalSQLTreeNode): TreeNode => {
+    const icon = (() => {
+      switch (node.type) {
+        case 'external-sql-root':
+          return <FolderOpenOutlined />;
+        case 'external-sql-directory':
+          return <HddOutlined />;
+        case 'external-sql-folder':
+          return <FolderOutlined />;
+        default:
+          return <FileTextOutlined />;
+      }
+    })();
+
+    return {
+      ...node,
+      icon,
+      children: node.children?.map((child) => decorateExternalSQLTreeNode(child)),
+    };
+  };
+
+  const getNodeDatabaseContext = (node: any): { connectionId: string; dbName: string; dbNodeKey: string } | null => {
+    if (!node) return null;
+    if (node.type === 'database') {
+      return {
+        connectionId: String(node?.dataRef?.id || '').trim(),
+        dbName: String(node?.dataRef?.dbName || '').trim(),
+        dbNodeKey: String(node.key || '').trim(),
+      };
+    }
+
+    if (
+      node.type === 'external-sql-root'
+      || node.type === 'external-sql-directory'
+      || node.type === 'external-sql-folder'
+      || node.type === 'external-sql-file'
+    ) {
+      return {
+        connectionId: String(node?.dataRef?.connectionId || '').trim(),
+        dbName: String(node?.dataRef?.dbName || '').trim(),
+        dbNodeKey: String(node?.dataRef?.dbNodeKey || '').trim(),
+      };
+    }
+
+    return null;
   };
 
   const SIDEBAR_SCHEMA_DB_TYPES = new Set([
@@ -973,6 +1051,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       loadingNodesRef.current.add(loadKey);
       
       const dbQueries = savedQueries.filter(q => q.connectionId === conn.id && q.dbName === dbName);
+      const dbExternalSQLDirectories = useStore.getState().externalSQLDirectories.filter(directory => directory.connectionId === conn.id && directory.dbName === dbName);
       
       const queriesNode: TreeNode = {
           title: '已存查询',
@@ -1014,11 +1093,38 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                };
 	            });
 
-            const [viewsResult, triggersResult, routinesResult] = await Promise.all([
-                loadViews(conn, conn.dbName),
-                loadDatabaseTriggers(conn, conn.dbName),
-                loadFunctions(conn, conn.dbName),
-            ]);
+	            const [viewsResult, triggersResult, routinesResult] = await Promise.all([
+	                loadViews(conn, conn.dbName),
+	                loadDatabaseTriggers(conn, conn.dbName),
+	                loadFunctions(conn, conn.dbName),
+	            ]);
+                const externalSQLDirectoryResults = await Promise.all(
+                    dbExternalSQLDirectories.map(async (directory) => {
+                        const directoryRes = await ListSQLDirectory(directory.path);
+                        if (!directoryRes.success) {
+                            message.warning({
+                                key: `external-sql-${directory.id}`,
+                                content: `SQL 目录读取失败: ${directory.name} (${directoryRes.message})`,
+                            });
+                            return { id: directory.id, entries: [] as ExternalSQLTreeEntry[] };
+                        }
+                        return {
+                            id: directory.id,
+                            entries: Array.isArray(directoryRes.data) ? directoryRes.data as ExternalSQLTreeEntry[] : [],
+                        };
+                    }),
+                );
+                const externalSQLTrees = externalSQLDirectoryResults.reduce<Record<string, ExternalSQLTreeEntry[]>>((accumulator, item) => {
+                    accumulator[item.id] = item.entries;
+                    return accumulator;
+                }, {});
+                const externalSQLRootNode = decorateExternalSQLTreeNode(buildExternalSQLRootNode({
+                    dbNodeKey: String(key),
+                    connectionId: String(conn.id),
+                    dbName: String(conn.dbName),
+                    directories: dbExternalSQLDirectories,
+                    directoryTrees: externalSQLTrees,
+                }));
 
             const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
@@ -1202,7 +1308,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
 	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
 
+	                const dialect = getMetadataDialect(conn as SavedConnection);
+	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
+
 	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
+	                    .filter((bucket) => !(isOracleLike && !bucket.schemaName))
 	                    .sort((a, b) => {
 	                        if (!a.schemaName && !b.schemaName) return 0;
 	                        if (!a.schemaName) return -1;
@@ -1210,8 +1320,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                        return a.schemaName.toLowerCase().localeCompare(b.schemaName.toLowerCase());
 	                    })
 	                    .map((bucket) => {
-	                        const schemaNodeKey = `${key}-schema-${bucket.schemaName || 'default'}`;
-	                        const schemaTitle = bucket.schemaName || '默认模式';
+	                    const schemaNodeKey = `${key}-schema-${bucket.schemaName || 'default'}`;
+	                    const schemaTitle = bucket.schemaName || '默认模式';
 	                        const groupedNodes: TreeNode[] = [
 	                            buildObjectGroup(schemaNodeKey, 'tables', '表', <TableOutlined />, bucket.tables, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'views', '视图', <EyeOutlined />, bucket.views, { schemaName: bucket.schemaName }),
@@ -1230,7 +1340,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                        };
 	                    });
 
-	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, ...schemaNodes]));
+	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, externalSQLRootNode, ...schemaNodes]));
 	            } else {
 	                const groupedNodes: TreeNode[] = [
 	                    buildObjectGroup(key as string, 'tables', '表', <TableOutlined />, tableEntries.map(buildTableNode)),
@@ -1239,7 +1349,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                    buildObjectGroup(key as string, 'triggers', '触发器', <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
 	                ];
 
-	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, ...groupedNodes]));
+	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, externalSQLRootNode, ...groupedNodes]));
 	            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
@@ -1355,6 +1465,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
+      } else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') {
+          setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       } else if (type === 'redis-db') {
           setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
       }
@@ -1397,6 +1509,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'table' || type === 'view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
+      else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
 
       if (node.type === 'table') {
@@ -1434,6 +1547,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               query: q.sql,
               savedQueryId: q.id,
           });
+          return;
+      } else if (node.type === 'external-sql-file') {
+          void openExternalSQLFile(node);
           return;
       } else if (node.type === 'redis-db') {
           const { id, redisDB } = node.dataRef;
@@ -2111,6 +2227,119 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       });
   };
 
+  const refreshDatabaseNode = async (dbNodeKey: string) => {
+      if (!dbNodeKey) {
+          return;
+      }
+      const dbNode = findTreeNodeByKey(treeData, dbNodeKey);
+      if (dbNode && dbNode.type === 'database') {
+          await loadTables(dbNode);
+      }
+  };
+
+  const openExternalSQLFile = async (fileNode: any) => {
+      const connectionId = String(fileNode?.dataRef?.connectionId || '').trim();
+      const dbName = String(fileNode?.dataRef?.dbName || '').trim();
+      const filePath = String(fileNode?.dataRef?.path || '').trim();
+      const fileName = String(fileNode?.dataRef?.name || fileNode?.title || 'SQL文件').trim() || 'SQL文件';
+      if (!connectionId || !dbName || !filePath) {
+          message.error('SQL 文件上下文不完整，无法打开');
+          return;
+      }
+
+      const res = await ReadSQLFile(filePath);
+      if (!res.success) {
+          if (res.message !== '已取消') {
+              message.error('读取 SQL 文件失败: ' + res.message);
+          }
+          return;
+      }
+
+      const data = res.data;
+      if (data && typeof data === 'object' && data.isLargeFile) {
+          const conn = connections.find((item) => item.id === connectionId);
+          if (!conn) {
+              message.error('未找到对应的连接配置');
+              return;
+          }
+          startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
+          return;
+      }
+
+      addTab({
+          id: buildExternalSQLTabId(connectionId, dbName, filePath),
+          title: fileName,
+          type: 'query',
+          connectionId,
+          dbName,
+          query: String(data || ''),
+      });
+  };
+
+  const handleAddExternalSQLDirectory = async (node: any) => {
+      const context = getNodeDatabaseContext(node);
+      if (!context?.connectionId || !context?.dbName || !context?.dbNodeKey) {
+          message.warning('请在具体数据库下添加外部 SQL 目录');
+          return;
+      }
+
+      const currentDirectory = externalSQLDirectories.find((item) =>
+          item.connectionId === context.connectionId && item.dbName === context.dbName,
+      )?.path || '';
+      const selection = await SelectSQLDirectory(currentDirectory);
+      if (!selection.success) {
+          if (selection.message !== '已取消') {
+              message.error('选择 SQL 目录失败: ' + selection.message);
+          }
+          return;
+      }
+
+      const payload = (selection.data && typeof selection.data === 'object') ? selection.data as Record<string, unknown> : {};
+      const path = String(payload.path || '').trim();
+      const name = String(payload.name || '').trim();
+      if (!path) {
+          message.error('未获取到有效的 SQL 目录路径');
+          return;
+      }
+
+      const directoryId = buildExternalSQLDirectoryId(context.connectionId, context.dbName, path);
+      saveExternalSQLDirectory({
+          id: directoryId,
+          name: name || path.split(/[\\/]/).filter(Boolean).pop() || 'SQL目录',
+          path,
+          connectionId: context.connectionId,
+          dbName: context.dbName,
+          createdAt: Date.now(),
+      });
+
+      setExpandedKeys((prev) => Array.from(new Set([...prev, context.dbNodeKey, `${context.dbNodeKey}-external-sql`])));
+      setAutoExpandParent(false);
+      await refreshDatabaseNode(context.dbNodeKey);
+      message.success('外部 SQL 目录已添加');
+  };
+
+  const handleRemoveExternalSQLDirectory = async (node: any) => {
+      const directoryId = String(node?.dataRef?.id || '').trim();
+      const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
+      if (!directoryId) {
+          message.error('未找到可移除的 SQL 目录');
+          return;
+      }
+      deleteExternalSQLDirectory(directoryId);
+      await refreshDatabaseNode(dbNodeKey);
+      message.success('外部 SQL 目录已移除');
+  };
+
+  const handleRefreshExternalSQLDirectory = async (node: any) => {
+      const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
+      if (!dbNodeKey) {
+          message.warning('当前目录缺少数据库上下文，无法刷新');
+          return;
+      }
+      await refreshDatabaseNode(dbNodeKey);
+      message.success('外部 SQL 目录已刷新');
+  };
+
   const handleCreateDatabase = async () => {
       try {
           const values = await createDbForm.validateFields();
@@ -2141,7 +2370,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
       return buildRpcConnectionConfig(conn.config, {
-          database: clearDatabase ? '' : ((overrideDatabase ?? conn.config.database) || ''),
+          database: resolveSidebarRuntimeDatabase(
+              conn?.config?.type,
+              conn?.config?.driver,
+              conn?.config?.database,
+              overrideDatabase,
+              clearDatabase,
+          ),
       });
   };
 
@@ -2409,7 +2644,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   const row = result.data[0] as Record<string, any>;
                   const def = row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
                   if (def) {
-                      template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
+                      if (dialect === 'mysql') {
+                          template = `-- 编辑视图 ${viewName}\n${normalizeMySQLViewDDLForEditing(viewName, def)}`;
+                      } else {
+                          template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
+                      }
                   }
               }
           }
@@ -2827,51 +3066,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       );
   }, [darkMode, overlayTheme, searchScopes]);
 
-  const parseHostOnlyToken = (value: unknown): string[] => {
-      const raw = String(value || '').trim();
-      if (!raw) {
-          return [];
-      }
-      let text = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
-      if (text.includes('/')) {
-          text = text.split('/')[0];
-      }
-      if (text.includes('?')) {
-          text = text.split('?')[0];
-      }
-      if (text.includes('@')) {
-          text = text.split('@').pop() || '';
-      }
-      return text
-          .split(',')
-          .map((entry) => {
-              const token = entry.trim();
-              if (!token) return '';
-              if (token.startsWith('[')) {
-                  const rightBracketIndex = token.indexOf(']');
-                  if (rightBracketIndex > 0) {
-                      return token.slice(0, rightBracketIndex + 1).toLowerCase();
-                  }
-              }
-              const colonIndex = token.lastIndexOf(':');
-              if (colonIndex > 0) {
-                  return token.slice(0, colonIndex).toLowerCase();
-              }
-              return token.toLowerCase();
-          })
-          .filter(Boolean);
-  };
-
   const getConnectionHostSearchText = (node: TreeNode): string => {
       if (node.type !== 'connection') return '';
       const config = node.dataRef?.config || {};
-      const hostTokens = [
-          ...parseHostOnlyToken(config.host),
-          ...(Array.isArray(config.hosts) ? config.hosts.flatMap((entry: string) => parseHostOnlyToken(entry)) : []),
-          ...parseHostOnlyToken(config.uri),
-      ];
-      const uniqueHosts = Array.from(new Set(hostTokens));
-      return uniqueHosts.join(' ');
+      return resolveConnectionHostTokens(config).join(' ');
   };
 
   const getConnectionNameSearchText = (node: TreeNode): string => {
@@ -3079,7 +3277,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     onClick: () => {
                         addTab({
                             id: `redis-cmd-${node.key}-${Date.now()}`,
-                            title: `命令 - ${node.title}`,
+                            title: '命令 - db0',
                             type: 'redis-command',
                             connectionId: node.key,
                             redisDB: 0
@@ -3093,7 +3291,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     onClick: () => {
                         addTab({
                             id: `redis-monitor-${node.key}-${Date.now()}`,
-                            title: `监控: ${node.title}`,
+                            title: '监控 - db0',
                             type: 'redis-monitor',
                             connectionId: node.key,
                             redisDB: 0
@@ -3355,7 +3553,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 onClick: () => {
                     addTab({
                         id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
-                        title: `监控: ${connections.find(c => c.id === id)?.name || id}`,
+                        title: `监控 - db${redisDB}`,
                         type: 'redis-monitor',
                         connectionId: id,
                         redisDB: redisDB
@@ -3560,7 +3758,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                    const tableName = String(node.dataRef?.tableName || '').trim();
-                   const queryTemplate = tableName ? `SELECT * FROM ${tableName};` : 'SELECT * FROM ';
+                   const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
                    addTab({
                        id: `query-${Date.now()}`,
                        title: `新建查询`,
@@ -3693,6 +3891,55 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         ];
     }
 
+    if (node.type === 'external-sql-root') {
+        return [
+            {
+                key: 'add-external-sql-directory',
+                label: '添加 SQL 目录',
+                icon: <PlusOutlined />,
+                onClick: () => {
+                    void handleAddExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-directory') {
+        return [
+            {
+                key: 'refresh-external-sql-directory',
+                label: '刷新目录',
+                icon: <ReloadOutlined />,
+                onClick: () => {
+                    void handleRefreshExternalSQLDirectory(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'remove-external-sql-directory',
+                label: '移除目录',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    void handleRemoveExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-file') {
+        return [
+            {
+                key: 'open-external-sql-file',
+                label: '打开 SQL 文件',
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    void openExternalSQLFile(node);
+                }
+            }
+        ];
+    }
+
     return [];
   };
 
@@ -3718,6 +3965,33 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 hoverTitle = rawTableName;
             }
         }
+    } else if (node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
+        hoverTitle = String(node?.dataRef?.path || displayTitle);
+    }
+
+    if (node.type === 'external-sql-root') {
+        return (
+            <span
+                title={hoverTitle}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}
+            >
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {statusBadge}
+                    {displayTitle}
+                </span>
+                <Button
+                    size="small"
+                    type="text"
+                    icon={<PlusOutlined />}
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void handleAddExternalSQLDirectory(node);
+                    }}
+                    style={{ paddingInline: 4, height: 20 }}
+                />
+            </span>
+        );
     }
 
     return <span title={hoverTitle}>{statusBadge}{displayTitle}</span>;
@@ -3804,6 +4078,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
             <Input
+                {...noAutoCapInputProps}
                 ref={searchInputRef}
                 placeholder="搜索..."
                 onChange={onSearch}
@@ -3995,7 +4270,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={createDbForm} layout="vertical">
                 <Form.Item name="name" label="数据库名称" rules={[{ required: true, message: '请输入名称' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
                 {/* Charset option could be added here */}
             </Form>
@@ -4013,7 +4288,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameDbForm} layout="vertical">
                 <Form.Item name="newName" label="新数据库名称" rules={[{ required: true, message: '请输入新数据库名称' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>
@@ -4030,7 +4305,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameTableForm} layout="vertical">
                 <Form.Item name="newName" label="新表名" rules={[{ required: true, message: '请输入新表名' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>
@@ -4047,7 +4322,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         >
             <Form form={renameViewForm} layout="vertical">
                 <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
-                    <Input />
+                    <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>

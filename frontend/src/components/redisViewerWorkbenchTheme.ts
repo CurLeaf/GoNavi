@@ -1,7 +1,10 @@
+import { resolveTextInputSafeBackdropFilter } from '../utils/appearance';
+
 type RedisWorkbenchThemeInput = {
   darkMode: boolean;
   opacity: number;
   blur: number;
+  disableBackdropFilter?: boolean;
 };
 
 type RedisWorkbenchTheme = {
@@ -43,10 +46,15 @@ export const buildRedisWorkbenchTheme = ({
   darkMode,
   opacity,
   blur,
+  disableBackdropFilter,
 }: RedisWorkbenchThemeInput): RedisWorkbenchTheme => {
   const normalizedOpacity = clamp(opacity, 0.1, 1);
   const normalizedBlur = Math.max(0, Math.round(blur));
   const isTranslucent = normalizedOpacity < 0.999 || normalizedBlur > 0;
+  const backdropFilter = resolveTextInputSafeBackdropFilter(
+    normalizedBlur > 0 ? `blur(${normalizedBlur}px)` : 'none',
+    disableBackdropFilter ?? false,
+  );
 
   if (darkMode) {
     const appTopAlpha = isTranslucent ? Math.max(0.08, Math.min(0.22, normalizedOpacity * 0.16)) : 0.92;
@@ -84,7 +92,7 @@ export const buildRedisWorkbenchTheme = ({
       treeSelectedBorder: 'rgba(246, 196, 83, 0.24)',
       divider: 'rgba(255, 255, 255, 0.07)',
       shadow: '0 20px 48px rgba(0, 0, 0, 0.26)',
-      backdropFilter: normalizedBlur > 0 ? `blur(${normalizedBlur}px)` : 'none',
+      backdropFilter,
     };
   }
 
@@ -122,7 +130,7 @@ export const buildRedisWorkbenchTheme = ({
     treeSelectedBorder: 'rgba(22, 119, 255, 0.18)',
     divider: 'rgba(15, 23, 42, 0.08)',
     shadow: '0 22px 52px rgba(15, 23, 42, 0.08)',
-    backdropFilter: normalizedBlur > 0 ? `blur(${normalizedBlur}px)` : 'none',
+    backdropFilter,
   };
 };
 

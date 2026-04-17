@@ -80,3 +80,16 @@ export const normalizeBlurForPlatform = (blur: number | undefined): number => {
 export const blurToFilter = (blur: number): string | undefined => {
   return blur > 0 ? `blur(${blur}px)` : undefined;
 };
+
+// macOS WebView 下，文本输入区域祖先节点的 backdrop-filter 会和输入法候选/切换浮层叠加，
+// 造成额外的透明框。这里允许交互面板按平台降级为非模糊背景。
+export const resolveTextInputSafeBackdropFilter = (
+  backdropFilter: string | undefined,
+  disableForMacLike: boolean = isMacLikePlatform(),
+): string => {
+  const normalized = String(backdropFilter || '').trim();
+  if (!normalized || normalized === 'none') {
+    return 'none';
+  }
+  return disableForMacLike ? 'none' : normalized;
+};

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	mssql "github.com/microsoft/go-mssqldb"
 )
 
 type duckMapLike map[any]any
@@ -47,6 +49,28 @@ func TestNormalizeQueryValueWithDBType_ByteFallbacks(t *testing.T) {
 	v = normalizeQueryValueWithDBType([]byte{0xff}, "")
 	if v != "0xff" {
 		t.Fatalf("未知类型 0xff 期望返回 0xff，实际=%v(%T)", v, v)
+	}
+}
+
+func TestNormalizeQueryValueWithDBType_UniqueIdentifierBytes(t *testing.T) {
+	var guid mssql.UniqueIdentifier
+	if err := guid.Scan("6F9619FF-8B86-D011-B42D-00C04FC964FF"); err != nil {
+		t.Fatalf("构造 UniqueIdentifier 失败: %v", err)
+	}
+
+	rawValue, err := guid.Value()
+	if err != nil {
+		t.Fatalf("UniqueIdentifier.Value() 失败: %v", err)
+	}
+
+	rawBytes, ok := rawValue.([]byte)
+	if !ok {
+		t.Fatalf("期望驱动值为 []byte，实际=%T", rawValue)
+	}
+
+	got := normalizeQueryValueWithDBType(rawBytes, "uniqueidentifier")
+	if got != "6F9619FF-8B86-D011-B42D-00C04FC964FF" {
+		t.Fatalf("uniqueidentifier 期望展示为 GUID 文本，实际=%v(%T)", got, got)
 	}
 }
 

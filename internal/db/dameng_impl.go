@@ -264,38 +264,12 @@ func (d *DamengDB) GetCreateStatement(dbName, tableName string) (string, error) 
 }
 
 func (d *DamengDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
-	query := fmt.Sprintf(`SELECT column_name, data_type, nullable, data_default 
-		FROM all_tab_columns 
-		WHERE owner = '%s' AND table_name = '%s'`,
-		strings.ToUpper(dbName), strings.ToUpper(tableName))
-
-	if dbName == "" {
-		query = fmt.Sprintf(`SELECT column_name, data_type, nullable, data_default 
-			FROM user_tab_columns 
-			WHERE table_name = '%s'`, strings.ToUpper(tableName))
-	}
-
-	data, _, err := d.Query(query)
+	data, _, err := d.Query(buildDamengColumnsQuery(dbName, tableName))
 	if err != nil {
 		return nil, err
 	}
 
-	var columns []connection.ColumnDefinition
-	for _, row := range data {
-		col := connection.ColumnDefinition{
-			Name:     fmt.Sprintf("%v", row["COLUMN_NAME"]),
-			Type:     fmt.Sprintf("%v", row["DATA_TYPE"]),
-			Nullable: fmt.Sprintf("%v", row["NULLABLE"]),
-		}
-
-		if row["DATA_DEFAULT"] != nil {
-			def := fmt.Sprintf("%v", row["DATA_DEFAULT"])
-			col.Default = &def
-		}
-
-		columns = append(columns, col)
-	}
-	return columns, nil
+	return buildDamengColumnDefinitions(data), nil
 }
 
 func (d *DamengDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {

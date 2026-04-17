@@ -13,6 +13,8 @@ import (
 )
 
 func TestMigrateLegacyWebKitStorageIfNeededImportsConnectionsForDevBuild(t *testing.T) {
+	withTestGOOS(t, "darwin")
+
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
 	homeDir := t.TempDir()
@@ -81,6 +83,8 @@ func TestMigrateLegacyWebKitStorageIfNeededImportsConnectionsForDevBuild(t *test
 }
 
 func TestMigrateLegacyWebKitStorageIfNeededSkipsWhenConnectionsFileAlreadyExists(t *testing.T) {
+	withTestGOOS(t, "darwin")
+
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
 	homeDir := t.TempDir()

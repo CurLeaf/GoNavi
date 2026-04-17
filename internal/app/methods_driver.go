@@ -486,6 +486,17 @@ func (a *App) SelectDriverDownloadDirectory(currentDir string) connection.QueryR
 	}
 }
 
+func validateLocalDriverPackagePath(path string) error {
+	pathText := strings.TrimSpace(path)
+	if pathText == "" {
+		return nil
+	}
+	if strings.EqualFold(filepath.Ext(pathText), ".jar") {
+		return fmt.Errorf("当前驱动管理不支持直接导入 JDBC Jar。GoNavi 使用 Go 驱动与可选 driver-agent；请改用驱动包/驱动目录，如需连接人大金仓请优先使用“Kingbase”连接类型，或在自定义连接中填写 kingbase / kingbase8")
+	}
+	return nil
+}
+
 func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult {
 	defaultDir := strings.TrimSpace(currentPath)
 	if defaultDir == "" {
@@ -501,7 +512,7 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择驱动包文件",
+		Title:            "选择驱动包文件（非 JDBC Jar）",
 		DefaultDirectory: defaultDir,
 	})
 	if err != nil {
@@ -513,6 +524,9 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
+	}
+	if err := validateLocalDriverPackagePath(selection); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
 }
@@ -899,6 +913,9 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 	}
 	if definition.BuiltIn {
 		return connection.QueryResult{Success: false, Message: "内置驱动无需安装扩展包"}
+	}
+	if err := validateLocalDriverPackagePath(filePath); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
@@ -1373,6 +1390,10 @@ func effectiveDriverEngine(definition driverDefinition) string {
 }
 
 func resolveDriverDefinition(driverType string) (driverDefinition, bool) {
+	effectivePackages, err := resolveEffectiveDriverPackages("")
+	if err == nil {
+		return resolveDriverDefinitionWithPackages(driverType, effectivePackages)
+	}
 	return resolveDriverDefinitionWithPackages(driverType, nil)
 }
 
@@ -2313,7 +2334,7 @@ func inferDriverInstallVersionByDownloadURL(downloadURL string) string {
 	if err == nil && parsed != nil {
 		switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
 		case "builtin":
-			return "go-embedded"
+			return ""
 		case "local":
 			return "local"
 		case "http", "https":
@@ -3060,6 +3081,54 @@ func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDef
 	return filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(entry.Name), "./")), nil
 }
 
+func buildOptionalDriverInstallPlanMessage(displayName string, selectedVersion string, forceSourceBuild bool, preferSourceBuildBeforeDownload bool, restrictToExplicitArtifact bool, directURLCount int, bundleURLCount int) string {
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = "驱动"
+	}
+	versionText := normalizeVersion(strings.TrimSpace(selectedVersion))
+	if versionText == "" {
+		versionText = "未标注版本"
+	}
+
+	if forceSourceBuild {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；当前版本仅允许本地源码构建", name, versionText)
+	}
+	if preferSourceBuildBeforeDownload {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；先尝试本地源码构建，失败后继续下载兜底", name, versionText)
+	}
+	if directURLCount > 0 && !restrictToExplicitArtifact && bundleURLCount > 0 {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；先尝试 %d 个预编译直链，失败后转入 %d 个驱动总包源", name, versionText, directURLCount, bundleURLCount)
+	}
+	if directURLCount > 0 && restrictToExplicitArtifact {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；仅允许显式版本资产，先尝试 %d 个预编译直链", name, versionText, directURLCount)
+	}
+	if directURLCount > 0 {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；先尝试 %d 个预编译直链", name, versionText, directURLCount)
+	}
+	if !restrictToExplicitArtifact && bundleURLCount > 0 {
+		return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；未提供预编译直链，直接尝试 %d 个驱动总包源", name, versionText, bundleURLCount)
+	}
+	return fmt.Sprintf("准备安装 %s 驱动代理（版本 %s）；未命中发布资产时将回退到本地源码构建", name, versionText)
+}
+
+func buildOptionalDriverFallbackProgressMessage(displayName string, directURLCount int, bundleURLCount int, restrictToExplicitArtifact bool) string {
+	name := strings.TrimSpace(displayName)
+	if name == "" {
+		name = "驱动"
+	}
+	if directURLCount > 0 && !restrictToExplicitArtifact && bundleURLCount > 0 {
+		return fmt.Sprintf("预编译直链未命中，转入驱动总包兜底（%s，剩余 %d 个总包源）", name, bundleURLCount)
+	}
+	if directURLCount > 0 && restrictToExplicitArtifact {
+		return fmt.Sprintf("预编译直链未命中；当前版本仅允许显式资产，跳过驱动总包（%s）", name)
+	}
+	if !restrictToExplicitArtifact && bundleURLCount > 0 {
+		return fmt.Sprintf("直链不可用，转入驱动总包兜底（%s，剩余 %d 个总包源）", name, bundleURLCount)
+	}
+	return fmt.Sprintf("发布资产未命中，准备回退到本地源码构建（%s）", name)
+}
+
 func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, executablePath string, downloadURL string, selectedVersion string) (string, string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
@@ -3067,6 +3136,16 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	preferSourceBuildBeforeDownload := shouldPreferSourceBuildBeforeDownload(driverType, selectedVersion)
 	skipReuseCandidate := shouldSkipReusableAgentCandidate(driverType, selectedVersion)
 	restrictToExplicitArtifact := shouldRestrictToExplicitVersionArtifact(definition, selectedVersion)
+	downloadURLs := []string{}
+	bundleURLs := []string{}
+	if !forceSourceBuild {
+		downloadURLs = resolveOptionalDriverAgentDownloadURLs(definition, downloadURL, selectedVersion)
+		if !restrictToExplicitArtifact {
+			bundleURLs = resolveOptionalDriverBundleDownloadURLs()
+		}
+	}
+	planMessage := buildOptionalDriverInstallPlanMessage(displayName, selectedVersion, forceSourceBuild, preferSourceBuildBeforeDownload, restrictToExplicitArtifact, len(downloadURLs), len(bundleURLs))
+	logger.Infof("%s，driver=%s version=%s direct_candidates=%d bundle_candidates=%d force_source_build=%v restrict_explicit=%v prefer_source_first=%v", planMessage, driverType, normalizeVersion(selectedVersion), len(downloadURLs), len(bundleURLs), forceSourceBuild, restrictToExplicitArtifact, preferSourceBuildBeforeDownload)
 
 	info, err := os.Stat(executablePath)
 	if err == nil && !info.IsDir() {
@@ -3087,7 +3166,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 		return "", "", fmt.Errorf("创建 %s 驱动目录失败：%w", displayName, mkErr)
 	}
 	if a != nil {
-		a.emitDriverDownloadProgress(driverType, "downloading", 10, 100, "检查本地驱动代理缓存")
+		a.emitDriverDownloadProgress(driverType, "downloading", 10, 100, planMessage)
 	}
 	if !skipReuseCandidate {
 		if sourcePath, ok := findExistingOptionalDriverAgentCandidate(definition, executablePath); ok {
@@ -3124,7 +3203,6 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	}
 
 	if !forceSourceBuild {
-		downloadURLs := resolveOptionalDriverAgentDownloadURLs(definition, downloadURL, selectedVersion)
 		if len(downloadURLs) > 0 {
 			for _, candidateURL := range downloadURLs {
 				if a != nil {
@@ -3134,11 +3212,16 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				if dlErr == nil {
 					return candidateURL, hash, nil
 				}
+				logger.Warnf("下载预编译 %s 驱动代理失败，url=%s err=%v", displayName, candidateURL, dlErr)
 				downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", candidateURL, strings.TrimSpace(dlErr.Error())))
 			}
 		}
-		bundleURLs := resolveOptionalDriverBundleDownloadURLs()
-		if !restrictToExplicitArtifact && len(bundleURLs) > 0 {
+		if len(bundleURLs) > 0 {
+			fallbackMessage := buildOptionalDriverFallbackProgressMessage(displayName, len(downloadURLs), len(bundleURLs), restrictToExplicitArtifact)
+			logger.Infof("%s，driver=%s version=%s", fallbackMessage, driverType, normalizeVersion(selectedVersion))
+			if a != nil {
+				a.emitDriverDownloadProgress(driverType, "downloading", 20, 100, fallbackMessage)
+			}
 			for _, bundleURL := range bundleURLs {
 				if a != nil {
 					a.emitDriverDownloadProgress(driverType, "downloading", 20, 100, fmt.Sprintf("从驱动总包提取 %s 代理", displayName))
@@ -3147,7 +3230,14 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				if bundleErr == nil {
 					return source, hash, nil
 				}
+				logger.Warnf("从驱动总包提取 %s 驱动代理失败，url=%s err=%v", displayName, bundleURL, bundleErr)
 				downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", bundleURL, strings.TrimSpace(bundleErr.Error())))
+			}
+		} else if len(downloadURLs) > 0 || restrictToExplicitArtifact {
+			fallbackMessage := buildOptionalDriverFallbackProgressMessage(displayName, len(downloadURLs), 0, restrictToExplicitArtifact)
+			logger.Infof("%s，driver=%s version=%s", fallbackMessage, driverType, normalizeVersion(selectedVersion))
+			if a != nil {
+				a.emitDriverDownloadProgress(driverType, "downloading", 20, 100, fallbackMessage)
 			}
 		}
 	}
@@ -3401,9 +3491,6 @@ func shouldForceSourceBuildForResolvedDownload(driverType string, selectedVersio
 func shouldPreferSourceBuildBeforeDownload(driverType string, selectedVersion string) bool {
 	_ = selectedVersion
 	switch normalizeDriverType(driverType) {
-	case "kingbase":
-		// 金仓迭代期优先本地源码构建，避免下载到旧版本预编译代理导致修复不生效。
-		return true
 	default:
 		return false
 	}

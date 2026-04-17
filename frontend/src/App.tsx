@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -18,7 +18,7 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
@@ -69,6 +69,8 @@ import {
   isShortcutMatch,
   normalizeShortcutCombo,
 } from './utils/shortcuts';
+import { resolveTitleBarToggleIconKey, shouldToggleMaximisedWindowForScaleFix } from './utils/windowStateUi';
+import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
@@ -168,6 +170,9 @@ function App() {
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
   const tokenFontSize = Math.round(effectiveFontSize * effectiveUiScale);
+  const titleBarToggleIconKey = resolveTitleBarToggleIconKey(
+      windowState === 'fullscreen' ? 'fullscreen' : (windowState === 'maximized' ? 'maximized' : 'normal')
+  );
   const tokenFontSizeSM = Math.max(10, Math.round(tokenFontSize * 0.86));
   const tokenFontSizeLG = Math.max(tokenFontSize + 1, Math.round(tokenFontSize * 1.14));
   const tokenControlHeight = Math.max(24, Math.round(32 * effectiveUiScale));
@@ -518,8 +523,26 @@ function App() {
           const bounds = state.windowBounds;
           if (!bounds || bounds.width < 400 || bounds.height < 300) return;
           try {
-              WindowSetSize(bounds.width, bounds.height);
-              WindowSetPosition(bounds.x, bounds.y);
+              const nextBounds = resolveVisibleStartupWindowBounds(bounds, {
+                  availWidth: window.screen?.availWidth || 0,
+                  availHeight: window.screen?.availHeight || 0,
+                  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
+                  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
+              });
+              if (
+                  nextBounds.x !== bounds.x ||
+                  nextBounds.y !== bounds.y ||
+                  nextBounds.width !== bounds.width ||
+                  nextBounds.height !== bounds.height
+              ) {
+                  void emitWindowDiagnostic('adjust:startup-window-bounds', {
+                      from: bounds,
+                      to: nextBounds,
+                  });
+                  state.setWindowBounds(nextBounds);
+              }
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
           } catch (e) {
               console.warn('Failed to restore window bounds', e);
           }
@@ -639,7 +662,7 @@ function App() {
               });
 
               if (isMaximised) {
-                  if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+                  if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
                       window.dispatchEvent(new Event('resize'));
                       lastFixAt = Date.now();
                       return;
@@ -812,7 +835,11 @@ function App() {
       whiteSpace: 'nowrap',
       fontSize: isSidebarCompact ? 13 : 14,
   }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
-  const overlayTheme = useMemo(() => buildOverlayWorkbenchTheme(darkMode), [darkMode]);
+  const disableLocalBackdropFilter = isMacLikePlatform();
+  const overlayTheme = useMemo(
+      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
+      [darkMode, disableLocalBackdropFilter],
+  );
 
   const sidebarQuickActionBaseStyle = useMemo(() => ({
       height: Math.max(34, Math.round(36 * effectiveUiScale)),
@@ -842,8 +869,8 @@ function App() {
       ...sidebarQuickActionBaseStyle,
       flex: '1 1 0',
       border: 'none',
-      background: 'linear-gradient(135deg, rgba(255,214,102,0.96) 0%, rgba(240,183,39,0.92) 100%)',
-      color: '#2a1f00',
+      background: 'linear-gradient(135deg, rgba(34,197,94,0.96) 0%, rgba(22,163,74,0.92) 100%)',
+      color: '#f3fff7',
     }), [sidebarQuickActionBaseStyle]);
 
   const utilityModalShellStyle = useMemo(() => ({
@@ -1702,14 +1729,18 @@ function App() {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
-          void message.error('文件格式错误：仅支持 GoNavi 恢复包或历史 JSON 连接数组');
+          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组或 MySQL Workbench XML');
           return;
       }
 
       try {
           setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
-          void message.success(`成功导入 ${importedViews.length} 个连接`);
+          if (importKind === 'mysql-workbench-xml' && importedViews.some(v => !v.hasPrimaryPassword)) {
+              void message.warning(`成功导入 ${importedViews.length} 个连接，部分连接未包含密码，请编辑对应连接并输入密码后保存`);
+          } else {
+              void message.success(`成功导入 ${importedViews.length} 个连接`);
+          }
       } catch (e: any) {
           if (isConnectionPackagePasswordRequiredError(e)) {
               setPendingConnectionImportPayload(raw);
@@ -1824,6 +1855,7 @@ function App() {
   };
 
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
@@ -1857,26 +1889,11 @@ function App() {
               icon: <ToolOutlined />,
               onClick: () => setIsToolsModalOpen(true),
           },
-          proxy: {
-              key: 'proxy',
-              title: '代理',
-              icon: <GlobalOutlined />,
-              onClick: () => {
-                  setSecurityUpdateRepairSource(null);
-                  setIsProxyModalOpen(true);
-              },
-          },
-          theme: {
-              key: 'theme',
-              title: '主题',
-              icon: <SkinOutlined />,
-              onClick: () => setIsThemeModalOpen(true),
-          },
-          about: {
-              key: 'about',
-              title: '关于',
-              icon: <InfoCircleOutlined />,
-              onClick: () => setIsAboutOpen(true),
+          settings: {
+              key: 'settings',
+              title: '设置',
+              icon: <SettingOutlined />,
+              onClick: () => setIsSettingsModalOpen(true),
           },
       } as const;
 
@@ -2159,19 +2176,34 @@ function App() {
   }, [securityUpdateRepairSource]);
 
   const handleTitleBarWindowToggle = async () => {
+      const syncWindowStateFromRuntime = async () => {
+          try {
+              const [isFullscreen, isMaximised] = await Promise.all([
+                  WindowIsFullscreen().catch(() => false),
+                  WindowIsMaximised().catch(() => false),
+              ]);
+              useStore.getState().setWindowState(isFullscreen ? 'fullscreen' : (isMaximised ? 'maximized' : 'normal'));
+          } catch {
+              // ignore
+          }
+      };
+
       try {
           void emitWindowDiagnostic('action:titlebar-toggle:before');
           if (await WindowIsFullscreen()) {
               await WindowUnfullscreen();
+              await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
           if (useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
+              await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
           await WindowToggleMaximise();
+          await syncWindowStateFromRuntime();
           void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
       } catch (_) {
           // ignore
@@ -2575,7 +2607,7 @@ function App() {
                       />
                       <Button 
                         type="text" 
-                        icon={<BorderOutlined />} 
+                        icon={titleBarToggleIconKey === 'restore' ? <SwitcherOutlined /> : <BorderOutlined />} 
                         style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
                         onClick={() => { void handleTitleBarWindowToggle(); }} 
                       />
@@ -2602,7 +2634,7 @@ function App() {
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, width: '100%' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sidebarUtilityItems.length}, minmax(0, 1fr))`, gap: 8, width: '100%' }}>
                         {sidebarUtilityItems.map((item) => (
                             <Tooltip key={item.key} title={item.title}>
                                 <Button type="text" icon={item.icon} style={utilityButtonStyle} onClick={item.onClick} />
@@ -2612,11 +2644,11 @@ function App() {
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: isSidebarCompact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
-                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
-                            新建查询
-                        </Button>
                         <Button icon={<PlusOutlined />} onClick={handleCreateConnection} title="新建连接" style={sidebarCreateConnectionActionStyle}>
                             新建连接
+                        </Button>
+                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
+                            新建查询
                         </Button>
                     </div>
                 </div>
@@ -2859,6 +2891,71 @@ function App() {
                   <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
                     <span>{item.title}</span>
                     <span style={utilityActionHintStyle}>{item.description}</span>
+                  </span>
+                </Button>
+              ))}
+            </div>
+          </Modal>
+          <Modal
+            title={renderUtilityModalTitle(<SettingOutlined />, '设置中心', '集中处理代理、主题、AI 与关于等通用配置入口。')}
+            open={isSettingsModalOpen}
+            onCancel={() => setIsSettingsModalOpen(false)}
+            footer={null}
+            width={560}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+          >
+            <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
+              {[
+                {
+                  key: 'theme',
+                  icon: <SkinOutlined />,
+                  title: '主题与外观',
+                  description: '切换亮暗主题并调整界面观感。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setThemeModalSection('theme');
+                    setIsThemeModalOpen(true);
+                  },
+                },
+                {
+                  key: 'proxy',
+                  icon: <GlobalOutlined />,
+                  title: '全局代理',
+                  description: '统一配置更新检查、驱动管理和公共网络出口。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setSecurityUpdateRepairSource(null);
+                    setIsProxyModalOpen(true);
+                  },
+                },
+                {
+                  key: 'ai',
+                  icon: <RobotOutlined />,
+                  title: 'AI 设置',
+                  description: '管理模型供应商、密钥和默认行为。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    handleOpenAISettings();
+                  },
+                },
+                {
+                  key: 'about',
+                  icon: <InfoCircleOutlined />,
+                  title: '关于 GoNavi',
+                  description: '查看版本信息、仓库地址和更新状态。',
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setIsAboutOpen(true);
+                  },
+                },
+              ].map((item) => (
+                <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
+                  <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                    {item.icon}
+                  </span>
+                  <span style={{ display: 'grid', gap: 4, textAlign: 'left', minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: overlayTheme.titleText }}>{item.title}</span>
+                    <span style={{ fontSize: 12, color: overlayTheme.mutedText, whiteSpace: 'normal' }}>{item.description}</span>
                   </span>
                 </Button>
               ))}

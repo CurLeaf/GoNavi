@@ -424,9 +424,12 @@ func (m *MySQLDB) GetDatabases() ([]string, error) {
 }
 
 func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
-	query := "SHOW TABLES"
+	query := "SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME"
 	if dbName != "" {
-		query = fmt.Sprintf("SHOW TABLES FROM `%s`", dbName)
+		query = fmt.Sprintf(
+			"SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = '%s' AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
+			strings.ReplaceAll(dbName, "'", "''"),
+		)
 	}
 
 	data, _, err := m.Query(query)

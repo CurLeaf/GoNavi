@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	stdRuntime "runtime"
+	"strings"
 	"testing"
 )
 
@@ -156,5 +157,43 @@ func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
 	}
 	if logged != 0 {
 		t.Fatalf("expected silent check to skip error logging, got %d", logged)
+	}
+}
+
+func TestExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix(t *testing.T) {
+	assetName, err := expectedAssetNameForExecutable(
+		"linux",
+		"amd64",
+		"v0.6.5",
+		"/opt/GoNavi/gonavi-build-linux-amd64-webkit41",
+	)
+	if err != nil {
+		t.Fatalf("expectedAssetNameForExecutable returned error: %v", err)
+	}
+
+	want := "GoNavi-0.6.5-Linux-Amd64-WebKit41.tar.gz"
+	if assetName != want {
+		t.Fatalf("unexpected linux webkit41 asset name: got %q want %q", assetName, want)
+	}
+}
+
+func TestBuildLinuxScriptPrefersTargetExecutableBasename(t *testing.T) {
+	script := buildLinuxScript(
+		"/tmp/GoNavi-0.6.5-Linux-Amd64-WebKit41.tar.gz",
+		"/opt/GoNavi/gonavi-build-linux-amd64-webkit41",
+		"/tmp/.gonavi-update-linux-0.6.5",
+		12345,
+	)
+
+	mustContain := []string{
+		`TARGET_NAME="$(basename "$TARGET")"`,
+		`NEWBIN="$TMPDIR/$TARGET_NAME"`,
+		`NEWBIN=$(find "$TMPDIR" -type f -name "$TARGET_NAME" | head -n 1)`,
+		`NEWBIN=$(find "$TMPDIR" -type f -name "GoNavi" | head -n 1)`,
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(script, want) {
+			t.Fatalf("linux update script missing required token: %s\nscript:\n%s", want, script)
+		}
 	}
 }

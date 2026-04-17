@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	mssql "github.com/microsoft/go-mssqldb"
 )
 
 const (
@@ -195,6 +197,12 @@ func bytesToDisplayValue(b []byte, databaseTypeName string) interface{} {
 	}
 
 	dbType := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	if isSQLServerUniqueIdentifierType(dbType) {
+		var guid mssql.UniqueIdentifier
+		if err := guid.Scan(b); err == nil {
+			return guid.String()
+		}
+	}
 	if isBitLikeDBType(dbType) {
 		if u, ok := bytesToUint64(b); ok {
 			// JS number precision is limited; keep large bitmasks as string.
@@ -228,6 +236,10 @@ func bytesToReadableString(b []byte) interface{} {
 		return ""
 	}
 	return "0x" + hex.EncodeToString(b)
+}
+
+func isSQLServerUniqueIdentifierType(typeName string) bool {
+	return typeName == "UNIQUEIDENTIFIER"
 }
 
 func isBitLikeDBType(typeName string) bool {

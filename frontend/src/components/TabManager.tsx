@@ -17,24 +17,7 @@ import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
 import type { TabData } from '../types';
-
-const detectConnectionEnvLabel = (connectionName: string): string | null => {
-  const tokens = connectionName.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  if (tokens.includes('prod') || tokens.includes('production')) return 'PROD';
-  if (tokens.includes('uat')) return 'UAT';
-  if (tokens.includes('dev') || tokens.includes('development')) return 'DEV';
-  if (tokens.includes('sit')) return 'SIT';
-  if (tokens.includes('stg') || tokens.includes('stage') || tokens.includes('staging') || tokens.includes('pre')) return 'STG';
-  if (tokens.includes('test') || tokens.includes('qa')) return 'TEST';
-  return null;
-};
-
-const buildTabDisplayTitle = (tab: TabData, connectionName: string | undefined): string => {
-  if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') return tab.title;
-  if (!connectionName) return tab.title;
-  const prefix = detectConnectionEnvLabel(connectionName) || connectionName;
-  return `[${prefix}] ${tab.title}`;
-};
+import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
 type SortableTabLabelProps = {
   displayTitle: string;
@@ -50,7 +33,7 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
       <span
         className="tab-dnd-label"
         onContextMenu={(e) => e.preventDefault()}
-        title="拖拽调整标签顺序"
+        title={displayTitle}
       >
         {displayTitle}
       </span>
@@ -198,8 +181,8 @@ const TabManager: React.FC = () => {
   );
 
   const items = useMemo(() => tabs.map((tab, index) => {
-    const connectionName = connections.find((conn) => conn.id === tab.connectionId)?.name;
-    const displayTitle = buildTabDisplayTitle(tab, connectionName);
+    const connection = connections.find((conn) => conn.id === tab.connectionId);
+    const displayTitle = buildTabDisplayTitle(tab, connection);
     const tabIsActive = tab.id === activeTabId;
     let content;
     if (tab.type === 'query') {
@@ -336,6 +319,10 @@ const TabManager: React.FC = () => {
               border-radius: 6px;
               box-shadow: 0 0 0 2px rgba(9, 109, 217, 0.32);
               background: rgba(9, 109, 217, 0.08);
+            }
+            body[data-theme='light'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
+              background: rgba(24, 144, 255, 0.10) !important;
+              border-color: rgba(24, 144, 255, 0.28) !important;
             }
             body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
               background: rgba(255, 214, 102, 0.12) !important;

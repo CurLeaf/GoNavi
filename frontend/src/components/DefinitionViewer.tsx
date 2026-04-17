@@ -10,6 +10,23 @@ interface DefinitionViewerProps {
     tab: TabData;
 }
 
+const normalizeMySQLViewDDL = (rawDefinition: unknown): string => {
+    const text = String(rawDefinition || '').trim();
+    if (!text) return '';
+
+    const normalized = text.replace(/\r\n/g, '\n').trim().replace(/;+\s*$/, '');
+    const createViewPrefixPattern = /^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:`[^`]+`|\S+)\s*@\s*(?:`[^`]+`|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+/i;
+    if (createViewPrefixPattern.test(normalized)) {
+        return `${normalized.replace(createViewPrefixPattern, 'CREATE OR REPLACE VIEW ')};`;
+    }
+
+    if (/^\s*(select|with)\b/i.test(normalized)) {
+        return normalized;
+    }
+
+    return `${normalized};`;
+};
+
 const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -257,15 +274,15 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'mysql': {
                 const keys = Object.keys(row);
                 const textDefinition = row.view_definition || row.VIEW_DEFINITION;
-                if (textDefinition) return String(textDefinition);
+                if (textDefinition) return normalizeMySQLViewDDL(textDefinition);
                 const sqlKey = keys.find(k => k.toLowerCase().includes('create view') || k.toLowerCase() === 'create view');
-                if (sqlKey) return row[sqlKey];
+                if (sqlKey) return normalizeMySQLViewDDL(row[sqlKey]);
                 const tableSqlKey = keys.find(k => k.toLowerCase().includes('create table'));
-                if (tableSqlKey) return row[tableSqlKey];
+                if (tableSqlKey) return normalizeMySQLViewDDL(row[tableSqlKey]);
                 for (const key of keys) {
                     const val = String(row[key] || '');
                     if (val.toUpperCase().includes('CREATE') && (val.toUpperCase().includes('VIEW') || val.toUpperCase().includes('TABLE'))) {
-                        return val;
+                        return normalizeMySQLViewDDL(val);
                     }
                 }
                 return JSON.stringify(row, null, 2);

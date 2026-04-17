@@ -6,7 +6,14 @@ import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from '@monaco-editor/react';
 import type { DataNode } from 'antd/es/tree';
-import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import {
+    blurToFilter,
+    isMacLikePlatform,
+    normalizeBlurForPlatform,
+    normalizeOpacityForPlatform,
+    resolveAppearanceValues,
+    resolveTextInputSafeBackdropFilter,
+} from '../utils/appearance';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     applyRenamedRedisKeyState,
@@ -19,6 +26,9 @@ import {
     type RedisTreeDataNode,
 } from './redisViewerTree';
 import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
+import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput } from '../utils/redisSearchPattern';
+import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../utils/redisValueDisplay';
 
 const { Search } = Input;
 
@@ -38,148 +48,6 @@ interface RedisViewerProps {
     connectionId: string;
     redisDB: number;
 }
-
-// 尝试多种方式解码二进制数据
-const tryDecodeValue = (value: string): { displayValue: string; encoding: string; needsHex: boolean } => {
-    if (!value || value.length === 0) {
-        return { displayValue: '', encoding: 'UTF-8', needsHex: false };
-    }
-
-    // 统计字节分布
-    let nullCount = 0;
-    let printableCount = 0;
-    let highByteCount = 0;
-    const sampleSize = Math.min(value.length, 200);
-
-    for (let i = 0; i < sampleSize; i++) {
-        const code = value.charCodeAt(i);
-        if (code === 0) {
-            nullCount++;
-        } else if (code >= 32 && code < 127) {
-            printableCount++;
-        } else if (code >= 128) {
-            highByteCount++;
-        }
-    }
-
-    // 如果超过30%是null字节，很可能是二进制数据，显示十六进制
-    if (nullCount / sampleSize > 0.3) {
-        return { displayValue: toHexDisplay(value), encoding: 'HEX', needsHex: true };
-    }
-
-    // 如果超过70%是可打印ASCII字符，直接显示
-    if (printableCount / sampleSize > 0.7) {
-        return { displayValue: value, encoding: 'UTF-8', needsHex: false };
-    }
-
-    // 尝试UTF-8解码
-    if (highByteCount > 0) {
-        try {
-            const bytes = new Uint8Array(value.length);
-            for (let i = 0; i < value.length; i++) {
-                bytes[i] = value.charCodeAt(i) & 0xFF;
-            }
-            const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-
-            // 检查解码质量
-            let validChars = 0;
-            let replacementChars = 0;
-            let controlChars = 0;
-
-            for (let i = 0; i < Math.min(decoded.length, 200); i++) {
-                const code = decoded.charCodeAt(i);
-                if (code === 0xFFFD) {
-                    replacementChars++;
-                } else if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
-                    controlChars++;
-                } else if ((code >= 32 && code < 127) || (code >= 0x4E00 && code <= 0x9FFF) || (code >= 0x3000 && code <= 0x303F)) {
-                    // ASCII可打印字符、中文字符、中文标点
-                    validChars++;
-                }
-            }
-
-            const totalChecked = Math.min(decoded.length, 200);
-
-            // 如果替换字符超过10%或控制字符超过20%，说明不是有效的UTF-8文本
-            if (replacementChars / totalChecked > 0.1 || controlChars / totalChecked > 0.2) {
-                return { displayValue: toHexDisplay(value), encoding: 'HEX', needsHex: true };
-            }
-
-            // 如果有效字符超过50%，使用UTF-8解码
-            if (validChars / totalChecked > 0.5) {
-                return { displayValue: decoded, encoding: 'UTF-8', needsHex: false };
-            }
-        } catch (e) {
-            // UTF-8解码失败
-        }
-    }
-
-    // 默认显示十六进制
-    return { displayValue: toHexDisplay(value), encoding: 'HEX', needsHex: true };
-};
-
-// 检测是否为二进制数据（包含大量不可打印字符）
-const isBinaryData = (value: string): boolean => {
-    if (!value || value.length === 0) return false;
-    // 检查前 100 个字符中不可打印字符的比例
-    const sampleSize = Math.min(value.length, 100);
-    let nonPrintableCount = 0;
-    for (let i = 0; i < sampleSize; i++) {
-        const code = value.charCodeAt(i);
-        // 不可打印字符：控制字符（0-31，除了 9, 10, 13）和 DEL（127）
-        if ((code < 32 && code !== 9 && code !== 10 && code !== 13) || code === 127 || code > 255) {
-            nonPrintableCount++;
-        }
-    }
-    // 如果超过 10% 是不可打印字符，认为是二进制数据
-    return nonPrintableCount / sampleSize > 0.1;
-};
-
-// 将字符串转换为十六进制显示
-const toHexDisplay = (value: string): string => {
-    const bytes: string[] = [];
-    const ascii: string[] = [];
-    let result = '';
-
-    for (let i = 0; i < value.length; i++) {
-        const code = value.charCodeAt(i);
-        bytes.push(code.toString(16).padStart(2, '0').toUpperCase());
-        // 可打印 ASCII 字符显示原字符，否则显示点
-        ascii.push(code >= 32 && code < 127 ? value[i] : '.');
-
-        if (bytes.length === 16 || i === value.length - 1) {
-            const offset = (Math.floor(i / 16) * 16).toString(16).padStart(8, '0').toUpperCase();
-            const hexPart = bytes.join(' ').padEnd(47, ' ');
-            const asciiPart = ascii.join('');
-            result += `${offset}  ${hexPart}  |${asciiPart}|\n`;
-            bytes.length = 0;
-            ascii.length = 0;
-        }
-    }
-    return result;
-};
-
-// 尝试解析并格式化 JSON
-const tryFormatJson = (value: string): { isJson: boolean; formatted: string } => {
-    try {
-        const parsed = JSON.parse(value);
-        return { isJson: true, formatted: JSON.stringify(parsed, null, 2) };
-    } catch {
-        return { isJson: false, formatted: value };
-    }
-};
-
-// 格式化字符串值 - 支持 JSON、二进制数据检测和智能解码
-const formatStringValue = (value: string): { displayValue: string; isBinary: boolean; isJson: boolean; encoding?: string } => {
-    // 先检测是否为二进制数据
-    if (isBinaryData(value)) {
-        const { displayValue, encoding, needsHex } = tryDecodeValue(value);
-        return { displayValue, isBinary: needsHex, isJson: false, encoding };
-    }
-    // 尝试 JSON 格式化
-    const { isJson, formatted } = tryFormatJson(value);
-    return { displayValue: formatted, isBinary: false, isJson, encoding: 'UTF-8' };
-};
 
 // 可拖拽分隔条组件 - 使用直接 DOM 操作避免卡顿
 const ResizableDivider: React.FC<{
@@ -283,8 +151,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const resolvedAppearance = resolveAppearanceValues(appearance);
     const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
     const blur = normalizeBlurForPlatform(resolvedAppearance.blur);
+    const disableLocalBackdropFilter = isMacLikePlatform();
     const connection = connections.find(c => c.id === connectionId);
-    const workbenchTheme = useMemo(() => buildRedisWorkbenchTheme({ darkMode, opacity, blur }), [blur, darkMode, opacity]);
+    const workbenchTheme = useMemo(
+        () => buildRedisWorkbenchTheme({ darkMode, opacity, blur, disableBackdropFilter: disableLocalBackdropFilter }),
+        [blur, darkMode, disableLocalBackdropFilter, opacity],
+    );
+    const workbenchBackdropFilter = useMemo(
+        () => resolveTextInputSafeBackdropFilter(blurToFilter(blur), disableLocalBackdropFilter),
+        [blur, disableLocalBackdropFilter],
+    );
     const keyAccentColor = workbenchTheme.accent;
     const jsonAccentColor = darkMode ? '#f6c453' : '#1890ff';
     const valueToolbarBg = workbenchTheme.panelBgStrong;
@@ -293,6 +169,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
+    const [searchInput, setSearchInput] = useState('');
     const [searchPattern, setSearchPattern] = useState('*');
     const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
@@ -467,13 +344,29 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
     useEffect(() => {
         loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
-    }, [redisDB]);
+    }, [loadKeys, redisDB]);
+
+    const executeSearch = useCallback((value: string) => {
+        const normalized = normalizeRedisSearchInput(value);
+        setSearchInput(normalized.keyword);
+        setSearchPattern(normalized.pattern);
+        setCursor('0');
+        loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
+    }, [loadKeys]);
 
     const handleSearch = (value: string) => {
-        const pattern = value.trim() || '*';
-        setSearchPattern(pattern);
+        executeSearch(value);
+    };
+
+    const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const normalized = normalizeRedisSearchDraftChange(event.target.value);
+        setSearchInput(normalized.keyword);
+        if (!normalized.shouldSearchImmediately) {
+            return;
+        }
+        setSearchPattern(normalized.pattern);
         setCursor('0');
-        loadKeys(pattern, '0', false, getRedisScanLoadCount(pattern, false));
+        loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
     };
 
     const handleLoadMore = () => {
@@ -1040,6 +933,22 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     };
 
     const renderValueEditor = () => {
+        const processValueForCurrentView = (value: string) => {
+            if (viewMode === 'hex') {
+                return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
+            }
+
+            if (viewMode === 'text') {
+                return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
+            }
+
+            if (viewMode === 'utf8') {
+                return { displayValue: decodeRedisUtf8Value(value), isBinary: false, isJson: false, encoding: 'UTF-8' };
+            }
+
+            return formatRedisStringValue(value);
+        };
+
         if (!keyValue || !selectedKey) {
             return (
                 <div
@@ -1061,33 +970,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         const renderStringValue = () => {
             const strValue = String(keyValue.value);
-
-            // 根据查看模式生成显示内容
-            const getDisplayContent = () => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(strValue), isBinary: true, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: strValue, isBinary: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(strValue.length);
-                        for (let i = 0; i < strValue.length; i++) {
-                            bytes[i] = strValue.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: strValue, isBinary: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    // auto mode
-                    const { displayValue, isBinary, isJson, encoding } = formatStringValue(strValue);
-                    return { displayValue, isBinary, encoding };
-                }
-            };
-
-            const { displayValue, isBinary, encoding } = getDisplayContent();
-            const isJson = viewMode === 'auto' && formatStringValue(strValue).isJson;
+            const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(strValue);
 
             return (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1146,31 +1029,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         const renderHashValue = () => {
-            // 根据查看模式处理值
-            const processValue = (value: string) => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(value.length);
-                        for (let i = 0; i < value.length; i++) {
-                            bytes[i] = value.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, isJson: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: value, isBinary: false, isJson: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    // auto mode
-                    return formatStringValue(value);
-                }
-            };
-
             const data = Object.entries(keyValue.value as Record<string, string>).map(([field, value]) => {
-                const { displayValue, isBinary, isJson, encoding } = processValue(value);
+                const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(value);
                 return { field, value, displayValue, isBinary, isJson, encoding };
             });
 
@@ -1194,7 +1054,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, field);
+                    const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, [field]);
                     if (res.success) {
                         message.success('删除成功');
                         loadKeyValue(selectedKey);
@@ -1214,9 +1074,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 title: '添加字段',
                                 content: (
                                     <Form id="add-hash-field-form" layout="vertical">
-                                        <Form.Item label="字段名" name="field" rules={[{ required: true }]}>
-                                            <Input id="new-hash-field" />
-                                        </Form.Item>
+	                                        <Form.Item label="字段名" name="field" rules={[{ required: true }]}>
+	                                            <Input id="new-hash-field" {...noAutoCapInputProps} />
+	                                        </Form.Item>
                                         <Form.Item label="值" name="value" rules={[{ required: true }]}>
                                             <Input.TextArea id="new-hash-value" rows={4} />
                                         </Form.Item>
@@ -1307,31 +1167,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         const renderListValue = () => {
-            // 根据查看模式处理值
-            const processValue = (value: string) => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(value.length);
-                        for (let i = 0; i < value.length; i++) {
-                            bytes[i] = value.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, isJson: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: value, isBinary: false, isJson: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    // auto mode
-                    return formatStringValue(value);
-                }
-            };
-
             const data = (keyValue.value as string[]).map((value, index) => {
-                const { displayValue, isBinary, isJson, encoding } = processValue(value);
+                const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(value);
                 return { index, value, displayValue, isBinary, isJson, encoding };
             });
 
@@ -1477,31 +1314,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         const renderSetValue = () => {
-            // 根据查看模式处理值
-            const processValue = (value: string) => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(value.length);
-                        for (let i = 0; i < value.length; i++) {
-                            bytes[i] = value.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, isJson: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: value, isBinary: false, isJson: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    // auto mode
-                    return formatStringValue(value);
-                }
-            };
-
             const data = (keyValue.value as string[]).map((member, index) => {
-                const { displayValue, isBinary, isJson, encoding } = processValue(member);
+                const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(member);
                 return { index, member, displayValue, isBinary, isJson, encoding };
             });
 
@@ -1614,31 +1428,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         const renderZSetValue = () => {
-            // 根据查看模式处理值
-            const processValue = (value: string) => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(value.length);
-                        for (let i = 0; i < value.length; i++) {
-                            bytes[i] = value.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, isJson: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: value, isBinary: false, isJson: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    // auto mode
-                    return formatStringValue(value);
-                }
-            };
-
             const data = (keyValue.value as Array<{ member: string; score: number }>).map((item, index) => {
-                const { displayValue, isBinary, isJson, encoding } = processValue(item.member);
+                const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(item.member);
                 return { ...item, index, displayMember: displayValue, isBinary, isJson, encoding };
             });
 
@@ -1779,30 +1570,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         const renderStreamValue = () => {
-            const processValue = (value: string) => {
-                if (viewMode === 'hex') {
-                    return { displayValue: toHexDisplay(value), isBinary: true, isJson: false, encoding: 'HEX' };
-                } else if (viewMode === 'text') {
-                    return { displayValue: value, isBinary: false, isJson: false, encoding: 'Text' };
-                } else if (viewMode === 'utf8') {
-                    try {
-                        const bytes = new Uint8Array(value.length);
-                        for (let i = 0; i < value.length; i++) {
-                            bytes[i] = value.charCodeAt(i) & 0xFF;
-                        }
-                        const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-                        return { displayValue: decoded, isBinary: false, isJson: false, encoding: 'UTF-8' };
-                    } catch (e) {
-                        return { displayValue: value, isBinary: false, isJson: false, encoding: 'UTF-8 (失败)' };
-                    }
-                } else {
-                    return formatStringValue(value);
-                }
-            };
-
             const data = (keyValue.value as StreamEntry[]).map((item, index) => {
                 const rawFieldsText = JSON.stringify(item.fields ?? {}, null, 2);
-                const { displayValue, isBinary, isJson, encoding } = processValue(rawFieldsText);
+                const { displayValue, isBinary, isJson, encoding } = processValueForCurrentView(rawFieldsText);
                 return {
                     index,
                     id: item.id,
@@ -1888,7 +1658,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     <div>
                                         <div style={{ marginBottom: 8 }}>
                                             <label>ID（可选，默认 *）：</label>
-                                            <Input id="new-stream-id" placeholder="例如: * 或 1723110000000-0" />
+	                                            <Input id="new-stream-id" {...noAutoCapInputProps} placeholder="例如: * 或 1723110000000-0" />
                                         </div>
                                         <div>
                                             <label>字段 JSON：</label>
@@ -2050,7 +1820,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     }
 
     return (
-        <div className="redis-viewer-workbench" style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: blurToFilter(blur), WebkitBackdropFilter: blurToFilter(blur) }}>
+        <div className="redis-viewer-workbench" style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: workbenchBackdropFilter, WebkitBackdropFilter: workbenchBackdropFilter }}>
             {/* Left: Key List */}
             <div ref={leftPanelRef} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
                 <div style={{ ...workbenchCardStyle, padding: 12 }}>
@@ -2063,9 +1833,12 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
                         <Search
-                            placeholder="搜索 Key (支持 * 通配符)"
-                            defaultValue="*"
+                            {...noAutoCapInputProps}
+                            placeholder="搜索 Key"
+                            value={searchInput}
+                            onChange={handleSearchInputChange}
                             onSearch={handleSearch}
+                            allowClear
                             enterButton={<SearchOutlined />}
                         />
                     </Space.Compact>
@@ -2152,7 +1925,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             >
                 <Editor
                     height="450px"
-                    language={tryFormatJson(editValue).isJson ? 'json' : 'plaintext'}
+                    language={formatRedisStringValue(editValue).isJson ? 'json' : 'plaintext'}
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     value={editValue}
                     onChange={(value) => setEditValue(value || '')}
@@ -2177,7 +1950,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             >
                 <Form form={newKeyForm} layout="vertical" initialValues={{ ttl: -1 }}>
                     <Form.Item name="key" label="Key" rules={[{ required: true, message: '请输入 Key' }]}>
-                        <Input placeholder="key name" />
+                        <Input {...noAutoCapInputProps} placeholder="key name" />
                     </Form.Item>
                     <Form.Item name="value" label="值" rules={[{ required: true, message: '请输入值' }]}>
                         <Input.TextArea rows={4} placeholder="value" />
@@ -2207,7 +1980,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         rules={[{ required: true, message: '请输入新的 Key 名称' }]}
                         extra={renameTargetKey ? `原始 Key：${renameTargetKey}` : undefined}
                     >
-                        <Input placeholder="new:key:name" />
+                        <Input {...noAutoCapInputProps} placeholder="new:key:name" />
                     </Form.Item>
                 </Form>
             </Modal>

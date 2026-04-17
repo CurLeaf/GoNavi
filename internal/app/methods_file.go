@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,116 @@ import (
 
 const minExportQueryTimeout = 5 * time.Minute
 const minClickHouseExportQueryTimeout = 2 * time.Hour
+const maxSQLFileSizeBytes int64 = 50 * 1024 * 1024
+
+var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
+
+type SQLDirectoryEntry struct {
+	Name     string              `json:"name"`
+	Path     string              `json:"path"`
+	IsDir    bool                `json:"isDir"`
+	Children []SQLDirectoryEntry `json:"children,omitempty"`
+}
+
+func normalizeDirectoryDialogPath(currentDir string) string {
+	defaultDir := strings.TrimSpace(currentDir)
+	if defaultDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			defaultDir = home
+		}
+	}
+	if filepath.Ext(defaultDir) != "" {
+		defaultDir = filepath.Dir(defaultDir)
+	}
+	if defaultDir != "" && !filepath.IsAbs(defaultDir) {
+		if abs, err := filepath.Abs(defaultDir); err == nil {
+			defaultDir = abs
+		}
+	}
+	return defaultDir
+}
+
+func readSQLFileByPath(filePath string) connection.QueryResult {
+	selection := strings.TrimSpace(filePath)
+	if selection == "" {
+		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+	}
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+
+	fi, err := os.Stat(selection)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+	if fi.IsDir() {
+		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+	}
+
+	if fi.Size() > maxSQLFileSizeBytes {
+		sizeMB := float64(fi.Size()) / (1024 * 1024)
+		return connection.QueryResult{
+			Success: true,
+			Data: map[string]interface{}{
+				"isLargeFile": true,
+				"filePath":    selection,
+				"fileSize":    fi.Size(),
+				"fileSizeMB":  fmt.Sprintf("%.1f", sizeMB),
+			},
+		}
+	}
+
+	content, err := os.ReadFile(selection)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]SQLDirectoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		entryPath := filepath.Join(directory, entry.Name())
+		if entry.IsDir() {
+			children, childErr := buildSQLDirectoryEntries(entryPath)
+			if childErr != nil {
+				return nil, childErr
+			}
+			if len(children) == 0 {
+				continue
+			}
+			result = append(result, SQLDirectoryEntry{
+				Name:     entry.Name(),
+				Path:     entryPath,
+				IsDir:    true,
+				Children: children,
+			})
+			continue
+		}
+		if !strings.EqualFold(filepath.Ext(entry.Name()), ".sql") {
+			continue
+		}
+		result = append(result, SQLDirectoryEntry{
+			Name:  entry.Name(),
+			Path:  entryPath,
+			IsDir: false,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].IsDir != result[j].IsDir {
+			return result[i].IsDir
+		}
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result, nil
+}
 
 func (a *App) OpenSQLFile() connection.QueryResult {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
@@ -52,33 +163,56 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	// 检查文件大小
-	const maxSQLFileSize int64 = 50 * 1024 * 1024 // 50MB
-	fi, err := os.Stat(selection)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
-	}
+	return readSQLFileByPath(selection)
+}
 
-	// 大文件：只返回文件路径和大小，不读取内容
-	if fi.Size() > maxSQLFileSize {
-		sizeMB := float64(fi.Size()) / (1024 * 1024)
-		return connection.QueryResult{
-			Success: true,
-			Data: map[string]interface{}{
-				"isLargeFile": true,
-				"filePath":    selection,
-				"fileSize":    fi.Size(),
-				"fileSizeMB":  fmt.Sprintf("%.1f", sizeMB),
-			},
-		}
-	}
-
-	content, err := os.ReadFile(selection)
+func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
+	selection, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "选择 SQL 目录",
+		DefaultDirectory: normalizeDirectoryDialogPath(currentDir),
+	})
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if strings.TrimSpace(selection) == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	name := filepath.Base(selection)
+	if name == "." || name == string(filepath.Separator) {
+		name = selection
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection, "name": name}}
+}
 
-	return connection.QueryResult{Success: true, Data: string(content)}
+func (a *App) ListSQLDirectory(directory string) connection.QueryResult {
+	target := strings.TrimSpace(directory)
+	if target == "" {
+		return connection.QueryResult{Success: false, Message: "目录路径不能为空"}
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if !info.IsDir() {
+		return connection.QueryResult{Success: false, Message: "所选路径不是目录"}
+	}
+
+	entries, err := buildSQLDirectoryEntries(target)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Data: entries}
+}
+
+func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
+	return readSQLFileByPath(filePath)
 }
 
 // ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
@@ -286,6 +420,10 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 			{
 				DisplayName: "JSON Files (*.json)",
 				Pattern:     "*.json",
+			},
+			{
+				DisplayName: "MySQL Workbench Connections (*.xml)",
+				Pattern:     "*.xml",
 			},
 		},
 	})
@@ -1601,7 +1739,7 @@ func extractViewCreateSQL(row map[string]interface{}) string {
 	}
 	ddl := exportRowValueCI(row, "create view", "create_statement", "create_sql", "ddl", "sql", "view_definition", "definition")
 	if ddl != "" {
-		return ddl
+		return normalizeMySQLViewCreateSQL(ddl)
 	}
 	for _, value := range row {
 		if value == nil {
@@ -1613,10 +1751,21 @@ func extractViewCreateSQL(row map[string]interface{}) string {
 		}
 		lower := strings.ToLower(text)
 		if strings.HasPrefix(lower, "create ") || strings.HasPrefix(lower, "select ") || strings.HasPrefix(lower, "with ") {
-			return text
+			return normalizeMySQLViewCreateSQL(text)
 		}
 	}
 	return ""
+}
+
+func normalizeMySQLViewCreateSQL(sql string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(sql), ";"))
+	if trimmed == "" {
+		return ""
+	}
+	if mysqlCreateViewPrefixPattern.MatchString(trimmed) {
+		return mysqlCreateViewPrefixPattern.ReplaceAllString(trimmed, "CREATE OR REPLACE VIEW ")
+	}
+	return trimmed
 }
 
 func exportRowValueCI(row map[string]interface{}, candidates ...string) string {
@@ -1682,8 +1831,36 @@ func exportInferObjectName(row map[string]interface{}) string {
 	return ""
 }
 
+func trimLeadingSQLComments(sql string) string {
+	trimmed := strings.TrimSpace(sql)
+	for trimmed != "" {
+		switch {
+		case strings.HasPrefix(trimmed, "--"):
+			if newline := strings.IndexByte(trimmed, '\n'); newline >= 0 {
+				trimmed = strings.TrimSpace(trimmed[newline+1:])
+				continue
+			}
+			return ""
+		case strings.HasPrefix(trimmed, "#"):
+			if newline := strings.IndexByte(trimmed, '\n'); newline >= 0 {
+				trimmed = strings.TrimSpace(trimmed[newline+1:])
+				continue
+			}
+			return ""
+		case strings.HasPrefix(trimmed, "/*"):
+			if end := strings.Index(trimmed, "*/"); end >= 0 {
+				trimmed = strings.TrimSpace(trimmed[end+2:])
+				continue
+			}
+			return ""
+		}
+		break
+	}
+	return trimmed
+}
+
 func looksLikeSelectOrWith(sql string) bool {
-	trimmed := strings.TrimSpace(strings.TrimSuffix(sql, ";"))
+	trimmed := trimLeadingSQLComments(strings.TrimSuffix(sql, ";"))
 	if trimmed == "" {
 		return false
 	}
@@ -1929,8 +2106,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	}
 
 	query = sanitizeSQLForPgLike(runConfig.Type, query)
-	lowerQuery := strings.ToLower(strings.TrimSpace(query))
-	if !(strings.HasPrefix(lowerQuery, "select") || strings.HasPrefix(lowerQuery, "with")) {
+	if !looksLikeSelectOrWith(query) {
 		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
 	}
 

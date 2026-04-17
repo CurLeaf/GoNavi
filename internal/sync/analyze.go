@@ -14,6 +14,7 @@ type TableDiffSummary struct {
 	Updates            int      `json:"updates"`
 	Deletes            int      `json:"deletes"`
 	Same               int      `json:"same"`
+	SchemaDiffCount    int      `json:"schemaDiffCount,omitempty"`
 	Message            string   `json:"message,omitempty"`
 	HasSchema          bool     `json:"hasSchema,omitempty"`
 	TargetTableExists  bool     `json:"targetTableExists,omitempty"`
@@ -37,6 +38,9 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 	}
 	if isMongoToRedisKeyspacePair(config) {
 		return s.analyzeMongoToRedis(config)
+	}
+	if hasSourceQuery(config) {
+		return s.analyzeSourceQuery(config)
 	}
 
 	contentRaw := strings.ToLower(strings.TrimSpace(config.Content))
@@ -109,6 +113,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			summary.UnsupportedObjects = append(summary.UnsupportedObjects, plan.UnsupportedObjects...)
 			summary.IndexesToCreate = plan.IndexesToCreate
 			summary.IndexesSkipped = plan.IndexesSkipped
+			summary.SchemaDiffCount = len(plan.PreDataSQL) + len(plan.PostDataSQL)
 
 			if !plan.TargetTableExists && !plan.AutoCreate {
 				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，无法执行同步")
@@ -118,7 +123,11 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 
 			if !syncData {
 				summary.CanSync = true
-				summary.Message = firstNonEmpty(plan.PlannedAction, "仅同步结构，未执行数据差异分析")
+				if summary.SchemaDiffCount > 0 {
+					summary.Message = firstNonEmpty(plan.PlannedAction, fmt.Sprintf("检测到 %d 条结构变更", summary.SchemaDiffCount))
+				} else {
+					summary.Message = firstNonEmpty(plan.PlannedAction, "仅同步结构，未执行数据差异分析")
+				}
 				result.Tables = append(result.Tables, summary)
 				return
 			}

@@ -119,3 +119,60 @@ func TestNormalizeRedisGetValueError(t *testing.T) {
 		t.Fatal("expected nil for supported existing key")
 	}
 }
+
+func TestReadRedisHashEntriesWithFallbackUsesHScanWhenHGetAllForbidden(t *testing.T) {
+	scanCalls := 0
+	values, length, err := readRedisHashEntriesWithFallback(
+		func() (map[string]string, error) {
+			return nil, errors.New("ERR command 'HGETALL' not support for normal user")
+		},
+		func() (int64, error) {
+			return 2, nil
+		},
+		func(cursor uint64, count int64) ([]string, uint64, error) {
+			scanCalls++
+			if cursor != 0 {
+				t.Fatalf("expected first scan cursor to be 0, got %d", cursor)
+			}
+			if count <= 0 {
+				t.Fatalf("expected positive scan count, got %d", count)
+			}
+			return []string{"field-a", "value-a", "field-b", "value-b"}, 0, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("readRedisHashEntriesWithFallback() unexpected error: %v", err)
+	}
+	if scanCalls != 1 {
+		t.Fatalf("expected exactly one HSCAN fallback, got %d", scanCalls)
+	}
+	if length != 2 {
+		t.Fatalf("expected hash length 2, got %d", length)
+	}
+	if got := values["field-a"]; got != "value-a" {
+		t.Fatalf("expected field-a=value-a, got %q", got)
+	}
+	if got := values["field-b"]; got != "value-b" {
+		t.Fatalf("expected field-b=value-b, got %q", got)
+	}
+}
+
+func TestReadRedisHashEntriesWithFallbackReturnsOriginalErrorForNonPermissionFailure(t *testing.T) {
+	expectedErr := errors.New("ERR wrong type")
+	_, _, err := readRedisHashEntriesWithFallback(
+		func() (map[string]string, error) {
+			return nil, expectedErr
+		},
+		func() (int64, error) {
+			t.Fatal("expected HLEN not to run for non-permission failure")
+			return 0, nil
+		},
+		func(cursor uint64, count int64) ([]string, uint64, error) {
+			t.Fatal("expected HSCAN not to run for non-permission failure")
+			return nil, 0, nil
+		},
+	)
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected original error %v, got %v", expectedErr, err)
+	}
+}

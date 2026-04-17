@@ -493,6 +493,19 @@ func fetchLatestRelease() (*githubRelease, error) {
 }
 
 func expectedAssetName(goos, goarch, version string) (string, error) {
+	executablePath := ""
+	if goos == "linux" {
+		if path, err := os.Executable(); err == nil {
+			if resolved, resolveErr := filepath.EvalSymlinks(path); resolveErr == nil && strings.TrimSpace(resolved) != "" {
+				path = resolved
+			}
+			executablePath = path
+		}
+	}
+	return expectedAssetNameForExecutable(goos, goarch, version, executablePath)
+}
+
+func expectedAssetNameForExecutable(goos, goarch, version, executablePath string) (string, error) {
 	version = strings.TrimSpace(version)
 	version = strings.TrimPrefix(version, "v")
 	version = strings.TrimPrefix(version, "V")
@@ -517,10 +530,24 @@ func expectedAssetName(goos, goarch, version string) (string, error) {
 		}
 	case "linux":
 		if goarch == "amd64" {
-			return fmt.Sprintf("GoNavi-%s-Linux-Amd64.tar.gz", version), nil
+			return fmt.Sprintf("GoNavi-%s-Linux-Amd64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
 		}
 	}
 	return "", fmt.Errorf("当前平台暂不支持在线更新：%s/%s", goos, goarch)
+}
+
+func resolveLinuxReleaseArtifactSuffix(executablePath string) string {
+	normalizedPath := strings.ToLower(strings.TrimSpace(executablePath))
+	if normalizedPath == "" {
+		return ""
+	}
+	normalizedPath = strings.ReplaceAll(normalizedPath, "\\", "/")
+	compactPath := strings.ReplaceAll(normalizedPath, "_", "")
+	compactPath = strings.ReplaceAll(compactPath, "-", "")
+	if strings.Contains(normalizedPath, "webkit41") || strings.Contains(compactPath, "webkit241") || strings.Contains(compactPath, "webkit41") {
+		return "-WebKit41"
+	}
+	return ""
 }
 
 func findReleaseAsset(assets []githubAsset, name string) (*githubAsset, error) {
@@ -1195,8 +1222,12 @@ while kill -0 $PID 2>/dev/null; do
 done
 TMPDIR=$(mktemp -d)
 tar -xzf "$ARCHIVE" -C "$TMPDIR"
-NEWBIN="$TMPDIR/GoNavi"
+TARGET_NAME="$(basename "$TARGET")"
+NEWBIN="$TMPDIR/$TARGET_NAME"
 if [ ! -f "$NEWBIN" ]; then
+  NEWBIN=$(find "$TMPDIR" -type f -name "$TARGET_NAME" | head -n 1)
+fi
+if [ -z "$NEWBIN" ] || [ ! -f "$NEWBIN" ]; then
   NEWBIN=$(find "$TMPDIR" -type f -name "GoNavi" | head -n 1)
 fi
 if [ -z "$NEWBIN" ] || [ ! -f "$NEWBIN" ]; then

@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AIChatMessage, AIToolCall } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import { normalizeAiMarkdown } from '../../utils/aiMarkdown';
 
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
@@ -27,6 +28,7 @@ const MemoizedMarkdown = React.memo(({
     activeConnectionId?: string;
     activeDbName?: string;
 }) => {
+    const normalizedContent = React.useMemo(() => normalizeAiMarkdown(content), [content]);
     // 缓存 components 对象，避免每次渲染都生成新的函数引用击穿内部子组件的 memo
     const components = React.useMemo(() => ({
         code({ node, inline, className, children, ...props }: any) {
@@ -46,7 +48,7 @@ const MemoizedMarkdown = React.memo(({
 
     return (
         <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-            {content}
+            {normalizedContent}
         </ReactMarkdown>
     );
 });

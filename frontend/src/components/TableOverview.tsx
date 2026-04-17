@@ -6,7 +6,9 @@ import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from 
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
+import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -55,10 +57,23 @@ const getMetadataDialect = (connType: string, driver?: string): string => {
 };
 
 const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: string): string => {
-    const escapeLiteral = (s: string) => s.replace(/'/g, "''");
-    switch (dialect) {
+        const escapeLiteral = (s: string) => s.replace(/'/g, "''");
+        switch (dialect) {
         case 'mysql':
-            return `SHOW TABLE STATUS FROM \`${dbName.replace(/`/g, '``')}\``;
+            return `
+SELECT
+    TABLE_NAME AS table_name,
+    TABLE_COMMENT AS table_comment,
+    TABLE_ROWS AS table_rows,
+    DATA_LENGTH AS data_length,
+    INDEX_LENGTH AS index_length,
+    ENGINE AS engine,
+    CREATE_TIME AS create_time,
+    UPDATE_TIME AS update_time
+FROM information_schema.tables
+WHERE table_schema = '${escapeLiteral(dbName)}'
+  AND table_type = 'BASE TABLE'
+ORDER BY table_name`;
         case 'postgres':
         case 'kingbase':
         case 'vastbase':
@@ -153,6 +168,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [viewMode, setViewMode] = useState<ViewMode>('list');
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
+    const metadataDialect = useMemo(
+        () => getMetadataDialect(connection?.config?.type || '', connection?.config?.driver),
+        [connection?.config?.driver, connection?.config?.type]
+    );
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -167,11 +186,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            const dialect = getMetadataDialect(connection.config.type, connection.config.driver);
-            const sql = buildTableStatusSQL(dialect, tab.dbName || '', (tab as any).schemaName);
+            const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', (tab as any).schemaName);
             const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
-                setTables(parseTableStats(dialect, res.data));
+                setTables(parseTableStats(metadataDialect, res.data));
             } else {
                 message.error('获取表信息失败: ' + (res.message || '未知错误'));
             }
@@ -180,7 +198,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         } finally {
             setLoading(false);
         }
-    }, [connection, tab.dbName]);
+    }, [connection, metadataDialect, tab.dbName]);
 
     useEffect(() => {
         if (!autoFetchVisible) {
@@ -331,6 +349,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             title: '重命名表',
             content: (
                 <Input
+                    {...noAutoCapInputProps}
                     defaultValue={tableName}
                     onChange={e => { newName = e.target.value; }}
                     placeholder="输入新表名"
@@ -404,6 +423,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 </span>
                 <div style={{ flex: 1 }} />
                 <Input
+                    {...noAutoCapInputProps}
                     placeholder="搜索表名或注释..."
                     prefix={<SearchOutlined style={{ color: textMuted }} />}
                     value={searchText}
@@ -471,7 +491,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                                 type: 'query',
                                                 connectionId: tab.connectionId,
                                                 dbName: tab.dbName,
-                                                query: `SELECT * FROM ${t.name};`,
+                                                query: buildTableSelectQuery(metadataDialect, t.name),
                                             });
                                         }},
                                         { type: 'divider' },
@@ -557,7 +577,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                                     type: 'query',
                                                     connectionId: tab.connectionId,
                                                     dbName: tab.dbName,
-                                                    query: `SELECT * FROM ${t.name};`,
+                                                    query: buildTableSelectQuery(metadataDialect, t.name),
                                                 });
                                             }},
                                             { type: 'divider' },

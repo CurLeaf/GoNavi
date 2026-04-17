@@ -1,0 +1,41 @@
+const REDIS_GLOB_SPECIAL_CHARS = /([*?\[\]\\])/g;
+const ASCII_LETTER = /^[A-Za-z]$/;
+
+const escapeRedisGlobLiteral = (value: string): string => {
+  return value.replace(REDIS_GLOB_SPECIAL_CHARS, '\\$1');
+};
+
+const toCaseInsensitiveRedisGlobLiteral = (value: string): string => {
+  return Array.from(value).map((char) => {
+    if (!ASCII_LETTER.test(char)) {
+      return escapeRedisGlobLiteral(char);
+    }
+
+    const lower = char.toLowerCase();
+    const upper = char.toUpperCase();
+    return `[${lower}${upper}]`;
+  }).join('');
+};
+
+export const normalizeRedisSearchInput = (rawValue: string): { keyword: string; pattern: string } => {
+  const keyword = String(rawValue || '').trim();
+  if (!keyword) {
+    return { keyword: '', pattern: '*' };
+  }
+  return {
+    keyword,
+    pattern: `*${toCaseInsensitiveRedisGlobLiteral(keyword)}*`,
+  };
+};
+
+export const normalizeRedisSearchDraftChange = (rawValue: string): {
+  keyword: string;
+  pattern: string;
+  shouldSearchImmediately: boolean;
+} => {
+  const normalized = normalizeRedisSearchInput(rawValue);
+  return {
+    ...normalized,
+    shouldSearchImmediately: normalized.keyword === '',
+  };
+};
