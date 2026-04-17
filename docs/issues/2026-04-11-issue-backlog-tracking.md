@@ -34,6 +34,7 @@
 | #337 | 自动更新无效 | Fixed | Pending |
 | #338 | 连接clickhouse不能通过8132端口 | Fixed | Pending |
 | #342 | 数据同步功能不能用，mysql数据库8.4版本选了结构同步，最后没同步成功 | Fixed | Pending |
+| #343 | redis删除hash类型中的key报错 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -115,6 +116,12 @@
 - 根因：结构同步现有执行链路统一依赖 `buildSchemaMigrationPlan(...).PreDataSQL`。但 legacy planner 在“目标表已存在”分支里只给 `MySQL -> Kingbase` 生成补字段 SQL，`MySQL -> MySQL` 即使目标表缺列也只记 warning，不会产生任何可执行结构变更；同时前端 schema 模式的预览入口完全按数据差异计数启用，导致结构同步场景无法点开预览。
 - 处理：将 existing-target 分支的自动补字段逻辑改为复用通用 `buildAddColumnSQLForPair`，让 `MySQL -> MySQL` 也能生成并执行缺失字段补齐 SQL；同时为 analyze/preview 响应补充 `schemaDiffCount`、`schemaStatements`、`schemaSummary` 和 warning 信息，前端 schema 模式下可直接查看结构变更语句与风险提示，SQL 预览也会包含结构语句。
 - 验证：新增 `internal/sync/schema_migration_test.go` 回归测试，覆盖 `MySQL -> MySQL` 已存在目标表时生成补字段 SQL，并执行 `go test ./internal/sync -count=1` 与 `frontend` 下 `npm run build`。
+
+### #343
+
+- 根因：前端 Redis hash 字段删除调用把单个字段 `string` 直接传给 `RedisDeleteHashField`，而后端/Wails 绑定签名要求的是 `[]string`，导致在参数反序列化阶段直接报 `json: cannot unmarshal string into Go value of type []string`。
+- 处理：前端改为传单元素数组；后端再增加一层参数归一化，兼容单字符串、字符串数组和 `[]interface{}` 三种形态，避免旧调用或异常入参再次在绑定层直接失败。
+- 验证：新增 `internal/app/methods_redis_test.go` 回归测试，覆盖单字符串与字符串数组两种调用形态，并执行 `go test ./internal/app -count=1` 与 `frontend` 下 `npm run build`。
 
 ### #330
 

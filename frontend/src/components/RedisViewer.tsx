@@ -1194,7 +1194,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const config = getConfig();
                 if (!config) return;
                 try {
-                    const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, field);
+                    const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, [field]);
                     if (res.success) {
                         message.success('删除成功');
                         loadKeyValue(selectedKey);

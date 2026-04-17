@@ -9,7 +9,9 @@ import (
 )
 
 type capturingRedisClient struct {
-	connectConfig connection.ConnectionConfig
+	connectConfig     connection.ConnectionConfig
+	deletedHashKey    string
+	deletedHashFields []string
 }
 
 func (c *capturingRedisClient) Connect(config connection.ConnectionConfig) error {
@@ -45,13 +47,21 @@ func (c *capturingRedisClient) GetString(key string) (string, error) { return ""
 
 func (c *capturingRedisClient) SetString(key, value string, ttl int64) error { return nil }
 
-func (c *capturingRedisClient) GetHash(key string) (map[string]string, error) { return map[string]string{}, nil }
+func (c *capturingRedisClient) GetHash(key string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
 
 func (c *capturingRedisClient) SetHashField(key, field, value string) error { return nil }
 
-func (c *capturingRedisClient) DeleteHashField(key string, fields ...string) error { return nil }
+func (c *capturingRedisClient) DeleteHashField(key string, fields ...string) error {
+	c.deletedHashKey = key
+	c.deletedHashFields = append([]string(nil), fields...)
+	return nil
+}
 
-func (c *capturingRedisClient) GetList(key string, start, stop int64) ([]string, error) { return nil, nil }
+func (c *capturingRedisClient) GetList(key string, start, stop int64) ([]string, error) {
+	return nil, nil
+}
 
 func (c *capturingRedisClient) ListPush(key string, values ...string) error { return nil }
 
@@ -83,7 +93,9 @@ func (c *capturingRedisClient) StreamDelete(key string, ids ...string) (int64, e
 
 func (c *capturingRedisClient) ExecuteCommand(args []string) (interface{}, error) { return nil, nil }
 
-func (c *capturingRedisClient) GetServerInfo() (map[string]string, error) { return map[string]string{}, nil }
+func (c *capturingRedisClient) GetServerInfo() (map[string]string, error) {
+	return map[string]string{}, nil
+}
 
 func (c *capturingRedisClient) GetDatabases() ([]redislib.RedisDBInfo, error) { return nil, nil }
 
@@ -109,7 +121,7 @@ func (c *scriptedRedisClient) Connect(config connection.ConnectionConfig) error 
 
 func TestRedisConnectResolvesSavedSecretsByConnectionID(t *testing.T) {
 	testCases := []struct {
-		name          string
+		name           string
 		savedConfig    connection.ConnectionConfig
 		runtimeConfig  connection.ConnectionConfig
 		assertResolved func(t *testing.T, got connection.ConnectionConfig)
@@ -424,5 +436,77 @@ func TestRedisConnectRetriesLegacyDefaultRootUserWithoutUsernameAfterAuthFailure
 	}
 	if connectCalls[1].User != "" {
 		t.Fatalf("expected fallback Redis connect attempt to clear legacy root user, got %q", connectCalls[1].User)
+	}
+}
+
+func TestRedisDeleteHashFieldAcceptsSingleStringField(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	CloseAllRedisClients()
+	client := &capturingRedisClient{}
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		CloseAllRedisClients()
+	}()
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	result := app.RedisDeleteHashField(connection.ConnectionConfig{
+		Type: "redis",
+		Host: "redis.local",
+		Port: 6379,
+	}, "profile", "nickname")
+	if !result.Success {
+		t.Fatalf("RedisDeleteHashField returned failure: %+v", result)
+	}
+	if client.deletedHashKey != "profile" {
+		t.Fatalf("expected hash key profile, got %q", client.deletedHashKey)
+	}
+	if len(client.deletedHashFields) != 1 || client.deletedHashFields[0] != "nickname" {
+		t.Fatalf("expected one deleted hash field nickname, got %v", client.deletedHashFields)
+	}
+}
+
+func TestRedisDeleteHashFieldAcceptsStringSlice(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	CloseAllRedisClients()
+	client := &capturingRedisClient{}
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		CloseAllRedisClients()
+	}()
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	result := app.RedisDeleteHashField(connection.ConnectionConfig{
+		Type: "redis",
+		Host: "redis.local",
+		Port: 6379,
+	}, "profile", []string{"nickname", "avatar"})
+	if !result.Success {
+		t.Fatalf("RedisDeleteHashField returned failure: %+v", result)
+	}
+	if client.deletedHashKey != "profile" {
+		t.Fatalf("expected hash key profile, got %q", client.deletedHashKey)
+	}
+	if len(client.deletedHashFields) != 2 || client.deletedHashFields[0] != "nickname" || client.deletedHashFields[1] != "avatar" {
+		t.Fatalf("unexpected deleted hash fields: %v", client.deletedHashFields)
 	}
 }

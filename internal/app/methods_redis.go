@@ -18,8 +18,8 @@ import (
 
 // Redis client cache
 var (
-	redisCache   = make(map[string]redis.RedisClient)
-	redisCacheMu sync.Mutex
+	redisCache         = make(map[string]redis.RedisClient)
+	redisCacheMu       sync.Mutex
 	newRedisClientFunc = redis.NewRedisClient
 )
 
@@ -539,16 +539,62 @@ func (a *App) RedisKeyExists(config connection.ConnectionConfig, key string) con
 	return connection.QueryResult{Success: true, Data: map[string]bool{"exists": exists}}
 }
 
+func normalizeRedisStringArgs(raw any, argName string) ([]string, error) {
+	switch v := raw.(type) {
+	case nil:
+		return nil, fmt.Errorf("%s 不能为空", argName)
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return nil, fmt.Errorf("%s 不能为空", argName)
+		}
+		return []string{text}, nil
+	case []string:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			text := strings.TrimSpace(item)
+			if text == "" {
+				continue
+			}
+			items = append(items, text)
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("%s 不能为空", argName)
+		}
+		return items, nil
+	case []interface{}:
+		items := make([]string, 0, len(v))
+		for _, item := range v {
+			text := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if text == "" || text == "<nil>" {
+				continue
+			}
+			items = append(items, text)
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("%s 不能为空", argName)
+		}
+		return items, nil
+	default:
+		return nil, fmt.Errorf("%s 类型无效", argName)
+	}
+}
+
 // RedisDeleteHashField deletes fields from a hash
-func (a *App) RedisDeleteHashField(config connection.ConnectionConfig, key string, fields []string) connection.QueryResult {
+func (a *App) RedisDeleteHashField(config connection.ConnectionConfig, key string, fields any) connection.QueryResult {
 	config.Type = "redis"
 	client, err := a.getRedisClient(config)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	if err := client.DeleteHashField(key, fields...); err != nil {
-		logger.Error(err, "RedisDeleteHashField 删除失败：key=%s fields=%v", key, fields)
+	normalizedFields, err := normalizeRedisStringArgs(fields, "fields")
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if err := client.DeleteHashField(key, normalizedFields...); err != nil {
+		logger.Error(err, "RedisDeleteHashField 删除失败：key=%s fields=%v", key, normalizedFields)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
