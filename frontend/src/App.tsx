@@ -70,6 +70,7 @@ import {
   normalizeShortcutCombo,
 } from './utils/shortcuts';
 import { resolveTitleBarToggleIconKey, shouldToggleMaximisedWindowForScaleFix } from './utils/windowStateUi';
+import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
@@ -522,8 +523,26 @@ function App() {
           const bounds = state.windowBounds;
           if (!bounds || bounds.width < 400 || bounds.height < 300) return;
           try {
-              WindowSetSize(bounds.width, bounds.height);
-              WindowSetPosition(bounds.x, bounds.y);
+              const nextBounds = resolveVisibleStartupWindowBounds(bounds, {
+                  availWidth: window.screen?.availWidth || 0,
+                  availHeight: window.screen?.availHeight || 0,
+                  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
+                  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
+              });
+              if (
+                  nextBounds.x !== bounds.x ||
+                  nextBounds.y !== bounds.y ||
+                  nextBounds.width !== bounds.width ||
+                  nextBounds.height !== bounds.height
+              ) {
+                  void emitWindowDiagnostic('adjust:startup-window-bounds', {
+                      from: bounds,
+                      to: nextBounds,
+                  });
+                  state.setWindowBounds(nextBounds);
+              }
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
           } catch (e) {
               console.warn('Failed to restore window bounds', e);
           }
