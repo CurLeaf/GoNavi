@@ -31,6 +31,7 @@
 | #330 | 建议在查询结果表格中增加自适应内容列宽的功能 | Fixed | `632e57e` |
 | #331 | 重复连接 DB，一分钟重试了 60 多次 | Fixed | `ca76440` |
 | #333 | AI 功能添加供应商测试正常，但问答显示失败 | Fixed | Pending |
+| #337 | 自动更新无效 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -94,6 +95,12 @@
 - 根因：AI 供应商“测试连接”走的是轻量健康检查，不会带 `tools`；而正式聊天默认会把本地工具定义一起发给模型。当前 `Anthropic` 协议路径缺少和 `OpenAI` 一样的 400 自动降级逻辑，遇到不支持工具调用的兼容端点时会直接报错。
 - 处理：为 `AnthropicProvider.Chat / ChatStream` 补充 400 降级回退。首次带 `tools` 请求若返回 400/422/404，则自动去掉 `tools` 重试一次，允许不支持 function calling 的兼容端点继续完成普通问答。
 - 验证：补充 `internal/ai/provider/anthropic_test.go` 回归测试，覆盖非流式与流式两条链路下“首请求因 tools 返回 400，回退后成功”的场景，并执行 `go test ./internal/ai/provider -count=1`。
+
+### #337
+
+- 根因：Linux 自动更新链路有两个断点。其一，更新资产名只按 `linux/amd64` 固定选择 `GoNavi-<ver>-Linux-Amd64.tar.gz`，没有根据当前运行的是 `WebKit41` 变体去选 `-WebKit41` 包；其二，Linux 安装脚本解压后优先查找固定文件名 `GoNavi`，而 release tar.gz 实际打包的是构建产物名，导致替换阶段经常找不到新二进制。
+- 处理：为更新资产解析新增“基于当前可执行文件路径推断 Linux 变体”的后缀选择逻辑；同时调整 Linux 更新脚本，解压后优先搜索与当前运行二进制同名的文件，再回退查找 `GoNavi`。
+- 验证：补充 `internal/app/methods_update_test.go` 回归测试，覆盖 Linux `WebKit41` 资产名选择与更新脚本目标名解析，并执行 `go test ./internal/app -run 'Test(ExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix|BuildLinuxScriptPrefersTargetExecutableBasename|TestFetchLatestUpdateInfo|TestCheckForUpdates|TestBuildWindowsScript)' -count=1`。
 
 ### #330
 
