@@ -486,6 +486,17 @@ func (a *App) SelectDriverDownloadDirectory(currentDir string) connection.QueryR
 	}
 }
 
+func validateLocalDriverPackagePath(path string) error {
+	pathText := strings.TrimSpace(path)
+	if pathText == "" {
+		return nil
+	}
+	if strings.EqualFold(filepath.Ext(pathText), ".jar") {
+		return fmt.Errorf("当前驱动管理不支持直接导入 JDBC Jar。GoNavi 使用 Go 驱动与可选 driver-agent；请改用驱动包/驱动目录，如需连接人大金仓请优先使用“Kingbase”连接类型，或在自定义连接中填写 kingbase / kingbase8")
+	}
+	return nil
+}
+
 func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult {
 	defaultDir := strings.TrimSpace(currentPath)
 	if defaultDir == "" {
@@ -501,7 +512,7 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择驱动包文件",
+		Title:            "选择驱动包文件（非 JDBC Jar）",
 		DefaultDirectory: defaultDir,
 	})
 	if err != nil {
@@ -513,6 +524,9 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
+	}
+	if err := validateLocalDriverPackagePath(selection); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
 }
@@ -899,6 +913,9 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 	}
 	if definition.BuiltIn {
 		return connection.QueryResult{Success: false, Message: "内置驱动无需安装扩展包"}
+	}
+	if err := validateLocalDriverPackagePath(filePath); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}

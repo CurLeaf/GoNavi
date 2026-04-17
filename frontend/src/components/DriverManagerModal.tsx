@@ -5,6 +5,11 @@ import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import {
+  DRIVER_LOCAL_IMPORT_BUTTON_LABEL,
+  DRIVER_LOCAL_IMPORT_DIRECTORY_HELP,
+  DRIVER_LOCAL_IMPORT_SINGLE_FILE_HELP,
+} from '../utils/driverImportGuidance';
+import {
   CheckDriverNetworkStatus,
   DownloadDriverPackage,
   GetDriverVersionList,
@@ -1171,7 +1176,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
                 loading={loadingLocal}
                 onClick={() => installDriverFromLocalFile(row)}
               >
-                本地导入
+                {DRIVER_LOCAL_IMPORT_BUTTON_LABEL}
               </Button>
               <Button
                 type={hasLogs ? 'default' : 'text'}
@@ -1373,8 +1378,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
                   children: (
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
                       <Text type="secondary">自动下载和手动导入的驱动都会落盘到以下目录；后续版本升级可重复复用已下载驱动。</Text>
-                      <Text type="secondary">如果应用内下载链路失败，可先手动下载驱动包到该目录，再使用“本地导入”或“导入驱动目录”完成安装。</Text>
-                      <Text type="secondary">行内“本地导入”仅用于单个驱动文件/总包（如 `mariadb-driver-agent`、`mariadb-driver-agent.exe`、`GoNavi-DriverAgents.zip`）；批量导入请使用上方“导入驱动目录”。</Text>
+                      <Text type="secondary">{DRIVER_LOCAL_IMPORT_DIRECTORY_HELP}</Text>
+                      <Text type="secondary">{DRIVER_LOCAL_IMPORT_SINGLE_FILE_HELP}</Text>
                       <Paragraph copyable={{ text: downloadDir || '-' }} style={{ marginBottom: 0 }}>
                         驱动根目录：{downloadDir || '-'}
                       </Paragraph>

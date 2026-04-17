@@ -12,6 +12,7 @@ import {
 } from '../utils/connectionModalPresentation';
 import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
 import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
+import { CUSTOM_CONNECTION_DRIVER_HELP } from '../utils/driverImportGuidance';
 import { applyNoAutoCapAttributes, noAutoCapInputProps } from '../utils/inputAutoCap';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
@@ -2163,7 +2164,7 @@ const ConnectionModal: React.FC<{
 
               {isCustom ? (
                   <>
-                      <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help="已支持: mysql, postgres, sqlite, oracle, dm, kingbase">
+                      <Form.Item name="driver" label="驱动名称 (Driver Name)" rules={[{ required: true, message: '请输入驱动名称' }]} help={CUSTOM_CONNECTION_DRIVER_HELP}>
                           <Input {...noAutoCapInputProps} placeholder="例如: mysql, postgres" />
                       </Form.Item>
                       <Form.Item name="dsn" label="连接字符串 (DSN)" rules={[createCustomDsnRule()]}>
