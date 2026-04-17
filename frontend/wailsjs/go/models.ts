@@ -849,6 +849,7 @@ export namespace sync {
 	    sourceConfig: connection.ConnectionConfig;
 	    targetConfig: connection.ConnectionConfig;
 	    tables: string[];
+	    sourceQuery?: string;
 	    content?: string;
 	    mode: string;
 	    jobId?: string;
@@ -867,6 +868,7 @@ export namespace sync {
 	        this.sourceConfig = this.convertValues(source["sourceConfig"], connection.ConnectionConfig);
 	        this.targetConfig = this.convertValues(source["targetConfig"], connection.ConnectionConfig);
 	        this.tables = source["tables"];
+	        this.sourceQuery = source["sourceQuery"];
 	        this.content = source["content"];
 	        this.mode = source["mode"];
 	        this.jobId = source["jobId"];
