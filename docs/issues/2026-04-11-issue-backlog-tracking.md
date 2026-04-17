@@ -37,6 +37,7 @@
 | #343 | redis删除hash类型中的key报错 | Fixed | Pending |
 | #346 | TDEngine只显示子表不显示超级表 | Fixed | Pending |
 | #348 | [Bug] sql查询同名字段，结果集不会自动添加别名 | Fixed | Pending |
+| #349 | [Bug] postgres对于表名大小写敏感，且为大写时，通过选中表右键新建查询时生成的sql语句没有自动带上引号"" | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -136,6 +137,12 @@
 - 根因：查询结果扫描层直接使用数据库返回的原始列名作为 `map[string]interface{}` 键。同名列场景下，后面的值会覆盖前面的值，返回给前端的 `fields/columns` 也保留重复列名，导致结果集既无法自动补别名，也拿不到两列值。
 - 处理：为 `scanRows` 增加稳定列名归一化逻辑。首次出现保留原名，重复列自动追加 `_2`、`_3` 后缀；空列名回退为 `column_N`。返回的列列表和每行数据统一使用同一套唯一列名，避免覆盖。
 - 验证：新增 `internal/db/scan_rows_test.go` 回归测试，覆盖重复列 `id/id/name` 自动归一化为 `id/id_2/name` 且两列值均保留，并执行 `go test ./internal/db -run TestScanRowsRenamesDuplicateColumns -count=1` 与 `go test ./internal/db -count=1`。
+
+### #349
+
+- 根因：表节点“新建查询”模板在 Sidebar 与 TableOverview 两处都直接拼接 `SELECT * FROM ${tableName};`，没有复用现有的标识符引用逻辑。对 PostgreSQL 这类未加引号会把标识符折叠为小写的数据库，遇到大写表名时生成的 SQL 会直接指向错误对象。
+- 处理：抽出统一的 `buildTableSelectQuery` helper，内部复用 `quoteQualifiedIdent` 按数据库方言生成表引用；并将 Sidebar、TableOverview 的三个“新建查询”入口统一接到该 helper，保证 PostgreSQL/Kingbase 等方言在大写或特殊字符表名场景下自动补双引号。
+- 验证：新增 `frontend/src/utils/objectQueryTemplates.test.ts` 回归测试，覆盖 PostgreSQL `public.MyTable` 自动生成 `SELECT * FROM public.\"MyTable\";`，并执行 `frontend` 下 `npm exec vitest run src/utils/objectQueryTemplates.test.ts` 与 `npm run build`。
 
 ### #330
 

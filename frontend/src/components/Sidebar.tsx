@@ -45,6 +45,7 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 
 const { Search } = Input;
 
@@ -3559,7 +3560,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                    const tableName = String(node.dataRef?.tableName || '').trim();
-                   const queryTemplate = tableName ? `SELECT * FROM ${tableName};` : 'SELECT * FROM ';
+                   const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
                    addTab({
                        id: `query-${Date.now()}`,
                        title: `新建查询`,
