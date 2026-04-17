@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
 )
 
@@ -102,4 +103,58 @@ func getDamengRowString(row map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildDamengColumnsQuery(dbName, tableName string) string {
+	upperTableName := strings.ToUpper(strings.TrimSpace(tableName))
+	upperDBName := strings.ToUpper(strings.TrimSpace(dbName))
+
+	if upperDBName == "" {
+		return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+		FROM user_tab_columns c
+		LEFT JOIN (
+			SELECT cols.table_name, cols.column_name
+			FROM user_constraints cons
+			JOIN user_cons_columns cols USING (constraint_name)
+			WHERE cons.constraint_type = 'P'
+		) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+		WHERE c.table_name = '%s'
+		ORDER BY c.column_id`, upperTableName)
+	}
+
+	return fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+		FROM all_tab_columns c
+		LEFT JOIN (
+			SELECT cols.owner, cols.table_name, cols.column_name
+			FROM all_constraints cons
+			JOIN all_cons_columns cols
+			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
+			WHERE cons.constraint_type = 'P'
+		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
+		WHERE c.owner = '%s' AND c.table_name = '%s'
+		ORDER BY c.column_id`, upperDBName, upperTableName)
+}
+
+func buildDamengColumnDefinitions(data []map[string]interface{}) []connection.ColumnDefinition {
+	columns := make([]connection.ColumnDefinition, 0, len(data))
+	for _, row := range data {
+		col := connection.ColumnDefinition{
+			Name:     getDamengRowString(row, "COLUMN_NAME"),
+			Type:     getDamengRowString(row, "DATA_TYPE"),
+			Nullable: getDamengRowString(row, "NULLABLE"),
+			Key:      getDamengRowString(row, "COLUMN_KEY"),
+		}
+
+		defaultValue := getDamengRowString(row, "DATA_DEFAULT")
+		if defaultValue != "" {
+			def := defaultValue
+			col.Default = &def
+		}
+
+		columns = append(columns, col)
+	}
+
+	return columns
 }
