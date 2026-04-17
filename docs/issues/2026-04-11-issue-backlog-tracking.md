@@ -41,6 +41,7 @@
 | #363 | [Bug] 日期字段无法设置值 | Fixed | Pending |
 | #368 | [Bug] 窗口状态问题 | Fixed | Pending |
 | #369 | [Bug] AI回复Sql语句时 md 没有正常渲染 | Fixed | Pending |
+| #373 | [Bug] 修改表列名时报错 | Fixed | Pending |
 | #351 | 为什么没有截断和清空表的功能呀？ | Fixed | Pending |
 
 ## Notes
@@ -164,6 +165,12 @@
 - 根因：AI 消息 markdown 渲染链路把模型返回内容原样交给 `react-markdown`，没有对损坏的 fenced code block 做任何预处理。当模型输出 ` ```sqlSELECT ...` 这类“语言标记后缺少换行”的内容时，markdown 解析器会把整段当普通文本/行内代码处理，导致 SQL 代码块和换行都失效。
 - 处理：新增 `aiMarkdown` 预处理 helper，在渲染前补齐 opening fence 后缺失的换行，并为 closing fence 缺少前置换行的场景补齐收尾；`AIMessageBubble` 统一使用规范化后的内容喂给 `react-markdown`，恢复 SQL/代码块的正常渲染。
 - 验证：新增 `frontend/src/utils/aiMarkdown.test.ts`，覆盖 ` ```sqlSELECT ...` 自动归一化为 ` ```sql\\nSELECT ...` 的坏样例，并执行 `frontend` 下 `npm exec vitest run src/utils/aiMarkdown.test.ts` 与 `npm run build`。
+
+### #373
+
+- 根因：表设计器的 MySQL alter preview 逻辑把“列名变化”和“列定义变化”混在同一个 `MODIFY COLUMN` 分支里处理。MySQL/MariaDB 在重命名列时必须使用 `CHANGE COLUMN old_name new_name definition`，直接生成 `MODIFY COLUMN new_name ...` 会在实际执行时报错。
+- 处理：将 MySQL 分支拆分为 rename 与 redefine 两条路径。列名发生变化时使用 `CHANGE COLUMN 原列名 新列定义`，其余类型/默认值/注释/自增等普通变更继续走 `MODIFY COLUMN`，保留原有位置子句（`FIRST` / `AFTER`）。
+- 验证：补充 `frontend/src/components/tableDesignerSchemaSql.test.ts` 回归测试，覆盖 MySQL 重命名列时必须生成 `CHANGE COLUMN` 而不是 `MODIFY COLUMN`，并执行 `frontend` 下 `npm exec vitest run src/components/tableDesignerSchemaSql.test.ts` 与 `npm run build`。
 
 ### #330
 

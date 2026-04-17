@@ -51,4 +51,16 @@ describe('tableDesignerSchemaSql', () => {
     expect(sql).not.toContain('AFTER');
     expect(sql).not.toContain(' FIRST');
   });
+
+  it('uses mysql change column syntax when renaming a column', () => {
+    const sql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'mysql',
+      originalColumns: [baseColumn({ _key: 'name', name: 'name', type: 'varchar(64)', nullable: 'YES' })],
+      columns: [baseColumn({ _key: 'name', name: 'display_name', type: 'varchar(64)', nullable: 'YES' })],
+    }));
+
+    expect(sql).toContain('CHANGE COLUMN `name` `display_name` varchar(64) NULL');
+    expect(sql).toContain('FIRST');
+    expect(sql).not.toContain('MODIFY COLUMN `display_name`');
+  });
 });
