@@ -699,12 +699,12 @@ func (r *RedisClientImpl) GetValue(key string) (*RedisValue, error) {
 		result.Length = int64(len(val))
 
 	case "hash":
-		val, err := r.client.HGetAll(ctx, physicalKey).Result()
+		val, length, err := r.readHashEntries(ctx, physicalKey)
 		if err != nil {
 			return nil, err
 		}
 		result.Value = val
-		result.Length = int64(len(val))
+		result.Length = length
 
 	case "list":
 		length, err := r.client.LLen(ctx, physicalKey).Result()
@@ -819,7 +819,74 @@ func (r *RedisClientImpl) GetHash(key string) (map[string]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return r.client.HGetAll(ctx, r.toPhysicalKey(key)).Result()
+	values, _, err := r.readHashEntries(ctx, r.toPhysicalKey(key))
+	return values, err
+}
+
+func (r *RedisClientImpl) readHashEntries(ctx context.Context, physicalKey string) (map[string]string, int64, error) {
+	return readRedisHashEntriesWithFallback(
+		func() (map[string]string, error) {
+			return r.client.HGetAll(ctx, physicalKey).Result()
+		},
+		func() (int64, error) {
+			return r.client.HLen(ctx, physicalKey).Result()
+		},
+		func(cursor uint64, count int64) ([]string, uint64, error) {
+			return r.client.HScan(ctx, physicalKey, cursor, "*", count).Result()
+		},
+	)
+}
+
+func readRedisHashEntriesWithFallback(
+	readAll func() (map[string]string, error),
+	readLength func() (int64, error),
+	scan func(cursor uint64, count int64) ([]string, uint64, error),
+) (map[string]string, int64, error) {
+	values, err := readAll()
+	if err == nil {
+		return values, int64(len(values)), nil
+	}
+	if !shouldFallbackRedisHashScan(err) {
+		return nil, 0, err
+	}
+
+	entries := make(map[string]string)
+	var cursor uint64
+	for round := 0; round < redisScanMaxRounds; round++ {
+		pairs, nextCursor, scanErr := scan(cursor, redisScanMinStepCount)
+		if scanErr != nil {
+			return nil, 0, scanErr
+		}
+		if len(pairs)%2 != 0 {
+			return nil, 0, fmt.Errorf("Redis HSCAN 返回结果格式异常")
+		}
+		for i := 0; i < len(pairs); i += 2 {
+			entries[pairs[i]] = pairs[i+1]
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			length, lengthErr := readLength()
+			if lengthErr == nil {
+				return entries, length, nil
+			}
+			return entries, int64(len(entries)), nil
+		}
+	}
+
+	return nil, 0, fmt.Errorf("Redis HSCAN 超出安全轮次，无法完整读取 hash")
+}
+
+func shouldFallbackRedisHashScan(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if !strings.Contains(message, "hgetall") {
+		return false
+	}
+	return strings.Contains(message, "not support for normal user") ||
+		strings.Contains(message, "noperm") ||
+		strings.Contains(message, "permission")
 }
 
 // SetHashField sets a field in a hash
