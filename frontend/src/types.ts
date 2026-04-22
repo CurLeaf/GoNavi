@@ -21,6 +21,72 @@ export interface HTTPTunnelConfig {
   password?: string;
 }
 
+export interface JVMJMXConfig {
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  username?: string;
+  password?: string;
+  domainAllowlist?: string[];
+}
+
+export interface JVMEndpointConfig {
+  enabled?: boolean;
+  baseUrl?: string;
+  apiKey?: string;
+  timeoutSeconds?: number;
+}
+
+export interface JVMConfig {
+  environment?: 'dev' | 'uat' | 'prod';
+  readOnly?: boolean;
+  allowedModes?: Array<'jmx' | 'endpoint' | 'agent'>;
+  preferredMode?: 'jmx' | 'endpoint' | 'agent';
+  jmx?: JVMJMXConfig;
+  endpoint?: JVMEndpointConfig;
+}
+
+export interface JVMCapability {
+  mode: 'jmx' | 'endpoint' | 'agent';
+  canBrowse: boolean;
+  canWrite: boolean;
+  canPreview: boolean;
+  reason?: string;
+  displayLabel: string;
+}
+
+export interface JVMResourceSummary {
+  id: string;
+  parentId?: string;
+  kind: string;
+  name: string;
+  path: string;
+  providerMode: 'jmx' | 'endpoint' | 'agent';
+  canRead: boolean;
+  canWrite: boolean;
+  hasChildren: boolean;
+  sensitive?: boolean;
+}
+
+export interface JVMValueSnapshot {
+  resourceId: string;
+  kind: string;
+  format: string;
+  version?: string;
+  value: any;
+  metadata?: Record<string, any>;
+}
+
+export interface JVMChangePreview {
+  allowed: boolean;
+  requiresConfirmation?: boolean;
+  summary: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  blockingReason?: string;
+  before: JVMValueSnapshot;
+  after: JVMValueSnapshot;
+}
+
 export interface ConnectionConfig {
   id?: string;
   type: string;
@@ -56,6 +122,7 @@ export interface ConnectionConfig {
   mongoAuthMechanism?: string;
   mongoReplicaUser?: string;
   mongoReplicaPassword?: string;
+  jvm?: JVMConfig;
 }
 
 export interface MongoMemberInfo {
@@ -343,5 +410,4 @@ export interface SecurityUpdateStatus {
   issues: SecurityUpdateIssue[];
   lastError?: string;
 }
-
 
