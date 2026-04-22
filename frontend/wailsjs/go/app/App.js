@@ -246,6 +246,14 @@ export function InstallUpdateAndRestart() {
   return window['go']['app']['App']['InstallUpdateAndRestart']();
 }
 
+export function JVMProbeCapabilities(arg1) {
+  return window['go']['app']['App']['JVMProbeCapabilities'](arg1);
+}
+
+export function ListSQLDirectory(arg1) {
+  return window['go']['app']['App']['ListSQLDirectory'](arg1);
+}
+
 export function LogWindowDiagnostic(arg1, arg2) {
   return window['go']['app']['App']['LogWindowDiagnostic'](arg1, arg2);
 }
@@ -288,10 +296,6 @@ export function OpenDriverDownloadDirectory(arg1) {
 
 export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
-}
-
-export function ListSQLDirectory(arg1) {
-  return window['go']['app']['App']['ListSQLDirectory'](arg1);
 }
 
 export function PreviewImportFile(arg1) {
@@ -438,10 +442,6 @@ export function SaveConnection(arg1) {
   return window['go']['app']['App']['SaveConnection'](arg1);
 }
 
-export function SelectSQLDirectory(arg1) {
-  return window['go']['app']['App']['SelectSQLDirectory'](arg1);
-}
-
 export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
 }
@@ -466,6 +466,10 @@ export function SelectDriverPackageFile(arg1) {
   return window['go']['app']['App']['SelectDriverPackageFile'](arg1);
 }
 
+export function SelectSQLDirectory(arg1) {
+  return window['go']['app']['App']['SelectSQLDirectory'](arg1);
+}
+
 export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
@@ -484,6 +488,10 @@ export function StartSecurityUpdate(arg1) {
 
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
+}
+
+export function TestJVMConnection(arg1) {
+  return window['go']['app']['App']['TestJVMConnection'](arg1);
 }
 
 export function TruncateTables(arg1, arg2, arg3) {

@@ -456,6 +456,86 @@ export namespace connection {
 		    return a;
 		}
 	}
+	export class JVMEndpointConfig {
+	    enabled?: boolean;
+	    baseUrl?: string;
+	    apiKey?: string;
+	    timeoutSeconds?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new JVMEndpointConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class JVMJMXConfig {
+	    enabled?: boolean;
+	    host?: string;
+	    port?: number;
+	    username?: string;
+	    password?: string;
+	    domainAllowlist?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new JVMJMXConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.username = source["username"];
+	        this.password = source["password"];
+	        this.domainAllowlist = source["domainAllowlist"];
+	    }
+	}
+	export class JVMConfig {
+	    environment?: string;
+	    readOnly?: boolean;
+	    allowedModes?: string[];
+	    preferredMode?: string;
+	    jmx?: JVMJMXConfig;
+	    endpoint?: JVMEndpointConfig;
+	
+	    static createFrom(source: any = {}) {
+	        return new JVMConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.environment = source["environment"];
+	        this.readOnly = source["readOnly"];
+	        this.allowedModes = source["allowedModes"];
+	        this.preferredMode = source["preferredMode"];
+	        this.jmx = this.convertValues(source["jmx"], JVMJMXConfig);
+	        this.endpoint = this.convertValues(source["endpoint"], JVMEndpointConfig);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class HTTPTunnelConfig {
 	    host: string;
 	    port: number;
@@ -549,6 +629,7 @@ export namespace connection {
 	    mongoAuthMechanism?: string;
 	    mongoReplicaUser?: string;
 	    mongoReplicaPassword?: string;
+	    jvm?: JVMConfig;
 	
 	    static createFrom(source: any = {}) {
 	        return new ConnectionConfig(source);
@@ -590,6 +671,7 @@ export namespace connection {
 	        this.mongoAuthMechanism = source["mongoAuthMechanism"];
 	        this.mongoReplicaUser = source["mongoReplicaUser"];
 	        this.mongoReplicaPassword = source["mongoReplicaPassword"];
+	        this.jvm = this.convertValues(source["jvm"], JVMConfig);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -636,6 +718,9 @@ export namespace connection {
 	        this.secretRef = source["secretRef"];
 	    }
 	}
+	
+	
+	
 	
 	
 	export class QueryResult {
