@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Tooltip, message } from 'antd';
+import { Button, Tooltip, message } from 'antd';
 import { UserOutlined, RobotOutlined, EditOutlined, ReloadOutlined, DeleteOutlined, CheckOutlined, CopyOutlined, PlayCircleOutlined, ApiOutlined, LoadingOutlined, CaretRightOutlined, CaretDownOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,8 +7,10 @@ import mermaid from 'mermaid';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AIChatMessage, AIToolCall } from '../../types';
+import { useStore } from '../../store';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { normalizeAiMarkdown } from '../../utils/aiMarkdown';
+import { extractJVMChangePlan } from '../../utils/jvmAiPlan';
 
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
@@ -568,6 +570,12 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
         }
         return { displayContent: content, parsedThinking: '' };
     }, [msg.content, msg.thinking]);
+    const jvmPlan = React.useMemo(() => {
+        if (isUser) {
+            return null;
+        }
+        return extractJVMChangePlan(displayContent);
+    }, [displayContent, isUser]);
     const isTypingThinking = !!(msg.loading && msg.phase === 'thinking');
     
     if (msg.role === 'tool') return null;
@@ -694,6 +702,22 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
                             activeConnectionId={activeConnectionId}
                             activeDbName={activeDbName}
                         />
+                    )}
+                    {!isUser && jvmPlan && (
+                        <div style={{ marginTop: 12 }}>
+                            <Button
+                                size="small"
+                                type="primary"
+                                onClick={() => {
+                                    const targetTabId = useStore.getState().activeTabId;
+                                    window.dispatchEvent(new CustomEvent('gonavi:jvm-apply-ai-plan', {
+                                        detail: { plan: jvmPlan, targetTabId },
+                                    }));
+                                }}
+                            >
+                                应用到 JVM 预览
+                            </Button>
+                        </div>
                     )}
                     {/* 错误原文复制按钮 */}
                     {!isUser && msg.rawError && (

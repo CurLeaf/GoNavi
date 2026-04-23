@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Empty, Input, Skeleton, Space, Tag, Typography } from 'antd';
-import { FileSearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { FileSearchOutlined, ReloadOutlined, RobotOutlined } from '@ant-design/icons';
 
 import { useStore } from '../store';
 import type {
@@ -12,6 +12,7 @@ import type {
   TabData,
 } from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { buildJVMAIPlanPrompt, type JVMAIChangePlan } from '../utils/jvmAiPlan';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import JVMChangePreviewModal from './jvm/JVMChangePreviewModal';
@@ -43,6 +44,14 @@ const formatValue = (value: unknown): string => {
     return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
+  }
+};
+
+const formatPlanPayload = (plan: JVMAIChangePlan): string => {
+  try {
+    return JSON.stringify(plan.payload ?? {}, null, 2);
+  } catch {
+    return '{}';
   }
 };
 
@@ -145,6 +154,34 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     setPreviewResult(null);
   }, [providerMode, resourcePath, tab.connectionId]);
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { plan?: JVMAIChangePlan; targetTabId?: string } | undefined;
+      const plan = detail?.plan;
+      if (!plan || (detail?.targetTabId && detail.targetTabId !== tab.id)) {
+        return;
+      }
+
+      const targetPath = String(plan.selector.resourcePath || '').trim();
+      if (targetPath && targetPath !== resourcePath) {
+        setDraftError(`AI 计划指向资源 ${targetPath}，当前页签是 ${resourcePath || '-'}，请切换到对应资源后再应用。`);
+        setApplyMessage('');
+        return;
+      }
+
+      setAction(plan.action);
+      setReason(plan.reason);
+      setPayloadText(formatPlanPayload(plan));
+      setDraftError('');
+      setApplyMessage('已从 AI 计划填充草稿，请先执行“预览变更”再确认写入。');
+      setPreviewOpen(false);
+      setPreviewResult(null);
+    };
+
+    window.addEventListener('gonavi:jvm-apply-ai-plan', handler as EventListener);
+    return () => window.removeEventListener('gonavi:jvm-apply-ai-plan', handler as EventListener);
+  }, [resourcePath, tab.id]);
+
   const buildDraftPlan = (): JVMChangeRequest => {
     const trimmedAction = String(action || '').trim() || 'update';
     const trimmedReason = String(reason || '').trim();
@@ -189,6 +226,32 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       connectionId: connection.id,
       providerMode,
     });
+  };
+
+  const handleAskAIForPlan = () => {
+    if (!connection) {
+      setDraftError('连接不存在或已被删除');
+      return;
+    }
+
+    const prompt = buildJVMAIPlanPrompt({
+      connectionName: connection.name,
+      host: connection.config.host,
+      providerMode,
+      resourcePath,
+      readOnly,
+      environment: connection.config.jvm?.environment,
+      snapshot,
+    });
+
+    const store = useStore.getState();
+    const wasClosed = !store.aiPanelVisible;
+    if (wasClosed) {
+      store.setAIPanelVisible(true);
+    }
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+    }, wasClosed ? 350 : 0);
   };
 
   const handlePreview = async () => {
@@ -312,6 +375,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
               <Button size="small" icon={<FileSearchOutlined />} onClick={handleOpenAudit}>
                 审计记录
               </Button>
+              <Button size="small" icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
+                AI 生成计划
+              </Button>
             </Space>
             <Paragraph style={{ marginBottom: 0 }}>
               <Text strong>{connection.name}</Text>
@@ -414,6 +480,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
             <Space size={12} wrap>
               <Button type="primary" loading={previewLoading} onClick={() => void handlePreview()}>
                 预览变更
+              </Button>
+              <Button icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
+                让 AI 生成计划
               </Button>
             </Space>
           </Space>

@@ -306,10 +306,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const messages = aiChatHistory[sid] || [];
 
     const getConnectionName = useCallback(() => {
-        if (!activeContext?.connectionId) return '';
-        const conn = connections.find(c => c.id === activeContext.connectionId);
+        let connectionId = activeContext?.connectionId;
+        if (!connectionId) {
+            const activeTab = tabs.find(t => t.id === activeTabId);
+            connectionId = activeTab?.connectionId;
+        }
+        if (!connectionId) return '';
+        const conn = connections.find(c => c.id === connectionId);
         return conn ? conn.name : '';
-    }, [activeContext, connections]);
+    }, [activeContext, activeTabId, connections, tabs]);
 
     const activeConnName = getConnectionName();
 
@@ -735,11 +740,45 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const connectionKey = ctx?.connectionId ? `${ctx.connectionId}:${ctx.dbName || ''}` : 'default';
         const activeContextItems = ctxMap[connectionKey] || [];
         const systemMessages: { role: string; content: string; images?: string[] }[] = [];
+        const activeTab = allTabs.find(t => t.id === tabId);
+        const activeConnection = activeTab?.connectionId
+            ? conns.find(c => c.id === activeTab.connectionId)
+            : undefined;
+
+        if (
+            activeTab &&
+            (activeTab.type === 'jvm-resource' || activeTab.type === 'jvm-overview' || activeTab.type === 'jvm-audit') &&
+            activeConnection?.config?.type === 'jvm'
+        ) {
+            const providerMode = activeTab.providerMode || activeConnection.config.jvm?.preferredMode || 'jmx';
+            const resourcePath = activeTab.resourcePath || '';
+            const readOnly = activeConnection.config.jvm?.readOnly !== false;
+            const environment = activeConnection.config.jvm?.environment || 'unknown';
+            systemMessages.push({
+                role: 'system',
+                content: `你是 GoNavi 的 JVM 运行时分析助手。当前上下文不是 SQL，而是 JVM 资源工作台。
+
+当前连接：${activeConnection.name}
+目标主机：${activeConnection.config.host || '-'}
+Provider 模式：${providerMode}
+运行环境：${environment}
+连接策略：${readOnly ? '只读连接，只能分析和生成变更计划，绝不能假设已执行写入。' : '可写连接，但任何修改都必须先生成预览并等待人工确认。'}
+${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体资源路径。'}
+
+回答规则：
+1. 你可以解释资源结构、风险、修改建议和回滚建议。
+2. 如果用户要求生成 JVM 修改方案，必须输出一个唯一的 \`\`\`json 代码块，并且 JSON 字段严格限定为 targetType、selector、action、payload、reason。
+3. action 只能使用 updateValue、evict、clear 之一。
+4. selector.resourcePath 优先使用当前资源路径；如果当前路径未知，就明确说明无法精确定位，不要编造路径。
+5. payload 必须保持对象结构，例如 {"format":"json","value":{"status":"ACTIVE"}}。
+6. 不要输出脚本、命令或“已经执行成功”之类的表述。`
+            });
+            return systemMessages;
+        }
         
         let targetConnId = ctx?.connectionId;
         let targetDbName = ctx?.dbName;
         if (!targetConnId || !targetDbName) {
-            const activeTab = allTabs.find(t => t.id === tabId);
             if (activeTab && activeTab.connectionId && activeTab.dbName) {
                 targetConnId = activeTab.connectionId;
                 targetDbName = activeTab.dbName;
