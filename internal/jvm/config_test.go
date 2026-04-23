@@ -91,3 +91,17 @@ func TestNormalizeConnectionConfigDefaultsJMXPortTo9010WhenPortsMissing(t *testi
 		t.Fatalf("expected JMX port default 9010, got %d", got.JVM.JMX.Port)
 	}
 }
+
+func TestResolveProviderModeRejectsDisallowedRequestedMode(t *testing.T) {
+	_, _, err := ResolveProviderMode(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			AllowedModes:  []string{ModeEndpoint},
+			PreferredMode: ModeEndpoint,
+		},
+	}, ModeJMX)
+	if err == nil {
+		t.Fatalf("expected disallowed requested mode to fail")
+	}
+}

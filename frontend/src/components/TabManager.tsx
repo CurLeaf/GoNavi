@@ -18,6 +18,7 @@ import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
 import JVMOverview from './JVMOverview';
 import JVMResourceBrowser from './JVMResourceBrowser';
+import JVMAuditViewer from './JVMAuditViewer';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
@@ -210,11 +211,7 @@ const TabManager: React.FC = () => {
     } else if (tab.type === 'jvm-resource') {
       content = <JVMResourceBrowser tab={tab} />;
     } else if (tab.type === 'jvm-audit') {
-      content = (
-        <div style={{ padding: 24 }}>
-          当前任务未实现 JVM 审计页。
-        </div>
-      );
+      content = <JVMAuditViewer tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [

@@ -87,6 +87,31 @@ export interface JVMChangePreview {
   after: JVMValueSnapshot;
 }
 
+export interface JVMChangeRequest {
+  providerMode: 'jmx' | 'endpoint' | 'agent';
+  resourceId: string;
+  action: string;
+  reason: string;
+  expectedVersion?: string;
+  payload?: Record<string, any>;
+}
+
+export interface JVMApplyResult {
+  status: string;
+  message?: string;
+  updatedValue: JVMValueSnapshot;
+}
+
+export interface JVMAuditRecord {
+  timestamp: number;
+  connectionId: string;
+  providerMode: string;
+  resourceId: string;
+  action: string;
+  reason: string;
+  result: string;
+}
+
 export interface ConnectionConfig {
   id?: string;
   type: string;

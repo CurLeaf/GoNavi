@@ -1,13 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Empty, Skeleton, Space, Typography } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Descriptions, Empty, Input, Skeleton, Space, Tag, Typography } from 'antd';
+import { FileSearchOutlined, ReloadOutlined } from '@ant-design/icons';
 
 import { useStore } from '../store';
-import type { JVMValueSnapshot, SavedConnection, TabData } from '../types';
+import type {
+  JVMApplyResult,
+  JVMChangePreview,
+  JVMChangeRequest,
+  JVMValueSnapshot,
+  SavedConnection,
+  TabData,
+} from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import JVMModeBadge from './jvm/JVMModeBadge';
+import JVMChangePreviewModal from './jvm/JVMChangePreviewModal';
 
 const { Paragraph, Text } = Typography;
+const { TextArea } = Input;
+const DEFAULT_PAYLOAD_TEXT = '{\n  \n}';
 
 type JVMResourceBrowserProps = {
   tab: TabData;
@@ -35,12 +46,44 @@ const formatValue = (value: unknown): string => {
   }
 };
 
+const normalizePreviewResult = (value: any): JVMChangePreview | null => {
+  if (value && typeof value === 'object' && typeof value.allowed === 'boolean') {
+    return value as JVMChangePreview;
+  }
+  if (value?.data && typeof value.data.allowed === 'boolean') {
+    return value.data as JVMChangePreview;
+  }
+  return null;
+};
+
+const normalizeApplyResult = (value: any): JVMApplyResult | null => {
+  if (value && typeof value === 'object' && typeof value.status === 'string') {
+    return value as JVMApplyResult;
+  }
+  if (value?.data && typeof value.data.status === 'string') {
+    return value.data as JVMApplyResult;
+  }
+  return null;
+};
+
 const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   const connection = useStore((state) => state.connections.find((item) => item.id === tab.connectionId));
-  const providerMode = tab.providerMode || connection?.config.jvm?.preferredMode || 'jmx';
+  const addTab = useStore((state) => state.addTab);
+  const providerMode = (tab.providerMode || connection?.config.jvm?.preferredMode || 'jmx') as 'jmx' | 'endpoint' | 'agent';
+  const resourcePath = String(tab.resourcePath || '').trim();
+  const readOnly = connection?.config.jvm?.readOnly !== false;
   const [loading, setLoading] = useState(true);
   const [snapshot, setSnapshot] = useState<JVMValueSnapshot | null>(null);
   const [error, setError] = useState('');
+  const [action, setAction] = useState('update');
+  const [reason, setReason] = useState('');
+  const [payloadText, setPayloadText] = useState(DEFAULT_PAYLOAD_TEXT);
+  const [draftError, setDraftError] = useState('');
+  const [applyMessage, setApplyMessage] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewResult, setPreviewResult] = useState<JVMChangePreview | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
 
   const displayValue = useMemo(() => formatValue(snapshot?.value), [snapshot]);
 
@@ -52,7 +95,6 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       return;
     }
 
-    const resourcePath = String(tab.resourcePath || '').trim();
     if (!resourcePath) {
       setLoading(false);
       setSnapshot(null);
@@ -91,77 +133,306 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   useEffect(() => {
     void loadSnapshot();
-  }, [connection, providerMode, tab.connectionId, tab.resourcePath]);
+  }, [connection, providerMode, resourcePath, tab.connectionId]);
+
+  useEffect(() => {
+    setAction('update');
+    setReason('');
+    setPayloadText(DEFAULT_PAYLOAD_TEXT);
+    setDraftError('');
+    setApplyMessage('');
+    setPreviewOpen(false);
+    setPreviewResult(null);
+  }, [providerMode, resourcePath, tab.connectionId]);
+
+  const buildDraftPlan = (): JVMChangeRequest => {
+    const trimmedAction = String(action || '').trim() || 'update';
+    const trimmedReason = String(reason || '').trim();
+    if (!trimmedReason) {
+      throw new Error('请填写变更原因');
+    }
+
+    const rawPayload = String(payloadText || '').trim();
+    let payload: Record<string, any> = {};
+    if (rawPayload) {
+      const parsed = JSON.parse(rawPayload);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Payload 必须是 JSON 对象');
+      }
+      payload = parsed as Record<string, any>;
+    }
+
+    const resourceId = String(snapshot?.resourceId || resourcePath).trim();
+    if (!resourceId) {
+      throw new Error('资源 ID 为空，无法生成变更草稿');
+    }
+
+    return {
+      providerMode,
+      resourceId,
+      action: trimmedAction,
+      reason: trimmedReason,
+      expectedVersion: snapshot?.version || undefined,
+      payload,
+    };
+  };
+
+  const handleOpenAudit = () => {
+    if (!connection) {
+      return;
+    }
+
+    addTab({
+      id: `jvm-audit-${connection.id}-${providerMode}`,
+      title: buildJVMTabTitle(connection.name, 'audit', providerMode),
+      type: 'jvm-audit',
+      connectionId: connection.id,
+      providerMode,
+    });
+  };
+
+  const handlePreview = async () => {
+    if (!connection) {
+      setDraftError('连接不存在或已被删除');
+      return;
+    }
+
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.JVMPreviewChange !== 'function') {
+      setDraftError('JVMPreviewChange 后端方法不可用');
+      return;
+    }
+
+    let draftPlan: JVMChangeRequest;
+    try {
+      draftPlan = buildDraftPlan();
+    } catch (err: any) {
+      setDraftError(err?.message || '变更草稿不合法');
+      return;
+    }
+
+    setPreviewLoading(true);
+    setDraftError('');
+    setApplyMessage('');
+    try {
+      const result = await backendApp.JVMPreviewChange(
+        buildJVMRuntimeConfig(connection, providerMode),
+        draftPlan,
+      );
+      if (result?.success === false) {
+        setPreviewResult(null);
+        setPreviewOpen(false);
+        setDraftError(String(result?.message || '预览 JVM 变更失败'));
+        return;
+      }
+
+      const preview = normalizePreviewResult(result);
+      if (!preview) {
+        setPreviewResult(null);
+        setPreviewOpen(false);
+        setDraftError('预览结果格式不正确');
+        return;
+      }
+
+      setPreviewResult(preview);
+      setPreviewOpen(true);
+    } catch (err: any) {
+      setPreviewResult(null);
+      setPreviewOpen(false);
+      setDraftError(err?.message || '预览 JVM 变更失败');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleApply = async () => {
+    if (!connection) {
+      setDraftError('连接不存在或已被删除');
+      return;
+    }
+
+    const backendApp = (window as any).go?.app?.App;
+    if (typeof backendApp?.JVMApplyChange !== 'function') {
+      setDraftError('JVMApplyChange 后端方法不可用');
+      return;
+    }
+
+    let draftPlan: JVMChangeRequest;
+    try {
+      draftPlan = buildDraftPlan();
+    } catch (err: any) {
+      setDraftError(err?.message || '变更草稿不合法');
+      return;
+    }
+
+    setApplyLoading(true);
+    setDraftError('');
+    setApplyMessage('');
+    try {
+      const result = await backendApp.JVMApplyChange(
+        buildJVMRuntimeConfig(connection, providerMode),
+        draftPlan,
+      );
+      if (result?.success === false) {
+        setDraftError(String(result?.message || '执行 JVM 变更失败'));
+        return;
+      }
+
+      const applyResult = normalizeApplyResult(result);
+      if (applyResult?.updatedValue) {
+        setSnapshot(applyResult.updatedValue);
+      }
+
+      setPreviewOpen(false);
+      setPreviewResult(null);
+      setApplyMessage(applyResult?.message || result?.message || 'JVM 变更已执行');
+      await loadSnapshot();
+    } catch (err: any) {
+      setDraftError(err?.message || '执行 JVM 变更失败');
+    } finally {
+      setApplyLoading(false);
+    }
+  };
 
   if (!connection) {
     return <Empty description="连接不存在或已被删除" style={{ marginTop: 64 }} />;
   }
 
   return (
-    <div style={{ padding: 20, display: 'grid', gap: 16 }}>
-      <Card>
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Space size={12} wrap>
-            <JVMModeBadge mode={providerMode} />
-            <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadSnapshot()}>
-              刷新
-            </Button>
+    <>
+      <div style={{ padding: 20, display: 'grid', gap: 16 }}>
+        <Card>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space size={12} wrap>
+              <JVMModeBadge mode={providerMode} />
+              <Tag color={readOnly ? 'blue' : 'red'}>{readOnly ? '只读连接' : '可写连接'}</Tag>
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadSnapshot()}>
+                刷新
+              </Button>
+              <Button size="small" icon={<FileSearchOutlined />} onClick={handleOpenAudit}>
+                审计记录
+              </Button>
+            </Space>
+            <Paragraph style={{ marginBottom: 0 }}>
+              <Text strong>{connection.name}</Text>
+            </Paragraph>
+            <Text type="secondary">{resourcePath || '-'}</Text>
           </Space>
-          <Paragraph style={{ marginBottom: 0 }}>
-            <Text strong>{connection.name}</Text>
-          </Paragraph>
-          <Text type="secondary">{tab.resourcePath}</Text>
-        </Space>
-      </Card>
+        </Card>
 
-      <Card title="资源快照">
-        {loading ? (
-          <Skeleton active paragraph={{ rows: 6 }} />
-        ) : (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            {error ? <Alert type="error" showIcon message={error} /> : null}
-            {snapshot ? (
-              <>
-                <Descriptions column={1} size="small" labelStyle={{ width: 120 }}>
-                  <Descriptions.Item label="资源 ID">{snapshot.resourceId || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="资源类型">{snapshot.kind || tab.resourceKind || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="格式">{snapshot.format || '-'}</Descriptions.Item>
-                  <Descriptions.Item label="版本">{snapshot.version || '-'}</Descriptions.Item>
-                </Descriptions>
-                <pre
-                  style={{
-                    margin: 0,
-                    padding: 16,
-                    borderRadius: 8,
-                    background: 'rgba(0, 0, 0, 0.04)',
-                    overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {displayValue}
-                </pre>
-                {snapshot.metadata && Object.keys(snapshot.metadata).length > 0 ? (
+        <Card title="资源快照">
+          {loading ? (
+            <Skeleton active paragraph={{ rows: 6 }} />
+          ) : (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {error ? <Alert type="error" showIcon message={error} /> : null}
+              {snapshot ? (
+                <>
+                  <Descriptions column={1} size="small" labelStyle={{ width: 120 }}>
+                    <Descriptions.Item label="资源 ID">{snapshot.resourceId || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="资源类型">{snapshot.kind || tab.resourceKind || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="格式">{snapshot.format || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="版本">{snapshot.version || '-'}</Descriptions.Item>
+                  </Descriptions>
                   <pre
                     style={{
                       margin: 0,
                       padding: 16,
                       borderRadius: 8,
-                      background: 'rgba(0, 0, 0, 0.03)',
+                      background: 'rgba(0, 0, 0, 0.04)',
                       overflow: 'auto',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                     }}
                   >
-                    {JSON.stringify(snapshot.metadata, null, 2)}
+                    {displayValue}
                   </pre>
-                ) : null}
-              </>
-            ) : error ? null : <Empty description="暂无资源数据" />}
+                  {snapshot.metadata && Object.keys(snapshot.metadata).length > 0 ? (
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: 16,
+                        borderRadius: 8,
+                        background: 'rgba(0, 0, 0, 0.03)',
+                        overflow: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {JSON.stringify(snapshot.metadata, null, 2)}
+                    </pre>
+                  ) : null}
+                </>
+              ) : error ? null : <Empty description="暂无资源数据" />}
+            </Space>
+          )}
+        </Card>
+
+        <Card title="变更草稿">
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            {readOnly ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="当前连接默认只读，预览或执行可能被后端策略拒绝。"
+              />
+            ) : null}
+            {draftError ? <Alert type="error" showIcon message={draftError} /> : null}
+            {applyMessage ? <Alert type="success" showIcon message={applyMessage} /> : null}
+            <Descriptions column={1} size="small" labelStyle={{ width: 120 }}>
+              <Descriptions.Item label="资源路径">{resourcePath || '-'}</Descriptions.Item>
+              <Descriptions.Item label="资源版本">{snapshot?.version || '-'}</Descriptions.Item>
+            </Descriptions>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text strong>Action</Text>
+              <Input
+                value={action}
+                onChange={(event) => setAction(event.target.value)}
+                placeholder="例如 update"
+                maxLength={64}
+              />
+            </Space>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text strong>变更原因</Text>
+              <Input
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="填写本次 JVM 资源变更原因"
+                maxLength={200}
+              />
+            </Space>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text strong>Payload(JSON)</Text>
+              <Text type="secondary">需要输入 JSON 对象，预览和执行都会直接使用这份 payload。</Text>
+              <TextArea
+                value={payloadText}
+                onChange={(event) => setPayloadText(event.target.value)}
+                autoSize={{ minRows: 8, maxRows: 18 }}
+                spellCheck={false}
+              />
+            </Space>
+            <Space size={12} wrap>
+              <Button type="primary" loading={previewLoading} onClick={() => void handlePreview()}>
+                预览变更
+              </Button>
+            </Space>
           </Space>
-        )}
-      </Card>
-    </div>
+        </Card>
+      </div>
+
+      <JVMChangePreviewModal
+        open={previewOpen}
+        preview={previewResult}
+        applying={applyLoading}
+        onCancel={() => {
+          if (applyLoading) {
+            return;
+          }
+          setPreviewOpen(false);
+        }}
+        onConfirm={() => void handleApply()}
+      />
+    </>
   );
 };
 

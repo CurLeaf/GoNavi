@@ -40,6 +40,24 @@ func NormalizeConnectionConfig(raw connection.ConnectionConfig) (connection.Conn
 	return cfg, nil
 }
 
+func ResolveProviderMode(raw connection.ConnectionConfig, requestedMode string) (connection.ConnectionConfig, string, error) {
+	cfg, err := NormalizeConnectionConfig(raw)
+	if err != nil {
+		return connection.ConnectionConfig{}, "", err
+	}
+
+	selectedMode := strings.ToLower(strings.TrimSpace(requestedMode))
+	if selectedMode == "" {
+		selectedMode = cfg.JVM.PreferredMode
+	}
+	if !containsMode(cfg.JVM.AllowedModes, selectedMode) {
+		return connection.ConnectionConfig{}, "", fmt.Errorf("当前连接不允许使用 %q 模式", selectedMode)
+	}
+
+	cfg.JVM.PreferredMode = selectedMode
+	return cfg, selectedMode, nil
+}
+
 func normalizeModes(input []string) []string {
 	if len(input) == 0 {
 		return []string{ModeJMX}

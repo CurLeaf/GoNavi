@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,14 +13,18 @@ import (
 )
 
 type fakeJVMProvider struct {
-	testErr  error
-	probe    []jvm.Capability
-	probeErr error
-	list     []jvm.ResourceSummary
-	listErr  error
-	value    jvm.ValueSnapshot
-	valueErr error
-	apply    jvm.ApplyResult
+	testErr    error
+	probe      []jvm.Capability
+	probeErr   error
+	list       []jvm.ResourceSummary
+	listErr    error
+	value      jvm.ValueSnapshot
+	valueErr   error
+	preview    jvm.ChangePreview
+	previewSet bool
+	previewErr error
+	apply      jvm.ApplyResult
+	applyErr   error
 }
 
 func (f fakeJVMProvider) Mode() string { return jvm.ModeJMX }
@@ -35,10 +41,13 @@ func (f fakeJVMProvider) GetValue(context.Context, connection.ConnectionConfig, 
 	return f.value, f.valueErr
 }
 func (f fakeJVMProvider) PreviewChange(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ChangePreview, error) {
-	return jvm.ChangePreview{Allowed: true, Summary: "preview"}, nil
+	if !f.previewSet {
+		return jvm.ChangePreview{Allowed: true, Summary: "preview", RiskLevel: "low"}, f.previewErr
+	}
+	return f.preview, f.previewErr
 }
 func (f fakeJVMProvider) ApplyChange(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ApplyResult, error) {
-	return f.apply, nil
+	return f.apply, f.applyErr
 }
 
 func swapJVMProviderFactory(factory func(mode string) (jvm.Provider, error)) func() {
@@ -319,5 +328,183 @@ func TestJVMGetValueReturnsProviderPayload(t *testing.T) {
 	}
 	if snapshot.Metadata["unit"] != "MiB" {
 		t.Fatalf("expected unit metadata %q, got %#v", "MiB", snapshot.Metadata)
+	}
+}
+
+func TestJVMApplyChangeReturnsProviderPayload(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	readOnly := false
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+				Value: map[string]any{
+					"status": "stale",
+				},
+			},
+			apply: jvm.ApplyResult{
+				Status:  "applied",
+				Message: "ok",
+				UpdatedValue: jvm.ValueSnapshot{
+					ResourceID: "/cache/orders",
+					Kind:       "entry",
+					Format:     "json",
+					Value: map[string]any{
+						"status": "ready",
+					},
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	result, ok := res.Data.(jvm.ApplyResult)
+	if !ok {
+		t.Fatalf("expected apply result, got %#v", res.Data)
+	}
+	if result.Status != "applied" {
+		t.Fatalf("expected status %q, got %#v", "applied", result)
+	}
+	if result.UpdatedValue.ResourceID != "/cache/orders" {
+		t.Fatalf("expected updated resource id %q, got %#v", "/cache/orders", result.UpdatedValue)
+	}
+}
+
+func TestJVMPreviewChangeRejectsModeOutsideAllowedModes(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+
+	res := app.JVMPreviewChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"endpoint"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+	})
+
+	if res.Success {
+		t.Fatalf("expected preview request to be rejected, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "不允许使用") {
+		t.Fatalf("expected disallowed mode error, got %+v", res)
+	}
+}
+
+func TestJVMListAuditRecordsReturnsLatestRecords(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	store := jvm.NewAuditStore(filepath.Join(app.configDir, "jvm_audit.jsonl"))
+	for _, record := range []jvm.AuditRecord{
+		{Timestamp: 100, ConnectionID: "conn-orders", ProviderMode: "jmx", ResourceID: "/cache/orders", Action: "put", Reason: "first", Result: "applied"},
+		{Timestamp: 200, ConnectionID: "conn-other", ProviderMode: "jmx", ResourceID: "/cache/other", Action: "put", Reason: "other", Result: "applied"},
+		{Timestamp: 300, ConnectionID: "conn-orders", ProviderMode: "jmx", ResourceID: "/cache/orders", Action: "put", Reason: "latest", Result: "applied"},
+	} {
+		if err := store.Append(record); err != nil {
+			t.Fatalf("Append returned error: %v", err)
+		}
+	}
+
+	res := app.JVMListAuditRecords("conn-orders", 1)
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	records, ok := res.Data.([]jvm.AuditRecord)
+	if !ok {
+		t.Fatalf("expected audit record slice, got %#v", res.Data)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one audit record, got %#v", records)
+	}
+	if records[0].Timestamp != 300 {
+		t.Fatalf("expected latest timestamp %d, got %#v", 300, records[0])
+	}
+}
+
+func TestJVMApplyChangeSurfacesAuditWriteFailure(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	tempDir := t.TempDir()
+	blockerPath := filepath.Join(tempDir, "audit-blocker")
+	if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	app.configDir = blockerPath
+
+	readOnly := false
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+				Value: map[string]any{
+					"status": "stale",
+				},
+			},
+			apply: jvm.ApplyResult{
+				Status: "applied",
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success despite audit failure, got %+v", res)
+	}
+	result, ok := res.Data.(jvm.ApplyResult)
+	if !ok {
+		t.Fatalf("expected apply result, got %#v", res.Data)
+	}
+	if !strings.Contains(result.Message, "审计记录写入失败") {
+		t.Fatalf("expected audit failure message, got %#v", result)
 	}
 }

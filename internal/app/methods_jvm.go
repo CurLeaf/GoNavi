@@ -1,6 +1,9 @@
 package app
 
 import (
+	"path/filepath"
+	"strings"
+
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/jvm"
 )
@@ -8,12 +11,18 @@ import (
 var newJVMProvider = jvm.NewProvider
 
 func resolveJVMProvider(cfg connection.ConnectionConfig) (connection.ConnectionConfig, jvm.Provider, error) {
-	normalized, err := jvm.NormalizeConnectionConfig(cfg)
+	return resolveJVMProviderForMode(cfg, "")
+}
+
+func resolveJVMProviderForMode(cfg connection.ConnectionConfig, mode string) (connection.ConnectionConfig, jvm.Provider, error) {
+	normalized, selectedMode, err := jvm.ResolveProviderMode(cfg, mode)
 	if err != nil {
 		return connection.ConnectionConfig{}, nil, err
 	}
 
-	provider, err := newJVMProvider(normalized.JVM.PreferredMode)
+	normalized.JVM.PreferredMode = selectedMode
+
+	provider, err := newJVMProvider(selectedMode)
 	if err != nil {
 		return connection.ConnectionConfig{}, nil, err
 	}
@@ -62,6 +71,69 @@ func (a *App) JVMGetValue(cfg connection.ConnectionConfig, resourcePath string) 
 	return connection.QueryResult{Success: true, Data: value}
 }
 
+func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRequest) connection.QueryResult {
+	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	preview, err := jvm.BuildChangePreview(a.ctx, provider, normalized, req)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Data: preview}
+}
+
+func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequest) connection.QueryResult {
+	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	preview, err := jvm.BuildChangePreview(a.ctx, provider, normalized, req)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if !preview.Allowed {
+		message := strings.TrimSpace(preview.BlockingReason)
+		if message == "" {
+			message = "当前变更被 Guard 拦截"
+		}
+		return connection.QueryResult{Success: false, Message: message}
+	}
+
+	result, err := provider.ApplyChange(a.ctx, normalized, req)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if err := jvm.NewAuditStore(filepath.Join(a.auditRootDir(), "jvm_audit.jsonl")).Append(jvm.AuditRecord{
+		ConnectionID: normalized.ID,
+		ProviderMode: normalized.JVM.PreferredMode,
+		ResourceID:   req.ResourceID,
+		Action:       req.Action,
+		Reason:       req.Reason,
+		Result:       result.Status,
+	}); err != nil {
+		if strings.TrimSpace(result.Message) == "" {
+			result.Message = "变更已执行，但审计记录写入失败: " + err.Error()
+		} else {
+			result.Message += "；审计记录写入失败: " + err.Error()
+		}
+	}
+
+	return connection.QueryResult{Success: true, Data: result}
+}
+
+func (a *App) JVMListAuditRecords(connectionID string, limit int) connection.QueryResult {
+	records, err := jvm.NewAuditStore(filepath.Join(a.auditRootDir(), "jvm_audit.jsonl")).List(connectionID, limit)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Data: records}
+}
+
 func (a *App) JVMProbeCapabilities(cfg connection.ConnectionConfig) connection.QueryResult {
 	normalized, err := jvm.NormalizeConnectionConfig(cfg)
 	if err != nil {
@@ -94,4 +166,11 @@ func (a *App) JVMProbeCapabilities(cfg connection.ConnectionConfig) connection.Q
 	}
 
 	return connection.QueryResult{Success: true, Data: items}
+}
+
+func (a *App) auditRootDir() string {
+	if strings.TrimSpace(a.configDir) != "" {
+		return a.configDir
+	}
+	return resolveAppConfigDir()
 }
