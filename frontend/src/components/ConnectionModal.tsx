@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal, Form, Input, InputNumber, Button, message, Checkbox, Divider, Select, Alert, Card, Row, Col, Typography, Collapse, Space, Table, Tag } from 'antd';
-import { DatabaseOutlined, ConsoleSqlOutlined, FileTextOutlined, CloudServerOutlined, AppstoreAddOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined, BgColorsOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, FileTextOutlined, CloudOutlined, CheckCircleFilled, CloseCircleFilled, LinkOutlined, EditOutlined, AppstoreOutlined, BgColorsOutlined } from '@ant-design/icons';
 import { getDbIcon, getDbDefaultColor, getDbIconLabel, DB_ICON_TYPES, PRESET_ICON_COLORS } from './DatabaseIcons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -14,10 +14,11 @@ import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
 import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
 import { CUSTOM_CONNECTION_DRIVER_HELP } from '../utils/driverImportGuidance';
 import { applyNoAutoCapAttributes, noAutoCapInputProps } from '../utils/inputAutoCap';
-import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile } from '../../wailsjs/go/app/App';
+import { buildDefaultJVMConnectionValues, buildJVMConnectionConfig } from '../utils/jvmConnectionConfig';
+import { JVM_RUNTIME_MODES, resolveJVMModeMeta } from '../utils/jvmRuntimePresentation';
+import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile, TestJVMConnection } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
-const { Meta } = Card;
 const { Text } = Typography;
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
@@ -51,6 +52,7 @@ const createEmptyConnectionSecretClearState = (): ConnectionSecretClearState => 
 
 const getDefaultPortByType = (type: string) => {
   switch (type) {
+    case 'jvm': return 9010;
     case 'mysql': return 3306;
     case 'doris':
     case 'diros': return 9030;
@@ -169,6 +171,16 @@ const ConnectionModal: React.FC<{
   const mongoTopology = Form.useWatch('mongoTopology', form) || 'single';
   const mongoSrv = Form.useWatch('mongoSrv', form) || false;
   const redisTopology = Form.useWatch('redisTopology', form) || 'single';
+  const jvmAllowedModes = Form.useWatch('jvmAllowedModes', form);
+  const jvmPreferredMode = Form.useWatch('jvmPreferredMode', form) || 'jmx';
+  const normalizedJvmAllowedModes = useMemo(() => {
+      const modes = Array.isArray(jvmAllowedModes)
+          ? jvmAllowedModes
+              .map((mode) => String(mode || '').trim().toLowerCase())
+              .filter((mode) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+          : [];
+      return modes.length > 0 ? Array.from(new Set(modes)) : ['jmx'];
+  }, [jvmAllowedModes]);
   const isMySQLLike = dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx';
   const isSSLType = supportsSSLForType(dbType);
   const sslHintText = isMySQLLike
@@ -1187,8 +1199,10 @@ const ConnectionModal: React.FC<{
               setStep(2);
               const config: any = initialValues.config || {};
               const configType = String(config.type || 'mysql');
+              const isJvmConfigType = configType === 'jvm';
               const defaultPort = getDefaultPortByType(configType);
               const isFileDbConfigType = isFileDatabaseType(configType);
+              const jvmDefaultValues = buildDefaultJVMConnectionValues();
               const normalizedHosts = isFileDbConfigType ? [] : normalizeAddressList(config.hosts, defaultPort);
               const primaryAddress = isFileDbConfigType
                   ? null
@@ -1208,6 +1222,18 @@ const ConnectionModal: React.FC<{
               const mysqlIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mysqlReplicaHosts.length > 0;
               const mongoIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mongoHosts.length > 0 || !!config.replicaSet;
               const redisIsCluster = String(config.topology || '').toLowerCase() === 'cluster' || redisHosts.length > 0;
+              const jvmAllowedModes = Array.isArray(config.jvm?.allowedModes) && config.jvm.allowedModes.length > 0
+                  ? config.jvm.allowedModes.map((mode: string) => String(mode || '').trim().toLowerCase())
+                  : jvmDefaultValues.jvmAllowedModes;
+              const normalizedJvmAllowedModes = jvmAllowedModes.filter((mode: string) =>
+                  JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]),
+              );
+              const resolvedJvmAllowedModes = normalizedJvmAllowedModes.length > 0
+                  ? Array.from(new Set(normalizedJvmAllowedModes))
+                  : jvmDefaultValues.jvmAllowedModes;
+              const resolvedJvmPreferredMode = resolvedJvmAllowedModes.includes(String(config.jvm?.preferredMode || '').trim().toLowerCase())
+                  ? String(config.jvm?.preferredMode || '').trim().toLowerCase()
+                  : resolvedJvmAllowedModes[0];
               const hasHttpTunnel = !!config.useHttpTunnel;
               const hasProxy = !hasHttpTunnel && !!config.useProxy;
               form.setFieldsValue({
@@ -1261,7 +1287,27 @@ const ConnectionModal: React.FC<{
                   savePassword: config.savePassword !== false,
                   redisDB: Number.isFinite(Number(config.redisDB)) ? Number(config.redisDB) : 0,
                   mongoReplicaUser: config.mongoReplicaUser || '',
-                  mongoReplicaPassword: config.mongoReplicaPassword || ''
+                  mongoReplicaPassword: config.mongoReplicaPassword || '',
+                  jvmReadOnly: isJvmConfigType ? config.jvm?.readOnly ?? jvmDefaultValues.jvmReadOnly : jvmDefaultValues.jvmReadOnly,
+                  jvmAllowedModes: isJvmConfigType ? resolvedJvmAllowedModes : jvmDefaultValues.jvmAllowedModes,
+                  jvmPreferredMode: isJvmConfigType ? resolvedJvmPreferredMode : jvmDefaultValues.jvmPreferredMode,
+                  jvmEnvironment: isJvmConfigType ? config.jvm?.environment || jvmDefaultValues.jvmEnvironment : jvmDefaultValues.jvmEnvironment,
+                  jvmEndpointEnabled: isJvmConfigType
+                      ? config.jvm?.endpoint?.enabled ?? resolvedJvmAllowedModes.includes('endpoint')
+                      : jvmDefaultValues.jvmEndpointEnabled,
+                  jvmEndpointBaseUrl: isJvmConfigType ? config.jvm?.endpoint?.baseUrl || '' : jvmDefaultValues.jvmEndpointBaseUrl,
+                  jvmEndpointApiKey: isJvmConfigType ? config.jvm?.endpoint?.apiKey || '' : jvmDefaultValues.jvmEndpointApiKey,
+                  jvmEndpointTimeoutSeconds: isJvmConfigType
+                      ? Number(config.jvm?.endpoint?.timeoutSeconds || config.timeout || 30)
+                      : Number(config.timeout || 30),
+                  jvmJmxHost: isJvmConfigType && config.jvm?.jmx?.host && config.jvm.jmx.host !== primaryHost
+                      ? config.jvm.jmx.host
+                      : '',
+                  jvmJmxPort: isJvmConfigType && Number(config.jvm?.jmx?.port) > 0 && Number(config.jvm.jmx.port) !== Number(primaryPort || defaultPort)
+                      ? Number(config.jvm.jmx.port)
+                      : undefined,
+                  jvmJmxUsername: isJvmConfigType ? config.jvm?.jmx?.username || '' : '',
+                  jvmJmxPassword: isJvmConfigType ? config.jvm?.jmx?.password || '' : ''
               });
               setUseSSL(!!config.useSSL);
               setCustomIconType(initialValues.iconType);
@@ -1559,10 +1605,13 @@ const ConnectionModal: React.FC<{
               : 30;
           const rpcTimeoutMs = (timeoutSeconds + 5) * 1000;
 
-          // Use different API for Redis
+          // Use different API for Redis / JVM
           const isRedisType = values.type === 'redis';
+          const isJVMType = values.type === 'jvm';
           const res = await withClientTimeout(
-              isRedisType
+              isJVMType
+                  ? TestJVMConnection(config as any)
+                  : isRedisType
                   ? RedisConnect(config as any)
                   : TestConnection(config as any),
               rpcTimeoutMs,
@@ -1574,7 +1623,7 @@ const ConnectionModal: React.FC<{
 				  setTestResult({ type: 'success', message: res.message });
 				  if (isRedisType) {
 					  setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
-				  } else {
+				  } else if (!isJVMType) {
 					  // Other databases: fetch database list
 					  const dbRes = await withClientTimeout(
 						  DBGetDatabases(config as any),
@@ -1675,6 +1724,26 @@ const ConnectionModal: React.FC<{
 
   const buildConfig = async (values: any, forPersist: boolean): Promise<ConnectionConfig> => {
       const mergedValues = { ...values };
+      if (String(mergedValues.type || '').trim().toLowerCase() === 'jvm') {
+          const nextJvmAllowedModes = Array.isArray(mergedValues.jvmAllowedModes)
+              ? mergedValues.jvmAllowedModes
+                  .map((mode: string) => String(mode || '').trim().toLowerCase())
+                  .filter((mode: string) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+              : [];
+          const resolvedJvmAllowedModes = nextJvmAllowedModes.length > 0
+              ? Array.from(new Set(nextJvmAllowedModes))
+              : buildDefaultJVMConnectionValues().jvmAllowedModes;
+          return buildJVMConnectionConfig({
+              ...buildDefaultJVMConnectionValues(),
+              ...mergedValues,
+              jvmAllowedModes: resolvedJvmAllowedModes,
+              jvmPreferredMode: resolvedJvmAllowedModes.includes(String(mergedValues.jvmPreferredMode || '').trim().toLowerCase())
+                  ? String(mergedValues.jvmPreferredMode || '').trim().toLowerCase()
+                  : resolvedJvmAllowedModes[0],
+              jvmEndpointEnabled: resolvedJvmAllowedModes.includes('endpoint'),
+              jvmEndpointTimeoutSeconds: Number(mergedValues.jvmEndpointTimeoutSeconds || mergedValues.timeout || 30),
+          });
+      }
       const parsedUriValues = parseUriToValues(mergedValues.uri, mergedValues.type);
       const isEmptyField = (value: unknown) => (
           value === undefined
@@ -1905,7 +1974,66 @@ const ConnectionModal: React.FC<{
       form.setFieldsValue({ type: type });
 
       const defaultPort = getDefaultPortByType(type);
-      if (isFileDatabaseType(type)) {
+      if (type === 'jvm') {
+          const jvmDefaultValues = buildDefaultJVMConnectionValues();
+          setUseSSL(false);
+          setUseSSH(false);
+          setUseProxy(false);
+          setUseHttpTunnel(false);
+          form.setFieldsValue({
+              ...jvmDefaultValues,
+              user: '',
+              password: '',
+              database: '',
+              useSSL: false,
+              sslMode: undefined,
+              sslCertPath: undefined,
+              sslKeyPath: undefined,
+              useSSH: false,
+              sshHost: '',
+              sshPort: 22,
+              sshUser: '',
+              sshPassword: '',
+              sshKeyPath: '',
+              useProxy: false,
+              proxyType: 'socks5',
+              proxyHost: '',
+              proxyPort: 1080,
+              proxyUser: '',
+              proxyPassword: '',
+              useHttpTunnel: false,
+              httpTunnelHost: '',
+              httpTunnelPort: 8080,
+              httpTunnelUser: '',
+              httpTunnelPassword: '',
+              timeout: 30,
+              uri: '',
+              includeDatabases: undefined,
+              includeRedisDatabases: undefined,
+              mysqlTopology: 'single',
+              redisTopology: 'single',
+              mongoTopology: 'single',
+              mongoSrv: false,
+              mongoReadPreference: 'primary',
+              mongoReplicaSet: '',
+              mongoAuthSource: '',
+              mongoAuthMechanism: '',
+              savePassword: true,
+              mysqlReplicaHosts: [],
+              redisHosts: [],
+              mongoHosts: [],
+              mysqlReplicaUser: '',
+              mysqlReplicaPassword: '',
+              mongoReplicaUser: '',
+              mongoReplicaPassword: '',
+              redisDB: 0,
+              jvmEndpointTimeoutSeconds: 30,
+              jvmJmxHost: '',
+              jvmJmxPort: undefined,
+              jvmJmxUsername: '',
+              jvmJmxPassword: '',
+          });
+      } else if (isFileDatabaseType(type)) {
           setUseSSL(false);
           setUseSSH(false);
           setUseProxy(false);
@@ -2008,6 +2136,7 @@ const ConnectionModal: React.FC<{
   const isFileDb = isFileDatabaseType(dbType);
   const isCustom = dbType === 'custom';
   const isRedis = dbType === 'redis';
+  const isJVM = dbType === 'jvm';
   const currentDriverType = normalizeDriverType(dbType);
   const currentDriverSnapshot = driverStatusMap[currentDriverType];
   const currentDriverUnavailableReason = currentDriverType !== 'custom'
@@ -2044,6 +2173,7 @@ const ConnectionModal: React.FC<{
           { key: 'tdengine', name: 'TDengine', icon: getDbIcon('tdengine', undefined, 36) },
       ]},
       { label: '其他', items: [
+          { key: 'jvm', name: 'JVM Runtime', icon: getDbIcon('jvm', undefined, 36) },
           { key: 'custom', name: 'Custom (自定义)', icon: getDbIcon('custom', undefined, 36) },
       ]},
   ];
@@ -2128,7 +2258,7 @@ const ConnectionModal: React.FC<{
                   <Input {...noAutoCapInputProps} placeholder="例如：本地测试库" />
               </Form.Item>
 
-              {!isCustom && (
+              {!isCustom && !isJVM && (
                   <>
                       <Form.Item
                           name="uri"
@@ -2177,6 +2307,83 @@ const ConnectionModal: React.FC<{
                           clearLabel: '清除已保存 DSN',
                           description: '当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。',
                       })}
+                  </>
+              ) : isJVM ? (
+                  <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16, alignItems: 'start' }}>
+                          <Form.Item
+                              name="host"
+                              label="主机地址 (Host)"
+                              rules={[{ required: true, message: '请输入 JVM 主机地址' }]}
+                              style={{ marginBottom: 0 }}
+                          >
+                              <Input {...noAutoCapInputProps} placeholder="localhost" />
+                          </Form.Item>
+                          <Form.Item
+                              name="port"
+                              label="端口 (Port)"
+                              rules={[{ required: true, message: '请输入 JVM 端口号' }]}
+                              style={{ marginBottom: 0 }}
+                          >
+                              <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+                          </Form.Item>
+                      </div>
+
+                      <Form.Item
+                          name="jvmAllowedModes"
+                          label="允许接入模式"
+                          rules={[{ required: true, message: '请至少选择一种 JVM 接入模式' }]}
+                          help="首期以 JMX / Endpoint 为主，Agent 仅保留扩展位。"
+                      >
+                          <Select
+                              mode="multiple"
+                              allowClear
+                              placeholder="请选择 JVM 接入模式"
+                              options={JVM_RUNTIME_MODES.map((mode) => ({
+                                  value: mode,
+                                  label: resolveJVMModeMeta(mode).label,
+                              }))}
+                          />
+                      </Form.Item>
+
+                      <Form.Item
+                          name="jvmPreferredMode"
+                          label="首选接入模式"
+                          rules={[{ required: true, message: '请选择首选 JVM 接入模式' }]}
+                      >
+                          <Select
+                              options={normalizedJvmAllowedModes.map((mode) => ({
+                                  value: mode,
+                                  label: resolveJVMModeMeta(mode).label,
+                              }))}
+                          />
+                      </Form.Item>
+
+                      <Form.Item name="jvmReadOnly" valuePropName="checked" style={{ marginBottom: 12 }}>
+                          <Checkbox>只读模式</Checkbox>
+                      </Form.Item>
+
+                      <Form.Item
+                          name="jvmEndpointBaseUrl"
+                          label="JVM Endpoint Base URL"
+                          rules={[{
+                              required: jvmPreferredMode === 'endpoint',
+                              message: '启用 Endpoint 模式时请输入 Base URL',
+                          }]}
+                          help="当允许或首选 Endpoint 时，用于后端探测与访问 JVM 管理端点。"
+                      >
+                          <Input {...noAutoCapInputProps} placeholder="例如：https://orders.internal/manage/jvm" />
+                      </Form.Item>
+
+                      <Form.Item
+                          name="timeout"
+                          label="连接超时 (秒)"
+                          help="JVM 连接测试超时时间，默认 30 秒"
+                          rules={[{ type: 'number', min: 1, max: 300, message: '超时时间范围: 1-300 秒' }]}
+                          style={{ marginBottom: 0 }}
+                      >
+                          <InputNumber style={{ width: '100%' }} min={1} max={300} placeholder="30" />
+                      </Form.Item>
                   </>
               ) : (
                   <>
@@ -2428,7 +2635,7 @@ const ConnectionModal: React.FC<{
                           </>
                       )}
 
-                      {!isFileDb && !isRedis && (
+                      {!isFileDb && !isRedis && !isJVM && (
                           <>
                           <div style={{ display: 'grid', gridTemplateColumns: dbType === 'mongodb' ? 'minmax(0, 1fr) minmax(0, 1fr) 180px' : 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
                               <Form.Item
@@ -2480,7 +2687,7 @@ const ConnectionModal: React.FC<{
                           </Form.Item>
                       )}
 
-                      {!isFileDb && !isRedis && (
+                      {!isFileDb && !isRedis && !isJVM && (
                           <Form.Item name="includeDatabases" label="显示数据库 (留空显示全部)" help="连接测试成功后可选择" style={{ marginTop: 12, marginBottom: 0 }}>
                               <Select mode="multiple" placeholder="选择显示的数据库" allowClear>
                                   {dbList.map(db => <Select.Option key={db} value={db}>{db}</Select.Option>)}
@@ -2492,7 +2699,7 @@ const ConnectionModal: React.FC<{
           </div>
       );
 
-      const networkSecuritySection = !isFileDb ? (() => {
+      const networkSecuritySection = !isFileDb && !isJVM ? (() => {
           const networkItems: Array<{
               key: 'ssl' | 'ssh' | 'proxy' | 'httpTunnel';
               title: string;
@@ -2815,6 +3022,18 @@ const ConnectionModal: React.FC<{
                   mongoReplicaUser: '',
                   mongoReplicaPassword: '',
                   redisDB: 0,
+                  jvmReadOnly: true,
+                  jvmAllowedModes: ['jmx'],
+                  jvmPreferredMode: 'jmx',
+                  jvmEnvironment: 'dev',
+                  jvmEndpointEnabled: false,
+                  jvmEndpointBaseUrl: '',
+                  jvmEndpointApiKey: '',
+                  jvmEndpointTimeoutSeconds: 30,
+                  jvmJmxHost: '',
+                  jvmJmxPort: undefined,
+                  jvmJmxUsername: '',
+                  jvmJmxPassword: '',
               }}
               onValuesChange={(changed) => {
                   if (testResult) {
@@ -2871,6 +3090,21 @@ const ConnectionModal: React.FC<{
                       }
                   }
                   if (changed.type !== undefined) setDbType(changed.type);
+                  if (changed.jvmAllowedModes !== undefined) {
+                      const nextModes = Array.isArray(changed.jvmAllowedModes)
+                          ? changed.jvmAllowedModes
+                              .map((mode: string) => String(mode || '').trim().toLowerCase())
+                              .filter((mode: string) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+                          : [];
+                      const resolvedModes = nextModes.length > 0 ? Array.from(new Set(nextModes)) : ['jmx'];
+                      const currentPreferredMode = String(form.getFieldValue('jvmPreferredMode') || '').trim().toLowerCase();
+                      form.setFieldValue('jvmAllowedModes', resolvedModes);
+                      form.setFieldValue(
+                          'jvmPreferredMode',
+                          resolvedModes.includes(currentPreferredMode) ? currentPreferredMode : resolvedModes[0],
+                      );
+                      form.setFieldValue('jvmEndpointEnabled', resolvedModes.includes('endpoint'));
+                  }
                   if (changed.redisTopology !== undefined) {
                       const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
                       setRedisDbList(supportedDbs);
@@ -2914,7 +3148,7 @@ const ConnectionModal: React.FC<{
               {(() => {
                   const sectionItems: Array<{ key: 'basic' | 'network' | 'appearance'; title: string; description: string; icon: React.ReactNode }> = [
                       { key: 'basic', title: '基础信息', description: '名称、地址、认证、URI 与数据库范围', icon: <DatabaseOutlined /> },
-                      ...(!isCustom && !isFileDb ? [{ key: 'network' as const, title: '网络与安全', description: 'SSL、SSH、代理与高级连接', icon: <CloudOutlined /> }] : []),
+                      ...(!isCustom && !isFileDb && !isJVM ? [{ key: 'network' as const, title: '网络与安全', description: 'SSL、SSH、代理与高级连接', icon: <CloudOutlined /> }] : []),
                       { key: 'appearance', title: '外观', description: '自定义图标与颜色', icon: <BgColorsOutlined /> },
                   ];
                   const resolvedSection = sectionItems.some((item) => item.key === activeConfigSection)
@@ -3222,5 +3456,3 @@ const ConnectionModal: React.FC<{
 };
 
 export default ConnectionModal;
-
-
