@@ -4,7 +4,7 @@ import { useStore, loadAISessionsFromBackend, loadAISessionFromBackend } from '.
 import { EventsOn, EventsOff } from '../../wailsjs/runtime';
 import { DBGetDatabases, DBGetTables } from '../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-import { AIChatMessage, AIToolCall } from '../types';
+import type { AIChatMessage, AIToolCall, JVMAIPlanContext } from '../types';
 import { DownOutlined } from '@ant-design/icons';
 import './AIChatPanel.css';
 
@@ -231,6 +231,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
     const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
     const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
+    const pendingJVMPlanContextRef = useRef<JVMAIPlanContext | undefined>(undefined);
 
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
@@ -247,6 +248,31 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const tabs = useStore(state => state.tabs);
     const activeTabId = useStore(state => state.activeTabId);
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
+
+    const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
+        const state = useStore.getState();
+        const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+        if (!activeTab || activeTab.type !== 'jvm-resource') {
+            return undefined;
+        }
+
+        const activeConnection = state.connections.find(c => c.id === activeTab.connectionId);
+        if (activeConnection?.config?.type !== 'jvm') {
+            return undefined;
+        }
+
+        const resourcePath = String(activeTab.resourcePath || '').trim();
+        if (!resourcePath) {
+            return undefined;
+        }
+
+        return {
+            tabId: activeTab.id,
+            connectionId: activeTab.connectionId,
+            providerMode: (activeTab.providerMode || activeConnection.config.jvm?.preferredMode || 'jmx') as JVMAIPlanContext['providerMode'],
+            resourcePath,
+        };
+    }, []);
 
     // Auto-Context Injection Hook
     useEffect(() => {
@@ -498,7 +524,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 if (assistantMsgId) {
                     updateAIChatMessage(sid, assistantMsgId, { content: `❌ 错误: ${cleanErr}`, phase: 'idle', loading: false, rawError: rawErr });
                 } else {
-                    addAIChatMessage(sid, { id: genId(), role: 'assistant', phase: 'idle', content: `❌ 错误: ${cleanErr}`, rawError: rawErr, timestamp: Date.now() });
+                    addAIChatMessage(sid, {
+                        id: genId(),
+                        role: 'assistant',
+                        phase: 'idle',
+                        content: `❌ 错误: ${cleanErr}`,
+                        rawError: rawErr,
+                        timestamp: Date.now(),
+                        jvmPlanContext: pendingJVMPlanContextRef.current,
+                    });
                 }
                 assistantMsgId = '';
                 setSending(false);
@@ -510,7 +544,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     updateAIChatMessage(sid, assistantMsgId, { tool_calls: data.tool_calls, phase: 'tool_calling' });
                 } else {
                     assistantMsgId = genId();
-                    addAIChatMessage(sid, { id: assistantMsgId, role: 'assistant', phase: 'tool_calling', content: '', tool_calls: data.tool_calls, timestamp: Date.now(), loading: true });
+                    addAIChatMessage(sid, {
+                        id: assistantMsgId,
+                        role: 'assistant',
+                        phase: 'tool_calling',
+                        content: '',
+                        tool_calls: data.tool_calls,
+                        timestamp: Date.now(),
+                        loading: true,
+                        jvmPlanContext: pendingJVMPlanContextRef.current,
+                    });
                 }
             }
 
@@ -518,7 +561,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             if (data.thinking) {
                 if (!assistantMsgId) {
                     assistantMsgId = genId();
-                    addAIChatMessage(sid, { id: assistantMsgId, role: 'assistant', phase: 'thinking', content: '', thinking: data.thinking, timestamp: Date.now(), loading: true });
+                    addAIChatMessage(sid, {
+                        id: assistantMsgId,
+                        role: 'assistant',
+                        phase: 'thinking',
+                        content: '',
+                        thinking: data.thinking,
+                        timestamp: Date.now(),
+                        loading: true,
+                        jvmPlanContext: pendingJVMPlanContextRef.current,
+                    });
                     if (sending) setSending(false);
                 } else {
                     streamBuffer.thinking += data.thinking;
@@ -529,7 +581,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             if (data.content) {
                 if (!assistantMsgId) {
                     assistantMsgId = genId();
-                    addAIChatMessage(sid, { id: assistantMsgId, role: 'assistant', phase: 'generating', content: data.content, timestamp: Date.now(), loading: true });
+                    addAIChatMessage(sid, {
+                        id: assistantMsgId,
+                        role: 'assistant',
+                        phase: 'generating',
+                        content: data.content,
+                        timestamp: Date.now(),
+                        loading: true,
+                        jvmPlanContext: pendingJVMPlanContextRef.current,
+                    });
                     setSending(false);
                     const currentHistory = useStore.getState().aiChatHistory[sid] || [];
                     if (currentHistory.length <= 1) isFirstCompletion = true;
@@ -770,7 +830,7 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 2. 如果用户要求生成 JVM 修改方案，必须输出一个唯一的 \`\`\`json 代码块，并且 JSON 字段严格限定为 targetType、selector、action、payload、reason。
 3. action 只能使用 updateValue、evict、clear 之一。
 4. selector.resourcePath 优先使用当前资源路径；如果当前路径未知，就明确说明无法精确定位，不要编造路径。
-5. payload 必须保持对象结构，例如 {"format":"json","value":{"status":"ACTIVE"}}。
+5. 当前 JVM 预览 MVP 只支持 JSON 对象变更：如果 action=updateValue，则 payload 必须是 {"format":"json","value":{...}}，且 value 必须是 JSON 对象；evict/clear 时 payload 可以省略。
 6. 不要输出脚本、命令或“已经执行成功”之类的表述。`
             });
             return systemMessages;
@@ -843,6 +903,10 @@ SELECT * FROM users WHERE status = 1;
     const toolContextMapRef = useRef<Map<string, { connectionId: string; dbName: string; tables: string[] }>>(new Map());
 
     const executeLocalTools = useCallback(async (toolCalls: AIToolCall[], currentAsstMsgId: string) => {
+        const currentAsstMsg = (useStore.getState().aiChatHistory[sid] || []).find(m => m.id === currentAsstMsgId);
+        const inheritedJVMPlanContext = currentAsstMsg?.jvmPlanContext || pendingJVMPlanContextRef.current;
+        pendingJVMPlanContextRef.current = inheritedJVMPlanContext;
+
         // 【全局轮次熔断】防止模型（如 DeepSeek）在已生成答案后仍无限循环调用工具
         const MAX_TOOL_CALL_ROUNDS = 15;
         totalToolRoundRef.current += 1;
@@ -852,6 +916,7 @@ SELECT * FROM users WHERE status = 1;
                 id: genId(), role: 'assistant',
                 content: `⚠️ 工具调用已达 ${MAX_TOOL_CALL_ROUNDS} 轮上限，自动终止循环。如需继续探索，请发送新的消息。`,
                 timestamp: Date.now(),
+                jvmPlanContext: inheritedJVMPlanContext,
             });
             setSending(false);
             return;
@@ -1040,6 +1105,7 @@ SELECT * FROM users WHERE status = 1;
                     id: genId(), role: 'assistant',
                     content: '⚠️ 探针连续 3 轮执行失败，自动终止。请检查连接状态后重试。',
                     timestamp: Date.now(),
+                    jvmPlanContext: inheritedJVMPlanContext,
                 });
                 setSending(false);
                 return;
@@ -1053,7 +1119,8 @@ SELECT * FROM users WHERE status = 1;
             const chainConnectingMsg: AIChatMessage = {
                 id: genId(), role: 'assistant', phase: 'connecting', 
                 content: '汇总探针执行结果中',
-                timestamp: Date.now(), loading: true
+                timestamp: Date.now(), loading: true,
+                jvmPlanContext: inheritedJVMPlanContext,
             };
             useStore.getState().addAIChatMessage(sid, chainConnectingMsg);
             
@@ -1118,6 +1185,7 @@ SELECT * FROM users WHERE status = 1;
                     content: result?.success ? result.content : `❌ ${errC}`,
                     rawError: (!result?.success && errC !== errR) ? errR : undefined,
                     timestamp: Date.now(),
+                    jvmPlanContext: inheritedJVMPlanContext,
                 });
                 setSending(false);
             }
@@ -1145,6 +1213,8 @@ SELECT * FROM users WHERE status = 1;
         toolCallRoundRef.current = 0; // 重置工具调用轮次计数
         totalToolRoundRef.current = 0; // 重置总轮次计数
         nudgeCountRef.current = 0;     // 重置催促计数
+        const currentJVMPlanContext = getCurrentJVMPlanContext();
+        pendingJVMPlanContextRef.current = currentJVMPlanContext;
 
         const currentImages = [...draftImages];
         setInput('');
@@ -1163,7 +1233,8 @@ SELECT * FROM users WHERE status = 1;
         
         const connectingMsg: AIChatMessage = {
             id: genId(), role: 'assistant', phase: 'connecting', content: '', 
-            timestamp: Date.now(), loading: true
+            timestamp: Date.now(), loading: true,
+            jvmPlanContext: currentJVMPlanContext,
         };
         addAIChatMessage(sid, connectingMsg);
 
@@ -1215,6 +1286,7 @@ SELECT * FROM users WHERE status = 1;
                     content: result?.success ? result.content : `❌ ${errC2}`,
                     rawError: (!result?.success && errC2 !== errR2) ? errR2 : undefined,
                     timestamp: Date.now(),
+                    jvmPlanContext: currentJVMPlanContext,
                 };
                 addAIChatMessage(sid, assistantMsg);
                 setSending(false);
@@ -1233,7 +1305,7 @@ SELECT * FROM users WHERE status = 1;
             addAIChatMessage(sid, { id: genId(), role: 'assistant', content: `❌ 发送失败: ${cleanE2}`, rawError: cleanE2 !== rawE2 ? rawE2 : undefined, timestamp: Date.now() });
             setSending(false);
         }
-    }, [input, draftImages, sending, messages, addAIChatMessage, sid, activeProvider]);
+    }, [input, draftImages, sending, messages, addAIChatMessage, sid, activeProvider, getCurrentJVMPlanContext]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {

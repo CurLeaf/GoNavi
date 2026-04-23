@@ -3,6 +3,7 @@
 import {connection} from '../models';
 import {sync} from '../models';
 import {app} from '../models';
+import {jvm} from '../models';
 import {redis} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
@@ -126,6 +127,16 @@ export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Pr
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
+
+export function JVMApplyChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
+
+export function JVMGetValue(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function JVMListAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
+
+export function JVMListResources(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function JVMPreviewChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
 
 export function JVMProbeCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 

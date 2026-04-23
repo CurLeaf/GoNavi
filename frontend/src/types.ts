@@ -244,6 +244,13 @@ export interface TabData {
   savedQueryId?: string; // Saved query identity for quick-save behavior
 }
 
+export interface JVMAIPlanContext {
+  tabId: string;
+  connectionId: string;
+  providerMode: 'jmx' | 'endpoint' | 'agent';
+  resourcePath: string;
+}
+
 export interface DatabaseNode {
   title: string;
   key: string;
@@ -364,6 +371,7 @@ export interface AIChatMessage {
   tool_name?: string; // used for UI display
   rawError?: string; // 存储未清洗的原始错误信息，用于用户复制排查
   success?: boolean; // 标记探针执行是否成功
+  jvmPlanContext?: JVMAIPlanContext;
 }
 
 export interface AISafetyResult {

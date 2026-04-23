@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { extractJVMChangePlan } from './jvmAiPlan';
+import { buildJVMChangeDraftFromAIPlan, extractJVMChangePlan, resolveJVMAIPlanResourceId, resolveJVMAIPlanTargetTabId } from './jvmAiPlan';
 
 describe('extractJVMChangePlan', () => {
   it('parses fenced json plan with namespace and key selector', () => {
@@ -15,6 +15,7 @@ describe('extractJVMChangePlan', () => {
     expect(plan?.action).toBe('updateValue');
     expect(plan?.selector.namespace).toBe('orders');
     expect(plan?.selector.key).toBe('user:1');
+    expect(plan ? resolveJVMAIPlanResourceId(plan) : '').toBe('orders/user:1');
   });
 
   it('parses fenced json plan with explicit resource path', () => {
@@ -38,5 +39,117 @@ describe('extractJVMChangePlan', () => {
     expect(
       extractJVMChangePlan('```json\n{"targetType":"cacheEntry","action":"evict","reason":"修复缓存脏值"}\n```'),
     ).toBeNull();
+  });
+});
+
+describe('buildJVMChangeDraftFromAIPlan', () => {
+  it('maps updateValue plan to current JVM change contract', () => {
+    const plan = extractJVMChangePlan(
+      '```json\n{"targetType":"cacheEntry","selector":{"namespace":"orders","key":"user:1"},"action":"updateValue","payload":{"format":"json","value":{"status":"ACTIVE"}},"reason":"修复缓存脏值"}\n```',
+    );
+
+    expect(plan).not.toBeNull();
+    expect(buildJVMChangeDraftFromAIPlan(plan!)).toEqual({
+      resourceId: 'orders/user:1',
+      action: 'put',
+      reason: '修复缓存脏值',
+      payload: {
+        status: 'ACTIVE',
+      },
+    });
+  });
+
+  it('maps clear plan without leaking wrapper payload fields', () => {
+    const plan = extractJVMChangePlan(
+      '```json\n{"targetType":"managedBean","selector":{"resourcePath":"/cache/orders"},"action":"clear","reason":"受控清理"}\n```',
+    );
+
+    expect(plan).not.toBeNull();
+    expect(buildJVMChangeDraftFromAIPlan(plan!)).toEqual({
+      resourceId: '/cache/orders',
+      action: 'clear',
+      reason: '受控清理',
+      payload: {},
+    });
+  });
+
+  it('rejects non-object update payload values for current preview contract', () => {
+    const plan = extractJVMChangePlan(
+      '```json\n{"targetType":"cacheEntry","selector":{"resourcePath":"/cache/orders"},"action":"updateValue","payload":{"format":"text","value":"ACTIVE"},"reason":"修复缓存脏值"}\n```',
+    );
+
+    expect(plan).not.toBeNull();
+    expect(() => buildJVMChangeDraftFromAIPlan(plan!)).toThrow('当前 JVM 预览仅支持 JSON 对象作为变更 payload');
+  });
+});
+
+describe('resolveJVMAIPlanTargetTabId', () => {
+  it('prefers the original tab when message context still matches', () => {
+    expect(
+      resolveJVMAIPlanTargetTabId(
+        [
+          {
+            id: 'tab-orders',
+            title: 'orders',
+            type: 'jvm-resource',
+            connectionId: 'conn-orders',
+            providerMode: 'endpoint',
+            resourcePath: '/cache/orders/user:1',
+          },
+        ],
+        {
+          tabId: 'tab-orders',
+          connectionId: 'conn-orders',
+          providerMode: 'endpoint',
+          resourcePath: '/cache/orders/user:1',
+        },
+      ),
+    ).toBe('tab-orders');
+  });
+
+  it('falls back to a reopened tab with the same JVM context', () => {
+    expect(
+      resolveJVMAIPlanTargetTabId(
+        [
+          {
+            id: 'tab-orders-reopened',
+            title: 'orders',
+            type: 'jvm-resource',
+            connectionId: 'conn-orders',
+            providerMode: 'endpoint',
+            resourcePath: '/cache/orders/user:1',
+          },
+        ],
+        {
+          tabId: 'tab-orders-old',
+          connectionId: 'conn-orders',
+          providerMode: 'endpoint',
+          resourcePath: '/cache/orders/user:1',
+        },
+      ),
+    ).toBe('tab-orders-reopened');
+  });
+
+  it('rejects tabs that only match the current session but not the original JVM context', () => {
+    expect(
+      resolveJVMAIPlanTargetTabId(
+        [
+          {
+            id: 'tab-other-resource',
+            title: 'orders-other',
+            type: 'jvm-resource',
+            connectionId: 'conn-orders',
+            providerMode: 'endpoint',
+            resourcePath: '/cache/orders/user:2',
+          },
+        ],
+        {
+          tabId: 'tab-orders',
+          connectionId: 'conn-orders',
+          providerMode: 'endpoint',
+          resourcePath: '/cache/orders/user:1',
+        },
+      ),
+    ).toBe('');
   });
 });

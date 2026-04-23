@@ -246,6 +246,26 @@ export function InstallUpdateAndRestart() {
   return window['go']['app']['App']['InstallUpdateAndRestart']();
 }
 
+export function JVMApplyChange(arg1, arg2) {
+  return window['go']['app']['App']['JVMApplyChange'](arg1, arg2);
+}
+
+export function JVMGetValue(arg1, arg2) {
+  return window['go']['app']['App']['JVMGetValue'](arg1, arg2);
+}
+
+export function JVMListAuditRecords(arg1, arg2) {
+  return window['go']['app']['App']['JVMListAuditRecords'](arg1, arg2);
+}
+
+export function JVMListResources(arg1, arg2) {
+  return window['go']['app']['App']['JVMListResources'](arg1, arg2);
+}
+
+export function JVMPreviewChange(arg1, arg2) {
+  return window['go']['app']['App']['JVMPreviewChange'](arg1, arg2);
+}
+
 export function JVMProbeCapabilities(arg1) {
   return window['go']['app']['App']['JVMProbeCapabilities'](arg1);
 }

@@ -1,4 +1,4 @@
-import type { JVMValueSnapshot } from '../types';
+import type { JVMChangeRequest, JVMAIPlanContext, JVMValueSnapshot, TabData } from '../types';
 
 export type JVMAIChangePlan = {
   targetType: 'cacheEntry' | 'managedBean';
@@ -14,6 +14,8 @@ export type JVMAIChangePlan = {
   };
   reason: string;
 };
+
+export type JVMAIChangeDraft = Pick<JVMChangeRequest, 'resourceId' | 'action' | 'reason' | 'payload'>;
 
 type JVMAIPlanPromptContext = {
   connectionName: string;
@@ -135,6 +137,79 @@ export const extractJVMChangePlan = (content: string): JVMAIChangePlan | null =>
   return null;
 };
 
+export const resolveJVMAIPlanResourceId = (plan: JVMAIChangePlan): string => {
+  const resourcePath = asTrimmedString(plan.selector.resourcePath);
+  if (resourcePath) {
+    return resourcePath;
+  }
+
+  const namespace = asTrimmedString(plan.selector.namespace);
+  const key = asTrimmedString(plan.selector.key);
+  return [namespace, key].filter(Boolean).join('/');
+};
+
+export const matchesJVMAIPlanTargetTab = (
+  tab: Pick<TabData, 'type' | 'connectionId' | 'providerMode' | 'resourcePath'>,
+  context?: JVMAIPlanContext,
+): boolean => {
+  if (!context || tab.type !== 'jvm-resource') {
+    return false;
+  }
+
+  const providerMode = (tab.providerMode || 'jmx') as JVMAIPlanContext['providerMode'];
+  return (
+    tab.connectionId === context.connectionId &&
+    providerMode === context.providerMode &&
+    asTrimmedString(tab.resourcePath) === asTrimmedString(context.resourcePath)
+  );
+};
+
+export const resolveJVMAIPlanTargetTabId = (tabs: TabData[], context?: JVMAIPlanContext): string => {
+  if (!context) {
+    return '';
+  }
+
+  const exactMatch = tabs.find((tab) => tab.id === context.tabId && matchesJVMAIPlanTargetTab(tab, context));
+  if (exactMatch) {
+    return exactMatch.id;
+  }
+
+  const fallbackMatch = tabs.find((tab) => matchesJVMAIPlanTargetTab(tab, context));
+  return fallbackMatch?.id || '';
+};
+
+export const buildJVMChangeDraftFromAIPlan = (plan: JVMAIChangePlan): JVMAIChangeDraft => {
+  const resourceId = resolveJVMAIPlanResourceId(plan);
+  if (!resourceId) {
+    throw new Error('AI 计划缺少可用的资源定位信息');
+  }
+
+  const reason = asTrimmedString(plan.reason);
+  if (!reason) {
+    throw new Error('AI 计划缺少变更原因');
+  }
+
+  if (plan.action === 'updateValue') {
+    const value = plan.payload?.value;
+    if (plan.payload?.format !== 'json' || !isRecord(value)) {
+      throw new Error('当前 JVM 预览仅支持 JSON 对象作为变更 payload');
+    }
+    return {
+      resourceId,
+      action: 'put',
+      reason,
+      payload: value as Record<string, any>,
+    };
+  }
+
+  return {
+    resourceId,
+    action: plan.action,
+    reason,
+    payload: {},
+  };
+};
+
 export const buildJVMAIPlanPrompt = ({
   connectionName,
   host,
@@ -168,7 +243,7 @@ export const buildJVMAIPlanPrompt = ({
     '2. 代码块里的 JSON 字段必须严格是：targetType、selector、action、payload、reason。',
     `3. selector.resourcePath 优先使用当前资源路径 ${normalizedPath}，不要凭空编造其他路径。`,
     '4. action 只能使用 updateValue、evict、clear 之一。',
-    '5. payload 必须保持对象结构，例如 {"format":"json","value":{"status":"ACTIVE"}}。',
+    '5. 当前 MVP 只支持 JSON 对象变更：如果 action=updateValue，则 payload 必须是 {"format":"json","value":{...}}，且 value 必须是 JSON 对象；evict/clear 时 payload 可以省略。',
     '6. 不要声称已经执行修改，也不要输出脚本或命令。',
     '',
     'JSON 示例：',

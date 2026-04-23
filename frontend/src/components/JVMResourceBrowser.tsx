@@ -7,12 +7,19 @@ import type {
   JVMApplyResult,
   JVMChangePreview,
   JVMChangeRequest,
+  JVMAIPlanContext,
   JVMValueSnapshot,
   SavedConnection,
   TabData,
 } from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { buildJVMAIPlanPrompt, type JVMAIChangePlan } from '../utils/jvmAiPlan';
+import {
+  buildJVMChangeDraftFromAIPlan,
+  buildJVMAIPlanPrompt,
+  matchesJVMAIPlanTargetTab,
+  type JVMAIChangeDraft,
+  type JVMAIChangePlan,
+} from '../utils/jvmAiPlan';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import JVMChangePreviewModal from './jvm/JVMChangePreviewModal';
@@ -47,9 +54,9 @@ const formatValue = (value: unknown): string => {
   }
 };
 
-const formatPlanPayload = (plan: JVMAIChangePlan): string => {
+const formatDraftPayload = (draft: JVMAIChangeDraft): string => {
   try {
-    return JSON.stringify(plan.payload ?? {}, null, 2);
+    return JSON.stringify(draft.payload ?? {}, null, 2);
   } catch {
     return '{}';
   }
@@ -84,9 +91,10 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   const [loading, setLoading] = useState(true);
   const [snapshot, setSnapshot] = useState<JVMValueSnapshot | null>(null);
   const [error, setError] = useState('');
-  const [action, setAction] = useState('update');
+  const [action, setAction] = useState('put');
   const [reason, setReason] = useState('');
   const [payloadText, setPayloadText] = useState(DEFAULT_PAYLOAD_TEXT);
+  const [draftResourceId, setDraftResourceId] = useState('');
   const [draftError, setDraftError] = useState('');
   const [applyMessage, setApplyMessage] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -145,9 +153,10 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   }, [connection, providerMode, resourcePath, tab.connectionId]);
 
   useEffect(() => {
-    setAction('update');
+    setAction('put');
     setReason('');
     setPayloadText(DEFAULT_PAYLOAD_TEXT);
+    setDraftResourceId('');
     setDraftError('');
     setApplyMessage('');
     setPreviewOpen(false);
@@ -156,24 +165,63 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail as { plan?: JVMAIChangePlan; targetTabId?: string } | undefined;
+      const detail = (event as CustomEvent).detail as
+        | {
+            plan?: JVMAIChangePlan;
+            targetTabId?: string;
+            connectionId?: string;
+            providerMode?: JVMAIPlanContext['providerMode'];
+            resourcePath?: string;
+          }
+        | undefined;
       const plan = detail?.plan;
       if (!plan || (detail?.targetTabId && detail.targetTabId !== tab.id)) {
         return;
       }
 
-      const targetPath = String(plan.selector.resourcePath || '').trim();
-      if (targetPath && targetPath !== resourcePath) {
-        setDraftError(`AI 计划指向资源 ${targetPath}，当前页签是 ${resourcePath || '-'}，请切换到对应资源后再应用。`);
+      const planContext =
+        detail?.targetTabId && detail?.connectionId && detail?.providerMode && detail?.resourcePath
+          ? {
+              tabId: detail.targetTabId,
+              connectionId: detail.connectionId,
+              providerMode: detail.providerMode,
+              resourcePath: detail.resourcePath,
+            }
+          : undefined;
+
+      if (!planContext) {
+        setDraftError('AI 计划缺少来源上下文，请在目标 JVM 资源页重新生成后再应用。');
         setApplyMessage('');
+        setPreviewOpen(false);
+        setPreviewResult(null);
         return;
       }
 
-      setAction(plan.action);
-      setReason(plan.reason);
-      setPayloadText(formatPlanPayload(plan));
+      if (!matchesJVMAIPlanTargetTab(tab, planContext)) {
+        setDraftError('当前 JVM 页签与 AI 计划的来源上下文不一致，已拒绝自动应用。');
+        setApplyMessage('');
+        setPreviewOpen(false);
+        setPreviewResult(null);
+        return;
+      }
+
+      let draftFromPlan: JVMAIChangeDraft;
+      try {
+        draftFromPlan = buildJVMChangeDraftFromAIPlan(plan);
+      } catch (err: any) {
+        setDraftError(err?.message || 'AI 计划暂时无法转换为 JVM 预览草稿');
+        setApplyMessage('');
+        setPreviewOpen(false);
+        setPreviewResult(null);
+        return;
+      }
+
+      setDraftResourceId(draftFromPlan.resourceId);
+      setAction(draftFromPlan.action);
+      setReason(draftFromPlan.reason);
+      setPayloadText(formatDraftPayload(draftFromPlan));
       setDraftError('');
-      setApplyMessage('已从 AI 计划填充草稿，请先执行“预览变更”再确认写入。');
+      setApplyMessage(`已从 AI 计划填充草稿，目标资源为 ${draftFromPlan.resourceId}，请先执行“预览变更”再确认写入。`);
       setPreviewOpen(false);
       setPreviewResult(null);
     };
@@ -183,7 +231,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   }, [resourcePath, tab.id]);
 
   const buildDraftPlan = (): JVMChangeRequest => {
-    const trimmedAction = String(action || '').trim() || 'update';
+    const trimmedAction = String(action || '').trim() || 'put';
     const trimmedReason = String(reason || '').trim();
     if (!trimmedReason) {
       throw new Error('请填写变更原因');
@@ -199,7 +247,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       payload = parsed as Record<string, any>;
     }
 
-    const resourceId = String(snapshot?.resourceId || resourcePath).trim();
+    const resourceId = String(draftResourceId || snapshot?.resourceId || resourcePath).trim();
     if (!resourceId) {
       throw new Error('资源 ID 为空，无法生成变更草稿');
     }
@@ -447,6 +495,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
             {applyMessage ? <Alert type="success" showIcon message={applyMessage} /> : null}
             <Descriptions column={1} size="small" labelStyle={{ width: 120 }}>
               <Descriptions.Item label="资源路径">{resourcePath || '-'}</Descriptions.Item>
+              <Descriptions.Item label="目标资源">{draftResourceId || resourcePath || '-'}</Descriptions.Item>
               <Descriptions.Item label="资源版本">{snapshot?.version || '-'}</Descriptions.Item>
             </Descriptions>
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -454,7 +503,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
               <Input
                 value={action}
                 onChange={(event) => setAction(event.target.value)}
-                placeholder="例如 update"
+                placeholder="例如 put"
                 maxLength={64}
               />
             </Space>

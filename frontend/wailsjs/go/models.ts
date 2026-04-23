@@ -887,6 +887,33 @@ export namespace connection {
 
 }
 
+export namespace jvm {
+
+	export class ChangeRequest {
+	    providerMode: string;
+	    resourceId: string;
+	    action: string;
+	    reason: string;
+	    expectedVersion?: string;
+	    payload?: Record<string, any>;
+
+	    static createFrom(source: any = {}) {
+	        return new ChangeRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.providerMode = source["providerMode"];
+	        this.resourceId = source["resourceId"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.expectedVersion = source["expectedVersion"];
+	        this.payload = source["payload"];
+	    }
+	}
+
+}
+
 export namespace redis {
 	
 	export class ZSetMember {
@@ -1008,4 +1035,3 @@ export namespace sync {
 	}
 
 }
-

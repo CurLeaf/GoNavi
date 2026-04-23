@@ -6,11 +6,11 @@ import remarkGfm from 'remark-gfm';
 import mermaid from 'mermaid';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { AIChatMessage, AIToolCall } from '../../types';
+import type { AIChatMessage, AIToolCall } from '../../types';
 import { useStore } from '../../store';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { normalizeAiMarkdown } from '../../utils/aiMarkdown';
-import { extractJVMChangePlan } from '../../utils/jvmAiPlan';
+import { extractJVMChangePlan, resolveJVMAIPlanTargetTabId } from '../../utils/jvmAiPlan';
 
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
@@ -709,9 +709,27 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
                                 size="small"
                                 type="primary"
                                 onClick={() => {
-                                    const targetTabId = useStore.getState().activeTabId;
+                                    const targetContext = msg.jvmPlanContext;
+                                    if (!targetContext) {
+                                        message.warning('这条 JVM 计划缺少来源页签上下文，请在目标 JVM 资源页重新生成。');
+                                        return;
+                                    }
+
+                                    const store = useStore.getState();
+                                    const targetTabId = resolveJVMAIPlanTargetTabId(store.tabs, targetContext);
+                                    if (!targetTabId) {
+                                        message.warning('未找到与该 JVM 计划匹配的资源页签，请先打开原目标资源后再应用。');
+                                        return;
+                                    }
+
                                     window.dispatchEvent(new CustomEvent('gonavi:jvm-apply-ai-plan', {
-                                        detail: { plan: jvmPlan, targetTabId },
+                                        detail: {
+                                            plan: jvmPlan,
+                                            targetTabId,
+                                            connectionId: targetContext.connectionId,
+                                            providerMode: targetContext.providerMode,
+                                            resourcePath: targetContext.resourcePath,
+                                        },
                                     }));
                                 }}
                             >
