@@ -47,6 +47,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const PERSIST_VERSION = 8;
 const DEFAULT_CONNECTION_TYPE = 'mysql';
+const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
   type: 'socks5',
@@ -73,6 +74,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   'mongodb',
   'highgo',
   'vastbase',
+  'jvm',
   'sqlite',
   'duckdb',
   'custom',
@@ -97,6 +99,8 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
 
 const getDefaultPortByType = (type: string): number => {
   switch (type) {
+    case 'jvm':
+      return DEFAULT_JVM_PORT;
     case 'mysql':
     case 'mariadb':
       return 3306;
@@ -217,6 +221,68 @@ const normalizeConnectionType = (value: unknown): string => {
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };
 
+const sanitizeJVMModes = (value: unknown): Array<'jmx' | 'endpoint' | 'agent'> => {
+  if (!Array.isArray(value)) return ['jmx'];
+  const result: Array<'jmx' | 'endpoint' | 'agent'> = [];
+  const seen = new Set<'jmx' | 'endpoint' | 'agent'>();
+  value.forEach((entry) => {
+    const normalized = toTrimmedString(entry).toLowerCase();
+    if (normalized !== 'jmx' && normalized !== 'endpoint' && normalized !== 'agent') return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result.length > 0 ? result : ['jmx'];
+};
+
+const sanitizeJVMConfig = (
+  value: unknown,
+  options: {
+    host: string;
+    port: number;
+    timeout: number;
+    persistSecrets: boolean;
+  }
+): ConnectionConfig['jvm'] => {
+  const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
+  const allowedModes = sanitizeJVMModes(raw.allowedModes);
+  const preferredModeRaw = toTrimmedString(raw.preferredMode).toLowerCase();
+  const preferredMode = allowedModes.includes(preferredModeRaw as 'jmx' | 'endpoint' | 'agent')
+    ? preferredModeRaw as 'jmx' | 'endpoint' | 'agent'
+    : allowedModes[0];
+  const environmentRaw = toTrimmedString(raw.environment, 'dev').toLowerCase();
+  const environment: 'dev' | 'uat' | 'prod' = environmentRaw === 'uat'
+    ? 'uat'
+    : environmentRaw === 'prod'
+      ? 'prod'
+      : 'dev';
+  const jmxRaw = (raw.jmx && typeof raw.jmx === 'object') ? raw.jmx as Record<string, unknown> : {};
+  const endpointRaw = (raw.endpoint && typeof raw.endpoint === 'object') ? raw.endpoint as Record<string, unknown> : {};
+  const fallbackPort = options.port > 0 ? options.port : DEFAULT_JVM_PORT;
+  const fallbackTimeout = options.timeout > 0 ? options.timeout : DEFAULT_TIMEOUT_SECONDS;
+
+  return {
+    environment,
+    readOnly: typeof raw.readOnly === 'boolean' ? raw.readOnly : true,
+    allowedModes,
+    preferredMode,
+    jmx: {
+      enabled: jmxRaw.enabled === true || allowedModes.includes('jmx'),
+      host: toTrimmedString(jmxRaw.host, options.host) || options.host,
+      port: normalizePort(jmxRaw.port, fallbackPort),
+      username: toTrimmedString(jmxRaw.username),
+      password: options.persistSecrets ? toTrimmedString(jmxRaw.password) : '',
+      domainAllowlist: sanitizeStringArray(jmxRaw.domainAllowlist, 256),
+    },
+    endpoint: {
+      enabled: endpointRaw.enabled === true,
+      baseUrl: toTrimmedString(endpointRaw.baseUrl),
+      apiKey: options.persistSecrets ? toTrimmedString(endpointRaw.apiKey) : '',
+      timeoutSeconds: normalizeIntegerInRange(endpointRaw.timeoutSeconds, fallbackTimeout, 1, MAX_TIMEOUT_SECONDS),
+    },
+  };
+};
+
 const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   const raw = (value && typeof value === 'object') ? value as Record<string, unknown> : {};
   const type = normalizeConnectionType(raw.type);
@@ -307,6 +373,15 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   if (type === 'custom') {
     safeConfig.driver = toTrimmedString(raw.driver);
     safeConfig.dsn = toTrimmedString(raw.dsn).slice(0, MAX_URI_LENGTH);
+  }
+
+  if (type === 'jvm') {
+    safeConfig.jvm = sanitizeJVMConfig(raw.jvm, {
+      host: safeConfig.host,
+      port: safeConfig.port,
+      timeout: safeConfig.timeout || DEFAULT_TIMEOUT_SECONDS,
+      persistSecrets: savePassword,
+    });
   }
 
   return safeConfig;

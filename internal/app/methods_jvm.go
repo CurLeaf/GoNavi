@@ -7,13 +7,22 @@ import (
 
 var newJVMProvider = jvm.NewProvider
 
-func (a *App) TestJVMConnection(cfg connection.ConnectionConfig) connection.QueryResult {
+func resolveJVMProvider(cfg connection.ConnectionConfig) (connection.ConnectionConfig, jvm.Provider, error) {
 	normalized, err := jvm.NormalizeConnectionConfig(cfg)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.ConnectionConfig{}, nil, err
 	}
 
 	provider, err := newJVMProvider(normalized.JVM.PreferredMode)
+	if err != nil {
+		return connection.ConnectionConfig{}, nil, err
+	}
+
+	return normalized, provider, nil
+}
+
+func (a *App) TestJVMConnection(cfg connection.ConnectionConfig) connection.QueryResult {
+	normalized, provider, err := resolveJVMProvider(cfg)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -23,6 +32,34 @@ func (a *App) TestJVMConnection(cfg connection.ConnectionConfig) connection.Quer
 	}
 
 	return connection.QueryResult{Success: true, Message: "JVM 连接成功"}
+}
+
+func (a *App) JVMListResources(cfg connection.ConnectionConfig, parentPath string) connection.QueryResult {
+	normalized, provider, err := resolveJVMProvider(cfg)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	items, err := provider.ListResources(a.ctx, normalized, parentPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Data: items}
+}
+
+func (a *App) JVMGetValue(cfg connection.ConnectionConfig, resourcePath string) connection.QueryResult {
+	normalized, provider, err := resolveJVMProvider(cfg)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	value, err := provider.GetValue(a.ctx, normalized, resourcePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Data: value}
 }
 
 func (a *App) JVMProbeCapabilities(cfg connection.ConnectionConfig) connection.QueryResult {

@@ -16,6 +16,8 @@ import RedisMonitor from './RedisMonitor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
+import JVMOverview from './JVMOverview';
+import JVMResourceBrowser from './JVMResourceBrowser';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
@@ -203,6 +205,16 @@ const TabManager: React.FC = () => {
       content = <DefinitionViewer tab={tab} />;
     } else if (tab.type === 'table-overview') {
       content = <TableOverview tab={tab} />;
+    } else if (tab.type === 'jvm-overview') {
+      content = <JVMOverview tab={tab} />;
+    } else if (tab.type === 'jvm-resource') {
+      content = <JVMResourceBrowser tab={tab} />;
+    } else if (tab.type === 'jvm-audit') {
+      content = (
+        <div style={{ padding: 24 }}>
+          当前任务未实现 JVM 审计页。
+        </div>
+      );
     }
 
     const menuItems: MenuProps['items'] = [

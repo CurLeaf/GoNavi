@@ -201,13 +201,16 @@ export interface TriggerDefinition {
 export interface TabData {
   id: string;
   title: string;
-  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'redis-monitor' | 'trigger' | 'view-def' | 'routine-def' | 'table-overview';
+  type: 'query' | 'table' | 'design' | 'redis-keys' | 'redis-command' | 'redis-monitor' | 'trigger' | 'view-def' | 'routine-def' | 'table-overview' | 'jvm-overview' | 'jvm-resource' | 'jvm-audit';
   connectionId: string;
   dbName?: string;
   tableName?: string;
   query?: string;
   initialTab?: string;
   readOnly?: boolean;
+  providerMode?: 'jmx' | 'endpoint' | 'agent';
+  resourcePath?: string;
+  resourceKind?: string;
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
   viewName?: string; // View name for view definition tabs
@@ -410,4 +413,3 @@ export interface SecurityUpdateStatus {
   issues: SecurityUpdateIssue[];
   lastError?: string;
 }
-

@@ -15,7 +15,9 @@ type fakeJVMProvider struct {
 	probe    []jvm.Capability
 	probeErr error
 	list     []jvm.ResourceSummary
+	listErr  error
 	value    jvm.ValueSnapshot
+	valueErr error
 	apply    jvm.ApplyResult
 }
 
@@ -27,10 +29,10 @@ func (f fakeJVMProvider) ProbeCapabilities(context.Context, connection.Connectio
 	return f.probe, f.probeErr
 }
 func (f fakeJVMProvider) ListResources(context.Context, connection.ConnectionConfig, string) ([]jvm.ResourceSummary, error) {
-	return f.list, nil
+	return f.list, f.listErr
 }
 func (f fakeJVMProvider) GetValue(context.Context, connection.ConnectionConfig, string) (jvm.ValueSnapshot, error) {
-	return f.value, nil
+	return f.value, f.valueErr
 }
 func (f fakeJVMProvider) PreviewChange(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ChangePreview, error) {
 	return jvm.ChangePreview{Allowed: true, Summary: "preview"}, nil
@@ -236,5 +238,86 @@ func TestJVMProbeCapabilitiesUsesReadableLabelForUnsupportedMode(t *testing.T) {
 	}
 	if !strings.Contains(items[0].Reason, "unsupported jvm provider mode") {
 		t.Fatalf("expected unsupported mode error, got %#v", items[0])
+	}
+}
+
+func TestJVMListResourcesReturnsProviderPayload(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			list: []jvm.ResourceSummary{
+				{
+					ID:           "memory.heap",
+					Kind:         "folder",
+					Name:         "Heap",
+					Path:         "/memory/heap",
+					ProviderMode: jvm.ModeJMX,
+					CanRead:      true,
+					HasChildren:  true,
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMListResources(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, "/memory")
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	items, ok := res.Data.([]jvm.ResourceSummary)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one resource summary, got %#v", res.Data)
+	}
+	if items[0].Path != "/memory/heap" {
+		t.Fatalf("expected resource path %q, got %#v", "/memory/heap", items[0])
+	}
+}
+
+func TestJVMGetValueReturnsProviderPayload(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "memory.heap.used",
+				Kind:       "metric",
+				Format:     "number",
+				Value:      128,
+				Metadata: map[string]any{
+					"unit": "MiB",
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMGetValue(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, "/memory/heap/used")
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	snapshot, ok := res.Data.(jvm.ValueSnapshot)
+	if !ok {
+		t.Fatalf("expected value snapshot, got %#v", res.Data)
+	}
+	if snapshot.ResourceID != "memory.heap.used" {
+		t.Fatalf("expected resource id %q, got %#v", "memory.heap.used", snapshot)
+	}
+	if snapshot.Metadata["unit"] != "MiB" {
+		t.Fatalf("expected unit metadata %q, got %#v", "MiB", snapshot.Metadata)
 	}
 }
