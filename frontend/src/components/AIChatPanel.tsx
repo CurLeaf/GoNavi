@@ -649,7 +649,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                                         if (m.tool_call_id) mapped.tool_call_id = m.tool_call_id;
                                         return mapped;
                                     });
-                                    const sysMessages = await buildSystemContextMessages();
+                                    const sysMessages = await buildSystemContextMessages(existing.jvmPlanContext);
                                     // 追加催促消息
                                     messagesPayload.push({ role: 'user', content: '请直接使用 function call 调用工具执行操作，不要只用文字描述计划。' });
                                     const allMsg = [...sysMessages, ...messagesPayload];
@@ -750,13 +750,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             toolCallRoundRef.current = 0;
             totalToolRoundRef.current = 0;
             nudgeCountRef.current = 0;
+            const retryJVMPlanContext = msg.jvmPlanContext || getCurrentJVMPlanContext();
+            pendingJVMPlanContextRef.current = retryJVMPlanContext;
 
             setSending(true);
 
             // 插入 connecting 过渡消息（波纹动画），与 handleSend 保持一致
             const connectingMsg: AIChatMessage = {
                 id: genId(), role: 'assistant', phase: 'connecting', content: '',
-                timestamp: Date.now(), loading: true
+                timestamp: Date.now(), loading: true,
+                jvmPlanContext: retryJVMPlanContext,
             };
             addAIChatMessage(sid, connectingMsg);
 
@@ -764,7 +767,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             const messagesPayload = truncatedHistory.map(m => ({ role: m.role, content: m.content, images: m.images }));
             
             try {
-                const sysMessages = await buildSystemContextMessages();
+                const sysMessages = await buildSystemContextMessages(retryJVMPlanContext);
                 const allMessages = [...sysMessages, ...messagesPayload];
                 
                 const Service = (window as any).go?.aiservice?.Service;
@@ -778,7 +781,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                          id: genId(), role: 'assistant', 
                          content: result?.success ? result.content : `❌ ${errClean}`,
                          rawError: (!result?.success && errClean !== errRaw) ? errRaw : undefined,
-                         timestamp: Date.now()
+                         timestamp: Date.now(),
+                         jvmPlanContext: retryJVMPlanContext,
                      });
                      setSending(false);
                 } else {
@@ -787,20 +791,38 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             } catch(e: any) {
                 const rawE = e?.message || String(e);
                 const cleanE = sanitizeErrorMsg(rawE);
-                addAIChatMessage(sid, { id: genId(), role: 'assistant', content: `❌ 发送失败: ${cleanE}`, rawError: cleanE !== rawE ? rawE : undefined, timestamp: Date.now() });
+                addAIChatMessage(sid, {
+                    id: genId(),
+                    role: 'assistant',
+                    content: `❌ 发送失败: ${cleanE}`,
+                    rawError: cleanE !== rawE ? rawE : undefined,
+                    timestamp: Date.now(),
+                    jvmPlanContext: retryJVMPlanContext,
+                });
                 setSending(false);
             }
         }
-    }, [sid, truncateAIChatMessages, addAIChatMessage]);
+    }, [sid, truncateAIChatMessages, addAIChatMessage, getCurrentJVMPlanContext]);
 
-    const buildSystemContextMessages = useCallback(async () => {
+    const buildSystemContextMessages = useCallback(async (overrideJVMPlanContext?: JVMAIPlanContext) => {
         // 🔧 性能优化：从 store 实时读取，避免闭包捕获导致的依赖链式重建
         const { activeContext: ctx, aiContexts: ctxMap, connections: conns, tabs: allTabs, activeTabId: tabId } = useStore.getState();
 
         const connectionKey = ctx?.connectionId ? `${ctx.connectionId}:${ctx.dbName || ''}` : 'default';
         const activeContextItems = ctxMap[connectionKey] || [];
         const systemMessages: { role: string; content: string; images?: string[] }[] = [];
-        const activeTab = allTabs.find(t => t.id === tabId);
+        const activeTab = overrideJVMPlanContext
+            ? (
+                allTabs.find(t => t.id === overrideJVMPlanContext.tabId) ||
+                allTabs.find(
+                    t =>
+                        t.type === 'jvm-resource' &&
+                        t.connectionId === overrideJVMPlanContext.connectionId &&
+                        t.providerMode === overrideJVMPlanContext.providerMode &&
+                        String(t.resourcePath || '').trim() === overrideJVMPlanContext.resourcePath,
+                )
+            )
+            : allTabs.find(t => t.id === tabId);
         const activeConnection = activeTab?.connectionId
             ? conns.find(c => c.id === activeTab.connectionId)
             : undefined;
@@ -1147,7 +1169,7 @@ SELECT * FROM users WHERE status = 1;
                 if (m.tool_call_id) mapped.tool_call_id = m.tool_call_id;
                 return mapped;
             });
-            const sysMessages = await buildSystemContextMessages();
+            const sysMessages = await buildSystemContextMessages(inheritedJVMPlanContext);
 
             let finalMessagesPayload = messagesPayload;
             // 在这里加入长度检查和自动摘要（带上动态限额）

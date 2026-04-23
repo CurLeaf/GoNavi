@@ -913,7 +913,6 @@ export namespace jvm {
 	}
 
 }
-
 export namespace redis {
 	
 	export class ZSetMember {
