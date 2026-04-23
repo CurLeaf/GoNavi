@@ -11,4 +11,12 @@ describe('jvmRuntimePresentation', () => {
   it('builds overview tab titles with connection name and mode label', () => {
     expect(buildJVMTabTitle('Orders JVM', 'overview', 'jmx')).toBe('[Orders JVM] JVM 概览 · JMX');
   });
+
+  it('builds resource tab titles with the planned label', () => {
+    expect(buildJVMTabTitle('Orders JVM', 'resource', 'endpoint')).toBe('[Orders JVM] JVM 资源 · Endpoint');
+  });
+
+  it('builds audit tab titles with the planned label', () => {
+    expect(buildJVMTabTitle('Orders JVM', 'audit', 'jmx')).toBe('[Orders JVM] JVM 审计 · JMX');
+  });
 });

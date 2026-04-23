@@ -33,8 +33,8 @@ const JVM_MODE_META_MAP: Record<JVMRuntimeMode, JVMModeMeta> = {
 
 const JVM_TAB_KIND_LABELS: Record<JVMTabKind, string> = {
   overview: 'JVM 概览',
-  resource: 'JVM 资源浏览',
-  audit: 'JVM 审计记录',
+  resource: 'JVM 资源',
+  audit: 'JVM 审计',
 };
 
 const normalizeMode = (mode: string): string => String(mode || '').trim().toLowerCase();

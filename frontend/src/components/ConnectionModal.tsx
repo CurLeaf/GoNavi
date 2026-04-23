@@ -15,7 +15,7 @@ import { getCustomConnectionDsnValidationMessage } from '../utils/customConnecti
 import { CUSTOM_CONNECTION_DRIVER_HELP } from '../utils/driverImportGuidance';
 import { applyNoAutoCapAttributes, noAutoCapInputProps } from '../utils/inputAutoCap';
 import { buildDefaultJVMConnectionValues, buildJVMConnectionConfig } from '../utils/jvmConnectionConfig';
-import { JVM_RUNTIME_MODES, resolveJVMModeMeta } from '../utils/jvmRuntimePresentation';
+import { resolveJVMModeMeta } from '../utils/jvmRuntimePresentation';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile, TestJVMConnection } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
 
@@ -27,6 +27,7 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
+const JVM_FORM_RUNTIME_MODES: Array<'jmx' | 'endpoint'> = ['jmx', 'endpoint'];
 type ConnectionSecretKey =
   | 'primaryPassword'
   | 'sshPassword'
@@ -177,7 +178,7 @@ const ConnectionModal: React.FC<{
       const modes = Array.isArray(jvmAllowedModes)
           ? jvmAllowedModes
               .map((mode) => String(mode || '').trim().toLowerCase())
-              .filter((mode) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+              .filter((mode): mode is typeof JVM_FORM_RUNTIME_MODES[number] => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
           : [];
       return modes.length > 0 ? Array.from(new Set(modes)) : ['jmx'];
   }, [jvmAllowedModes]);
@@ -1226,7 +1227,7 @@ const ConnectionModal: React.FC<{
                   ? config.jvm.allowedModes.map((mode: string) => String(mode || '').trim().toLowerCase())
                   : jvmDefaultValues.jvmAllowedModes;
               const normalizedJvmAllowedModes = jvmAllowedModes.filter((mode: string) =>
-                  JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]),
+                  JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]),
               );
               const resolvedJvmAllowedModes = normalizedJvmAllowedModes.length > 0
                   ? Array.from(new Set(normalizedJvmAllowedModes))
@@ -1728,7 +1729,7 @@ const ConnectionModal: React.FC<{
           const nextJvmAllowedModes = Array.isArray(mergedValues.jvmAllowedModes)
               ? mergedValues.jvmAllowedModes
                   .map((mode: string) => String(mode || '').trim().toLowerCase())
-                  .filter((mode: string) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+                  .filter((mode: string) => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
               : [];
           const resolvedJvmAllowedModes = nextJvmAllowedModes.length > 0
               ? Array.from(new Set(nextJvmAllowedModes))
@@ -2339,7 +2340,7 @@ const ConnectionModal: React.FC<{
                               mode="multiple"
                               allowClear
                               placeholder="请选择 JVM 接入模式"
-                              options={JVM_RUNTIME_MODES.map((mode) => ({
+                              options={JVM_FORM_RUNTIME_MODES.map((mode) => ({
                                   value: mode,
                                   label: resolveJVMModeMeta(mode).label,
                               }))}
@@ -3094,7 +3095,7 @@ const ConnectionModal: React.FC<{
                       const nextModes = Array.isArray(changed.jvmAllowedModes)
                           ? changed.jvmAllowedModes
                               .map((mode: string) => String(mode || '').trim().toLowerCase())
-                              .filter((mode: string) => JVM_RUNTIME_MODES.includes(mode as typeof JVM_RUNTIME_MODES[number]))
+                              .filter((mode: string) => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
                           : [];
                       const resolvedModes = nextModes.length > 0 ? Array.from(new Set(nextModes)) : ['jmx'];
                       const currentPreferredMode = String(form.getFieldValue('jvmPreferredMode') || '').trim().toLowerCase();
