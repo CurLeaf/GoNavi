@@ -4,12 +4,15 @@ const DEFAULT_JMX_PORT = 9010;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const DEFAULT_ENVIRONMENT = 'dev';
 const JVM_MODES = ['jmx', 'endpoint', 'agent'] as const;
+export const JVM_EDITABLE_MODES = ['jmx', 'endpoint'] as const;
 
 type JVMMode = typeof JVM_MODES[number];
+type JVMEditableMode = typeof JVM_EDITABLE_MODES[number];
 type JVMEnvironment = 'dev' | 'uat' | 'prod';
 type JVMConnectionFormValues = Record<string, unknown>;
 
 const isJVMMode = (value: string): value is JVMMode => JVM_MODES.includes(value as JVMMode);
+const isJVMEditableMode = (value: string): value is JVMEditableMode => JVM_EDITABLE_MODES.includes(value as JVMEditableMode);
 
 const toStringValue = (value: unknown): string => {
   if (typeof value === 'string') {
@@ -49,6 +52,61 @@ const normalizeModes = (value: unknown): JVMMode[] => {
     result.push(mode);
   }
   return result.length > 0 ? result : ['jmx'];
+};
+
+export const normalizeEditableJVMModes = (value: unknown): JVMEditableMode[] => {
+  if (!Array.isArray(value)) {
+    return ['jmx'];
+  }
+
+  const result: JVMEditableMode[] = [];
+  const seen = new Set<JVMEditableMode>();
+  for (const item of value) {
+    const mode = toStringValue(item).toLowerCase();
+    if (!isJVMEditableMode(mode) || seen.has(mode)) {
+      continue;
+    }
+    seen.add(mode);
+    result.push(mode);
+  }
+  return result.length > 0 ? result : ['jmx'];
+};
+
+export const hasUnsupportedJVMEditableModes = ({
+  allowedModes,
+  preferredMode,
+}: {
+  allowedModes: unknown;
+  preferredMode: unknown;
+}): boolean => {
+  const allowed = Array.isArray(allowedModes)
+    ? allowedModes.map((item) => toStringValue(item).toLowerCase()).filter((item) => item !== '')
+    : [];
+  const preferred = toStringValue(preferredMode).toLowerCase();
+
+  return allowed.some((mode) => !isJVMEditableMode(mode))
+    || (preferred !== '' && !isJVMEditableMode(preferred));
+};
+
+export const resolveEditableJVMModeSelection = ({
+  allowedModes,
+  preferredMode,
+}: {
+  allowedModes: unknown;
+  preferredMode: unknown;
+}): { allowedModes: string[]; preferredMode: string } => {
+  const normalizedAllowedModes = Array.isArray(allowedModes)
+    ? allowedModes.map((item) => toStringValue(item).toLowerCase()).filter((item) => item !== '')
+    : [];
+  const normalizedPreferredMode = toStringValue(preferredMode).toLowerCase();
+  const resolvedAllowedModes = normalizedAllowedModes.length > 0
+    ? Array.from(new Set(normalizedAllowedModes))
+    : (normalizedPreferredMode ? [normalizedPreferredMode] : ['jmx']);
+
+  return {
+    allowedModes: resolvedAllowedModes,
+    preferredMode: normalizedPreferredMode || resolvedAllowedModes[0],
+  };
 };
 
 const normalizePreferredMode = (value: unknown, allowedModes: JVMMode[]): JVMMode => {
@@ -91,7 +149,9 @@ export const buildJVMConnectionConfig = (values: JVMConnectionFormValues): Conne
   const allowedModes = normalizeModes(values.jvmAllowedModes);
   const preferredMode = normalizePreferredMode(values.jvmPreferredMode, allowedModes);
   const port = toInteger(values.port, DEFAULT_JMX_PORT);
-  const timeout = toInteger(values.timeout, DEFAULT_TIMEOUT_SECONDS);
+  const timeout = values.timeout === undefined || values.timeout === null || values.timeout === ''
+    ? toInteger(values.jvmEndpointTimeoutSeconds, DEFAULT_TIMEOUT_SECONDS)
+    : toInteger(values.timeout, DEFAULT_TIMEOUT_SECONDS);
 
   return {
     type: 'jvm',
@@ -116,7 +176,7 @@ export const buildJVMConnectionConfig = (values: JVMConnectionFormValues): Conne
         enabled: values.jvmEndpointEnabled === true,
         baseUrl: toStringValue(values.jvmEndpointBaseUrl),
         apiKey: toStringValue(values.jvmEndpointApiKey),
-        timeoutSeconds: toInteger(values.jvmEndpointTimeoutSeconds, timeout),
+        timeoutSeconds: timeout,
       },
     },
   };

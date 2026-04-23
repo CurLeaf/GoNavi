@@ -14,7 +14,14 @@ import { resolveConnectionSecretDraft } from '../utils/connectionSecretDraft';
 import { getCustomConnectionDsnValidationMessage } from '../utils/customConnectionDsn';
 import { CUSTOM_CONNECTION_DRIVER_HELP } from '../utils/driverImportGuidance';
 import { applyNoAutoCapAttributes, noAutoCapInputProps } from '../utils/inputAutoCap';
-import { buildDefaultJVMConnectionValues, buildJVMConnectionConfig } from '../utils/jvmConnectionConfig';
+import {
+  buildDefaultJVMConnectionValues,
+  buildJVMConnectionConfig,
+  hasUnsupportedJVMEditableModes,
+  JVM_EDITABLE_MODES,
+  normalizeEditableJVMModes,
+  resolveEditableJVMModeSelection,
+} from '../utils/jvmConnectionConfig';
 import { resolveJVMModeMeta } from '../utils/jvmRuntimePresentation';
 import { DBGetDatabases, GetDriverStatusList, MongoDiscoverMembers, TestConnection, RedisConnect, SelectDatabaseFile, SelectSSHKeyFile, TestJVMConnection } from '../../wailsjs/go/app/App';
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from '../types';
@@ -27,7 +34,6 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = 'rgba(255, 255, 255, 0.16)';
 const STEP1_SIDEBAR_DIVIDER_LIGHT = 'rgba(0, 0, 0, 0.08)';
-const JVM_FORM_RUNTIME_MODES: Array<'jmx' | 'endpoint'> = ['jmx', 'endpoint'];
 type ConnectionSecretKey =
   | 'primaryPassword'
   | 'sshPassword'
@@ -174,14 +180,11 @@ const ConnectionModal: React.FC<{
   const redisTopology = Form.useWatch('redisTopology', form) || 'single';
   const jvmAllowedModes = Form.useWatch('jvmAllowedModes', form);
   const jvmPreferredMode = Form.useWatch('jvmPreferredMode', form) || 'jmx';
-  const normalizedJvmAllowedModes = useMemo(() => {
-      const modes = Array.isArray(jvmAllowedModes)
-          ? jvmAllowedModes
-              .map((mode) => String(mode || '').trim().toLowerCase())
-              .filter((mode): mode is typeof JVM_FORM_RUNTIME_MODES[number] => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
-          : [];
-      return modes.length > 0 ? Array.from(new Set(modes)) : ['jmx'];
-  }, [jvmAllowedModes]);
+  const normalizedJvmAllowedModes = useMemo(() => normalizeEditableJVMModes(jvmAllowedModes), [jvmAllowedModes]);
+  const hasUnsupportedJvmModeSelection = useMemo(() => hasUnsupportedJVMEditableModes({
+      allowedModes: jvmAllowedModes,
+      preferredMode: jvmPreferredMode,
+  }), [jvmAllowedModes, jvmPreferredMode]);
   const isMySQLLike = dbType === 'mysql' || dbType === 'mariadb' || dbType === 'diros' || dbType === 'sphinx';
   const isSSLType = supportsSSLForType(dbType);
   const sslHintText = isMySQLLike
@@ -1223,18 +1226,13 @@ const ConnectionModal: React.FC<{
               const mysqlIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mysqlReplicaHosts.length > 0;
               const mongoIsReplica = String(config.topology || '').toLowerCase() === 'replica' || mongoHosts.length > 0 || !!config.replicaSet;
               const redisIsCluster = String(config.topology || '').toLowerCase() === 'cluster' || redisHosts.length > 0;
-              const jvmAllowedModes = Array.isArray(config.jvm?.allowedModes) && config.jvm.allowedModes.length > 0
-                  ? config.jvm.allowedModes.map((mode: string) => String(mode || '').trim().toLowerCase())
-                  : jvmDefaultValues.jvmAllowedModes;
-              const normalizedJvmAllowedModes = jvmAllowedModes.filter((mode: string) =>
-                  JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]),
-              );
-              const resolvedJvmAllowedModes = normalizedJvmAllowedModes.length > 0
-                  ? Array.from(new Set(normalizedJvmAllowedModes))
-                  : jvmDefaultValues.jvmAllowedModes;
-              const resolvedJvmPreferredMode = resolvedJvmAllowedModes.includes(String(config.jvm?.preferredMode || '').trim().toLowerCase())
-                  ? String(config.jvm?.preferredMode || '').trim().toLowerCase()
-                  : resolvedJvmAllowedModes[0];
+              const { allowedModes: resolvedJvmAllowedModes, preferredMode: resolvedJvmPreferredMode } = resolveEditableJVMModeSelection({
+                  allowedModes: config.jvm?.allowedModes,
+                  preferredMode: config.jvm?.preferredMode,
+              });
+              const resolvedJvmTimeout = isJvmConfigType
+                  ? Number(config.jvm?.endpoint?.timeoutSeconds || config.timeout || 30)
+                  : Number(config.timeout || 30);
               const hasHttpTunnel = !!config.useHttpTunnel;
               const hasProxy = !hasHttpTunnel && !!config.useProxy;
               form.setFieldsValue({
@@ -1271,7 +1269,7 @@ const ConnectionModal: React.FC<{
                   httpTunnelPassword: config.httpTunnel?.password,
                   driver: config.driver,
                   dsn: config.dsn,
-                  timeout: config.timeout || 30,
+                  timeout: resolvedJvmTimeout,
                   mysqlTopology: mysqlIsReplica ? 'replica' : 'single',
                   mysqlReplicaHosts: mysqlReplicaHosts,
                   mysqlReplicaUser: config.mysqlReplicaUser || '',
@@ -1298,9 +1296,7 @@ const ConnectionModal: React.FC<{
                       : jvmDefaultValues.jvmEndpointEnabled,
                   jvmEndpointBaseUrl: isJvmConfigType ? config.jvm?.endpoint?.baseUrl || '' : jvmDefaultValues.jvmEndpointBaseUrl,
                   jvmEndpointApiKey: isJvmConfigType ? config.jvm?.endpoint?.apiKey || '' : jvmDefaultValues.jvmEndpointApiKey,
-                  jvmEndpointTimeoutSeconds: isJvmConfigType
-                      ? Number(config.jvm?.endpoint?.timeoutSeconds || config.timeout || 30)
-                      : Number(config.timeout || 30),
+                  jvmEndpointTimeoutSeconds: resolvedJvmTimeout,
                   jvmJmxHost: isJvmConfigType && config.jvm?.jmx?.host && config.jvm.jmx.host !== primaryHost
                       ? config.jvm.jmx.host
                       : '',
@@ -1726,23 +1722,24 @@ const ConnectionModal: React.FC<{
   const buildConfig = async (values: any, forPersist: boolean): Promise<ConnectionConfig> => {
       const mergedValues = { ...values };
       if (String(mergedValues.type || '').trim().toLowerCase() === 'jvm') {
-          const nextJvmAllowedModes = Array.isArray(mergedValues.jvmAllowedModes)
-              ? mergedValues.jvmAllowedModes
-                  .map((mode: string) => String(mode || '').trim().toLowerCase())
-                  .filter((mode: string) => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
-              : [];
-          const resolvedJvmAllowedModes = nextJvmAllowedModes.length > 0
-              ? Array.from(new Set(nextJvmAllowedModes))
-              : buildDefaultJVMConnectionValues().jvmAllowedModes;
+          if (hasUnsupportedJVMEditableModes({
+              allowedModes: mergedValues.jvmAllowedModes,
+              preferredMode: mergedValues.jvmPreferredMode,
+          })) {
+              throw new Error('当前连接包含未支持的 JVM 模式；请先调整为 JMX 或 Endpoint 后再测试或保存');
+          }
+          const resolvedJvmAllowedModes = normalizeEditableJVMModes(mergedValues.jvmAllowedModes);
+          const resolvedJvmTimeout = Number(mergedValues.timeout || 30);
+          const preferredJvmMode = String(mergedValues.jvmPreferredMode || '').trim().toLowerCase();
+          const resolvedJvmPreferredMode = resolvedJvmAllowedModes.find((mode) => mode === preferredJvmMode) || resolvedJvmAllowedModes[0];
           return buildJVMConnectionConfig({
               ...buildDefaultJVMConnectionValues(),
               ...mergedValues,
               jvmAllowedModes: resolvedJvmAllowedModes,
-              jvmPreferredMode: resolvedJvmAllowedModes.includes(String(mergedValues.jvmPreferredMode || '').trim().toLowerCase())
-                  ? String(mergedValues.jvmPreferredMode || '').trim().toLowerCase()
-                  : resolvedJvmAllowedModes[0],
+              jvmPreferredMode: resolvedJvmPreferredMode,
               jvmEndpointEnabled: resolvedJvmAllowedModes.includes('endpoint'),
-              jvmEndpointTimeoutSeconds: Number(mergedValues.jvmEndpointTimeoutSeconds || mergedValues.timeout || 30),
+              timeout: resolvedJvmTimeout,
+              jvmEndpointTimeoutSeconds: resolvedJvmTimeout,
           });
       }
       const parsedUriValues = parseUriToValues(mergedValues.uri, mergedValues.type);
@@ -2138,6 +2135,9 @@ const ConnectionModal: React.FC<{
   const isCustom = dbType === 'custom';
   const isRedis = dbType === 'redis';
   const isJVM = dbType === 'jvm';
+  const unsupportedJvmModeMessage = isJVM && hasUnsupportedJvmModeSelection
+      ? '当前连接包含未支持的 JVM 模式。此版本只支持 JMX / Endpoint，请先调整允许模式和首选模式后再继续。'
+      : '';
   const currentDriverType = normalizeDriverType(dbType);
   const currentDriverSnapshot = driverStatusMap[currentDriverType];
   const currentDriverUnavailableReason = currentDriverType !== 'custom'
@@ -2311,6 +2311,15 @@ const ConnectionModal: React.FC<{
                   </>
               ) : isJVM ? (
                   <>
+                      {unsupportedJvmModeMessage && (
+                          <Alert
+                              type="warning"
+                              showIcon
+                              style={{ marginBottom: 16 }}
+                              message="检测到未支持的 JVM 模式"
+                              description={unsupportedJvmModeMessage}
+                          />
+                      )}
                       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 120px', gap: 16, alignItems: 'start' }}>
                           <Form.Item
                               name="host"
@@ -2340,7 +2349,7 @@ const ConnectionModal: React.FC<{
                               mode="multiple"
                               allowClear
                               placeholder="请选择 JVM 接入模式"
-                              options={JVM_FORM_RUNTIME_MODES.map((mode) => ({
+                              options={JVM_EDITABLE_MODES.map((mode) => ({
                                   value: mode,
                                   label: resolveJVMModeMeta(mode).label,
                               }))}
@@ -3092,18 +3101,11 @@ const ConnectionModal: React.FC<{
                   }
                   if (changed.type !== undefined) setDbType(changed.type);
                   if (changed.jvmAllowedModes !== undefined) {
-                      const nextModes = Array.isArray(changed.jvmAllowedModes)
-                          ? changed.jvmAllowedModes
-                              .map((mode: string) => String(mode || '').trim().toLowerCase())
-                              .filter((mode: string) => JVM_FORM_RUNTIME_MODES.includes(mode as typeof JVM_FORM_RUNTIME_MODES[number]))
-                          : [];
-                      const resolvedModes = nextModes.length > 0 ? Array.from(new Set(nextModes)) : ['jmx'];
+                      const resolvedModes = normalizeEditableJVMModes(changed.jvmAllowedModes);
                       const currentPreferredMode = String(form.getFieldValue('jvmPreferredMode') || '').trim().toLowerCase();
+                      const resolvedPreferredMode = resolvedModes.find((mode) => mode === currentPreferredMode) || resolvedModes[0];
                       form.setFieldValue('jvmAllowedModes', resolvedModes);
-                      form.setFieldValue(
-                          'jvmPreferredMode',
-                          resolvedModes.includes(currentPreferredMode) ? currentPreferredMode : resolvedModes[0],
-                      );
+                      form.setFieldValue('jvmPreferredMode', resolvedPreferredMode);
                       form.setFieldValue('jvmEndpointEnabled', resolvedModes.includes('endpoint'));
                   }
                   if (changed.redisTopology !== undefined) {
@@ -3322,7 +3324,7 @@ const ConnectionModal: React.FC<{
       }
       const isTestSuccess = testResult?.type === 'success';
       const hasTestError = !!testResult && !isTestSuccess;
-      const operationBlocked = !!currentDriverUnavailableReason || driverStatusChecking;
+      const operationBlocked = !!currentDriverUnavailableReason || driverStatusChecking || !!unsupportedJvmModeMessage;
       return (
           <div style={{ display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '4px 2px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>

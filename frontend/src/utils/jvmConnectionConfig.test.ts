@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDefaultJVMConnectionValues, buildJVMConnectionConfig } from './jvmConnectionConfig';
+import {
+  buildDefaultJVMConnectionValues,
+  buildJVMConnectionConfig,
+  hasUnsupportedJVMEditableModes,
+  normalizeEditableJVMModes,
+  resolveEditableJVMModeSelection,
+} from './jvmConnectionConfig';
 
 describe('jvmConnectionConfig', () => {
   it('defaults to readonly jmx mode', () => {
@@ -57,5 +63,57 @@ describe('jvmConnectionConfig', () => {
     expect(config.jvm?.jmx?.port).toBe(9010);
     expect(config.jvm?.environment).toBe('prod');
     expect(config.jvm?.readOnly).toBe(false);
+  });
+
+  it('keeps the visible timeout as the source of truth for endpoint probing', () => {
+    const config = buildJVMConnectionConfig({
+      host: 'orders.internal',
+      port: 9010,
+      timeout: 45,
+      jvmEndpointTimeoutSeconds: 30,
+      jvmAllowedModes: ['endpoint'],
+      jvmPreferredMode: 'endpoint',
+      jvmEndpointEnabled: true,
+      jvmEndpointBaseUrl: 'https://orders.internal/manage/jvm',
+    });
+
+    expect(config.timeout).toBe(45);
+    expect(config.jvm?.endpoint?.timeoutSeconds).toBe(45);
+  });
+
+  it('normalizes editable JVM modes to the supported form subset', () => {
+    expect(normalizeEditableJVMModes([' endpoint ', 'agent', 'JMX', 'endpoint'])).toEqual(['endpoint', 'jmx']);
+  });
+
+  it('detects unsupported editable JVM modes without downgrading them silently', () => {
+    expect(hasUnsupportedJVMEditableModes({
+      allowedModes: ['agent', 'jmx'],
+      preferredMode: 'agent',
+    })).toBe(true);
+    expect(hasUnsupportedJVMEditableModes({
+      allowedModes: ['endpoint', 'jmx'],
+      preferredMode: 'agent',
+    })).toBe(true);
+    expect(hasUnsupportedJVMEditableModes({
+      allowedModes: ['endpoint', 'jmx'],
+      preferredMode: 'endpoint',
+    })).toBe(false);
+  });
+
+  it('preserves preferred mode when rebuilding editable mode selection from stored config', () => {
+    expect(resolveEditableJVMModeSelection({
+      allowedModes: [],
+      preferredMode: 'agent',
+    })).toEqual({
+      allowedModes: ['agent'],
+      preferredMode: 'agent',
+    });
+    expect(resolveEditableJVMModeSelection({
+      allowedModes: ['endpoint', 'jmx'],
+      preferredMode: 'agent',
+    })).toEqual({
+      allowedModes: ['endpoint', 'jmx'],
+      preferredMode: 'agent',
+    });
   });
 });
