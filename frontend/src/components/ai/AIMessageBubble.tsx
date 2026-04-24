@@ -11,6 +11,10 @@ import { useStore } from '../../store';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { normalizeAiMarkdown } from '../../utils/aiMarkdown';
 import { extractJVMChangePlan, resolveJVMAIPlanTargetTabId } from '../../utils/jvmAiPlan';
+import {
+    parseJVMDiagnosticPlan,
+    resolveJVMDiagnosticPlanTargetTabId,
+} from '../../utils/jvmDiagnosticPlan';
 
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
@@ -576,6 +580,12 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
         }
         return extractJVMChangePlan(displayContent);
     }, [displayContent, isUser]);
+    const jvmDiagnosticPlan = React.useMemo(() => {
+        if (isUser) {
+            return null;
+        }
+        return parseJVMDiagnosticPlan(displayContent);
+    }, [displayContent, isUser]);
     const isTypingThinking = !!(msg.loading && msg.phase === 'thinking');
     
     if (msg.role === 'tool') return null;
@@ -734,6 +744,43 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({ msg
                                 }}
                             >
                                 应用到 JVM 预览
+                            </Button>
+                        </div>
+                    )}
+                    {!isUser && jvmDiagnosticPlan && (
+                        <div style={{ marginTop: 12 }}>
+                            <Button
+                                size="small"
+                                type="primary"
+                                onClick={() => {
+                                    const targetContext = msg.jvmDiagnosticPlanContext;
+                                    if (!targetContext) {
+                                        message.warning('这条诊断计划缺少来源页签上下文，请在目标诊断控制台重新生成。');
+                                        return;
+                                    }
+
+                                    const store = useStore.getState();
+                                    const targetTabId = resolveJVMDiagnosticPlanTargetTabId(
+                                        store.tabs,
+                                        store.connections,
+                                        targetContext,
+                                    );
+                                    if (!targetTabId) {
+                                        message.warning('未找到与该诊断计划匹配的诊断控制台页签，请先打开原目标控制台后再应用。');
+                                        return;
+                                    }
+
+                                    window.dispatchEvent(new CustomEvent('gonavi:jvm-apply-diagnostic-plan', {
+                                        detail: {
+                                            plan: jvmDiagnosticPlan,
+                                            targetTabId,
+                                            connectionId: targetContext.connectionId,
+                                            transport: targetContext.transport,
+                                        },
+                                    }));
+                                }}
+                            >
+                                应用到诊断控制台
                             </Button>
                         </div>
                     )}

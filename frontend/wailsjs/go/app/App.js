@@ -250,12 +250,24 @@ export function JVMApplyChange(arg1, arg2) {
   return window['go']['app']['App']['JVMApplyChange'](arg1, arg2);
 }
 
+export function JVMCancelDiagnosticCommand(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['JVMCancelDiagnosticCommand'](arg1, arg2, arg3, arg4);
+}
+
+export function JVMExecuteDiagnosticCommand(arg1, arg2, arg3) {
+  return window['go']['app']['App']['JVMExecuteDiagnosticCommand'](arg1, arg2, arg3);
+}
+
 export function JVMGetValue(arg1, arg2) {
   return window['go']['app']['App']['JVMGetValue'](arg1, arg2);
 }
 
 export function JVMListAuditRecords(arg1, arg2) {
   return window['go']['app']['App']['JVMListAuditRecords'](arg1, arg2);
+}
+
+export function JVMListDiagnosticAuditRecords(arg1, arg2) {
+  return window['go']['app']['App']['JVMListDiagnosticAuditRecords'](arg1, arg2);
 }
 
 export function JVMListResources(arg1, arg2) {
@@ -268,6 +280,14 @@ export function JVMPreviewChange(arg1, arg2) {
 
 export function JVMProbeCapabilities(arg1) {
   return window['go']['app']['App']['JVMProbeCapabilities'](arg1);
+}
+
+export function JVMProbeDiagnosticCapabilities(arg1) {
+  return window['go']['app']['App']['JVMProbeDiagnosticCapabilities'](arg1);
+}
+
+export function JVMStartDiagnosticSession(arg1, arg2) {
+  return window['go']['app']['App']['JVMStartDiagnosticSession'](arg1, arg2);
 }
 
 export function ListSQLDirectory(arg1) {

@@ -21,6 +21,7 @@ type Provider interface {
 var providerFactories = map[string]func() Provider{
 	ModeJMX:      func() Provider { return NewJMXProvider() },
 	ModeEndpoint: func() Provider { return NewHTTPProvider() },
+	ModeAgent:    func() Provider { return NewAgentProvider() },
 }
 
 func NewProvider(mode string) (Provider, error) {

@@ -109,6 +109,64 @@ func TestTestJVMConnectionReturnsProviderError(t *testing.T) {
 	}
 }
 
+func TestTestJVMConnectionTranslatesJMXBusinessPortError(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{testErr: errors.New("jmx test connection failed: jmx helper ping failed for localhost:18080: JMX command ping failed for localhost:18080: Failed to retrieve RMIServer stub: javax.naming.CommunicationException [Root exception is java.rmi.ConnectIOException: non-JRMP server at remote endpoint]; details={\"exception\":\"java.lang.IllegalStateException\"}")}, nil
+	})
+	defer restore()
+
+	res := app.TestJVMConnection(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "localhost",
+		Port: 18080,
+		JVM: connection.JVMConfig{
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "不是标准 JMX 远程管理端口") {
+		t.Fatalf("expected translated summary, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "业务 `server.port`") {
+		t.Fatalf("expected actionable suggestion, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "技术细节：") {
+		t.Fatalf("expected raw technical detail to be preserved, got %q", res.Message)
+	}
+}
+
+func TestTestJVMConnectionTranslatesAgentConnectionRefused(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{testErr: errors.New("agent probe request failed: Get \"http://127.0.0.1:19090/gonavi/agent/jvm\": dial tcp 127.0.0.1:19090: connect: connection refused")}, nil
+	})
+	defer restore()
+
+	res := app.TestJVMConnection(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "127.0.0.1",
+		JVM: connection.JVMConfig{
+			PreferredMode: "agent",
+			AllowedModes:  []string{"agent"},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "目标 Agent 管理端口未监听") {
+		t.Fatalf("expected translated summary, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "`-javaagent`") {
+		t.Fatalf("expected actionable suggestion, got %q", res.Message)
+	}
+}
+
 func TestTestJVMConnectionReturnsProviderFactoryError(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
@@ -190,6 +248,37 @@ func TestJVMProbeCapabilitiesIncludesReasonWhenProbeFails(t *testing.T) {
 	}
 }
 
+func TestJVMProbeCapabilitiesTranslatesJMXProbeErrorUsingCurrentMode(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			probeErr: errors.New("jmx test connection failed: jmx helper ping failed for localhost:18080: JMX command ping failed for localhost:18080: Failed to retrieve RMIServer stub: javax.naming.CommunicationException [Root exception is java.rmi.ConnectIOException: non-JRMP server at remote endpoint]; details={\"exception\":\"java.lang.IllegalStateException\"}"),
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMProbeCapabilities(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "localhost",
+		Port: 18080,
+		JVM: connection.JVMConfig{
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"jmx"},
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	items, ok := res.Data.([]jvm.Capability)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one capability, got %#v", res.Data)
+	}
+	if !strings.Contains(items[0].Reason, "不是标准 JMX 远程管理端口") {
+		t.Fatalf("expected translated JMX reason, got %#v", items[0])
+	}
+}
+
 func TestJVMProbeCapabilitiesIncludesReasonWhenProviderFactoryFails(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
@@ -221,7 +310,7 @@ func TestJVMProbeCapabilitiesIncludesReasonWhenProviderFactoryFails(t *testing.T
 	}
 }
 
-func TestJVMProbeCapabilitiesUsesReadableLabelForUnsupportedMode(t *testing.T) {
+func TestJVMProbeCapabilitiesUsesReadableLabelForAgentValidationError(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	restore := swapJVMProviderFactory(jvm.NewProvider)
 	defer restore()
@@ -245,8 +334,37 @@ func TestJVMProbeCapabilitiesUsesReadableLabelForUnsupportedMode(t *testing.T) {
 	if items[0].DisplayLabel != "Agent" {
 		t.Fatalf("expected display label %q, got %#v", "Agent", items[0])
 	}
-	if !strings.Contains(items[0].Reason, "unsupported jvm provider mode") {
-		t.Fatalf("expected unsupported mode error, got %#v", items[0])
+	if !strings.Contains(items[0].Reason, "未填写 Agent Base URL") {
+		t.Fatalf("expected agent validation error, got %#v", items[0])
+	}
+}
+
+func TestJVMProbeCapabilitiesUsesReadableLabelForEndpointValidationError(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	restore := swapJVMProviderFactory(jvm.NewProvider)
+	defer restore()
+
+	res := app.JVMProbeCapabilities(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"endpoint"},
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	items, ok := res.Data.([]jvm.Capability)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one capability, got %#v", res.Data)
+	}
+	if items[0].DisplayLabel != "Endpoint" {
+		t.Fatalf("expected display label %q, got %#v", "Endpoint", items[0])
+	}
+	if !strings.Contains(items[0].Reason, "未填写 Endpoint Base URL") {
+		t.Fatalf("expected endpoint validation error, got %#v", items[0])
 	}
 }
 
@@ -392,6 +510,71 @@ func TestJVMApplyChangeReturnsProviderPayload(t *testing.T) {
 	}
 	if result.UpdatedValue.ResourceID != "/cache/orders" {
 		t.Fatalf("expected updated resource id %q, got %#v", "/cache/orders", result.UpdatedValue)
+	}
+}
+
+func TestJVMApplyChangePersistsAuditSource(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	readOnly := false
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+				Value: map[string]any{
+					"status": "stale",
+				},
+			},
+			apply: jvm.ApplyResult{
+				Status: "applied",
+				UpdatedValue: jvm.ValueSnapshot{
+					ResourceID: "/cache/orders",
+					Kind:       "entry",
+					Format:     "json",
+					Value: map[string]any{
+						"status": "ready",
+					},
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"endpoint"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "endpoint",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Source:       "ai-plan",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	})
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+
+	listRes := app.JVMListAuditRecords("conn-orders", 10)
+	if !listRes.Success {
+		t.Fatalf("expected audit list success, got %+v", listRes)
+	}
+	records, ok := listRes.Data.([]jvm.AuditRecord)
+	if !ok || len(records) != 1 {
+		t.Fatalf("expected one audit record, got %#v", listRes.Data)
+	}
+	if records[0].Source != "ai-plan" {
+		t.Fatalf("expected audit source %q, got %#v", "ai-plan", records[0])
 	}
 }
 

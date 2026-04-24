@@ -4,6 +4,7 @@ import {
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
   resolveConnectionTestFailureFeedback,
+  summarizeConnectionTestFailureMessage,
 } from './connectionModalPresentation';
 
 describe('connectionModalPresentation', () => {
@@ -33,14 +34,14 @@ describe('connectionModalPresentation', () => {
     expect(normalizeConnectionSecretErrorMessage('连接测试超时')).toBe('连接测试超时');
   });
 
-  it('shows a toast-worthy failure message for saved-secret lookup errors during connection tests', () => {
+  it('keeps saved-secret lookup errors inside the modal instead of raising a global toast', () => {
     expect(resolveConnectionTestFailureFeedback({
       kind: 'runtime',
       reason: 'saved connection not found: conn-1',
       fallback: '连接失败',
     })).toEqual({
       message: '测试失败: 未找到当前连接对应的已保存密文，请重新填写密码并保存后再试',
-      shouldToast: true,
+      shouldToast: false,
     });
   });
 
@@ -53,5 +54,11 @@ describe('connectionModalPresentation', () => {
       message: '测试失败: 请先完善必填项后再测试连接',
       shouldToast: false,
     });
+  });
+
+  it('uses only the first line for connection failure toast summaries', () => {
+    expect(summarizeConnectionTestFailureMessage(`测试失败: 当前端口不是 JMX 远程管理端口\n建议：请改填 JMX 端口\n技术细节：raw error`)).toBe(
+      '测试失败: 当前端口不是 JMX 远程管理端口',
+    );
   });
 });

@@ -456,6 +456,52 @@ export namespace connection {
 		    return a;
 		}
 	}
+	export class JVMDiagnosticConfig {
+	    enabled?: boolean;
+	    transport?: string;
+	    baseUrl?: string;
+	    targetId?: string;
+	    apiKey?: string;
+	    allowObserveCommands?: boolean;
+	    allowTraceCommands?: boolean;
+	    allowMutatingCommands?: boolean;
+	    timeoutSeconds?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new JVMDiagnosticConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.transport = source["transport"];
+	        this.baseUrl = source["baseUrl"];
+	        this.targetId = source["targetId"];
+	        this.apiKey = source["apiKey"];
+	        this.allowObserveCommands = source["allowObserveCommands"];
+	        this.allowTraceCommands = source["allowTraceCommands"];
+	        this.allowMutatingCommands = source["allowMutatingCommands"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class JVMAgentConfig {
+	    enabled?: boolean;
+	    baseUrl?: string;
+	    apiKey?: string;
+	    timeoutSeconds?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new JVMAgentConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.baseUrl = source["baseUrl"];
+	        this.apiKey = source["apiKey"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
 	export class JVMEndpointConfig {
 	    enabled?: boolean;
 	    baseUrl?: string;
@@ -503,6 +549,8 @@ export namespace connection {
 	    preferredMode?: string;
 	    jmx?: JVMJMXConfig;
 	    endpoint?: JVMEndpointConfig;
+	    agent?: JVMAgentConfig;
+	    diagnostic?: JVMDiagnosticConfig;
 	
 	    static createFrom(source: any = {}) {
 	        return new JVMConfig(source);
@@ -516,6 +564,8 @@ export namespace connection {
 	        this.preferredMode = source["preferredMode"];
 	        this.jmx = this.convertValues(source["jmx"], JVMJMXConfig);
 	        this.endpoint = this.convertValues(source["endpoint"], JVMEndpointConfig);
+	        this.agent = this.convertValues(source["agent"], JVMAgentConfig);
+	        this.diagnostic = this.convertValues(source["diagnostic"], JVMDiagnosticConfig);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -723,6 +773,8 @@ export namespace connection {
 	
 	
 	
+	
+	
 	export class QueryResult {
 	    success: boolean;
 	    message: string;
@@ -888,31 +940,68 @@ export namespace connection {
 }
 
 export namespace jvm {
-
+	
 	export class ChangeRequest {
 	    providerMode: string;
 	    resourceId: string;
 	    action: string;
 	    reason: string;
+	    source?: string;
 	    expectedVersion?: string;
 	    payload?: Record<string, any>;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ChangeRequest(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.providerMode = source["providerMode"];
 	        this.resourceId = source["resourceId"];
 	        this.action = source["action"];
 	        this.reason = source["reason"];
+	        this.source = source["source"];
 	        this.expectedVersion = source["expectedVersion"];
 	        this.payload = source["payload"];
 	    }
 	}
+	export class DiagnosticCommandRequest {
+	    sessionId: string;
+	    commandId: string;
+	    command: string;
+	    source?: string;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnosticCommandRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
+	        this.commandId = source["commandId"];
+	        this.command = source["command"];
+	        this.source = source["source"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class DiagnosticSessionRequest {
+	    title?: string;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiagnosticSessionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.reason = source["reason"];
+	    }
+	}
 
 }
+
 export namespace redis {
 	
 	export class ZSetMember {
@@ -1034,3 +1123,4 @@ export namespace sync {
 	}
 
 }
+

@@ -53,6 +53,7 @@ describe('buildJVMChangeDraftFromAIPlan', () => {
       resourceId: 'orders/user:1',
       action: 'put',
       reason: '修复缓存脏值',
+      source: 'ai-plan',
       payload: {
         status: 'ACTIVE',
       },
@@ -69,6 +70,7 @@ describe('buildJVMChangeDraftFromAIPlan', () => {
       resourceId: '/cache/orders',
       action: 'clear',
       reason: '受控清理',
+      source: 'ai-plan',
       payload: {},
     });
   });
@@ -79,7 +81,24 @@ describe('buildJVMChangeDraftFromAIPlan', () => {
     );
 
     expect(plan).not.toBeNull();
-    expect(() => buildJVMChangeDraftFromAIPlan(plan!)).toThrow('当前 JVM 预览仅支持 JSON 对象作为变更 payload');
+    expect(() => buildJVMChangeDraftFromAIPlan(plan!)).toThrow('当前 JVM 预览要求 payload 仍然是 JSON 对象');
+  });
+
+  it('keeps generic action for managed bean payload updates', () => {
+    const plan = extractJVMChangePlan(
+      '```json\n{"targetType":"attribute","selector":{"resourcePath":"jmx://java.lang/type=Memory/attribute/Verbose"},"action":"set","payload":{"format":"json","value":{"value":true}},"reason":"开启诊断日志"}\n```',
+    );
+
+    expect(plan).not.toBeNull();
+    expect(buildJVMChangeDraftFromAIPlan(plan!)).toEqual({
+      resourceId: 'jmx://java.lang/type=Memory/attribute/Verbose',
+      action: 'set',
+      reason: '开启诊断日志',
+      source: 'ai-plan',
+      payload: {
+        value: true,
+      },
+    });
   });
 });
 

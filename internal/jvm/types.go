@@ -29,13 +29,32 @@ type ResourceSummary struct {
 	Sensitive    bool   `json:"sensitive,omitempty"`
 }
 
+type ActionPayloadField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type ActionDefinition struct {
+	Action         string               `json:"action"`
+	Label          string               `json:"label,omitempty"`
+	Description    string               `json:"description,omitempty"`
+	Dangerous      bool                 `json:"dangerous,omitempty"`
+	PayloadFields  []ActionPayloadField `json:"payloadFields,omitempty"`
+	PayloadExample map[string]any       `json:"payloadExample,omitempty"`
+}
+
 type ValueSnapshot struct {
-	ResourceID string         `json:"resourceId"`
-	Kind       string         `json:"kind"`
-	Format     string         `json:"format"`
-	Version    string         `json:"version,omitempty"`
-	Value      interface{}    `json:"value"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	ResourceID       string             `json:"resourceId"`
+	Kind             string             `json:"kind"`
+	Format           string             `json:"format"`
+	Version          string             `json:"version,omitempty"`
+	Value            interface{}        `json:"value"`
+	Description      string             `json:"description,omitempty"`
+	Sensitive        bool               `json:"sensitive,omitempty"`
+	SupportedActions []ActionDefinition `json:"supportedActions,omitempty"`
+	Metadata         map[string]any     `json:"metadata,omitempty"`
 }
 
 type ChangeRequest struct {
@@ -43,6 +62,7 @@ type ChangeRequest struct {
 	ResourceID      string         `json:"resourceId"`
 	Action          string         `json:"action"`
 	Reason          string         `json:"reason"`
+	Source          string         `json:"source,omitempty"`
 	ExpectedVersion string         `json:"expectedVersion,omitempty"`
 	Payload         map[string]any `json:"payload,omitempty"`
 }
@@ -70,5 +90,6 @@ type AuditRecord struct {
 	ResourceID   string `json:"resourceId"`
 	Action       string `json:"action"`
 	Reason       string `json:"reason"`
+	Source       string `json:"source,omitempty"`
 	Result       string `json:"result"`
 }

@@ -44,14 +44,37 @@ type JVMEndpointConfig struct {
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
+// JVMAgentConfig 存储 JVM Agent 管理端点配置。
+type JVMAgentConfig struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	BaseURL        string `json:"baseUrl,omitempty"`
+	APIKey         string `json:"apiKey,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// JVMDiagnosticConfig 存储 JVM 诊断增强模式配置。
+type JVMDiagnosticConfig struct {
+	Enabled               bool   `json:"enabled,omitempty"`
+	Transport             string `json:"transport,omitempty"`
+	BaseURL               string `json:"baseUrl,omitempty"`
+	TargetID              string `json:"targetId,omitempty"`
+	APIKey                string `json:"apiKey,omitempty"`
+	AllowObserveCommands  bool   `json:"allowObserveCommands,omitempty"`
+	AllowTraceCommands    bool   `json:"allowTraceCommands,omitempty"`
+	AllowMutatingCommands bool   `json:"allowMutatingCommands,omitempty"`
+	TimeoutSeconds        int    `json:"timeoutSeconds,omitempty"`
+}
+
 // JVMConfig 存储 JVM 连接的协议与能力偏好配置。
 type JVMConfig struct {
-	Environment   string            `json:"environment,omitempty"`
-	ReadOnly      *bool             `json:"readOnly,omitempty"`
-	AllowedModes  []string          `json:"allowedModes,omitempty"`
-	PreferredMode string            `json:"preferredMode,omitempty"`
-	JMX           JVMJMXConfig      `json:"jmx,omitempty"`
-	Endpoint      JVMEndpointConfig `json:"endpoint,omitempty"`
+	Environment   string              `json:"environment,omitempty"`
+	ReadOnly      *bool               `json:"readOnly,omitempty"`
+	AllowedModes  []string            `json:"allowedModes,omitempty"`
+	PreferredMode string              `json:"preferredMode,omitempty"`
+	JMX           JVMJMXConfig        `json:"jmx,omitempty"`
+	Endpoint      JVMEndpointConfig   `json:"endpoint,omitempty"`
+	Agent         JVMAgentConfig      `json:"agent,omitempty"`
+	Diagnostic    JVMDiagnosticConfig `json:"diagnostic,omitempty"`
 }
 
 // ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。

@@ -1,13 +1,13 @@
-import type { JVMChangeRequest, JVMAIPlanContext, JVMValueSnapshot, TabData } from '../types';
+import type { JVMActionDefinition, JVMChangeRequest, JVMAIPlanContext, JVMValueSnapshot, TabData } from '../types';
 
 export type JVMAIChangePlan = {
-  targetType: 'cacheEntry' | 'managedBean';
+  targetType: 'cacheEntry' | 'managedBean' | 'attribute' | 'operation';
   selector: {
     namespace?: string;
     key?: string;
     resourcePath?: string;
   };
-  action: 'updateValue' | 'evict' | 'clear';
+  action: string;
   payload?: {
     format: 'json' | 'text';
     value: unknown;
@@ -15,7 +15,7 @@ export type JVMAIChangePlan = {
   reason: string;
 };
 
-export type JVMAIChangeDraft = Pick<JVMChangeRequest, 'resourceId' | 'action' | 'reason' | 'payload'>;
+export type JVMAIChangeDraft = Pick<JVMChangeRequest, 'resourceId' | 'action' | 'reason' | 'source' | 'payload'>;
 
 type JVMAIPlanPromptContext = {
   connectionName: string;
@@ -28,8 +28,7 @@ type JVMAIPlanPromptContext = {
 };
 
 const planFencePattern = /```json\s*([\s\S]*?)```/gi;
-const allowedTargetTypes = new Set<JVMAIChangePlan['targetType']>(['cacheEntry', 'managedBean']);
-const allowedActions = new Set<JVMAIChangePlan['action']>(['updateValue', 'evict', 'clear']);
+const allowedTargetTypes = new Set<JVMAIChangePlan['targetType']>(['cacheEntry', 'managedBean', 'attribute', 'operation']);
 const allowedPayloadFormats = new Set<NonNullable<JVMAIChangePlan['payload']>['format']>(['json', 'text']);
 
 const asTrimmedString = (value: unknown): string => String(value ?? '').trim();
@@ -90,7 +89,7 @@ const normalizePlan = (value: unknown): JVMAIChangePlan | null => {
   const selector = normalizeSelector(value.selector);
   const payload = normalizePayload(value.payload);
 
-  if (!allowedTargetTypes.has(targetType) || !allowedActions.has(action) || !reason || !selector) {
+  if (!allowedTargetTypes.has(targetType) || !action || !reason || !selector) {
     return null;
   }
 
@@ -189,25 +188,72 @@ export const buildJVMChangeDraftFromAIPlan = (plan: JVMAIChangePlan): JVMAIChang
     throw new Error('AI 计划缺少变更原因');
   }
 
+  const action = asTrimmedString(plan.action);
+  if (!action) {
+    throw new Error('AI 计划缺少可执行 action');
+  }
+
   if (plan.action === 'updateValue') {
     const value = plan.payload?.value;
     if (plan.payload?.format !== 'json' || !isRecord(value)) {
-      throw new Error('当前 JVM 预览仅支持 JSON 对象作为变更 payload');
+      throw new Error('当前 JVM 预览要求 payload 仍然是 JSON 对象');
     }
     return {
       resourceId,
       action: 'put',
       reason,
+      source: 'ai-plan',
       payload: value as Record<string, any>,
+    };
+  }
+
+  const payloadValue = plan.payload?.value;
+  if (plan.payload && plan.payload.format === 'json') {
+    if (!isRecord(payloadValue)) {
+      throw new Error('当前 JVM 预览要求 payload 仍然是 JSON 对象');
+    }
+    return {
+      resourceId,
+      action,
+      reason,
+      source: 'ai-plan',
+      payload: payloadValue as Record<string, any>,
+    };
+  }
+
+  if (plan.payload && plan.payload.format === 'text') {
+    return {
+      resourceId,
+      action,
+      reason,
+      source: 'ai-plan',
+      payload: {
+        value: payloadValue == null ? '' : String(payloadValue),
+      },
     };
   }
 
   return {
     resourceId,
-    action: plan.action,
+    action,
     reason,
+    source: 'ai-plan',
     payload: {},
   };
+};
+
+const formatSupportedActions = (actions?: JVMActionDefinition[]): string => {
+  if (!actions || actions.length === 0) {
+    return '当前资源未声明支持动作。若要生成计划，请仅在你能从快照内容中明确推断时给出 action，并保持 payload 为 JSON 对象。';
+  }
+  return actions
+    .map((item) => {
+      const payloadFields = Array.isArray(item.payloadFields) && item.payloadFields.length > 0
+        ? `；payload 字段：${item.payloadFields.map((field) => `${field.name}${field.required ? '(required)' : ''}`).join('、')}`
+        : '';
+      return `- ${item.action}${item.label ? ` (${item.label})` : ''}${item.description ? `：${item.description}` : ''}${payloadFields}`;
+    })
+    .join('\n');
 };
 
 export const buildJVMAIPlanPrompt = ({
@@ -222,6 +268,7 @@ export const buildJVMAIPlanPrompt = ({
   const normalizedPath = asTrimmedString(resourcePath) || '(未提供资源路径)';
   const snapshotFormat = asTrimmedString(snapshot?.format) || 'json';
   const environmentLabel = asTrimmedString(environment) || 'unknown';
+  const supportedActionsText = formatSupportedActions(snapshot?.supportedActions);
 
   return [
     '请分析下面这个 JVM 资源，并生成一个可用于 GoNavi “预览变更” 的结构化修改计划。',
@@ -238,12 +285,15 @@ export const buildJVMAIPlanPrompt = ({
     formatSnapshotValue(snapshot),
     '```',
     '',
+    '当前资源支持动作：',
+    supportedActionsText,
+    '',
     '输出要求：',
     '1. 可以先给一小段分析，但必须包含且只包含一个 ```json 代码块。',
     '2. 代码块里的 JSON 字段必须严格是：targetType、selector、action、payload、reason。',
     `3. selector.resourcePath 优先使用当前资源路径 ${normalizedPath}，不要凭空编造其他路径。`,
-    '4. action 只能使用 updateValue、evict、clear 之一。',
-    '5. 当前 MVP 只支持 JSON 对象变更：如果 action=updateValue，则 payload 必须是 {"format":"json","value":{...}}，且 value 必须是 JSON 对象；evict/clear 时 payload 可以省略。',
+    '4. action 优先从“当前资源支持动作”里选择；如果当前资源未声明支持动作，才允许基于快照内容推断。',
+    '5. payload 只能使用 JSON 对象包装，不要输出脚本、命令或原始二进制。若需要纯文本值，也请包装成 {"format":"text","value":"..."}。',
     '6. 不要声称已经执行修改，也不要输出脚本或命令。',
     '',
     'JSON 示例：',
@@ -254,7 +304,7 @@ export const buildJVMAIPlanPrompt = ({
         selector: {
           resourcePath: normalizedPath,
         },
-        action: 'updateValue',
+        action: 'put',
         payload: {
           format: 'json',
           value: {

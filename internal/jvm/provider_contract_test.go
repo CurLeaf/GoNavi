@@ -36,7 +36,7 @@ func TestJMXProviderTestConnectionReturnsErrorWhenPortInvalid(t *testing.T) {
 		Host: "orders.internal",
 		JVM: connection.JVMConfig{
 			JMX: connection.JVMJMXConfig{
-				Port: 0,
+				Port: -1,
 			},
 		},
 	})
@@ -89,14 +89,62 @@ func TestHTTPProviderTestConnectionReturnsErrorWhenBaseURLInvalid(t *testing.T) 
 	}
 }
 
-func TestJMXProviderListResourcesReturnsNotImplementedError(t *testing.T) {
+func TestAgentProviderTestConnectionReturnsErrorWhenBaseURLMissing(t *testing.T) {
+	provider := NewAgentProvider()
+
+	err := provider.TestConnection(context.Background(), connection.ConnectionConfig{
+		Type: "jvm",
+		JVM: connection.JVMConfig{
+			Agent: connection.JVMAgentConfig{
+				BaseURL: "",
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected error when agent baseURL is missing")
+	}
+	if !strings.Contains(err.Error(), "agent baseURL is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAgentProviderTestConnectionReturnsErrorWhenBaseURLInvalid(t *testing.T) {
+	provider := NewAgentProvider()
+
+	err := provider.TestConnection(context.Background(), connection.ConnectionConfig{
+		Type: "jvm",
+		JVM: connection.JVMConfig{
+			Agent: connection.JVMAgentConfig{
+				BaseURL: "://bad-url",
+			},
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected error when agent baseURL is invalid")
+	}
+	if !strings.Contains(err.Error(), "agent baseURL is invalid") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestJMXProviderListResourcesReturnsErrorWhenParentPathInvalid(t *testing.T) {
 	provider := NewJMXProvider()
 
-	_, err := provider.ListResources(context.Background(), connection.ConnectionConfig{}, "")
+	_, err := provider.ListResources(context.Background(), connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			JMX: connection.JVMJMXConfig{
+				Port: 9010,
+			},
+		},
+	}, "bad-path")
 	if err == nil {
-		t.Fatal("expected not implemented error")
+		t.Fatal("expected invalid parent path error")
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "does not implement") {
+	if !strings.Contains(strings.ToLower(err.Error()), "parent resource path") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

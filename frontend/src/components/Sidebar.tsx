@@ -62,7 +62,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic';
 }
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -991,7 +991,21 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                           },
                           isLeaf: capability.canBrowse !== true,
                       }));
-                      setTreeData(origin => updateTreeData(origin, node.key, modeNodes));
+                      const diagnosticNode: TreeNode[] =
+                          conn.config.jvm?.diagnostic?.enabled
+                              ? [{
+                                  title: '诊断增强',
+                                  key: `${conn.id}-jvm-diagnostic`,
+                                  icon: <DashboardOutlined />,
+                                  type: 'jvm-diagnostic',
+                                  dataRef: {
+                                      ...conn,
+                                      diagnosticTransport: conn.config.jvm?.diagnostic?.transport || 'agent-bridge',
+                                  },
+                                  isLeaf: true,
+                              }]
+                              : [];
+                      setTreeData(origin => updateTreeData(origin, node.key, [...modeNodes, ...diagnosticNode]));
                   } else {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                       setLoadedKeys(prev => prev.filter(k => k !== node.key));
@@ -1549,7 +1563,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'table') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
-      } else if (type === 'jvm-mode' || type === 'jvm-resource') {
+      } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic') {
           setActiveContext({ connectionId: dataRef.id, dbName: '' });
       } else if (type === 'view' || type === 'db-trigger' || type === 'routine') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
@@ -1597,7 +1611,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const { type, dataRef, key: nodeKey } = node;
       if (type === 'connection') setActiveContext({ connectionId: nodeKey, dbName: '' });
       else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
-      else if (type === 'jvm-mode' || type === 'jvm-resource') setActiveContext({ connectionId: dataRef.id, dbName: '' });
+      else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic') setActiveContext({ connectionId: dataRef.id, dbName: '' });
       else if (type === 'table' || type === 'view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -1685,6 +1699,10 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           const { providerMode, resourcePath, resourceKind, id } = node.dataRef;
           const conn = (connections.find((item) => item.id === id) || node.dataRef) as SavedConnection;
           openJVMResourceTab(conn, providerMode, resourcePath, resourceKind);
+          return;
+      } else if (node.type === 'jvm-diagnostic') {
+          const conn = (connections.find((item) => item.id === node.dataRef.id) || node.dataRef) as SavedConnection;
+          openJVMDiagnosticTab(conn);
           return;
       }
 
@@ -2515,6 +2533,16 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           providerMode: providerMode as 'jmx' | 'endpoint' | 'agent',
           resourcePath: trimmedResourcePath,
           resourceKind,
+      });
+  };
+
+  const openJVMDiagnosticTab = (conn: SavedConnection) => {
+      const transport = conn.config.jvm?.diagnostic?.transport || 'agent-bridge';
+      addTab({
+          id: `jvm-diagnostic-${conn.id}`,
+          title: buildJVMTabTitle(conn.name, 'diagnostic', transport),
+          type: 'jvm-diagnostic',
+          connectionId: conn.id,
       });
   };
 

@@ -130,15 +130,25 @@ export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
 
 export function JVMApplyChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
 
+export function JVMCancelDiagnosticCommand(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function JVMExecuteDiagnosticCommand(arg1:connection.ConnectionConfig,arg2:string,arg3:jvm.DiagnosticCommandRequest):Promise<connection.QueryResult>;
+
 export function JVMGetValue(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function JVMListAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
+
+export function JVMListDiagnosticAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
 
 export function JVMListResources(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function JVMPreviewChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
 
 export function JVMProbeCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function JVMProbeDiagnosticCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function JVMStartDiagnosticSession(arg1:connection.ConnectionConfig,arg2:jvm.DiagnosticSessionRequest):Promise<connection.QueryResult>;
 
 export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 

@@ -19,6 +19,7 @@ import TableOverview from './TableOverview';
 import JVMOverview from './JVMOverview';
 import JVMResourceBrowser from './JVMResourceBrowser';
 import JVMAuditViewer from './JVMAuditViewer';
+import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
@@ -212,6 +213,8 @@ const TabManager: React.FC = () => {
       content = <JVMResourceBrowser tab={tab} />;
     } else if (tab.type === 'jvm-audit') {
       content = <JVMAuditViewer tab={tab} />;
+    } else if (tab.type === 'jvm-diagnostic') {
+      content = <JVMDiagnosticConsole tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [
