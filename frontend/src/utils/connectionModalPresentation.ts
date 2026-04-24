@@ -50,6 +50,18 @@ export const normalizeConnectionSecretErrorMessage = (
   return text;
 };
 
+export const summarizeConnectionTestFailureMessage = (
+  value: unknown,
+  fallback = '',
+): string => {
+  const text = normalizeConnectionSecretErrorMessage(value, fallback);
+  const [firstLine] = text
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
+  return firstLine || text;
+};
+
 export const resolveConnectionTestFailureFeedback = ({
   kind,
   reason,
@@ -68,7 +80,7 @@ export const resolveConnectionTestFailureFeedback = ({
 
   return {
     message: `测试失败: ${normalizeConnectionSecretErrorMessage(reason, fallback)}`,
-    shouldToast: true,
+    shouldToast: false,
   };
 };
 

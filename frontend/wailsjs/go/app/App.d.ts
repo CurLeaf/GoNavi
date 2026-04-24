@@ -3,6 +3,7 @@
 import {connection} from '../models';
 import {sync} from '../models';
 import {app} from '../models';
+import {jvm} from '../models';
 import {redis} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
@@ -127,6 +128,30 @@ export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,ar
 
 export function InstallUpdateAndRestart():Promise<connection.QueryResult>;
 
+export function JVMApplyChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
+
+export function JVMCancelDiagnosticCommand(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function JVMExecuteDiagnosticCommand(arg1:connection.ConnectionConfig,arg2:string,arg3:jvm.DiagnosticCommandRequest):Promise<connection.QueryResult>;
+
+export function JVMGetValue(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function JVMListAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
+
+export function JVMListDiagnosticAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
+
+export function JVMListResources(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function JVMPreviewChange(arg1:connection.ConnectionConfig,arg2:jvm.ChangeRequest):Promise<connection.QueryResult>;
+
+export function JVMProbeCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function JVMProbeDiagnosticCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function JVMStartDiagnosticSession(arg1:connection.ConnectionConfig,arg2:jvm.DiagnosticSessionRequest):Promise<connection.QueryResult>;
+
+export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
+
 export function LogWindowDiagnostic(arg1:string,arg2:string):Promise<void>;
 
 export function MongoDiscoverMembers(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -148,8 +173,6 @@ export function OpenDownloadedUpdateDirectory():Promise<connection.QueryResult>;
 export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
-
-export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 
@@ -223,8 +246,6 @@ export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequ
 
 export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
 
-export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
-
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
 export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
@@ -237,6 +258,8 @@ export function SelectDriverPackageDirectory(arg1:string):Promise<connection.Que
 
 export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryResult>;
 
+export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
+
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
@@ -246,5 +269,7 @@ export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 
 export function TestConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function TestJVMConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function TruncateTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;

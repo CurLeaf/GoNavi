@@ -16,6 +16,10 @@ import RedisMonitor from './RedisMonitor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
+import JVMOverview from './JVMOverview';
+import JVMResourceBrowser from './JVMResourceBrowser';
+import JVMAuditViewer from './JVMAuditViewer';
+import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
@@ -203,6 +207,14 @@ const TabManager: React.FC = () => {
       content = <DefinitionViewer tab={tab} />;
     } else if (tab.type === 'table-overview') {
       content = <TableOverview tab={tab} />;
+    } else if (tab.type === 'jvm-overview') {
+      content = <JVMOverview tab={tab} />;
+    } else if (tab.type === 'jvm-resource') {
+      content = <JVMResourceBrowser tab={tab} />;
+    } else if (tab.type === 'jvm-audit') {
+      content = <JVMAuditViewer tab={tab} />;
+    } else if (tab.type === 'jvm-diagnostic') {
+      content = <JVMDiagnosticConsole tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [
