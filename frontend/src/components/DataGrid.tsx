@@ -1,7 +1,7 @@
 // cspell:ignore anticon sqls uuidv uuidv4 hscroll
 import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker } from 'antd';
+import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker, AutoComplete } from 'antd';
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons';
@@ -61,6 +61,13 @@ import {
     resolveTemporalEditorSaveValue,
     type TemporalPickerType,
 } from './dataGridTemporal';
+import {
+    buildEffectiveFilterConditions,
+    normalizeQuickWhereCondition,
+    resolveWhereConditionSelectedValue,
+    resolveWhereConditionSuggestions,
+    validateQuickWhereCondition,
+} from '../utils/dataGridWhereFilter';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -889,6 +896,8 @@ interface DataGridProps {
     exportSqlWithFilter?: string;
     onApplyFilter?: (conditions: GridFilterCondition[]) => void;
     appliedFilterConditions?: FilterCondition[];
+    quickWhereCondition?: string;
+    onApplyQuickWhereCondition?: (condition: string) => void;
     scrollSnapshot?: { top: number; left: number };
     onScrollSnapshotChange?: (snapshot: { top: number; left: number }) => void;
 }
@@ -914,7 +923,8 @@ const VIRTUAL_CELL_WRAPPER_STYLE: React.CSSProperties = { margin: -8, padding: '
 
 const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], readOnly = false,
-    onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions,
+    onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
+    onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange
 }) => {
   const connections = useStore(state => state.connections);
@@ -2199,6 +2209,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   // Filter State
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
+  const [quickWhereDraft, setQuickWhereDraft] = useState(() => normalizeQuickWhereCondition(quickWhereCondition));
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -2207,6 +2218,29 @@ const DataGrid: React.FC<DataGridProps> = ({
       const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
       setNextFilterId(Math.max(1, maxId + 1));
   }, [appliedFilterConditions, normalizeGridFilterConditions]);
+
+  useEffect(() => {
+      setQuickWhereDraft(normalizeQuickWhereCondition(quickWhereCondition));
+  }, [quickWhereCondition]);
+
+  const quickWhereSuggestionOptions = useMemo(() => {
+      const columnSuggestionSource = allTableColumnNames.length > 0 ? allTableColumnNames : displayColumnNames;
+      return resolveWhereConditionSuggestions({
+          input: quickWhereDraft,
+          columnNames: columnSuggestionSource,
+          dbType,
+      }).map((item) => ({
+          value: item.value,
+          insertText: item.insertText,
+          suggestionKind: item.kind,
+          label: (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <span>{item.label}</span>
+                  <span style={{ color: darkMode ? 'rgba(255,255,255,0.46)' : 'rgba(0,0,0,0.42)', fontSize: 12 }}>{item.detail}</span>
+              </div>
+          ),
+      }));
+  }, [allTableColumnNames, displayColumnNames, quickWhereDraft, dbType, darkMode]);
 
   useEffect(() => {
       if (!showFilter) {
@@ -4032,9 +4066,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       return clauses.join(' OR ');
   }, [pkColumns, tableName]);
 
-      const buildCurrentPageSql = useCallback((dbType: string) => {
+  const buildCurrentPageSql = useCallback((dbType: string) => {
       if (!tableName || !pagination) return '';
-      const whereSQL = buildWhereSQL(dbType, filterConditions);
+      const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
+      const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
       const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
       const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
       const normalizedType = String(dbType || '').trim().toLowerCase();
@@ -4045,7 +4080,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
       }
       return sql;
-  }, [tableName, pagination, filterConditions, sortInfo, pkColumns]);
+  }, [tableName, pagination, filterConditions, quickWhereCondition, sortInfo, pkColumns]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
@@ -4277,7 +4312,25 @@ const DataGrid: React.FC<DataGridProps> = ({
   const removeFilter = (id: number) => {
       setFilterConditions(prev => prev.filter(c => c.id !== id));
   };
+  const applyQuickWhereCondition = useCallback((condition: string = quickWhereDraft): boolean => {
+      const normalized = normalizeQuickWhereCondition(condition);
+      const validation = validateQuickWhereCondition(normalized);
+      if (!validation.ok) {
+          void message.warning(validation.message);
+          return false;
+      }
+      setQuickWhereDraft(normalized);
+      if (onApplyQuickWhereCondition) onApplyQuickWhereCondition(normalized);
+      return true;
+  }, [quickWhereDraft, onApplyQuickWhereCondition]);
+
+  const clearQuickWhereCondition = useCallback(() => {
+      setQuickWhereDraft('');
+      if (onApplyQuickWhereCondition) onApplyQuickWhereCondition('');
+  }, [onApplyQuickWhereCondition]);
+
   const applyFilters = () => {
+      if (!applyQuickWhereCondition()) return;
       if (onApplyFilter) onApplyFilter(filterConditions);
   };
 
@@ -5149,6 +5202,73 @@ const DataGrid: React.FC<DataGridProps> = ({
                display: 'flex',
                flexDirection: 'column',
            }}>
+               <div
+                   data-grid-quick-where="true"
+                   style={{
+                       display: 'flex',
+                       alignItems: 'center',
+                       gap: 10,
+                       padding: '10px 12px',
+                       marginBottom: 10,
+                       borderRadius: Math.max(10, panelRadius - 2),
+                       border: `1px solid ${panelFrameColor}`,
+                       background: darkMode ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.72)',
+                       boxSizing: 'border-box',
+                       minWidth: 0,
+                   }}
+               >
+                   <span
+                       style={{
+                           flex: '0 0 auto',
+                           minWidth: 58,
+                           height: 28,
+                           display: 'inline-flex',
+                           alignItems: 'center',
+                           justifyContent: 'center',
+                           borderRadius: 999,
+                           background: darkMode ? 'rgba(24,144,255,0.18)' : 'rgba(24,144,255,0.10)',
+                           border: `1px solid ${darkMode ? 'rgba(24,144,255,0.32)' : 'rgba(24,144,255,0.22)'}`,
+                           color: selectionAccentHex,
+                           fontSize: 12,
+                           fontWeight: 700,
+                           letterSpacing: '0.03em',
+                       }}
+                   >
+                       WHERE
+                   </span>
+                   <AutoComplete
+                       value={quickWhereDraft}
+                       options={quickWhereSuggestionOptions}
+                       onChange={setQuickWhereDraft}
+                       onSelect={(value, option) => {
+                           setQuickWhereDraft(resolveWhereConditionSelectedValue({
+                               selectedValue: value,
+                               currentInput: quickWhereDraft,
+                               insertText: (option as any)?.insertText,
+                           }));
+                       }}
+                       style={{ flex: '1 1 320px', minWidth: 220 }}
+                       popupMatchSelectWidth={420}
+                   >
+                       <Input
+                           {...noAutoCapInputProps}
+                           allowClear
+                           placeholder={dbType === 'mongodb' ? '输入 MongoDB JSON 查询对象，例如 {"status":"A"}' : '输入 WHERE 后面的条件，例如 status = 1 AND name LIKE \'A%\''}
+                           onPressEnter={(event) => {
+                               if (!event.shiftKey) {
+                                   event.preventDefault();
+                                   applyQuickWhereCondition();
+                               }
+                           }}
+                       />
+                   </AutoComplete>
+                   <Button size="small" type="primary" onClick={() => applyQuickWhereCondition()}>
+                       应用 WHERE
+                   </Button>
+                   <Button size="small" onClick={clearQuickWhereCondition} disabled={!quickWhereDraft && !quickWhereCondition}>
+                       清空
+                   </Button>
+               </div>
                {/* 筛选条件 + 排序区域：固定最大高度，超出后可滚动，避免条件过多挤压数据表 */}
                <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', flex: '0 1 auto' }}>
                {filterConditions.map((cond, condIndex) => (
@@ -5316,6 +5436,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                    <Button type="primary" onClick={applyFilters} size="small">应用</Button>
                    <Button size="small" icon={<ClearOutlined />} onClick={() => {
                        setFilterConditions([]);
+                       clearQuickWhereCondition();
                        if (onApplyFilter) onApplyFilter([]);
                        if (onSort) onSort('', '');
                    }}>清除</Button>
