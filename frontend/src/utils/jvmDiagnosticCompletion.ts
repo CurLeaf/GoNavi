@@ -30,6 +30,11 @@ const BASE_COMMAND_DEFINITIONS: DiagnosticCommandDefinition[] = [
     documentation: "查看 JVM 运行总览。",
   },
   {
+    head: "jvm",
+    detail: "观察类命令",
+    documentation: "查看 JVM 内存、线程、类加载、GC 和运行参数信息。",
+  },
+  {
     head: "thread",
     detail: "观察类命令",
     documentation: "查看热点线程、线程栈和阻塞线程。",
@@ -155,6 +160,15 @@ const ARGUMENT_ITEMS_BY_HEAD: Record<string, JVMDiagnosticCompletionItem[]> = {
       insertText: "",
       detail: "直接执行",
       documentation: "查看当前 JVM 运行总览。",
+      scope: "argument",
+    },
+  ],
+  jvm: [
+    {
+      label: "jvm",
+      insertText: "",
+      detail: "直接执行",
+      documentation: "查看 JVM 内存、线程、类加载、GC 和运行参数信息。",
       scope: "argument",
     },
   ],

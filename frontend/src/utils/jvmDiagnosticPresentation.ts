@@ -66,6 +66,43 @@ const RISK_COLORS: Record<"low" | "medium" | "high", string> = {
   high: "red",
 };
 
+const PHASE_LABELS: Record<string, string> = {
+  running: "执行中",
+  completed: "已完成",
+  failed: "失败",
+  canceled: "已取消",
+  canceling: "取消中",
+  diagnostic: "诊断事件",
+};
+
+const EVENT_LABELS: Record<string, string> = {
+  diagnostic: "诊断输出",
+  chunk: "输出片段",
+  done: "执行结束",
+};
+
+const TRANSPORT_LABELS: Record<string, string> = {
+  "agent-bridge": "Agent Bridge",
+  "arthas-tunnel": "Arthas Tunnel",
+};
+
+const RISK_LABELS: Record<string, string> = {
+  low: "低风险",
+  medium: "中风险",
+  high: "高风险",
+};
+
+const COMMAND_TYPE_LABELS: Record<string, string> = {
+  observe: "观察类",
+  trace: "跟踪类",
+  mutating: "高风险类",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "手动输入",
+  "ai-plan": "AI 计划",
+};
+
 export const formatJVMDiagnosticPresetCategory = (
   category: JVMDiagnosticPresetCategory,
 ): string => CATEGORY_LABELS[category];
@@ -73,6 +110,41 @@ export const formatJVMDiagnosticPresetCategory = (
 export const resolveJVMDiagnosticRiskColor = (
   riskLevel: "low" | "medium" | "high",
 ): string => RISK_COLORS[riskLevel];
+
+const normalizeLabelKey = (value?: string | null): string =>
+  String(value || "").trim().toLowerCase();
+
+const formatWithFallback = (
+  value: string | undefined | null,
+  labels: Record<string, string>,
+  fallback = "未知",
+): string => {
+  const normalized = normalizeLabelKey(value);
+  if (!normalized) {
+    return fallback;
+  }
+  return labels[normalized] || String(value || "").trim();
+};
+
+export const formatJVMDiagnosticPhaseLabel = (phase?: string | null): string =>
+  formatWithFallback(phase, PHASE_LABELS);
+
+export const formatJVMDiagnosticEventLabel = (event?: string | null): string =>
+  formatWithFallback(event, EVENT_LABELS);
+
+export const formatJVMDiagnosticTransportLabel = (
+  transport?: string | null,
+): string => formatWithFallback(transport, TRANSPORT_LABELS);
+
+export const formatJVMDiagnosticRiskLabel = (risk?: string | null): string =>
+  formatWithFallback(risk, RISK_LABELS);
+
+export const formatJVMDiagnosticCommandTypeLabel = (
+  type?: string | null,
+): string => formatWithFallback(type, COMMAND_TYPE_LABELS);
+
+export const formatJVMDiagnosticSourceLabel = (source?: string | null): string =>
+  formatWithFallback(source, SOURCE_LABELS);
 
 export const groupJVMDiagnosticPresets = (
   presets: JVMDiagnosticCommandPreset[] = JVM_DIAGNOSTIC_COMMAND_PRESETS,
@@ -90,16 +162,19 @@ export const groupJVMDiagnosticPresets = (
 export const formatJVMDiagnosticChunkText = (
   chunk: JVMDiagnosticEventChunk,
 ): string => {
-  const phase = String(chunk.phase || chunk.event || "").trim();
+  const rawPhase = String(chunk.phase || chunk.event || "").trim();
+  const phase = chunk.phase
+    ? formatJVMDiagnosticPhaseLabel(chunk.phase)
+    : formatJVMDiagnosticEventLabel(chunk.event);
   const content = String(chunk.content || "").trim();
-  if (!phase && !content) {
+  if (!rawPhase && !content) {
     return "空事件";
   }
-  if (!phase) {
+  if (!rawPhase) {
     return content;
   }
   if (!content) {
     return phase;
   }
-  return `${phase}: ${content}`;
+  return `${phase}：${content}`;
 };

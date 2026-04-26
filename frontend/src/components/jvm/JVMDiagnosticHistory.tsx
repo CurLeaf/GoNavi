@@ -5,6 +5,13 @@ import type {
   JVMDiagnosticAuditRecord,
   JVMDiagnosticSessionHandle,
 } from "../../types";
+import {
+  formatJVMDiagnosticCommandTypeLabel,
+  formatJVMDiagnosticRiskLabel,
+  formatJVMDiagnosticSourceLabel,
+  formatJVMDiagnosticPhaseLabel,
+  formatJVMDiagnosticTransportLabel,
+} from "../../utils/jvmDiagnosticPresentation";
 
 const { Text } = Typography;
 
@@ -23,7 +30,7 @@ const JVMDiagnosticHistory: React.FC<JVMDiagnosticHistoryProps> = ({
       {session ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Tag color="blue">{session.sessionId}</Tag>
-          <Tag>{session.transport}</Tag>
+          <Tag>{formatJVMDiagnosticTransportLabel(session.transport)}</Tag>
         </div>
       ) : (
         <Empty
@@ -55,10 +62,16 @@ const JVMDiagnosticHistory: React.FC<JVMDiagnosticHistoryProps> = ({
                     {record.command}
                   </Text>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {record.status ? <Tag color="green">{record.status}</Tag> : null}
-                    {record.riskLevel ? <Tag color="gold">{record.riskLevel}</Tag> : null}
-                    {record.commandType ? <Tag color="blue">{record.commandType}</Tag> : null}
-                    {record.source ? <Tag>{record.source}</Tag> : null}
+                    {record.status ? (
+                      <Tag color="green">{formatJVMDiagnosticPhaseLabel(record.status)}</Tag>
+                    ) : null}
+                    {record.riskLevel ? (
+                      <Tag color="gold">{formatJVMDiagnosticRiskLabel(record.riskLevel)}</Tag>
+                    ) : null}
+                    {record.commandType ? (
+                      <Tag color="blue">{formatJVMDiagnosticCommandTypeLabel(record.commandType)}</Tag>
+                    ) : null}
+                    {record.source ? <Tag>{formatJVMDiagnosticSourceLabel(record.source)}</Tag> : null}
                   </div>
                   <Text type="secondary">
                     {record.reason || "未填写诊断原因"}

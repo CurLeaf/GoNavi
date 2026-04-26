@@ -13,6 +13,12 @@ describe("jvmDiagnosticCompletion", () => {
     expect(items.some((item) => item.label === "trace")).toBe(true);
   });
 
+  it("suggests the jvm command from the command input hint", () => {
+    const items = resolveJVMDiagnosticCompletionItems("jv");
+
+    expect(items.some((item) => item.label === "jvm")).toBe(true);
+  });
+
   it("switches to argument mode after the command head", () => {
     expect(resolveJVMDiagnosticCompletionMode("thread -")).toEqual({
       head: "thread",
