@@ -74,6 +74,19 @@ func (p *JMXProvider) GetValue(ctx context.Context, cfg connection.ConnectionCon
 	return valueSnapshotFromHelper(target, resp.Snapshot)
 }
 
+func (p *JMXProvider) GetMonitoringSnapshot(ctx context.Context, cfg connection.ConnectionConfig, previous *JVMMonitoringPoint) (JVMMonitoringSnapshot, error) {
+	resp, err := jmxHelperRunner(ctx, cfg, jmxHelperCommandMonitor, nil, nil)
+	if err != nil {
+		return JVMMonitoringSnapshot{}, fmt.Errorf("jmx get monitoring snapshot failed: %w", err)
+	}
+	snapshot, err := monitoringSnapshotFromHelper(resp.MonitoringSnapshot)
+	if err != nil {
+		return JVMMonitoringSnapshot{}, err
+	}
+	finalizeMonitoringSnapshot(&snapshot, previous)
+	return snapshot, nil
+}
+
 func (p *JMXProvider) PreviewChange(ctx context.Context, cfg connection.ConnectionConfig, req ChangeRequest) (ChangePreview, error) {
 	target, err := parseRequiredResourcePath(req.ResourceID)
 	if err != nil {

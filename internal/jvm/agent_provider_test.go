@@ -59,6 +59,51 @@ func TestAgentProviderListResourcesBuildsRequestAndDecodesResponse(t *testing.T)
 	}
 }
 
+func TestAgentProviderGetMonitoringSnapshotDecodesResponse(t *testing.T) {
+	provider := &AgentProvider{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/gonavi/agent/jvm/metrics" {
+			t.Fatalf("expected path /gonavi/agent/jvm/metrics, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(JVMMonitoringSnapshot{
+			Point: JVMMonitoringPoint{
+				Timestamp:                  1713945600000,
+				ThreadCount:                27,
+				HeapUsedBytes:              402653184,
+				GCCollectionCount:          128,
+				GCDeltaCount:               2,
+				ProcessCpuLoad:             0.29,
+				CommittedVirtualMemoryBytes: 2147483648,
+			},
+			RecentGCEvents: []RecentGCEvent{{
+				Timestamp:  1713945600000,
+				Name:       "ConcurrentMarkSweep",
+				DurationMs: 12,
+			}},
+			AvailableMetrics: []string{"thread.count", "heap.used", "gc.count", "cpu.process", "memory.virtual"},
+		})
+	}))
+	defer server.Close()
+
+	snapshot, err := provider.GetMonitoringSnapshot(context.Background(), newAgentProviderTestConfig(server.URL+"/gonavi/agent/jvm", 3), nil)
+	if err != nil {
+		t.Fatalf("GetMonitoringSnapshot returned error: %v", err)
+	}
+	if snapshot.Point.ThreadCount != 27 || snapshot.Point.GCDeltaCount != 2 || snapshot.Point.ProcessCpuLoad != 0.29 {
+		t.Fatalf("unexpected monitoring snapshot: %#v", snapshot)
+	}
+	if len(snapshot.RecentGCEvents) != 1 || snapshot.RecentGCEvents[0].Name != "ConcurrentMarkSweep" {
+		t.Fatalf("unexpected recent gc events: %#v", snapshot.RecentGCEvents)
+	}
+	if len(snapshot.AvailableMetrics) != 5 {
+		t.Fatalf("unexpected available metrics: %#v", snapshot)
+	}
+}
+
 func TestAgentProviderRealAgentRoundTrip(t *testing.T) {
 	if _, err := exec.LookPath("java"); err != nil {
 		t.Skipf("java 不可用，跳过真实 Agent 集成测试: %v", err)
@@ -214,7 +259,18 @@ func startAgentFixture(t *testing.T) agentFixtureProcess {
 		t.Fatalf("write agent manifest failed: %v", err)
 	}
 
-	agentJar := filepath.Join(t.TempDir(), "gonavi-test-agent.jar")
+	agentJarFile, err := os.CreateTemp("", "gonavi-test-agent-*.jar")
+	if err != nil {
+		t.Fatalf("create agent jar temp file failed: %v", err)
+	}
+	agentJar := agentJarFile.Name()
+	if closeErr := agentJarFile.Close(); closeErr != nil {
+		t.Fatalf("close agent jar temp file failed: %v", closeErr)
+	}
+	_ = os.Remove(agentJar)
+	t.Cleanup(func() {
+		_ = os.Remove(agentJar)
+	})
 	jarCmd := exec.Command(jarBin, "cmf", manifestPath, agentJar, "-C", classesDir, "com")
 	output, err = jarCmd.CombinedOutput()
 	if err != nil {

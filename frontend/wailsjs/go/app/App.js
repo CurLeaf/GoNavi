@@ -258,6 +258,10 @@ export function JVMExecuteDiagnosticCommand(arg1, arg2, arg3) {
   return window['go']['app']['App']['JVMExecuteDiagnosticCommand'](arg1, arg2, arg3);
 }
 
+export function JVMGetMonitoringHistory(arg1, arg2) {
+  return window['go']['app']['App']['JVMGetMonitoringHistory'](arg1, arg2);
+}
+
 export function JVMGetValue(arg1, arg2) {
   return window['go']['app']['App']['JVMGetValue'](arg1, arg2);
 }
@@ -288,6 +292,14 @@ export function JVMProbeDiagnosticCapabilities(arg1) {
 
 export function JVMStartDiagnosticSession(arg1, arg2) {
   return window['go']['app']['App']['JVMStartDiagnosticSession'](arg1, arg2);
+}
+
+export function JVMStartMonitoring(arg1) {
+  return window['go']['app']['App']['JVMStartMonitoring'](arg1);
+}
+
+export function JVMStopMonitoring(arg1, arg2) {
+  return window['go']['app']['App']['JVMStopMonitoring'](arg1, arg2);
 }
 
 export function ListSQLDirectory(arg1) {

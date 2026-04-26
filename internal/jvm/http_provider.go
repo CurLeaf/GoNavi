@@ -92,6 +92,20 @@ func (p *HTTPProvider) GetValue(ctx context.Context, cfg connection.ConnectionCo
 	return snapshot, nil
 }
 
+func (p *HTTPProvider) GetMonitoringSnapshot(ctx context.Context, cfg connection.ConnectionConfig, previous *JVMMonitoringPoint) (JVMMonitoringSnapshot, error) {
+	runtime, err := newEndpointRuntime(cfg)
+	if err != nil {
+		return JVMMonitoringSnapshot{}, err
+	}
+
+	var snapshot JVMMonitoringSnapshot
+	if err := runtime.doJSON(ctx, http.MethodGet, "get monitoring snapshot", "metrics", nil, nil, &snapshot); err != nil {
+		return JVMMonitoringSnapshot{}, err
+	}
+	finalizeMonitoringSnapshot(&snapshot, previous)
+	return snapshot, nil
+}
+
 func (p *HTTPProvider) PreviewChange(ctx context.Context, cfg connection.ConnectionConfig, req ChangeRequest) (ChangePreview, error) {
 	runtime, err := newEndpointRuntime(cfg)
 	if err != nil {

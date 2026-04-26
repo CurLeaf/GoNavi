@@ -91,6 +91,20 @@ func (p *AgentProvider) GetValue(ctx context.Context, cfg connection.ConnectionC
 	return snapshot, nil
 }
 
+func (p *AgentProvider) GetMonitoringSnapshot(ctx context.Context, cfg connection.ConnectionConfig, previous *JVMMonitoringPoint) (JVMMonitoringSnapshot, error) {
+	runtime, err := newAgentRuntime(cfg)
+	if err != nil {
+		return JVMMonitoringSnapshot{}, err
+	}
+
+	var snapshot JVMMonitoringSnapshot
+	if err := runtime.doJSON(ctx, http.MethodGet, "get monitoring snapshot", "metrics", nil, nil, &snapshot); err != nil {
+		return JVMMonitoringSnapshot{}, err
+	}
+	finalizeMonitoringSnapshot(&snapshot, previous)
+	return snapshot, nil
+}
+
 func (p *AgentProvider) PreviewChange(ctx context.Context, cfg connection.ConnectionConfig, req ChangeRequest) (ChangePreview, error) {
 	runtime, err := newAgentRuntime(cfg)
 	if err != nil {

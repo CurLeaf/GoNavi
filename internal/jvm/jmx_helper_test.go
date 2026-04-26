@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +81,20 @@ func TestEnsureJMXHelperRuntimeUsesOverrideClasspath(t *testing.T) {
 	}
 	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
 		t.Fatalf("expected override mode to skip cache writes, stat err=%v", err)
+	}
+}
+
+func TestRedactJMXHelperOutputMasksSensitiveFields(t *testing.T) {
+	output := `{"password":"secret-pass","apiKey":"agent-token","details":"token=abc123 password: raw-secret"}`
+
+	redacted := redactJMXHelperOutput(output)
+
+	for _, secret := range []string{"secret-pass", "agent-token", "abc123", "raw-secret"} {
+		if strings.Contains(redacted, secret) {
+			t.Fatalf("expected %q to be redacted from %q", secret, redacted)
+		}
+	}
+	if !strings.Contains(redacted, "<redacted>") {
+		t.Fatalf("expected redaction marker, got %q", redacted)
 	}
 }

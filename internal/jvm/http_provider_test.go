@@ -93,6 +93,52 @@ func TestHTTPProviderGetValueDecodesResponse(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderGetMonitoringSnapshotDecodesResponse(t *testing.T) {
+	provider := &HTTPProvider{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/manage/jvm/metrics" {
+			t.Fatalf("expected path /manage/jvm/metrics, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(JVMMonitoringSnapshot{
+			Point: JVMMonitoringPoint{
+				Timestamp:        1713945600000,
+				ThreadCount:      18,
+				HeapUsedBytes:    805306368,
+				ProcessCpuLoad:   0.48,
+				ProcessRssBytes:  1879048192,
+				LoadedClassCount: 4096,
+			},
+			RecentGCEvents: []RecentGCEvent{{
+				Timestamp:  1713945600000,
+				Name:       "G1 Old Generation",
+				DurationMs: 41,
+			}},
+			AvailableMetrics: []string{"thread.count", "heap.used", "cpu.process", "memory.rss", "class.loading"},
+			MissingMetrics:   []string{"cpu.system"},
+			ProviderWarnings: []string{"endpoint cpu metric unavailable"},
+		})
+	}))
+	defer server.Close()
+
+	snapshot, err := provider.GetMonitoringSnapshot(context.Background(), newHTTPProviderTestConfig(server.URL+"/manage/jvm", 3), nil)
+	if err != nil {
+		t.Fatalf("GetMonitoringSnapshot returned error: %v", err)
+	}
+	if snapshot.Point.ThreadCount != 18 || snapshot.Point.HeapUsedBytes != 805306368 || snapshot.Point.ProcessRssBytes != 1879048192 {
+		t.Fatalf("unexpected monitoring snapshot: %#v", snapshot)
+	}
+	if len(snapshot.RecentGCEvents) != 1 || snapshot.RecentGCEvents[0].Name != "G1 Old Generation" {
+		t.Fatalf("unexpected recent gc events: %#v", snapshot.RecentGCEvents)
+	}
+	if len(snapshot.MissingMetrics) != 1 || snapshot.MissingMetrics[0] != "cpu.system" {
+		t.Fatalf("unexpected missing metrics: %#v", snapshot)
+	}
+}
+
 func TestHTTPProviderPreviewChangeAndApplySendJSONBody(t *testing.T) {
 	provider := NewHTTPProvider()
 	request := ChangeRequest{

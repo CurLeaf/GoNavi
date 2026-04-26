@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,7 @@ const (
 	jmxHelperCommandPing    = "ping"
 	jmxHelperCommandList    = "list"
 	jmxHelperCommandGet     = "get"
+	jmxHelperCommandMonitor = "monitor"
 	jmxHelperCommandPreview = "preview"
 	jmxHelperCommandApply   = "apply"
 
@@ -42,6 +44,11 @@ var (
 	jmxHelperCompileMu      sync.Mutex
 	jmxHelperCommandContext = exec.CommandContext
 	jmxHelperLookPath       = exec.LookPath
+)
+
+var (
+	jmxHelperSensitiveJSONFieldPattern = regexp.MustCompile(`(?i)("(?:password|apiKey|token|secret)"\s*:\s*")([^"]*)(")`)
+	jmxHelperSensitivePairPattern      = regexp.MustCompile(`(?i)\b(password|api[_-]?key|token|secret)(\s*[:=]\s*)([^&\s;,"'}]+)`)
 )
 
 //go:embed jmxhelper_assets/jmx-helper-runtime.jar
@@ -94,13 +101,14 @@ type jmxHelperChangePlan struct {
 }
 
 type jmxHelperResponse struct {
-	OK          bool                    `json:"ok"`
-	Error       string                  `json:"error,omitempty"`
-	Details     map[string]any          `json:"details,omitempty"`
-	Resources   []jmxHelperResource     `json:"resources,omitempty"`
-	Snapshot    *jmxHelperSnapshot      `json:"snapshot,omitempty"`
-	Preview     *jmxHelperPreview       `json:"preview,omitempty"`
-	ApplyResult *jmxHelperApplyResponse `json:"applyResult,omitempty"`
+	OK                 bool                         `json:"ok"`
+	Error              string                       `json:"error,omitempty"`
+	Details            map[string]any               `json:"details,omitempty"`
+	Resources          []jmxHelperResource          `json:"resources,omitempty"`
+	Snapshot           *jmxHelperSnapshot           `json:"snapshot,omitempty"`
+	MonitoringSnapshot *jmxHelperMonitoringSnapshot `json:"monitoringSnapshot,omitempty"`
+	Preview            *jmxHelperPreview            `json:"preview,omitempty"`
+	ApplyResult        *jmxHelperApplyResponse      `json:"applyResult,omitempty"`
 }
 
 type jmxHelperResource struct {
@@ -125,6 +133,38 @@ type jmxHelperSnapshot struct {
 	Sensitive        bool               `json:"sensitive,omitempty"`
 	SupportedActions []ActionDefinition `json:"supportedActions,omitempty"`
 	Metadata         map[string]any     `json:"metadata,omitempty"`
+}
+
+type jmxHelperMonitoringPoint struct {
+	Timestamp                   int64          `json:"timestamp"`
+	HeapUsedBytes               int64          `json:"heapUsedBytes,omitempty"`
+	HeapCommittedBytes          int64          `json:"heapCommittedBytes,omitempty"`
+	HeapMaxBytes                int64          `json:"heapMaxBytes,omitempty"`
+	NonHeapUsedBytes            int64          `json:"nonHeapUsedBytes,omitempty"`
+	NonHeapCommittedBytes       int64          `json:"nonHeapCommittedBytes,omitempty"`
+	GCCollectionCount           int64          `json:"gcCollectionCount,omitempty"`
+	GCCollectionTimeMs          int64          `json:"gcCollectionTimeMs,omitempty"`
+	GCDeltaCount                int64          `json:"gcDeltaCount,omitempty"`
+	GCDeltaTimeMs               int64          `json:"gcDeltaTimeMs,omitempty"`
+	ThreadCount                 int            `json:"threadCount,omitempty"`
+	DaemonThreadCount           int            `json:"daemonThreadCount,omitempty"`
+	PeakThreadCount             int            `json:"peakThreadCount,omitempty"`
+	ThreadStateCounts           map[string]int `json:"threadStateCounts,omitempty"`
+	LoadedClassCount            int            `json:"loadedClassCount,omitempty"`
+	UnloadedClassCount          int64          `json:"unloadedClassCount,omitempty"`
+	ClassLoadDelta              int64          `json:"classLoadDelta,omitempty"`
+	ProcessCpuLoad              float64        `json:"processCpuLoad,omitempty"`
+	SystemCpuLoad               float64        `json:"systemCpuLoad,omitempty"`
+	ProcessRssBytes             int64          `json:"processRssBytes,omitempty"`
+	CommittedVirtualMemoryBytes int64          `json:"committedVirtualMemoryBytes,omitempty"`
+}
+
+type jmxHelperMonitoringSnapshot struct {
+	Point            jmxHelperMonitoringPoint `json:"point"`
+	RecentGCEvents   []RecentGCEvent          `json:"recentGcEvents,omitempty"`
+	AvailableMetrics []string                 `json:"availableMetrics,omitempty"`
+	MissingMetrics   []string                 `json:"missingMetrics,omitempty"`
+	ProviderWarnings []string                 `json:"providerWarnings,omitempty"`
 }
 
 type jmxHelperPreview struct {
@@ -366,6 +406,11 @@ func helperContextSummary(cfg connection.ConnectionConfig, target *jmxResourceTa
 	}
 }
 
+func redactJMXHelperOutput(text string) string {
+	redacted := jmxHelperSensitiveJSONFieldPattern.ReplaceAllString(text, `${1}<redacted>${3}`)
+	return jmxHelperSensitivePairPattern.ReplaceAllString(redacted, `${1}${2}<redacted>`)
+}
+
 func runJMXHelper(
 	ctx context.Context,
 	cfg connection.ConnectionConfig,
@@ -414,6 +459,7 @@ func runJMXHelper(
 	defer cancel()
 
 	cmd := jmxHelperCommandContext(execCtx, runtimeInfo.javaBinary, "-cp", runtimeInfo.classpath, jmxHelperMainClass)
+	configureJMXHelperCommand(cmd)
 	cmd.Stdin = bytes.NewReader(input)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -421,7 +467,7 @@ func runJMXHelper(
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		stderrText := strings.TrimSpace(stderr.String())
+		stderrText := strings.TrimSpace(redactJMXHelperOutput(stderr.String()))
 		if stderrText == "" {
 			stderrText = "<empty>"
 		}
@@ -436,23 +482,24 @@ func runJMXHelper(
 
 	var response jmxHelperResponse
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		stdoutText := strings.TrimSpace(redactJMXHelperOutput(stdout.String()))
 		return jmxHelperResponse{}, fmt.Errorf(
 			"decode JMX helper %s response failed for %s: %w; stdout: %s",
 			command,
 			helperContextSummary(cfg, target),
 			err,
-			strings.TrimSpace(stdout.String()),
+			stdoutText,
 		)
 	}
 	if !response.OK {
-		errText := strings.TrimSpace(response.Error)
+		errText := strings.TrimSpace(redactJMXHelperOutput(response.Error))
 		if errText == "" {
 			errText = "unknown helper failure"
 		}
 		if len(response.Details) > 0 {
 			detailsJSON, marshalErr := json.Marshal(response.Details)
 			if marshalErr == nil {
-				errText += "; details=" + string(detailsJSON)
+				errText += "; details=" + redactJMXHelperOutput(string(detailsJSON))
 			}
 		}
 		return jmxHelperResponse{}, fmt.Errorf("jmx helper %s failed for %s: %s", command, helperContextSummary(cfg, target), errText)
@@ -647,6 +694,42 @@ func previewFromHelper(target jmxResourceTarget, preview *jmxHelperPreview) (Cha
 		result.After = after
 	}
 	return result, nil
+}
+
+func monitoringSnapshotFromHelper(snapshot *jmxHelperMonitoringSnapshot) (JVMMonitoringSnapshot, error) {
+	if snapshot == nil {
+		return JVMMonitoringSnapshot{}, fmt.Errorf("helper did not return monitoring snapshot")
+	}
+
+	return JVMMonitoringSnapshot{
+		Point: JVMMonitoringPoint{
+			Timestamp:                   snapshot.Point.Timestamp,
+			HeapUsedBytes:               snapshot.Point.HeapUsedBytes,
+			HeapCommittedBytes:          snapshot.Point.HeapCommittedBytes,
+			HeapMaxBytes:                snapshot.Point.HeapMaxBytes,
+			NonHeapUsedBytes:            snapshot.Point.NonHeapUsedBytes,
+			NonHeapCommittedBytes:       snapshot.Point.NonHeapCommittedBytes,
+			GCCollectionCount:           snapshot.Point.GCCollectionCount,
+			GCCollectionTimeMs:          snapshot.Point.GCCollectionTimeMs,
+			GCDeltaCount:                snapshot.Point.GCDeltaCount,
+			GCDeltaTimeMs:               snapshot.Point.GCDeltaTimeMs,
+			ThreadCount:                 snapshot.Point.ThreadCount,
+			DaemonThreadCount:           snapshot.Point.DaemonThreadCount,
+			PeakThreadCount:             snapshot.Point.PeakThreadCount,
+			ThreadStateCounts:           cloneStringIntMap(snapshot.Point.ThreadStateCounts),
+			LoadedClassCount:            snapshot.Point.LoadedClassCount,
+			UnloadedClassCount:          snapshot.Point.UnloadedClassCount,
+			ClassLoadDelta:              snapshot.Point.ClassLoadDelta,
+			ProcessCpuLoad:              snapshot.Point.ProcessCpuLoad,
+			SystemCpuLoad:               snapshot.Point.SystemCpuLoad,
+			ProcessRssBytes:             snapshot.Point.ProcessRssBytes,
+			CommittedVirtualMemoryBytes: snapshot.Point.CommittedVirtualMemoryBytes,
+		},
+		RecentGCEvents:   append([]RecentGCEvent(nil), snapshot.RecentGCEvents...),
+		AvailableMetrics: append([]string(nil), snapshot.AvailableMetrics...),
+		MissingMetrics:   append([]string(nil), snapshot.MissingMetrics...),
+		ProviderWarnings: append([]string(nil), snapshot.ProviderWarnings...),
+	}, nil
 }
 
 func applyResultFromHelper(target jmxResourceTarget, result *jmxHelperApplyResponse) (ApplyResult, error) {

@@ -135,6 +135,51 @@ func TestJMXProviderGetValueUsesHelperSnapshot(t *testing.T) {
 	}
 }
 
+func TestJMXProviderGetMonitoringSnapshotUsesHelperMonitorCommand(t *testing.T) {
+	helper := &stubJMXHelper{
+		response: jmxHelperResponse{
+			MonitoringSnapshot: &jmxHelperMonitoringSnapshot{
+				Point: jmxHelperMonitoringPoint{
+					Timestamp:                   1713945600000,
+					ThreadCount:                 33,
+					HeapUsedBytes:               536870912,
+					ProcessCpuLoad:              0.37,
+					LoadedClassCount:            2048,
+					ProcessRssBytes:             1610612736,
+					CommittedVirtualMemoryBytes: 2147483648,
+				},
+				RecentGCEvents: []RecentGCEvent{{
+					Timestamp:  1713945600000,
+					Name:       "G1 Young Generation",
+					Cause:      "G1 Evacuation Pause",
+					DurationMs: 18,
+				}},
+				AvailableMetrics: []string{"thread.count", "heap.used", "class.loading", "memory.rss"},
+				MissingMetrics:   []string{"cpu.system"},
+			},
+		},
+	}
+	withStubJMXHelper(t, helper.run)
+	provider := &JMXProvider{}
+
+	snapshot, err := provider.GetMonitoringSnapshot(context.Background(), newJMXProviderTestConfig(), nil)
+	if err != nil {
+		t.Fatalf("GetMonitoringSnapshot returned error: %v", err)
+	}
+	if helper.lastRequest.Command != jmxHelperCommandMonitor {
+		t.Fatalf("expected helper command %q, got %#v", jmxHelperCommandMonitor, helper.lastRequest)
+	}
+	if snapshot.Point.ThreadCount != 33 || snapshot.Point.HeapUsedBytes != 536870912 || snapshot.Point.LoadedClassCount != 2048 {
+		t.Fatalf("unexpected monitoring snapshot: %#v", snapshot)
+	}
+	if len(snapshot.RecentGCEvents) != 1 || snapshot.RecentGCEvents[0].DurationMs != 18 {
+		t.Fatalf("unexpected recent gc events: %#v", snapshot.RecentGCEvents)
+	}
+	if len(snapshot.MissingMetrics) != 1 || snapshot.MissingMetrics[0] != "cpu.system" {
+		t.Fatalf("unexpected missing metrics: %#v", snapshot)
+	}
+}
+
 func TestJMXProviderPreviewAndApplyUseHelperPayload(t *testing.T) {
 	request := ChangeRequest{
 		ProviderMode: ModeJMX,

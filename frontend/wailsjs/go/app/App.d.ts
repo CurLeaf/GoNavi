@@ -134,6 +134,8 @@ export function JVMCancelDiagnosticCommand(arg1:connection.ConnectionConfig,arg2
 
 export function JVMExecuteDiagnosticCommand(arg1:connection.ConnectionConfig,arg2:string,arg3:jvm.DiagnosticCommandRequest):Promise<connection.QueryResult>;
 
+export function JVMGetMonitoringHistory(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
 export function JVMGetValue(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function JVMListAuditRecords(arg1:string,arg2:number):Promise<connection.QueryResult>;
@@ -149,6 +151,10 @@ export function JVMProbeCapabilities(arg1:connection.ConnectionConfig):Promise<c
 export function JVMProbeDiagnosticCapabilities(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function JVMStartDiagnosticSession(arg1:connection.ConnectionConfig,arg2:jvm.DiagnosticSessionRequest):Promise<connection.QueryResult>;
+
+export function JVMStartMonitoring(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function JVMStopMonitoring(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
