@@ -91,6 +91,7 @@ describe('TableDesignerSqlPreview', () => {
     expect(markup).toContain('data-theme="gonavi-sql-preview-light"');
     expect(markup).toContain('&quot;readOnly&quot;:true');
     expect(markup).toContain('&quot;lineNumbers&quot;:&quot;on&quot;');
+    expect(markup).not.toContain('&quot;glyphMargin&quot;:true');
     expect(markup).toContain('ALTER TABLE');
     expect(markup).toContain('RENAME COLUMN');
 
@@ -143,6 +144,7 @@ describe('TableDesignerSqlPreview', () => {
           options: expect.objectContaining({
             className: expect.stringContaining('gonavi-sql-preview-change-line-add'),
             isWholeLine: true,
+            linesDecorationsClassName: expect.stringContaining('gonavi-sql-preview-change-marker-add'),
           }),
         }),
         expect.objectContaining({
@@ -150,12 +152,22 @@ describe('TableDesignerSqlPreview', () => {
           options: expect.objectContaining({
             className: expect.stringContaining('gonavi-sql-preview-change-line-drop'),
             isWholeLine: true,
+            linesDecorationsClassName: expect.stringContaining('gonavi-sql-preview-change-marker-drop'),
           }),
         }),
       ]),
     );
     const firstDecorationCall = mockEditor.deltaDecorations.mock.calls[0] as unknown as [unknown, unknown[]];
     expect(firstDecorationCall[1]).toHaveLength(2);
+    expect(firstDecorationCall[1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          options: expect.not.objectContaining({
+            glyphMarginClassName: expect.any(String),
+          }),
+        }),
+      ]),
+    );
   });
 
   it('uses the dark SQL preview theme when dark mode is enabled', () => {

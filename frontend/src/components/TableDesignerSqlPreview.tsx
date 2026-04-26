@@ -151,7 +151,6 @@ const TableDesignerSqlPreview: React.FC<TableDesignerSqlPreviewProps> = ({
           range: new monaco.Range(highlight.lineNumber, 1, highlight.lineNumber, endColumn),
           options: {
             className: getLineDecorationClassName(highlight.kind),
-            glyphMarginClassName: getLineDecorationMarkerClassName(highlight.kind),
             hoverMessage: { value: highlight.label },
             isWholeLine: true,
             linesDecorationsClassName: getLineDecorationMarkerClassName(highlight.kind),
@@ -233,7 +232,6 @@ const TableDesignerSqlPreview: React.FC<TableDesignerSqlPreviewProps> = ({
           automaticLayout: true,
           fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
           fontSize: 13,
-          glyphMargin: true,
           lineNumbers: 'on',
           lineDecorationsWidth: 14,
           minimap: { enabled: false },
