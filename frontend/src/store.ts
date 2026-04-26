@@ -243,6 +243,18 @@ const sanitizeAddressList = (value: unknown): string[] => {
   return all.slice(0, MAX_HOST_ENTRIES);
 };
 
+const sanitizeConnectionIconType = (value: unknown): string | undefined => {
+  const iconType = toTrimmedString(value).toLowerCase();
+  return iconType || undefined;
+};
+
+const sanitizeConnectionIconColor = (value: unknown): string | undefined => {
+  const color = toTrimmedString(value);
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)
+    ? color
+    : undefined;
+};
+
 const normalizeConnectionType = (value: unknown): string => {
   const type = toTrimmedString(value).toLowerCase();
   if (type === "doris") {
@@ -574,6 +586,8 @@ const sanitizeSavedConnection = (
       includeDatabases.length > 0 ? includeDatabases : undefined,
     includeRedisDatabases:
       includeRedisDatabases.length > 0 ? includeRedisDatabases : undefined,
+    iconType: sanitizeConnectionIconType(raw.iconType),
+    iconColor: sanitizeConnectionIconColor(raw.iconColor),
   };
 };
 

@@ -48,6 +48,7 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { resolveConnectionHostTokens } from '../utils/tabDisplay';
+import { resolveConnectionAccentColor, resolveConnectionIconType } from '../utils/connectionVisual';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
@@ -358,10 +359,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
       const buildConnectionNode = (conn: SavedConnection): TreeNode => {
         const existing = prevMap.get(conn.id);
+        const iconType = resolveConnectionIconType(conn);
+        const iconColor = resolveConnectionAccentColor(conn);
         return {
           title: conn.name,
           key: conn.id,
-          icon: getDbIcon(conn.iconType || conn.config.type, conn.iconColor, 22),
+          icon: getDbIcon(iconType, iconColor, 22),
           type: 'connection',
           dataRef: conn,
           isLeaf: false,

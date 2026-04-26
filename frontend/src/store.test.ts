@@ -164,6 +164,29 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('preserves connection icon metadata when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'visual-1',
+        name: 'Visual Orders',
+        iconType: 'postgres',
+        iconColor: '#2f855a',
+        config: {
+          id: 'visual-1',
+          type: 'mysql',
+          host: 'db.local',
+          port: 3306,
+          user: 'root',
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.iconType).toBe('postgres');
+    expect(useStore.getState().connections[0]?.iconColor).toBe('#2f855a');
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
