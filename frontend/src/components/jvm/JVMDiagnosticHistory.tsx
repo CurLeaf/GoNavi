@@ -18,32 +18,38 @@ const { Text } = Typography;
 type JVMDiagnosticHistoryProps = {
   session?: JVMDiagnosticSessionHandle | null;
   records?: JVMDiagnosticAuditRecord[];
+  showSession?: boolean;
+  maxHeight?: number;
 };
 
 const JVMDiagnosticHistory: React.FC<JVMDiagnosticHistoryProps> = ({
   session,
   records = [],
+  showSession = true,
+  maxHeight = 360,
 }) => (
   <div style={{ display: "grid", gap: 12 }}>
-    <div style={{ display: "grid", gap: 4 }}>
-      <Text strong>当前会话</Text>
-      {session ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Tag color="blue">{session.sessionId}</Tag>
-          <Tag>{formatJVMDiagnosticTransportLabel(session.transport)}</Tag>
-        </div>
-      ) : (
-        <Empty
-          description="尚未建立诊断会话"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
-      )}
-    </div>
+    {showSession ? (
+      <div style={{ display: "grid", gap: 4 }}>
+        <Text strong>当前会话</Text>
+        {session ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Tag color="blue">{session.sessionId}</Tag>
+            <Tag>{formatJVMDiagnosticTransportLabel(session.transport)}</Tag>
+          </div>
+        ) : (
+          <Empty
+            description="尚未建立诊断会话"
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        )}
+      </div>
+    ) : null}
 
     <div style={{ display: "grid", gap: 8 }}>
       <Text strong>最近记录</Text>
       {records.length ? (
-        <div style={{ maxHeight: 360, overflow: "auto", paddingRight: 4 }}>
+        <div style={{ maxHeight, overflow: "auto", paddingRight: 4 }}>
           <List
             size="small"
             dataSource={records}

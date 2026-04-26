@@ -12,15 +12,24 @@ const { Text } = Typography;
 
 type JVMDiagnosticOutputProps = {
   chunks: JVMDiagnosticEventChunk[];
+  maxHeight?: number;
 };
 
-const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({ chunks }) => {
+const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
+  chunks,
+  maxHeight = 420,
+}) => {
   if (!chunks.length) {
-    return <Empty description="尚无诊断输出" />;
+    return (
+      <Empty
+        description="暂无实时输出。命令执行后，这里会按时间顺序追加后端返回内容。"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    );
   }
 
   return (
-    <div style={{ maxHeight: 420, overflow: "auto", paddingRight: 4 }}>
+    <div style={{ maxHeight, overflow: "auto", paddingRight: 4 }}>
       <List
         size="small"
         dataSource={chunks}

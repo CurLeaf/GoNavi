@@ -7,14 +7,12 @@ import {
   Button,
   message,
   Checkbox,
-  Divider,
   Select,
   Alert,
   Card,
   Row,
   Col,
   Typography,
-  Collapse,
   Space,
   Table,
   Tag,
@@ -30,6 +28,12 @@ import {
   EditOutlined,
   AppstoreOutlined,
   BgColorsOutlined,
+  ApiOutlined,
+  ClusterOutlined,
+  CodeOutlined,
+  GatewayOutlined,
+  SafetyCertificateOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   getDbIcon,
@@ -46,10 +50,14 @@ import {
   resolveAppearanceValues,
 } from "../utils/appearance";
 import {
+  getConnectionConfigLayoutKindLabel,
+  getConnectionConfigSectionCopy,
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
   resolveConnectionTestFailureFeedback,
+  resolveConnectionConfigLayout,
   summarizeConnectionTestFailureMessage,
+  type ConnectionConfigSectionKey,
 } from "../utils/connectionModalPresentation";
 import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
@@ -81,6 +89,12 @@ import {
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from "../types";
 
 const { Text } = Typography;
+type EditableJVMMode = (typeof JVM_EDITABLE_MODES)[number];
+type ChoiceCardOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
@@ -172,6 +186,7 @@ const singleHostUriSchemesByType: Record<string, string[]> = {
 const sslSupportedTypes = new Set([
   "mysql",
   "mariadb",
+  "doris",
   "diros",
   "sphinx",
   "dameng",
@@ -283,6 +298,12 @@ const ConnectionModal: React.FC<{
   const mongoTopology = Form.useWatch("mongoTopology", form) || "single";
   const mongoSrv = Form.useWatch("mongoSrv", form) || false;
   const redisTopology = Form.useWatch("redisTopology", form) || "single";
+  const sslMode = Form.useWatch("sslMode", form) || "preferred";
+  const proxyType = Form.useWatch("proxyType", form) || "socks5";
+  const mongoReadPreference =
+    Form.useWatch("mongoReadPreference", form) || "primary";
+  const mongoAuthMechanism = Form.useWatch("mongoAuthMechanism", form) || "";
+  const jvmEnvironment = Form.useWatch("jvmEnvironment", form) || "dev";
   const jvmAllowedModes = Form.useWatch("jvmAllowedModes", form);
   const jvmPreferredMode = Form.useWatch("jvmPreferredMode", form) || "jmx";
   const jvmDiagnosticEnabled =
@@ -304,6 +325,7 @@ const ConnectionModal: React.FC<{
   const isMySQLLike =
     dbType === "mysql" ||
     dbType === "mariadb" ||
+    dbType === "doris" ||
     dbType === "diros" ||
     dbType === "sphinx";
   const isSSLType = supportsSSLForType(dbType);
@@ -526,6 +548,271 @@ const ConnectionModal: React.FC<{
       : "inset 0 0 0 1px rgba(16,24,40,0.03)",
     transition: "all 120ms ease",
   });
+
+  const jvmSectionCardStyle = (): React.CSSProperties => ({
+    ...modalInnerSectionStyle,
+    padding: 16,
+  });
+
+  const renderJvmSectionHeader = (
+    icon: React.ReactNode,
+    title: string,
+    description: string,
+    badge?: React.ReactNode,
+  ) => (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 12,
+        marginBottom: 14,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 12,
+            display: "grid",
+            placeItems: "center",
+            flexShrink: 0,
+            background: darkMode
+              ? "rgba(255,214,102,0.14)"
+              : "rgba(22,119,255,0.10)",
+            color: darkMode ? "#ffd666" : "#1677ff",
+          }}
+        >
+          {icon}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              color: darkMode ? "#f5f7ff" : "#162033",
+              fontSize: 14,
+              fontWeight: 800,
+            }}
+          >
+            {title}
+          </div>
+          <div style={{ ...modalMutedTextStyle, marginTop: 4 }}>
+            {description}
+          </div>
+        </div>
+      </div>
+      {badge ? <div style={{ flexShrink: 0 }}>{badge}</div> : null}
+    </div>
+  );
+
+  const configSectionCardStyle = (): React.CSSProperties => ({
+    padding: 16,
+    borderRadius: 16,
+    border: darkMode
+      ? "1px solid rgba(255,255,255,0.08)"
+      : "1px solid rgba(16,24,40,0.08)",
+    background: darkMode
+      ? "rgba(255,255,255,0.025)"
+      : "rgba(255,255,255,0.70)",
+    boxShadow: darkMode
+      ? "inset 0 1px 0 rgba(255,255,255,0.04)"
+      : "inset 0 1px 0 rgba(255,255,255,0.90)",
+  });
+
+  const renderConfigSectionCard = ({
+    sectionKey,
+    icon,
+    children,
+    badge,
+  }: {
+    sectionKey: ConnectionConfigSectionKey;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+    badge?: React.ReactNode;
+  }) => {
+    const copy = getConnectionConfigSectionCopy(sectionKey);
+    return (
+      <div
+        data-connection-config-section={sectionKey}
+        style={configSectionCardStyle()}
+      >
+        {renderJvmSectionHeader(icon, copy.title, copy.description, badge)}
+        {children}
+      </div>
+    );
+  };
+
+  const clearConnectionTestResultForChoice = () => {
+    if (testResult) {
+      setTestResult(null);
+      setTestErrorLogOpen(false);
+    }
+  };
+
+  const setChoiceFieldValue = (fieldName: string, value: string | boolean) => {
+    clearConnectionTestResultForChoice();
+    form.setFieldValue(fieldName, value);
+    if (
+      fieldName === "mongoTopology" ||
+      fieldName === "mongoSrv" ||
+      fieldName === "host" ||
+      fieldName === "port"
+    ) {
+      setMongoMembers([]);
+    }
+    if (fieldName === "redisTopology") {
+      const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+      setRedisDbList(supportedDbs);
+      const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
+      const selectedDbs = Array.isArray(selectedDbsRaw)
+        ? selectedDbsRaw.map((entry: any) => Number(entry))
+        : [];
+      const validDbs = selectedDbs
+        .filter((entry: number) => Number.isFinite(entry))
+        .map((entry: number) => Math.trunc(entry))
+        .filter((entry: number) => supportedDbs.includes(entry));
+      form.setFieldValue(
+        "includeRedisDatabases",
+        validDbs.length > 0 ? validDbs : undefined,
+      );
+    }
+    if (fieldName === "proxyType") {
+      const nextType = String(value || "socks5").toLowerCase();
+      const currentPort = Number(form.getFieldValue("proxyPort") || 0);
+      if (nextType === "http") {
+        if (!currentPort || currentPort === 1080) {
+          form.setFieldValue("proxyPort", 8080);
+        }
+      } else if (!currentPort || currentPort === 8080) {
+        form.setFieldValue("proxyPort", 1080);
+      }
+    }
+  };
+
+  const renderChoiceCards = ({
+    fieldName,
+    value,
+    options,
+    minWidth = 180,
+    onSelect,
+  }: {
+    fieldName: string;
+    value: string;
+    options: ChoiceCardOption[];
+    minWidth?: number;
+    onSelect?: (value: string) => void;
+  }) => (
+    <>
+      <Form.Item name={fieldName} hidden>
+        <Input {...noAutoCapInputProps} />
+      </Form.Item>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(auto-fit, minmax(${minWidth}px, 1fr))`,
+          gap: 10,
+        }}
+      >
+        {options.map((option) => {
+          const active = String(value ?? "") === option.value;
+          return (
+            <button
+              key={option.value || "empty"}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                onSelect
+                  ? onSelect(option.value)
+                  : setChoiceFieldValue(fieldName, option.value)
+              }
+              style={{
+                textAlign: "left",
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: active
+                  ? darkMode
+                    ? "1px solid rgba(255,214,102,0.42)"
+                    : "1px solid rgba(22,119,255,0.36)"
+                  : darkMode
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "1px solid rgba(16,24,40,0.08)",
+                background: active
+                  ? darkMode
+                    ? "rgba(255,214,102,0.10)"
+                    : "rgba(22,119,255,0.07)"
+                  : darkMode
+                    ? "rgba(255,255,255,0.03)"
+                    : "rgba(16,24,40,0.03)",
+                color: darkMode ? "#f5f7ff" : "#162033",
+                cursor: "pointer",
+                transition: "all 120ms ease",
+                boxShadow: active
+                  ? darkMode
+                    ? "0 0 0 2px rgba(255,214,102,0.10)"
+                    : "0 0 0 2px rgba(22,119,255,0.08)"
+                  : "none",
+              }}
+            >
+              <Space size={8} wrap>
+                <Text strong>{option.label}</Text>
+                {active ? <Tag color="blue">当前</Tag> : null}
+              </Space>
+              {option.description ? (
+                <div style={{ ...modalMutedTextStyle, marginTop: 6 }}>
+                  {option.description}
+                </div>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  const applyJvmModeSelection = (
+    nextModes: EditableJVMMode[],
+    preferredMode?: EditableJVMMode,
+  ) => {
+    const normalizedModes = normalizeEditableJVMModes(nextModes);
+    const resolvedModes = normalizedModes.length ? normalizedModes : ["jmx"];
+    const resolvedPreferred =
+      preferredMode && resolvedModes.includes(preferredMode)
+        ? preferredMode
+        : resolvedModes.includes(jvmPreferredMode as EditableJVMMode)
+          ? (jvmPreferredMode as EditableJVMMode)
+          : resolvedModes[0];
+    form.setFieldsValue({
+      jvmAllowedModes: resolvedModes,
+      jvmPreferredMode: resolvedPreferred,
+      jvmEndpointEnabled: resolvedModes.includes("endpoint"),
+      jvmAgentEnabled: resolvedModes.includes("agent"),
+    });
+  };
+
+  const handleJvmModeCardSelect = (mode: EditableJVMMode) => {
+    const enabled = normalizedJvmAllowedModes.includes(mode);
+    applyJvmModeSelection(
+      enabled ? normalizedJvmAllowedModes : [...normalizedJvmAllowedModes, mode],
+      mode,
+    );
+  };
+
+  const handleJvmModeToggle = (
+    mode: EditableJVMMode,
+    event: React.MouseEvent<HTMLElement>,
+  ) => {
+    event.stopPropagation();
+    const enabled = normalizedJvmAllowedModes.includes(mode);
+    if (!enabled) {
+      applyJvmModeSelection([...normalizedJvmAllowedModes, mode], mode);
+      return;
+    }
+    if (normalizedJvmAllowedModes.length <= 1) {
+      return;
+    }
+    const nextModes = normalizedJvmAllowedModes.filter((item) => item !== mode);
+    applyJvmModeSelection(nextModes, nextModes[0]);
+  };
 
   const fetchDriverStatusMap = async (): Promise<
     Record<string, DriverStatusSnapshot>
@@ -2896,6 +3183,7 @@ const ConnectionModal: React.FC<{
   const isCustom = dbType === "custom";
   const isRedis = dbType === "redis";
   const isJVM = dbType === "jvm";
+  const connectionConfigLayout = resolveConnectionConfigLayout(dbType);
   const unsupportedJvmModeMessage =
     isJVM && hasUnsupportedJvmModeSelection
       ? "当前连接包含未支持的 JVM 模式。此版本只支持 JMX / Endpoint / Agent，请先调整允许模式和首选模式后再继续。"
@@ -3036,6 +3324,23 @@ const ConnectionModal: React.FC<{
   ];
 
   const dbTypes = dbTypeGroups.flatMap((g) => g.items);
+  const getDbTypeHint = (type: string) => {
+    switch (type) {
+      case "jvm":
+        return "JMX / Endpoint / Agent";
+      case "custom":
+        return "自定义驱动与 DSN";
+      case "redis":
+        return "单机 / 集群";
+      case "mongodb":
+        return "单机 / 副本集";
+      case "sqlite":
+      case "duckdb":
+        return "本地文件连接";
+      default:
+        return "标准连接配置";
+    }
+  };
 
   const renderStep1 = () => (
     <div
@@ -3094,9 +3399,9 @@ const ConnectionModal: React.FC<{
         {/* 左侧分类导航 */}
         <div
           style={{
-            width: 120,
+            width: 148,
             borderRight: `1px solid ${step1SidebarDividerColor}`,
-            paddingRight: 8,
+            paddingRight: 10,
             flexShrink: 0,
             overflowY: "auto",
           }}
@@ -3106,15 +3411,15 @@ const ConnectionModal: React.FC<{
               key={group.label}
               onClick={() => setActiveGroup(idx)}
               style={{
-                padding: "10px 12px",
+                padding: "11px 12px",
                 cursor: "pointer",
-                borderRadius: 6,
-                marginBottom: 4,
+                borderRadius: 12,
+                marginBottom: 6,
                 background:
                   activeGroup === idx ? step1SidebarActiveBg : "transparent",
                 color:
                   activeGroup === idx ? step1SidebarActiveColor : undefined,
-                fontWeight: activeGroup === idx ? 500 : 400,
+                fontWeight: activeGroup === idx ? 700 : 500,
                 transition: "all 0.2s",
                 fontSize: 13,
               }}
@@ -3128,48 +3433,73 @@ const ConnectionModal: React.FC<{
           style={{
             flex: 1,
             minHeight: 0,
-            paddingLeft: 16,
+            paddingLeft: 18,
             overflowY: "auto",
             overflowX: "hidden",
           }}
         >
-          <Row gutter={[12, 12]}>
+          <Row gutter={[14, 14]}>
             {dbTypeGroups[activeGroup]?.items.map((item) => (
-              <Col span={8} key={item.key}>
+              <Col span={12} key={item.key}>
                 <Card
                   hoverable
                   onClick={() => {
                     void handleTypeSelect(item.key);
                   }}
                   style={{
-                    textAlign: "center",
                     cursor: "pointer",
-                    height: 100,
+                    minHeight: 92,
+                    borderRadius: 16,
+                    border: darkMode
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(16,24,40,0.08)",
+                    background: darkMode
+                      ? "rgba(255,255,255,0.03)"
+                      : "rgba(255,255,255,0.80)",
                   }}
                   styles={{
                     body: {
-                      padding: "16px 8px",
+                      padding: 14,
                       display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      alignItems: "flex-start",
+                      gap: 12,
                       height: "100%",
                     },
                   }}
                 >
-                  <div style={{ marginBottom: 8 }}>{item.icon}</div>
-                  <Text
-                    strong
+                  <div
                     style={{
-                      fontSize: 12,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      maxWidth: "100%",
+                      width: 44,
+                      height: 44,
+                      borderRadius: 14,
+                      display: "grid",
+                      placeItems: "center",
+                      flexShrink: 0,
+                      background: darkMode
+                        ? "rgba(255,255,255,0.05)"
+                        : "rgba(22,119,255,0.08)",
                     }}
                   >
-                    {item.name}
-                  </Text>
+                    {item.icon}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <Text
+                      strong
+                      style={{
+                        fontSize: 14,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        maxWidth: "100%",
+                        display: "block",
+                      }}
+                    >
+                      {item.name}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {getDbTypeHint(item.key)}
+                    </Text>
+                  </div>
                 </Card>
               </Col>
             ))}
@@ -3196,87 +3526,127 @@ const ConnectionModal: React.FC<{
           常用参数集中在左侧，优先完成连接建立所需的最小输入。
         </div>
 
-        <Form.Item name="name" label="连接名称">
-          <Input {...noAutoCapInputProps} placeholder="例如：本地测试库" />
-        </Form.Item>
+        <div style={{ display: "grid", gap: 16 }}>
+          {renderConfigSectionCard({
+            sectionKey: "identity",
+            icon: <ApiOutlined />,
+            badge: (
+              <Tag>
+                {getConnectionConfigLayoutKindLabel(connectionConfigLayout.kind)}
+              </Tag>
+            ),
+            children: (
+              <Form.Item name="name" label="连接名称" style={{ marginBottom: 0 }}>
+                <Input
+                  {...noAutoCapInputProps}
+                  placeholder={
+                    isJVM
+                      ? "例如：本地 JVM / 订单服务 JVM"
+                      : "例如：本地测试库"
+                  }
+                />
+              </Form.Item>
+            ),
+          })}
 
-        {!isCustom && !isJVM && (
-          <>
-            <Form.Item
-              name="uri"
-              label="连接 URI（可复制粘贴）"
-              help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
-            >
-              <Input.TextArea
-                {...noAutoCapInputProps}
-                rows={3}
-                placeholder={getUriPlaceholder()}
-              />
-            </Form.Item>
-            <Space
-              size={8}
-              style={{ marginBottom: uriFeedback ? 12 : 16 }}
-              wrap
-            >
-              <Button onClick={handleGenerateURI}>生成 URI</Button>
-              <Button onClick={handleParseURI}>从 URI 解析</Button>
-              <Button onClick={handleCopyURI}>复制 URI</Button>
-            </Space>
-            {uriFeedback && (
-              <Alert
-                showIcon
-                closable
-                type={uriFeedback.type}
-                message={uriFeedback.message}
-                onClose={() => setUriFeedback(null)}
-                style={{ marginBottom: 16 }}
-              />
-            )}
-            {renderStoredSecretControls({
-              fieldName: "uri",
-              clearKey: "opaqueURI",
-              hasStoredSecret: initialValues?.hasOpaqueURI,
-              clearLabel: "清除已保存 URI",
-              description:
-                "当前已保存连接 URI。留空表示继续沿用，输入新值表示替换。",
+          {!isCustom &&
+            !isJVM &&
+            renderConfigSectionCard({
+              sectionKey: "uri",
+              icon: <LinkOutlined />,
+              children: (
+                <>
+                  <Form.Item
+                    name="uri"
+                    label="连接 URI（可复制粘贴）"
+                    help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
+                  >
+                    <Input.TextArea
+                      {...noAutoCapInputProps}
+                      rows={3}
+                      placeholder={getUriPlaceholder()}
+                    />
+                  </Form.Item>
+                  <Space
+                    size={8}
+                    style={{ marginBottom: uriFeedback ? 12 : 16 }}
+                    wrap
+                  >
+                    <Button onClick={handleGenerateURI}>生成 URI</Button>
+                    <Button onClick={handleParseURI}>从 URI 解析</Button>
+                    <Button onClick={handleCopyURI}>复制 URI</Button>
+                  </Space>
+                  {uriFeedback && (
+                    <Alert
+                      showIcon
+                      closable
+                      type={uriFeedback.type}
+                      message={uriFeedback.message}
+                      onClose={() => setUriFeedback(null)}
+                      style={{ marginBottom: 16 }}
+                    />
+                  )}
+                  {renderStoredSecretControls({
+                    fieldName: "uri",
+                    clearKey: "opaqueURI",
+                    hasStoredSecret: initialValues?.hasOpaqueURI,
+                    clearLabel: "清除已保存 URI",
+                    description:
+                      "当前已保存连接 URI。留空表示继续沿用，输入新值表示替换。",
+                  })}
+                </>
+              ),
             })}
-          </>
-        )}
 
-        {isCustom ? (
-          <>
-            <Form.Item
-              name="driver"
-              label="驱动名称 (Driver Name)"
-              rules={[{ required: true, message: "请输入驱动名称" }]}
-              help={CUSTOM_CONNECTION_DRIVER_HELP}
-            >
-              <Input
-                {...noAutoCapInputProps}
-                placeholder="例如: mysql, postgres"
-              />
-            </Form.Item>
-            <Form.Item
-              name="dsn"
-              label="连接字符串 (DSN)"
-              rules={[createCustomDsnRule()]}
-            >
-              <Input.TextArea
-                {...noAutoCapInputProps}
-                rows={4}
-                placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8"
-              />
-            </Form.Item>
-            {renderStoredSecretControls({
-              fieldName: "dsn",
-              clearKey: "opaqueDSN",
-              hasStoredSecret: initialValues?.hasOpaqueDSN,
-              clearLabel: "清除已保存 DSN",
-              description:
-                "当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。",
-            })}
-          </>
-        ) : isJVM ? (
+          {isCustom ? (
+            <>
+              {renderConfigSectionCard({
+                sectionKey: "customDriver",
+                icon: <CodeOutlined />,
+                children: (
+                  <Form.Item
+                    name="driver"
+                    label="驱动名称 (Driver Name)"
+                    rules={[{ required: true, message: "请输入驱动名称" }]}
+                    help={CUSTOM_CONNECTION_DRIVER_HELP}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Input
+                      {...noAutoCapInputProps}
+                      placeholder="例如: mysql, postgres"
+                    />
+                  </Form.Item>
+                ),
+              })}
+              {renderConfigSectionCard({
+                sectionKey: "customDsn",
+                icon: <FileTextOutlined />,
+                children: (
+                  <>
+                    <Form.Item
+                      name="dsn"
+                      label="连接字符串 (DSN)"
+                      rules={[createCustomDsnRule()]}
+                    >
+                      <Input.TextArea
+                        {...noAutoCapInputProps}
+                        rows={4}
+                        placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8"
+                      />
+                    </Form.Item>
+                    {renderStoredSecretControls({
+                      fieldName: "dsn",
+                      clearKey: "opaqueDSN",
+                      hasStoredSecret: initialValues?.hasOpaqueDSN,
+                      clearLabel: "清除已保存 DSN",
+                      description:
+                        "当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。",
+                    })}
+                  </>
+                ),
+              })}
+            </>
+          ) : isJVM ? (
           <>
             {unsupportedJvmModeMessage && (
               <Alert
@@ -3287,798 +3657,1301 @@ const ConnectionModal: React.FC<{
                 description={unsupportedJvmModeMessage}
               />
             )}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) 120px",
-                gap: 16,
-                alignItems: "start",
-              }}
-            >
-              <Form.Item
-                name="host"
-                label="主机地址 (Host)"
-                rules={[{ required: true, message: "请输入 JVM 主机地址" }]}
-                style={{ marginBottom: 0 }}
-              >
-                <Input {...noAutoCapInputProps} placeholder="localhost" />
-              </Form.Item>
-              <Form.Item
-                name="port"
-                label="端口 (Port)"
-                rules={[{ required: true, message: "请输入 JVM 端口号" }]}
-                style={{ marginBottom: 0 }}
-              >
-                <InputNumber style={{ width: "100%" }} min={1} max={65535} />
-              </Form.Item>
-            </div>
-
-            <Form.Item
-              name="jvmAllowedModes"
-              label="允许接入模式"
-              rules={[
-                { required: true, message: "请至少选择一种 JVM 接入模式" },
-              ]}
-              help="JMX 适合标准 MBean；Endpoint 适合业务管理端点；Agent 适合已预埋 GoNavi Java Agent 的服务。"
-            >
-              <Select
-                mode="multiple"
-                allowClear
-                placeholder="请选择 JVM 接入模式"
-                options={JVM_EDITABLE_MODES.map((mode) => ({
-                  value: mode,
-                  label: resolveJVMModeMeta(mode).label,
-                }))}
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="jvmPreferredMode"
-              label="首选接入模式"
-              rules={[{ required: true, message: "请选择首选 JVM 接入模式" }]}
-            >
-              <Select
-                options={normalizedJvmAllowedModes.map((mode) => ({
-                  value: mode,
-                  label: resolveJVMModeMeta(mode).label,
-                }))}
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="jvmReadOnly"
-              valuePropName="checked"
-              style={{ marginBottom: 12 }}
-            >
-              <Checkbox>只读模式</Checkbox>
-            </Form.Item>
-
-            <Form.Item
-              name="jvmEndpointBaseUrl"
-              label="JVM Endpoint Base URL"
-              rules={[
-                {
-                  required: jvmPreferredMode === "endpoint",
-                  message: "启用 Endpoint 模式时请输入 Base URL",
-                },
-              ]}
-              help="当允许或首选 Endpoint 时，用于后端探测与访问 JVM 管理端点。"
-            >
-              <Input
-                {...noAutoCapInputProps}
-                placeholder="例如：https://orders.internal/manage/jvm"
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="jvmEndpointApiKey"
-              label="Endpoint API Key"
-              help="如果 JVM Endpoint 受 Token 保护，请在这里填写 API Key。"
-            >
-              <Input.Password placeholder="可选" />
-            </Form.Item>
-
-            <Form.Item
-              name="jvmAgentBaseUrl"
-              label="JVM Agent Base URL"
-              rules={[
-                {
-                  required: jvmPreferredMode === "agent",
-                  message: "启用 Agent 模式时请输入 Base URL",
-                },
-              ]}
-              help="用于访问 GoNavi Java Agent 管理端口。目标 Java 服务需以 `-javaagent` 方式启动对应 Agent。"
-            >
-              <Input
-                {...noAutoCapInputProps}
-                placeholder="例如：http://127.0.0.1:19090/gonavi/agent/jvm"
-              />
-            </Form.Item>
-
-            <Form.Item
-              name="jvmAgentApiKey"
-              label="Agent API Key"
-              help="如果 GoNavi Java Agent 启用了 Token 校验，请填写对应 API Key。"
-            >
-              <Input.Password placeholder="可选" />
-            </Form.Item>
-
-            <Divider orientation="left">诊断增强</Divider>
-
-            <Form.Item
-              name="jvmDiagnosticEnabled"
-              label="启用诊断增强"
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-
-            {jvmDiagnosticEnabled ? (
-              <>
-                <Form.Item
-                  name="jvmDiagnosticTransport"
-                  label="诊断传输"
-                  rules={[
-                    { required: true, message: "请选择诊断传输模式" },
-                  ]}
+            <div style={{ display: "grid", gap: 16 }}>
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <GatewayOutlined />,
+                  "目标 JVM",
+                  "定义连接树中的主机入口和基础运行环境。",
+                )}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) 120px",
+                    gap: 16,
+                    alignItems: "start",
+                  }}
                 >
-                  <Select
-                    options={[
+                  <Form.Item
+                    name="host"
+                    label="主机地址"
+                    rules={[{ required: true, message: "请输入 JVM 主机地址" }]}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Input {...noAutoCapInputProps} placeholder="localhost" />
+                  </Form.Item>
+                  <Form.Item
+                    name="port"
+                    label="主端口"
+                    rules={[{ required: true, message: "请输入 JVM 端口号" }]}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber style={{ width: "100%" }} min={1} max={65535} />
+                  </Form.Item>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 16,
+                    marginTop: 16,
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <Text strong>环境</Text>
+                    {renderChoiceCards({
+                      fieldName: "jvmEnvironment",
+                      value: String(jvmEnvironment),
+                      minWidth: 120,
+                      options: [
+                        {
+                          value: "dev",
+                          label: "开发 / 测试",
+                          description: "本地或测试环境。",
+                        },
+                        {
+                          value: "uat",
+                          label: "预发 / 验收",
+                          description: "上线前验证环境。",
+                        },
+                        {
+                          value: "prod",
+                          label: "生产",
+                          description: "生产 JVM，默认更谨慎。",
+                        },
+                      ],
+                    })}
+                  </div>
+                  <Form.Item
+                    name="timeout"
+                    label="连接超时（秒）"
+                    rules={[
                       {
-                        value: "agent-bridge",
-                        label: "Agent Bridge（GoNavi Agent 桥接）",
-                      },
-                      {
-                        value: "arthas-tunnel",
-                        label: "Arthas Tunnel（官方 Tunnel / Web Console）",
+                        type: "number",
+                        min: 1,
+                        max: 300,
+                        message: "超时时间范围: 1-300 秒",
                       },
                     ]}
-                  />
-                </Form.Item>
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      min={1}
+                      max={300}
+                      placeholder="30"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="jvmReadOnly"
+                    label="安全策略"
+                    valuePropName="checked"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Checkbox>只读优先</Checkbox>
+                  </Form.Item>
+                </div>
+              </div>
 
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <ClusterOutlined />,
+                  "接入模式",
+                  "通过卡片选择允许使用的 JVM 通道；已启用卡片再次点击会设为首选。",
+                )}
                 <Form.Item
-                  name="jvmDiagnosticBaseUrl"
-                  label={
-                    jvmDiagnosticTransport === "arthas-tunnel"
-                      ? "Arthas Tunnel URL"
-                      : "诊断 Bridge URL"
-                  }
+                  name="jvmAllowedModes"
+                  hidden
                   rules={[
                     {
                       required: true,
-                      message:
-                        jvmDiagnosticTransport === "arthas-tunnel"
-                          ? "请输入 Arthas Tunnel Server 地址"
-                          : "请输入诊断 Bridge URL",
+                      message: "请至少选择一种 JVM 接入模式",
                     },
                   ]}
-                  help={
-                    jvmDiagnosticTransport === "arthas-tunnel"
-                      ? "填写 Arthas Tunnel Server 地址，例如：http://127.0.0.1:7777。若 Tunnel 部署在反向代理下，也可以填写带访问前缀的入口地址。"
-                      : "用于访问诊断桥接接口，例如：http://127.0.0.1:19091/gonavi/diag"
-                  }
                 >
-                  <Input
-                    {...noAutoCapInputProps}
-                    placeholder={
-                      jvmDiagnosticTransport === "arthas-tunnel"
-                        ? "http://127.0.0.1:7777"
-                        : "http://127.0.0.1:19091/gonavi/diag"
-                    }
-                  />
+                  <Select mode="multiple" />
                 </Form.Item>
-
                 <Form.Item
-                  name="jvmDiagnosticTargetId"
-                  label={
-                    jvmDiagnosticTransport === "arthas-tunnel"
-                      ? "目标实例标识 (AgentId)"
-                      : "目标实例标识"
-                  }
-                  rules={
-                    jvmDiagnosticTransport === "arthas-tunnel"
-                      ? [
-                          {
-                            required: true,
-                            message:
-                              "Arthas Tunnel 模式必须填写目标实例标识（targetId / agentId）",
-                          },
-                        ]
-                      : undefined
-                  }
-                  help={
-                    jvmDiagnosticTransport === "arthas-tunnel"
-                      ? "必填。填写 Arthas Tunnel 中目标 JVM 的 agentId，用于 connectArthas 握手。"
-                      : "可选。用于在桥接端区分具体 JVM 实例。"
-                  }
-                >
-                  <Input
-                    {...noAutoCapInputProps}
-                    placeholder={
-                      jvmDiagnosticTransport === "arthas-tunnel"
-                        ? "例如：orders-app_A1B2C3D4E5"
-                        : "例如：orders-prod-01"
-                    }
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="jvmDiagnosticApiKey"
-                  label="诊断 API Key"
-                  help="如果桥接端启用了 Token 校验，请填写对应密钥。"
-                >
-                  <Input.Password placeholder="可选" />
-                </Form.Item>
-
-                <Space size={16} wrap style={{ marginBottom: 16 }}>
-                  <Form.Item
-                    name="jvmDiagnosticAllowObserveCommands"
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Checkbox>观察类命令</Checkbox>
-                  </Form.Item>
-                  <Form.Item
-                    name="jvmDiagnosticAllowTraceCommands"
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Checkbox>跟踪类命令</Checkbox>
-                  </Form.Item>
-                  <Form.Item
-                    name="jvmDiagnosticAllowMutatingCommands"
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Checkbox>高风险命令</Checkbox>
-                  </Form.Item>
-                </Space>
-
-                <Form.Item
-                  name="jvmDiagnosticTimeoutSeconds"
-                  label="诊断超时 (秒)"
+                  name="jvmPreferredMode"
+                  hidden
                   rules={[
                     {
-                      type: "number",
-                      min: 1,
-                      max: 300,
-                      message: "诊断超时时间范围: 1-300 秒",
+                      required: true,
+                      message: "请选择首选 JVM 接入模式",
                     },
                   ]}
                 >
-                  <InputNumber style={{ width: "100%" }} min={1} max={300} />
+                  <Input {...noAutoCapInputProps} />
                 </Form.Item>
-              </>
-            ) : null}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 14,
+                  }}
+                >
+                  {JVM_EDITABLE_MODES.map((mode) => {
+                    const meta = resolveJVMModeMeta(mode);
+                    const enabled = normalizedJvmAllowedModes.includes(mode);
+                    const preferred = jvmPreferredMode === mode;
+                    return (
+                      <div
+                        key={mode}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleJvmModeCardSelect(mode)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            handleJvmModeCardSelect(mode);
+                          }
+                        }}
+                        aria-pressed={enabled}
+                        style={{
+                          textAlign: "left",
+                          padding: 14,
+                          borderRadius: 16,
+                          border: enabled
+                            ? darkMode
+                              ? "1px solid rgba(255,214,102,0.36)"
+                              : "1px solid rgba(22,119,255,0.34)"
+                            : darkMode
+                              ? "1px solid rgba(255,255,255,0.08)"
+                              : "1px solid rgba(16,24,40,0.08)",
+                          background: enabled
+                            ? darkMode
+                              ? "rgba(255,214,102,0.08)"
+                              : "rgba(22,119,255,0.06)"
+                            : darkMode
+                              ? "rgba(255,255,255,0.03)"
+                              : "rgba(16,24,40,0.03)",
+                          boxShadow: preferred
+                            ? darkMode
+                              ? "0 0 0 2px rgba(255,214,102,0.12)"
+                              : "0 0 0 2px rgba(22,119,255,0.10)"
+                            : "none",
+                          color: darkMode ? "#f5f7ff" : "#162033",
+                          cursor: "pointer",
+                          transition: "all 120ms ease",
+                        }}
+                      >
+                        <Space size={8} wrap>
+                          <Tag color={enabled ? "blue" : "default"}>
+                            {meta.label}
+                          </Tag>
+                          {preferred ? <Tag color="green">首选</Tag> : null}
+                          {!enabled ? <Tag>未启用</Tag> : null}
+                        </Space>
+                        <div style={{ ...modalMutedTextStyle, marginTop: 8 }}>
+                          {mode === "jmx"
+                            ? "标准 MBean 与线程、内存、类加载等运行时指标。"
+                            : mode === "endpoint"
+                              ? "通过服务端管理接口读取 JVM 资源与配置。"
+                              : "通过 GoNavi Java Agent 提供更完整的增强能力。"}
+                        </div>
+                        <Button
+                          size="small"
+                          type={enabled ? "default" : "primary"}
+                          disabled={enabled && normalizedJvmAllowedModes.length <= 1}
+                          onClick={(event) => handleJvmModeToggle(mode, event)}
+                          style={{ marginTop: 12, borderRadius: 999 }}
+                        >
+                          {enabled ? "停用" : "启用并设为首选"}
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ ...modalMutedTextStyle, marginTop: 12 }}>
+                  当前首选：
+                  {resolveJVMModeMeta(String(jvmPreferredMode || "jmx")).label}
+                  。至少保留一种接入模式，停用首选模式时会自动切换到剩余模式。
+                </div>
+              </div>
 
-            <Form.Item
-              name="timeout"
-              label="连接超时 (秒)"
-              help="JVM 连接测试超时时间，默认 30 秒"
-              rules={[
-                {
-                  type: "number",
-                  min: 1,
-                  max: 300,
-                  message: "超时时间范围: 1-300 秒",
-                },
-              ]}
-              style={{ marginBottom: 0 }}
-            >
-              <InputNumber
-                style={{ width: "100%" }}
-                min={1}
-                max={300}
-                placeholder="30"
-              />
-            </Form.Item>
-          </>
-        ) : (
-          <>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: isFileDb
-                  ? "minmax(0, 1fr) 120px"
-                  : "minmax(0, 1fr) 120px",
-                gap: 16,
-                alignItems: "start",
-              }}
-            >
-              <Form.Item
-                name="host"
-                label={isFileDb ? "文件路径 (绝对路径)" : "主机地址 (Host)"}
-                rules={[createUriAwareRequiredRule("请输入地址/路径")]}
-                style={{ marginBottom: 0 }}
-              >
-                <Input
-                  {...noAutoCapInputProps}
-                  placeholder={
-                    isFileDb
-                      ? dbType === "duckdb"
-                        ? "/path/to/db.duckdb"
-                        : "/path/to/db.sqlite"
-                      : "localhost"
-                  }
-                />
-              </Form.Item>
-              {isFileDb ? (
-                <Form.Item label=" " style={{ marginBottom: 0 }}>
-                  <Button
-                    style={{ width: "100%" }}
-                    onClick={handleSelectDatabaseFile}
-                    loading={selectingDbFile}
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <ApiOutlined />,
+                  "JMX",
+                  "标准 JVM 管理通道，可覆盖主机/端口并配置认证。",
+                  <Tag color={normalizedJvmAllowedModes.includes("jmx") ? "green" : "default"}>
+                    {normalizedJvmAllowedModes.includes("jmx") ? "已启用" : "未启用"}
+                  </Tag>,
+                )}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) 120px",
+                    gap: 16,
+                  }}
+                >
+                  <Form.Item
+                    name="jvmJmxHost"
+                    label="JMX 主机覆盖（可选）"
+                    style={{ marginBottom: 0 }}
                   >
-                    浏览...
-                  </Button>
-                </Form.Item>
-              ) : (
-                <Form.Item
-                  name="port"
-                  label="端口 (Port)"
-                  rules={[
-                    createUriAwareRequiredRule(
-                      "请输入端口号",
-                      (value) => Number(value) > 0,
-                    ),
-                  ]}
-                  style={{ marginBottom: 0 }}
-                >
-                  <InputNumber style={{ width: "100%" }} />
-                </Form.Item>
-              )}
-            </div>
-
-            {(dbType === "postgres" ||
-              dbType === "kingbase" ||
-              dbType === "highgo" ||
-              dbType === "vastbase") && (
-              <Form.Item
-                name="database"
-                label="默认连接数据库（可选）"
-                help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
-              >
-                <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
-              </Form.Item>
-            )}
-
-            {dbType === "oracle" && (
-              <Form.Item
-                name="database"
-                label="服务名 (Service Name)"
-                rules={[
-                  createUriAwareRequiredRule(
-                    "请输入 Oracle 服务名（例如 ORCLPDB1）",
-                  ),
-                ]}
-                help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
-              >
-                <Input {...noAutoCapInputProps} placeholder="例如：ORCLPDB1" />
-              </Form.Item>
-            )}
-
-            {(dbType === "mysql" ||
-              dbType === "mariadb" ||
-              dbType === "diros" ||
-              dbType === "sphinx") && (
-              <>
-                <Form.Item name="mysqlTopology" label="连接模式">
-                  <Select
-                    options={[
-                      { value: "single", label: "单机模式" },
-                      {
-                        value: "replica",
-                        label: "主从模式（优先主库，可切换从库）",
-                      },
-                    ]}
-                  />
-                </Form.Item>
-                {mysqlTopology === "replica" && (
-                  <>
-                    <Form.Item
-                      name="mysqlReplicaHosts"
-                      label="从库地址列表"
-                      help="可输入多个从库地址，格式：host:port（回车确认）"
-                    >
-                      <Select
-                        mode="tags"
-                        placeholder="例如：10.10.0.12:3306、10.10.0.13:3306"
-                        tokenSeparators={[",", ";", " "]}
-                      />
-                    </Form.Item>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 16,
-                      }}
-                    >
-                      <Form.Item
-                        name="mysqlReplicaUser"
-                        label="从库用户名（可选）"
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder="留空沿用主库用户名"
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name="mysqlReplicaPassword"
-                        label="从库密码（可选）"
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Input.Password
-                          {...noAutoCapInputProps}
-                          placeholder={getStoredSecretPlaceholder({
-                            hasStoredSecret:
-                              initialValues?.hasMySQLReplicaPassword,
-                            emptyPlaceholder: "留空沿用主库密码",
-                            retainedLabel: "已保存从库密码",
-                          })}
-                        />
-                      </Form.Item>
-                    </div>
-                    {renderStoredSecretControls({
-                      fieldName: "mysqlReplicaPassword",
-                      clearKey: "mysqlReplicaPassword",
-                      hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
-                      clearLabel: "清除已保存从库密码",
-                      description:
-                        "当前已保存从库密码。留空表示继续沿用，输入新值表示替换。",
-                    })}
-                  </>
-                )}
-              </>
-            )}
-
-            {dbType === "mongodb" && (
-              <>
-                <Form.Item name="mongoTopology" label="连接模式">
-                  <Select
-                    options={[
-                      { value: "single", label: "单机模式" },
-                      { value: "replica", label: "副本集 / 多节点" },
-                    ]}
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="mongoSrv"
-                  valuePropName="checked"
-                  style={{ marginTop: -6 }}
-                >
-                  <Checkbox>使用 SRV（mongodb+srv）</Checkbox>
-                </Form.Item>
-                {mongoSrv && useSSH && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="SRV 与 SSH 隧道同时启用时，可能依赖本地 DNS 解析能力"
-                  />
-                )}
-                {mongoTopology === "replica" && (
-                  <>
-                    <Form.Item
-                      name="mongoHosts"
-                      label={
-                        mongoSrv ? "附加 SRV 主机（可选）" : "附加节点地址"
-                      }
-                      help={
-                        mongoSrv
-                          ? "可输入多个候选主机名，格式：host；若留空则仅使用上方主机。"
-                          : "可输入多个节点地址，格式：host:port（回车确认）"
-                      }
-                    >
-                      <Select
-                        mode="tags"
-                        placeholder={
-                          mongoSrv
-                            ? "例如：cluster-a.example.com、cluster-b.example.com"
-                            : "例如：10.10.0.12:27017、10.10.0.13:27017"
-                        }
-                        tokenSeparators={[",", ";", " "]}
-                      />
-                    </Form.Item>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 16,
-                      }}
-                    >
-                      <Form.Item
-                        name="mongoReplicaSet"
-                        label="副本集名称（可选）"
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder="例如：rs0"
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name="mongoReplicaUser"
-                        label="副本集用户名（可选）"
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder="留空沿用主用户名"
-                        />
-                      </Form.Item>
-                    </div>
-                    <Form.Item
-                      name="mongoReplicaPassword"
-                      label="副本集密码（可选）"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input.Password
-                        {...noAutoCapInputProps}
-                        placeholder={getStoredSecretPlaceholder({
-                          hasStoredSecret:
-                            initialValues?.hasMongoReplicaPassword,
-                          emptyPlaceholder: "留空沿用主密码",
-                          retainedLabel: "已保存副本集密码",
-                        })}
-                      />
-                    </Form.Item>
-                    {renderStoredSecretControls({
-                      fieldName: "mongoReplicaPassword",
-                      clearKey: "mongoReplicaPassword",
-                      hasStoredSecret: initialValues?.hasMongoReplicaPassword,
-                      clearLabel: "清除已保存副本集密码",
-                      description:
-                        "当前已保存副本集密码。留空表示继续沿用，输入新值表示替换。",
-                    })}
-                    <Space size={8} style={{ marginTop: 12, marginBottom: 12 }}>
-                      <Button
-                        onClick={handleDiscoverMongoMembers}
-                        loading={discoveringMembers}
-                      >
-                        自动发现成员
-                      </Button>
-                    </Space>
-                    {mongoMembers.length > 0 && (
-                      <Table
-                        size="small"
-                        rowKey={(record) => record.host}
-                        pagination={false}
-                        dataSource={mongoMembers}
-                        style={{ marginBottom: 12 }}
-                        columns={[
-                          { title: "Host", dataIndex: "host", width: "48%" },
-                          {
-                            title: "角色",
-                            dataIndex: "role",
-                            width: "32%",
-                            render: (
-                              value: string,
-                              record: MongoMemberInfo,
-                            ) => (
-                              <Tag color={record.isSelf ? "blue" : "default"}>
-                                {value || "UNKNOWN"}
-                              </Tag>
-                            ),
-                          },
-                          {
-                            title: "健康",
-                            dataIndex: "healthy",
-                            width: "20%",
-                            render: (value: boolean) => (
-                              <Tag color={value ? "success" : "error"}>
-                                {value ? "正常" : "异常"}
-                              </Tag>
-                            ),
-                          },
-                        ]}
-                      />
-                    )}
-                  </>
-                )}
+                    <Input
+                      {...noAutoCapInputProps}
+                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
+                      placeholder="留空沿用主机地址"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="jvmJmxPort"
+                    label="JMX 端口"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber
+                      style={{ width: "100%" }}
+                      min={1}
+                      max={65535}
+                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
+                      placeholder="沿用主端口"
+                    />
+                  </Form.Item>
+                </div>
                 <div
                   style={{
                     display: "grid",
                     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                     gap: 16,
+                    marginTop: 16,
                   }}
                 >
                   <Form.Item
-                    name="mongoAuthSource"
-                    label="认证库 (authSource)"
+                    name="jvmJmxUsername"
+                    label="JMX 用户名（可选）"
                     style={{ marginBottom: 0 }}
                   >
                     <Input
                       {...noAutoCapInputProps}
-                      placeholder="默认使用 database 或 admin"
+                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
+                      placeholder="未开启认证可留空"
                     />
                   </Form.Item>
                   <Form.Item
-                    name="mongoReadPreference"
-                    label="读偏好 (readPreference)"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Select
-                      options={[
-                        { value: "primary", label: "primary" },
-                        {
-                          value: "primaryPreferred",
-                          label: "primaryPreferred",
-                        },
-                        { value: "secondary", label: "secondary" },
-                        {
-                          value: "secondaryPreferred",
-                          label: "secondaryPreferred",
-                        },
-                        { value: "nearest", label: "nearest" },
-                      ]}
-                    />
-                  </Form.Item>
-                </div>
-              </>
-            )}
-
-            {isRedis && (
-              <>
-                <Form.Item name="redisTopology" label="连接模式">
-                  <Select
-                    options={[
-                      { value: "single", label: "单机模式" },
-                      { value: "cluster", label: "集群模式（Redis Cluster）" },
-                    ]}
-                  />
-                </Form.Item>
-                {redisTopology === "cluster" && (
-                  <Form.Item
-                    name="redisHosts"
-                    label="集群附加节点地址"
-                    help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
-                  >
-                    <Select
-                      mode="tags"
-                      placeholder="例如：10.10.0.12:6379、10.10.0.13:6379"
-                      tokenSeparators={[",", ";", " "]}
-                    />
-                  </Form.Item>
-                )}
-                <Form.Item name="password" label="密码 (可选)">
-                  <Input.Password
-                    {...noAutoCapInputProps}
-                    placeholder={getStoredSecretPlaceholder({
-                      hasStoredSecret: initialValues?.hasPrimaryPassword,
-                      emptyPlaceholder: "Redis 密码（如果设置了 requirepass）",
-                      retainedLabel: "已保存 Redis 密码",
-                    })}
-                  />
-                </Form.Item>
-                {renderStoredSecretControls({
-                  fieldName: "password",
-                  clearKey: "primaryPassword",
-                  hasStoredSecret: initialValues?.hasPrimaryPassword,
-                  clearLabel: "清除已保存密码",
-                  description:
-                    "当前已保存 Redis 密码。留空表示继续沿用，输入新值表示替换。",
-                })}
-                <Form.Item
-                  name="includeRedisDatabases"
-                  label="显示数据库 (留空显示全部)"
-                  help="连接测试成功后可选择"
-                >
-                  <Select
-                    mode="multiple"
-                    placeholder="选择显示的数据库 (0-15)"
-                    allowClear
-                  >
-                    {redisDbList.map((db) => (
-                      <Select.Option key={db} value={db}>
-                        db{db}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </>
-            )}
-
-            {!isFileDb && !isRedis && !isJVM && (
-              <>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      dbType === "mongodb"
-                        ? "minmax(0, 1fr) minmax(0, 1fr) 180px"
-                        : "repeat(2, minmax(0, 1fr))",
-                    gap: 16,
-                  }}
-                >
-                  <Form.Item
-                    name="user"
-                    label="用户名"
-                    rules={
-                      dbType === "mongodb"
-                        ? []
-                        : [createUriAwareRequiredRule("请输入用户名")]
-                    }
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input {...noAutoCapInputProps} />
-                  </Form.Item>
-                  <Form.Item
-                    name="password"
-                    label="密码"
+                    name="jvmJmxPassword"
+                    label="JMX 密码（可选）"
                     style={{ marginBottom: 0 }}
                   >
                     <Input.Password
                       {...noAutoCapInputProps}
-                      placeholder={getStoredSecretPlaceholder({
-                        hasStoredSecret: initialValues?.hasPrimaryPassword,
-                        emptyPlaceholder: "密码",
-                        retainedLabel: "已保存密码",
-                      })}
+                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
+                      placeholder="未开启认证可留空"
                     />
                   </Form.Item>
-                  {dbType === "mongodb" && (
+                </div>
+              </div>
+
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <CodeOutlined />,
+                  "Endpoint",
+                  "连接应用暴露的 JVM 管理端点，适合已有运维 API 的服务。",
+                  <Tag
+                    color={
+                      normalizedJvmAllowedModes.includes("endpoint")
+                        ? "green"
+                        : "default"
+                    }
+                  >
+                    {normalizedJvmAllowedModes.includes("endpoint")
+                      ? "已启用"
+                      : "未启用"}
+                  </Tag>,
+                )}
+                <Form.Item
+                  name="jvmEndpointBaseUrl"
+                  label="Endpoint 地址"
+                  rules={[
+                    {
+                      required: jvmPreferredMode === "endpoint",
+                      message: "启用 Endpoint 模式时请输入 Endpoint 地址",
+                    },
+                  ]}
+                  help="例如 Spring Boot Actuator 或自定义管理接口地址。"
+                >
+                  <Input
+                    {...noAutoCapInputProps}
+                    disabled={!normalizedJvmAllowedModes.includes("endpoint")}
+                    placeholder="例如：https://orders.internal/manage/jvm"
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="jvmEndpointApiKey"
+                  label="Endpoint API Key（可选）"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input.Password
+                    {...noAutoCapInputProps}
+                    disabled={!normalizedJvmAllowedModes.includes("endpoint")}
+                    placeholder="端点受 Token 保护时填写"
+                  />
+                </Form.Item>
+              </div>
+
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <ThunderboltOutlined />,
+                  "Agent",
+                  "连接 GoNavi Java Agent 管理端口，用于增强采集和诊断链路。",
+                  <Tag color={normalizedJvmAllowedModes.includes("agent") ? "green" : "default"}>
+                    {normalizedJvmAllowedModes.includes("agent") ? "已启用" : "未启用"}
+                  </Tag>,
+                )}
+                <Form.Item
+                  name="jvmAgentBaseUrl"
+                  label="Agent 地址"
+                  rules={[
+                    {
+                      required: jvmPreferredMode === "agent",
+                      message: "启用 Agent 模式时请输入 Agent 地址",
+                    },
+                  ]}
+                  help="目标 Java 服务需要以 -javaagent 方式启动 GoNavi Agent。"
+                >
+                  <Input
+                    {...noAutoCapInputProps}
+                    disabled={!normalizedJvmAllowedModes.includes("agent")}
+                    placeholder="例如：http://127.0.0.1:19090/gonavi/agent/jvm"
+                  />
+                </Form.Item>
+                <Form.Item
+                  name="jvmAgentApiKey"
+                  label="Agent API Key（可选）"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Input.Password
+                    {...noAutoCapInputProps}
+                    disabled={!normalizedJvmAllowedModes.includes("agent")}
+                    placeholder="Agent 启用 Token 校验时填写"
+                  />
+                </Form.Item>
+              </div>
+
+              <div style={jvmSectionCardStyle()}>
+                {renderJvmSectionHeader(
+                  <SafetyCertificateOutlined />,
+                  "诊断增强",
+                  "开启后可创建 JVM 诊断会话并执行受控 Arthas/诊断命令。",
+                  <Form.Item
+                    name="jvmDiagnosticEnabled"
+                    valuePropName="checked"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                  </Form.Item>,
+                )}
+                {jvmDiagnosticEnabled ? (
+                  <>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "220px minmax(0, 1fr)",
+                        gap: 16,
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <Text strong>诊断传输</Text>
+                        {renderChoiceCards({
+                          fieldName: "jvmDiagnosticTransport",
+                          value: String(jvmDiagnosticTransport),
+                          options: [
+                            {
+                              value: "agent-bridge",
+                              label: "Agent Bridge",
+                              description: "通过 GoNavi Agent 桥接诊断命令。",
+                            },
+                            {
+                              value: "arthas-tunnel",
+                              label: "Arthas Tunnel",
+                              description: "连接官方 Tunnel / Web Console。",
+                            },
+                          ],
+                        })}
+                      </div>
+                      <Form.Item
+                        name="jvmDiagnosticBaseUrl"
+                        label={
+                          jvmDiagnosticTransport === "arthas-tunnel"
+                            ? "Arthas Tunnel 地址"
+                            : "诊断 Bridge 地址"
+                        }
+                        rules={[
+                          {
+                            required: true,
+                            message:
+                              jvmDiagnosticTransport === "arthas-tunnel"
+                                ? "请输入 Arthas Tunnel Server 地址"
+                                : "请输入诊断 Bridge 地址",
+                          },
+                        ]}
+                        help={
+                          jvmDiagnosticTransport === "arthas-tunnel"
+                            ? "例如：http://127.0.0.1:7777，支持反向代理后的访问前缀。"
+                            : "例如：http://127.0.0.1:19091/gonavi/diag"
+                        }
+                      >
+                        <Input
+                          {...noAutoCapInputProps}
+                          placeholder={
+                            jvmDiagnosticTransport === "arthas-tunnel"
+                              ? "http://127.0.0.1:7777"
+                              : "http://127.0.0.1:19091/gonavi/diag"
+                          }
+                        />
+                      </Form.Item>
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1fr) 220px",
+                        gap: 16,
+                      }}
+                    >
+                      <Form.Item
+                        name="jvmDiagnosticTargetId"
+                        label={
+                          jvmDiagnosticTransport === "arthas-tunnel"
+                            ? "目标实例标识（AgentId）"
+                            : "目标实例标识"
+                        }
+                        rules={
+                          jvmDiagnosticTransport === "arthas-tunnel"
+                            ? [
+                                {
+                                  required: true,
+                                  message:
+                                    "Arthas Tunnel 模式必须填写目标实例标识",
+                                },
+                              ]
+                            : undefined
+                        }
+                        help={
+                          jvmDiagnosticTransport === "arthas-tunnel"
+                            ? "填写 Arthas Tunnel 中目标 JVM 的 agentId。"
+                            : "可选，用于在桥接端区分具体 JVM 实例。"
+                        }
+                      >
+                        <Input
+                          {...noAutoCapInputProps}
+                          placeholder={
+                            jvmDiagnosticTransport === "arthas-tunnel"
+                              ? "例如：orders-app_A1B2C3D4E5"
+                              : "例如：orders-prod-01"
+                          }
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name="jvmDiagnosticTimeoutSeconds"
+                        label="诊断超时（秒）"
+                        rules={[
+                          {
+                            type: "number",
+                            min: 1,
+                            max: 300,
+                            message: "诊断超时时间范围: 1-300 秒",
+                          },
+                        ]}
+                      >
+                        <InputNumber style={{ width: "100%" }} min={1} max={300} />
+                      </Form.Item>
+                    </div>
                     <Form.Item
-                      name="mongoAuthMechanism"
-                      label="验证方式"
+                      name="jvmDiagnosticApiKey"
+                      label="诊断 API Key（可选）"
+                    >
+                      <Input.Password
+                        {...noAutoCapInputProps}
+                        placeholder="诊断桥接端启用 Token 校验时填写"
+                      />
+                    </Form.Item>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {[
+                        {
+                          name: "jvmDiagnosticAllowObserveCommands",
+                          label: "观察类命令",
+                          description: "thread、dashboard、jvm 等只读排查命令。",
+                        },
+                        {
+                          name: "jvmDiagnosticAllowTraceCommands",
+                          label: "跟踪类命令",
+                          description: "trace、watch 等对目标有额外开销的命令。",
+                        },
+                        {
+                          name: "jvmDiagnosticAllowMutatingCommands",
+                          label: "高风险命令",
+                          description: "可能改变运行态或造成明显性能影响的命令。",
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.name}
+                          style={{
+                            padding: 12,
+                            borderRadius: 14,
+                            background: darkMode
+                              ? "rgba(255,255,255,0.04)"
+                              : "rgba(16,24,40,0.04)",
+                          }}
+                        >
+                          <Form.Item
+                            name={item.name}
+                            valuePropName="checked"
+                            style={{ marginBottom: 6 }}
+                          >
+                            <Checkbox>{item.label}</Checkbox>
+                          </Form.Item>
+                          <div style={modalMutedTextStyle}>
+                            {item.description}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      ...modalMutedTextStyle,
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      background: darkMode
+                        ? "rgba(255,255,255,0.04)"
+                        : "rgba(16,24,40,0.04)",
+                    }}
+                  >
+                    关闭时只保存 JVM 连接与监控能力，不显示诊断会话入口。
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+          ) : (
+            <>
+              {renderConfigSectionCard({
+                sectionKey: isFileDb ? "fileTarget" : "target",
+                icon: isFileDb ? <FileTextOutlined /> : <GatewayOutlined />,
+                children: (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) 120px",
+                      gap: 16,
+                      alignItems: "start",
+                    }}
+                  >
+                    <Form.Item
+                      name="host"
+                      label={
+                        isFileDb ? "文件路径 (绝对路径)" : "主机地址 (Host)"
+                      }
+                      rules={[createUriAwareRequiredRule("请输入地址/路径")]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={
+                          isFileDb
+                            ? dbType === "duckdb"
+                              ? "/path/to/db.duckdb"
+                              : "/path/to/db.sqlite"
+                            : "localhost"
+                        }
+                      />
+                    </Form.Item>
+                    {isFileDb ? (
+                      <Form.Item label=" " style={{ marginBottom: 0 }}>
+                        <Button
+                          style={{ width: "100%" }}
+                          onClick={handleSelectDatabaseFile}
+                          loading={selectingDbFile}
+                        >
+                          浏览...
+                        </Button>
+                      </Form.Item>
+                    ) : (
+                      <Form.Item
+                        name="port"
+                        label="端口 (Port)"
+                        rules={[
+                          createUriAwareRequiredRule(
+                            "请输入端口号",
+                            (value) => Number(value) > 0,
+                          ),
+                        ]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <InputNumber style={{ width: "100%" }} />
+                      </Form.Item>
+                    )}
+                  </div>
+                ),
+              })}
+
+              {(dbType === "postgres" ||
+                dbType === "kingbase" ||
+                dbType === "highgo" ||
+                dbType === "vastbase") &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认连接数据库（可选）"
+                      help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
+                    </Form.Item>
+                  ),
+                })}
+
+              {dbType === "oracle" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="服务名 (Service Name)"
+                      rules={[
+                        createUriAwareRequiredRule(
+                          "请输入 Oracle 服务名（例如 ORCLPDB1）",
+                        ),
+                      ]}
+                      help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder="例如：ORCLPDB1"
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
+              {isMySQLLike &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "mysqlTopology",
+                    value: String(mysqlTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单机模式",
+                        description: "只连接一个主库地址，适合本地和单实例。",
+                      },
+                      {
+                        value: "replica",
+                        label: "主从模式",
+                        description: "主库优先，可配置从库地址用于切换。",
+                      },
+                    ],
+                  }),
+                })}
+
+              {isMySQLLike &&
+                mysqlTopology === "replica" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <>
+                      <Form.Item
+                        name="mysqlReplicaHosts"
+                        label="从库地址列表"
+                        help="可输入多个从库地址，格式：host:port（回车确认）"
+                      >
+                        <Select
+                          mode="tags"
+                          placeholder="例如：10.10.0.12:3306、10.10.0.13:3306"
+                          tokenSeparators={[",", ";", " "]}
+                        />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                          gap: 16,
+                        }}
+                      >
+                        <Form.Item
+                          name="mysqlReplicaUser"
+                          label="从库用户名（可选）"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder="留空沿用主库用户名"
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="mysqlReplicaPassword"
+                          label="从库密码（可选）"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input.Password
+                            {...noAutoCapInputProps}
+                            placeholder={getStoredSecretPlaceholder({
+                              hasStoredSecret:
+                                initialValues?.hasMySQLReplicaPassword,
+                              emptyPlaceholder: "留空沿用主库密码",
+                              retainedLabel: "已保存从库密码",
+                            })}
+                          />
+                        </Form.Item>
+                      </div>
+                      {renderStoredSecretControls({
+                        fieldName: "mysqlReplicaPassword",
+                        clearKey: "mysqlReplicaPassword",
+                        hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
+                        clearLabel: "清除已保存从库密码",
+                        description:
+                          "当前已保存从库密码。留空表示继续沿用，输入新值表示替换。",
+                      })}
+                    </>
+                  ),
+                })}
+
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "mongoTopology",
+                    value: String(mongoTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单机模式",
+                        description: "只连接一个 MongoDB 节点。",
+                      },
+                      {
+                        value: "replica",
+                        label: "副本集 / 多节点",
+                        description: "配置副本集名称和多个候选节点。",
+                      },
+                    ],
+                  }),
+                })}
+
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "mongoDiscovery",
+                  icon: <ApiOutlined />,
+                  children: (
+                    <>
+                      <Form.Item name="mongoSrv" hidden valuePropName="checked">
+                        <Checkbox />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(180px, 1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        {[
+                          {
+                            value: false,
+                            label: "标准地址",
+                            description: "使用 host:port 直连或副本集节点列表。",
+                          },
+                          {
+                            value: true,
+                            label: "SRV 地址",
+                            description:
+                              "使用 mongodb+srv，由 DNS 发现目标节点。",
+                          },
+                        ].map((option) => {
+                          const active = mongoSrv === option.value;
+                          return (
+                            <button
+                              key={String(option.value)}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                setChoiceFieldValue("mongoSrv", option.value)
+                              }
+                              style={{
+                                textAlign: "left",
+                                padding: "12px 14px",
+                                borderRadius: 14,
+                                border: active
+                                  ? darkMode
+                                    ? "1px solid rgba(255,214,102,0.42)"
+                                    : "1px solid rgba(22,119,255,0.36)"
+                                  : darkMode
+                                    ? "1px solid rgba(255,255,255,0.08)"
+                                    : "1px solid rgba(16,24,40,0.08)",
+                                background: active
+                                  ? darkMode
+                                    ? "rgba(255,214,102,0.10)"
+                                    : "rgba(22,119,255,0.07)"
+                                  : darkMode
+                                    ? "rgba(255,255,255,0.03)"
+                                    : "rgba(16,24,40,0.03)",
+                                color: darkMode ? "#f5f7ff" : "#162033",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <Space size={8} wrap>
+                                <Text strong>{option.label}</Text>
+                                {active ? <Tag color="blue">当前</Tag> : null}
+                              </Space>
+                              <div
+                                style={{
+                                  ...modalMutedTextStyle,
+                                  marginTop: 6,
+                                }}
+                              >
+                                {option.description}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {mongoSrv && useSSH && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          style={{ marginTop: 12 }}
+                          message="SRV 与 SSH 隧道同时启用时，可能依赖本地 DNS 解析能力"
+                        />
+                      )}
+                    </>
+                  ),
+                })}
+
+              {dbType === "mongodb" &&
+                mongoTopology === "replica" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <>
+                      <Form.Item
+                        name="mongoHosts"
+                        label={
+                          mongoSrv ? "附加 SRV 主机（可选）" : "附加节点地址"
+                        }
+                        help={
+                          mongoSrv
+                            ? "可输入多个候选主机名，格式：host；若留空则仅使用上方主机。"
+                            : "可输入多个节点地址，格式：host:port（回车确认）"
+                        }
+                      >
+                        <Select
+                          mode="tags"
+                          placeholder={
+                            mongoSrv
+                              ? "例如：cluster-a.example.com、cluster-b.example.com"
+                              : "例如：10.10.0.12:27017、10.10.0.13:27017"
+                          }
+                          tokenSeparators={[",", ";", " "]}
+                        />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                          gap: 16,
+                        }}
+                      >
+                        <Form.Item
+                          name="mongoReplicaSet"
+                          label="副本集名称（可选）"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder="例如：rs0"
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="mongoReplicaUser"
+                          label="副本集用户名（可选）"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder="留空沿用主用户名"
+                          />
+                        </Form.Item>
+                      </div>
+                      <Form.Item
+                        name="mongoReplicaPassword"
+                        label="副本集密码（可选）"
+                        style={{ marginTop: 16, marginBottom: 0 }}
+                      >
+                        <Input.Password
+                          {...noAutoCapInputProps}
+                          placeholder={getStoredSecretPlaceholder({
+                            hasStoredSecret:
+                              initialValues?.hasMongoReplicaPassword,
+                            emptyPlaceholder: "留空沿用主密码",
+                            retainedLabel: "已保存副本集密码",
+                          })}
+                        />
+                      </Form.Item>
+                      {renderStoredSecretControls({
+                        fieldName: "mongoReplicaPassword",
+                        clearKey: "mongoReplicaPassword",
+                        hasStoredSecret: initialValues?.hasMongoReplicaPassword,
+                        clearLabel: "清除已保存副本集密码",
+                        description:
+                          "当前已保存副本集密码。留空表示继续沿用，输入新值表示替换。",
+                      })}
+                      <Space
+                        size={8}
+                        style={{ marginTop: 12, marginBottom: 12 }}
+                      >
+                        <Button
+                          onClick={handleDiscoverMongoMembers}
+                          loading={discoveringMembers}
+                        >
+                          自动发现成员
+                        </Button>
+                      </Space>
+                      {mongoMembers.length > 0 && (
+                        <Table
+                          size="small"
+                          rowKey={(record) => record.host}
+                          pagination={false}
+                          dataSource={mongoMembers}
+                          style={{ marginBottom: 12 }}
+                          columns={[
+                            { title: "Host", dataIndex: "host", width: "48%" },
+                            {
+                              title: "角色",
+                              dataIndex: "role",
+                              width: "32%",
+                              render: (
+                                value: string,
+                                record: MongoMemberInfo,
+                              ) => (
+                                <Tag
+                                  color={record.isSelf ? "blue" : "default"}
+                                >
+                                  {value || "UNKNOWN"}
+                                </Tag>
+                              ),
+                            },
+                            {
+                              title: "健康",
+                              dataIndex: "healthy",
+                              width: "20%",
+                              render: (value: boolean) => (
+                                <Tag color={value ? "success" : "error"}>
+                                  {value ? "正常" : "异常"}
+                                </Tag>
+                              ),
+                            },
+                          ]}
+                        />
+                      )}
+                    </>
+                  ),
+                })}
+
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "mongoPolicy",
+                  icon: <ThunderboltOutlined />,
+                  children: (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: 16,
+                      }}
+                    >
+                      <Form.Item
+                        name="mongoAuthSource"
+                        label="认证库 (authSource)"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input
+                          {...noAutoCapInputProps}
+                          placeholder="默认使用 database 或 admin"
+                        />
+                      </Form.Item>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <Text strong>读偏好 (readPreference)</Text>
+                        {renderChoiceCards({
+                          fieldName: "mongoReadPreference",
+                          value: String(mongoReadPreference),
+                          minWidth: 130,
+                          options: [
+                            {
+                              value: "primary",
+                              label: "primary",
+                              description: "只读主节点。",
+                            },
+                            {
+                              value: "primaryPreferred",
+                              label: "primaryPreferred",
+                              description: "主节点优先。",
+                            },
+                            {
+                              value: "secondary",
+                              label: "secondary",
+                              description: "只读从节点。",
+                            },
+                            {
+                              value: "secondaryPreferred",
+                              label: "secondaryPreferred",
+                              description: "从节点优先。",
+                            },
+                            {
+                              value: "nearest",
+                              label: "nearest",
+                              description: "选择最近节点。",
+                            },
+                          ],
+                        })}
+                      </div>
+                    </div>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <>
+                      {renderChoiceCards({
+                        fieldName: "redisTopology",
+                        value: String(redisTopology),
+                        options: [
+                          {
+                            value: "single",
+                            label: "单机模式",
+                            description: "只连接一个 Redis 节点。",
+                          },
+                          {
+                            value: "cluster",
+                            label: "集群模式",
+                            description: "Redis Cluster，配置多个种子节点。",
+                          },
+                        ],
+                      })}
+                      {redisTopology === "cluster" && (
+                        <Form.Item
+                          name="redisHosts"
+                          label="集群附加节点地址"
+                          help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
+                          style={{ marginTop: 16, marginBottom: 0 }}
+                        >
+                          <Select
+                            mode="tags"
+                            placeholder="例如：10.10.0.12:6379、10.10.0.13:6379"
+                            tokenSeparators={[",", ";", " "]}
+                          />
+                        </Form.Item>
+                      )}
+                    </>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "credentials",
+                  icon: <SafetyCertificateOutlined />,
+                  children: (
+                    <>
+                      <Form.Item name="password" label="密码 (可选)">
+                        <Input.Password
+                          {...noAutoCapInputProps}
+                          placeholder={getStoredSecretPlaceholder({
+                            hasStoredSecret: initialValues?.hasPrimaryPassword,
+                            emptyPlaceholder:
+                              "Redis 密码（如果设置了 requirepass）",
+                            retainedLabel: "已保存 Redis 密码",
+                          })}
+                        />
+                      </Form.Item>
+                      {renderStoredSecretControls({
+                        fieldName: "password",
+                        clearKey: "primaryPassword",
+                        hasStoredSecret: initialValues?.hasPrimaryPassword,
+                        clearLabel: "清除已保存密码",
+                        description:
+                          "当前已保存 Redis 密码。留空表示继续沿用，输入新值表示替换。",
+                      })}
+                    </>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "databaseScope",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="includeRedisDatabases"
+                      label="显示数据库 (留空显示全部)"
+                      help="连接测试成功后可选择"
                       style={{ marginBottom: 0 }}
                     >
                       <Select
+                        mode="multiple"
+                        placeholder="选择显示的数据库 (0-15)"
                         allowClear
-                        placeholder="自动协商"
-                        options={[
-                          { value: "NONE", label: "无认证 (None)" },
-                          { value: "SCRAM-SHA-1", label: "SCRAM-SHA-1" },
-                          { value: "SCRAM-SHA-256", label: "SCRAM-SHA-256" },
-                          { value: "MONGODB-AWS", label: "MONGODB-AWS" },
-                        ]}
-                      />
+                      >
+                        {redisDbList.map((db) => (
+                          <Select.Option key={db} value={db}>
+                            db{db}
+                          </Select.Option>
+                        ))}
+                      </Select>
                     </Form.Item>
-                  )}
-                </div>
-                {renderStoredSecretControls({
-                  fieldName: "password",
-                  clearKey: "primaryPassword",
-                  hasStoredSecret: initialValues?.hasPrimaryPassword,
-                  clearLabel: "清除已保存密码",
-                  description:
-                    "当前已保存主连接密码。留空表示继续沿用，输入新值表示替换。",
+                  ),
                 })}
-              </>
-            )}
 
-            {dbType === "mongodb" && (
-              <Form.Item
-                name="savePassword"
-                valuePropName="checked"
-                style={{ marginTop: 12, marginBottom: 0 }}
-              >
-                <Checkbox>保存密码</Checkbox>
-              </Form.Item>
-            )}
+              {!isFileDb &&
+                !isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "credentials",
+                  icon: <SafetyCertificateOutlined />,
+                  children: (
+                    <>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            dbType === "mongodb"
+                              ? "minmax(0, 1fr) minmax(0, 1fr) 180px"
+                              : "repeat(2, minmax(0, 1fr))",
+                          gap: 16,
+                        }}
+                      >
+                        <Form.Item
+                          name="user"
+                          label="用户名"
+                          rules={
+                            dbType === "mongodb"
+                              ? []
+                              : [createUriAwareRequiredRule("请输入用户名")]
+                          }
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input {...noAutoCapInputProps} />
+                        </Form.Item>
+                        <Form.Item
+                          name="password"
+                          label="密码"
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input.Password
+                            {...noAutoCapInputProps}
+                            placeholder={getStoredSecretPlaceholder({
+                              hasStoredSecret:
+                                initialValues?.hasPrimaryPassword,
+                              emptyPlaceholder: "密码",
+                              retainedLabel: "已保存密码",
+                            })}
+                          />
+                        </Form.Item>
+                        {dbType === "mongodb" && (
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <Text strong>验证方式</Text>
+                            {renderChoiceCards({
+                              fieldName: "mongoAuthMechanism",
+                              value: String(mongoAuthMechanism),
+                              minWidth: 150,
+                              options: [
+                                {
+                                  value: "",
+                                  label: "自动协商",
+                                  description: "交给驱动按服务端能力选择。",
+                                },
+                                {
+                                  value: "NONE",
+                                  label: "无认证",
+                                  description: "不发送认证信息。",
+                                },
+                                {
+                                  value: "SCRAM-SHA-1",
+                                  label: "SCRAM-SHA-1",
+                                  description: "兼容旧版本 MongoDB。",
+                                },
+                                {
+                                  value: "SCRAM-SHA-256",
+                                  label: "SCRAM-SHA-256",
+                                  description: "推荐的 SCRAM 认证。",
+                                },
+                                {
+                                  value: "MONGODB-AWS",
+                                  label: "MONGODB-AWS",
+                                  description: "AWS IAM 认证。",
+                                },
+                              ],
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      {renderStoredSecretControls({
+                        fieldName: "password",
+                        clearKey: "primaryPassword",
+                        hasStoredSecret: initialValues?.hasPrimaryPassword,
+                        clearLabel: "清除已保存密码",
+                        description:
+                          "当前已保存主连接密码。留空表示继续沿用，输入新值表示替换。",
+                      })}
+                      {dbType === "mongodb" && (
+                        <Form.Item
+                          name="savePassword"
+                          valuePropName="checked"
+                          style={{ marginTop: 12, marginBottom: 0 }}
+                        >
+                          <Checkbox>保存密码</Checkbox>
+                        </Form.Item>
+                      )}
+                    </>
+                  ),
+                })}
 
-            {!isFileDb && !isRedis && !isJVM && (
-              <Form.Item
-                name="includeDatabases"
-                label="显示数据库 (留空显示全部)"
-                help="连接测试成功后可选择"
-                style={{ marginTop: 12, marginBottom: 0 }}
-              >
-                <Select
-                  mode="multiple"
-                  placeholder="选择显示的数据库"
-                  allowClear
-                >
-                  {dbList.map((db) => (
-                    <Select.Option key={db} value={db}>
-                      {db}
-                    </Select.Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            )}
-          </>
-        )}
+              {!isFileDb &&
+                !isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "databaseScope",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="includeDatabases"
+                      label="显示数据库 (留空显示全部)"
+                      help="连接测试成功后可选择"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        mode="multiple"
+                        placeholder="选择显示的数据库"
+                        allowClear
+                      >
+                        {dbList.map((db) => (
+                          <Select.Option key={db} value={db}>
+                            {db}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  ),
+                })}
+            </>
+          )}
+        </div>
       </div>
     );
 
@@ -4157,31 +5030,30 @@ const ConnectionModal: React.FC<{
                       </div>
                     ) : (
                       <div style={tunnelSectionStyle}>
-                        <Form.Item
-                          name="sslMode"
-                          label="SSL 模式"
-                          rules={[
-                            { required: true, message: "请选择 SSL 模式" },
-                          ]}
-                          style={{ marginBottom: 8 }}
-                        >
-                          <Select
-                            options={[
+                        <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+                          <Text strong>SSL 模式</Text>
+                          {renderChoiceCards({
+                            fieldName: "sslMode",
+                            value: String(sslMode),
+                            options: [
                               {
                                 value: "preferred",
-                                label: "Preferred（优先 SSL，推荐）",
+                                label: "Preferred",
+                                description: "优先使用 SSL，失败后按驱动策略处理。",
                               },
                               {
                                 value: "required",
-                                label: "Required（必须 SSL，校验证书）",
+                                label: "Required",
+                                description: "必须使用 SSL，并进行证书校验。",
                               },
                               {
                                 value: "skip-verify",
-                                label: "Skip Verify（必须 SSL，跳过证书校验）",
+                                label: "Skip Verify",
+                                description: "必须使用 SSL，但跳过证书校验。",
                               },
-                            ]}
-                          />
-                        </Form.Item>
+                            ],
+                          })}
+                        </div>
                         {dbType === "dameng" && (
                           <>
                             <Form.Item
@@ -4402,25 +5274,30 @@ const ConnectionModal: React.FC<{
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "180px 120px",
+                            gridTemplateColumns: "minmax(0, 1fr) 120px",
                             gap: 16,
                           }}
                         >
-                          <Form.Item
-                            name="proxyType"
-                            label="代理类型"
-                            rules={[
-                              { required: useProxy, message: "请选择代理类型" },
-                            ]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Select
-                              options={[
-                                { value: "socks5", label: "SOCKS5" },
-                                { value: "http", label: "HTTP CONNECT" },
-                              ]}
-                            />
-                          </Form.Item>
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <Text strong>代理类型</Text>
+                            {renderChoiceCards({
+                              fieldName: "proxyType",
+                              value: String(proxyType),
+                              minWidth: 150,
+                              options: [
+                                {
+                                  value: "socks5",
+                                  label: "SOCKS5",
+                                  description: "常见本地代理和网关代理。",
+                                },
+                                {
+                                  value: "http",
+                                  label: "HTTP CONNECT",
+                                  description: "通过 HTTP CONNECT 建立隧道。",
+                                },
+                              ],
+                            })}
+                          </div>
                           <Form.Item
                             name="proxyPort"
                             label="端口"
@@ -5031,7 +5908,9 @@ const ConnectionModal: React.FC<{
             {
               key: "basic",
               title: "基础信息",
-              description: "名称、地址、认证、URI 与数据库范围",
+              description: isJVM
+                ? "JVM 目标、接入模式、JMX、Endpoint、Agent 与诊断增强"
+                : "名称、地址、认证、URI 与数据库范围",
               icon: <DatabaseOutlined />,
             },
             ...(!isCustom && !isFileDb && !isJVM

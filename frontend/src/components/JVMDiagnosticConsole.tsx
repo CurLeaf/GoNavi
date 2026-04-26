@@ -11,6 +11,15 @@ import {
   Tag,
   Typography,
 } from "antd";
+import {
+  ClearOutlined,
+  HistoryOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  RocketOutlined,
+  ToolOutlined,
+} from "@ant-design/icons";
 
 import { EventsOn } from "../../wailsjs/runtime";
 import { useStore } from "../store";
@@ -23,7 +32,10 @@ import type {
 } from "../types";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { resolveJVMDiagnosticCompletionItems } from "../utils/jvmDiagnosticCompletion";
-import { JVM_DIAGNOSTIC_COMMAND_PRESETS } from "../utils/jvmDiagnosticPresentation";
+import {
+  formatJVMDiagnosticTransportLabel,
+  JVM_DIAGNOSTIC_COMMAND_PRESETS,
+} from "../utils/jvmDiagnosticPresentation";
 import JVMCommandPresetBar from "./jvm/JVMCommandPresetBar";
 import JVMDiagnosticHistory from "./jvm/JVMDiagnosticHistory";
 import JVMDiagnosticOutput from "./jvm/JVMDiagnosticOutput";
@@ -40,10 +52,33 @@ const DEFAULT_COMMAND =
   JVM_DIAGNOSTIC_COMMAND_PRESETS.find((item) => item.category === "observe")
     ?.command || "thread -n 5";
 
+const DIAGNOSTIC_WORKFLOW_STEPS = [
+  {
+    index: "01",
+    title: "检查能力",
+    description: "只读取诊断通道、流式输出与命令权限，不创建会话。",
+  },
+  {
+    index: "02",
+    title: "新建会话",
+    description: "创建诊断上下文，后续命令都会绑定到这个会话。",
+  },
+  {
+    index: "03",
+    title: "执行命令",
+    description: "会话建立后显示命令编辑器、原因输入与模板。",
+  },
+];
+
 const commandEditorShellStyle = (darkMode: boolean): React.CSSProperties => ({
   borderRadius: 14,
-  border: darkMode ? "1px solid #303030" : "1px solid #e6eef8",
-  background: darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+  border: darkMode
+    ? "1px solid rgba(255,255,255,0.12)"
+    : "1px solid rgba(22,119,255,0.16)",
+  background: darkMode ? "rgba(5,12,20,0.68)" : "rgba(246,249,253,0.92)",
+  boxShadow: darkMode
+    ? "inset 0 0 0 1px rgba(255,255,255,0.03)"
+    : "inset 0 0 0 1px rgba(255,255,255,0.86)",
   overflow: "hidden",
 });
 
@@ -564,24 +599,125 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   }
 
   const pageBackground = darkMode
-    ? "linear-gradient(135deg, #101820 0%, #141414 48%, #1f1f1f 100%)"
-    : "linear-gradient(135deg, #eef4ff 0%, #f7f9fc 45%, #ffffff 100%)";
+    ? "radial-gradient(circle at top left, rgba(22,119,255,0.20), transparent 34%), linear-gradient(135deg, #101820 0%, #141414 54%, #1d2228 100%)"
+    : "radial-gradient(circle at top left, rgba(22,119,255,0.16), transparent 32%), linear-gradient(135deg, #f4f8ff 0%, #f8fbff 48%, #ffffff 100%)";
   const heroBackground = darkMode
-    ? "linear-gradient(135deg, rgba(22,119,255,0.22), rgba(82,196,26,0.08))"
-    : "linear-gradient(135deg, rgba(22,119,255,0.14), rgba(19,194,194,0.08))";
-  const cardStyle = {
-    borderRadius: 16,
+    ? "linear-gradient(135deg, rgba(22,119,255,0.18), rgba(82,196,26,0.07))"
+    : "linear-gradient(135deg, rgba(22,119,255,0.12), rgba(19,194,194,0.06))";
+  const panelBg = darkMode ? "rgba(18,24,32,0.86)" : "rgba(255,255,255,0.92)";
+  const panelBorder = darkMode
+    ? "1px solid rgba(255,255,255,0.08)"
+    : "1px solid rgba(22,119,255,0.10)";
+  const mutedPanelBg = darkMode
+    ? "rgba(255,255,255,0.045)"
+    : "rgba(22,119,255,0.045)";
+  const cardStyle: React.CSSProperties = {
+    borderRadius: 18,
+    border: panelBorder,
+    background: panelBg,
     boxShadow: darkMode
-      ? "0 18px 44px rgba(0, 0, 0, 0.22)"
-      : "0 18px 44px rgba(24, 54, 96, 0.08)",
+      ? "0 18px 42px rgba(0, 0, 0, 0.24)"
+      : "0 16px 38px rgba(24, 54, 96, 0.07)",
   };
+  const compactCardStyles = {
+    header: {
+      borderBottom: darkMode
+        ? "1px solid rgba(255,255,255,0.07)"
+        : "1px solid rgba(15,23,42,0.06)",
+      padding: "14px 18px",
+    },
+    body: { padding: 18 },
+  };
+  const actionButtonStyle: React.CSSProperties = {
+    height: 36,
+    borderRadius: 12,
+    paddingInline: 14,
+    fontWeight: 600,
+  };
+  const renderCardTitle = (
+    icon: React.ReactNode,
+    title: string,
+    description?: string,
+  ) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <span
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 10,
+          display: "grid",
+          placeItems: "center",
+          color: darkMode ? "#91caff" : "#1677ff",
+          background: darkMode
+            ? "rgba(22,119,255,0.18)"
+            : "rgba(22,119,255,0.10)",
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </span>
+      <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+        <Text strong>{title}</Text>
+        {description ? (
+          <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
+            {description}
+          </Text>
+        ) : null}
+      </span>
+    </div>
+  );
+  const renderCapabilityContent = () =>
+    capabilities.length ? (
+      <div style={{ display: "grid", gap: 10 }}>
+        <Text strong>能力检查结果</Text>
+        <div style={{ display: "grid", gap: 8 }}>
+          {capabilities.map((item) => (
+            <div
+              key={item.transport}
+              style={{
+                padding: 12,
+                borderRadius: 14,
+                border: darkMode
+                  ? "1px solid rgba(255,255,255,0.08)"
+                  : "1px solid rgba(22,119,255,0.12)",
+                background: mutedPanelBg,
+              }}
+            >
+              <Space size={6} wrap>
+                <Tag color="processing">
+                  {formatJVMDiagnosticTransportLabel(item.transport)}
+                </Tag>
+                <Tag color={item.canOpenSession ? "green" : "red"}>
+                  {item.canOpenSession ? "可建会话" : "不可建会话"}
+                </Tag>
+                <Tag color={item.canStream ? "green" : "red"}>
+                  {item.canStream ? "流式输出" : "不支持流式"}
+                </Tag>
+                <Tag color={item.allowObserveCommands ? "green" : "red"}>
+                  {item.allowObserveCommands ? "观察命令" : "禁止观察"}
+                </Tag>
+                {item.allowTraceCommands ? <Tag color="gold">跟踪命令</Tag> : null}
+                {item.allowMutatingCommands ? <Tag color="red">高风险命令</Tag> : null}
+              </Space>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : (
+      <Alert
+        type="info"
+        showIcon
+        message="尚未检查能力"
+        description="能力检查只读取通道权限和命令策略，不会创建会话或执行命令。"
+      />
+    );
 
   return (
     <div
       style={{
-        padding: 24,
+        padding: 18,
         display: "grid",
-        gap: 18,
+        gap: 16,
         height: "100%",
         minHeight: 0,
         overflow: "auto",
@@ -592,10 +728,10 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     >
       <Card
         variant="borderless"
+        styles={{ body: { padding: 18 } }}
         style={{
           ...cardStyle,
           background: heroBackground,
-          border: darkMode ? "1px solid rgba(255,255,255,0.08)" : "1px solid rgba(22,119,255,0.12)",
         }}
       >
         <div
@@ -607,29 +743,36 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <Text type="secondary">JVM Diagnostics</Text>
-            <Typography.Title level={3} style={{ margin: "4px 0 8px" }}>
+            <Text type="secondary">JVM 诊断</Text>
+            <Typography.Title level={3} style={{ margin: "2px 0 6px" }}>
               JVM 诊断工作台
             </Typography.Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
               <Text strong>{connection.name}</Text>
               <Text type="secondary">
                 {" "}· {connection.config.host || "unknown"}:{connection.config.port || 0}
-                {" "}· {diagnosticTransport}
+                {" "}· {formatJVMDiagnosticTransportLabel(diagnosticTransport)}
               </Text>
             </Paragraph>
           </div>
 
-          <Space wrap style={{ justifyContent: "flex-end" }}>
+          <Space wrap size={8} style={{ justifyContent: "flex-end" }}>
             <Tag color={hasSession ? "green" : "default"}>
               {hasSession ? "会话已建立" : "未建会话"}
             </Tag>
             {commandRunning ? <Tag color="processing">命令执行中</Tag> : null}
-            <Button onClick={() => void handleProbe()} loading={loading}>
+            <Button
+              icon={<ToolOutlined />}
+              style={actionButtonStyle}
+              onClick={() => void handleProbe()}
+              loading={loading}
+            >
               检查能力
             </Button>
             <Button
+              icon={<RocketOutlined />}
               type={hasSession ? "default" : "primary"}
+              style={actionButtonStyle}
               onClick={() => void handleStartSession()}
               loading={loading}
             >
@@ -637,7 +780,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
             </Button>
             {hasSession ? (
               <Button
+                icon={<PlayCircleOutlined />}
                 type="primary"
+                style={actionButtonStyle}
                 onClick={() => void handleExecuteCommand()}
                 loading={commandRunning}
               >
@@ -647,6 +792,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
             {hasSession ? (
               <Button
                 danger
+                icon={<PauseCircleOutlined />}
+                style={actionButtonStyle}
                 disabled={!commandRunning || !effectiveSession?.sessionId || !activeCommandId}
                 onClick={() => void handleCancelCommand()}
                 loading={loading && commandRunning}
@@ -659,195 +806,286 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         {error ? <Alert type="error" showIcon message={error} style={{ marginTop: 16 }} /> : null}
       </Card>
 
-      {!hasSession ? (
-        <Card title="使用流程" variant="borderless" style={cardStyle}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-              gap: 12,
-            }}
-          >
-            {[
-              ["1", "检查能力（可选）", "读取诊断通道、流式输出和命令权限，不创建会话、不执行命令。"],
-              ["2", "新建会话", "创建一次诊断上下文。Arthas Tunnel 的目标连接会在测试或执行命令时发生。"],
-              ["3", "执行命令", "先新建会话，再显示命令编辑区；会话创建后才显示原因输入和模板区。"],
-            ].map(([index, title, description]) => (
-              <div
-                key={index}
-                style={{
-                  padding: 14,
-                  borderRadius: 14,
-                  border: darkMode ? "1px solid #303030" : "1px solid #e6eef8",
-                  background: darkMode ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.72)",
-                }}
-              >
-                <Tag color="blue">{index}</Tag>
-                <Text strong>{title}</Text>
-                <Paragraph type="secondary" style={{ margin: "8px 0 0" }}>
-                  {description}
-                </Paragraph>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
-            gap: 18,
-            alignItems: "start",
-          }}
-        >
-          <div style={{ display: "grid", gap: 18, minWidth: 0 }}>
-            <Card title="命令输入" variant="borderless" style={cardStyle}>
-              <div style={{ display: "grid", gap: 14 }}>
-                <div style={{ display: "grid", gap: 6 }}>
-                  <Text strong>诊断命令</Text>
-                  <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                    输入 Arthas/诊断命令，例如 thread -n 5、dashboard、jvm；也可以从下方模板一键回填。按 Ctrl/Cmd + Enter 可执行。
-                  </Paragraph>
-                  <div
-                    data-jvm-diagnostic-command-editor-shell="true"
-                    style={commandEditorShellStyle(darkMode)}
-                  >
-                    <Editor
-                      beforeMount={handleCommandEditorBeforeMount}
-                      height={220}
-                      language={JVM_DIAGNOSTIC_EDITOR_LANGUAGE}
-                      theme={
-                        darkMode ? "transparent-dark" : "transparent-light"
-                      }
-                      value={draft.command}
-                      onMount={handleCommandEditorMount}
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        automaticLayout: true,
-                        scrollBeyondLastLine: false,
-                        wordWrap: "on",
-                        quickSuggestions: {
-                          other: true,
-                          comments: false,
-                          strings: true,
-                        },
-                        suggestOnTriggerCharacters: true,
-                        lineNumbers: "off",
-                        folding: false,
-                        glyphMargin: false,
-                        renderLineHighlight: "all",
-                        roundedSelection: true,
-                      }}
-                      onChange={(value) =>
-                        setDraft(tab.id, {
-                          command: value || "",
-                          source: "manual",
-                        })
-                      }
-                    />
-                  </div>
-                </div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  <Text strong>诊断原因（可选）</Text>
-                  <Input
-                    value={draft.reason || ""}
-                    placeholder="例如：排查 CPU 飙高、确认线程阻塞、定位慢方法"
-                    onChange={(event) => setDraft(tab.id, { reason: event.target.value })}
-                  />
-                  <Text type="secondary">
-                    用于审计记录和 AI 上下文理解，不会作为 Arthas 命令发送到目标 JVM。
-                  </Text>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="命令模板" variant="borderless" style={cardStyle}>
-              <JVMCommandPresetBar
-                onSelectPreset={(preset) =>
-                  setDraft(tab.id, {
-                    command: preset.command,
-                    reason: preset.description,
-                    source: "manual",
-                  })
-                }
-              />
-            </Card>
-          </div>
-
-          <Card title="会话与能力" variant="borderless" style={cardStyle}>
-            <Space direction="vertical" size={12} style={{ width: "100%" }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Tag color="blue">{effectiveSession?.sessionId}</Tag>
-                <Tag>{effectiveSession?.transport || diagnosticTransport}</Tag>
-                <Tag color={commandRunning ? "processing" : "green"}>
-                  {commandRunning ? "命令执行中" : "空闲"}
-                </Tag>
-              </div>
-              <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                检查能力只读取通道权限；执行命令前必须先建会话。输出优先看下方“实时输出”，审计记录看“审计历史”。
-              </Paragraph>
-              <Space wrap>
-                <Button size="small" onClick={() => clearOutput(tab.id)}>
-                  清空输出
-                </Button>
-                <Button size="small" onClick={() => void loadAuditRecords()} loading={historyLoading}>
-                  刷新历史
-                </Button>
-              </Space>
-              {capabilities.length ? (
-                <Alert
-                  type="info"
-                  showIcon
-                  message="能力检查结果"
-                  description={
-                    <Space size={8} wrap>
-                      {capabilities.map((item) => (
-                        <Space key={item.transport} size={4} wrap>
-                          <Tag color="processing">{item.transport}</Tag>
-                          <Tag color={item.canOpenSession ? "green" : "red"}>
-                            {item.canOpenSession ? "可建会话" : "不可建会话"}
-                          </Tag>
-                          <Tag color={item.canStream ? "green" : "red"}>
-                            {item.canStream ? "支持流式输出" : "不支持流式输出"}
-                          </Tag>
-                          <Tag color={item.allowObserveCommands ? "green" : "red"}>
-                            {item.allowObserveCommands ? "允许观察命令" : "禁止观察命令"}
-                          </Tag>
-                          {item.allowTraceCommands ? <Tag color="gold">允许 Trace</Tag> : null}
-                          {item.allowMutatingCommands ? <Tag color="red">允许变更类命令</Tag> : null}
-                        </Space>
-                      ))}
-                    </Space>
-                  }
-                />
-              ) : (
-                <Alert
-                  type="info"
-                  showIcon
-                  message="尚未检查能力"
-                  description="如需确认当前连接是否允许 observe/trace/高风险命令，可点击顶部“检查能力”。"
-                />
-              )}
-            </Space>
-          </Card>
-        </div>
-      )}
-
       <div
         style={{
           display: "grid",
-          gap: 18,
-          gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+          gap: 16,
+          gridTemplateColumns:
+            "minmax(min(100%, 520px), 1.16fr) minmax(min(100%, 340px), 0.84fr)",
           alignItems: "start",
         }}
       >
-        <Card title="实时输出" variant="borderless" style={cardStyle}>
-          <JVMDiagnosticOutput chunks={chunks} />
-        </Card>
-        <Card title="审计历史" variant="borderless" style={cardStyle}>
-          <JVMDiagnosticHistory session={effectiveSession} records={records} />
-        </Card>
+        <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+          {!hasSession ? (
+            <Card
+              title={renderCardTitle(
+                <RocketOutlined />,
+                "开始一次诊断",
+                "先建立会话，再显示命令编辑器和模板",
+              )}
+              variant="borderless"
+              style={cardStyle}
+              styles={compactCardStyles}
+            >
+              <div style={{ display: "grid", gap: 16 }}>
+                <Alert
+                  type="info"
+                  showIcon
+                  message="命令输入将在会话建立后显示"
+                  description="这样可以避免未绑定会话时误以为命令已经可执行，也能保证审计记录、输出流和取消命令都绑定到同一个会话。"
+                />
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {DIAGNOSTIC_WORKFLOW_STEPS.map((step) => (
+                    <div
+                      key={step.index}
+                      style={{
+                        padding: 14,
+                        borderRadius: 16,
+                        border: darkMode
+                          ? "1px solid rgba(255,255,255,0.08)"
+                          : "1px solid rgba(22,119,255,0.12)",
+                        background: mutedPanelBg,
+                      }}
+                    >
+                      <Text
+                        strong
+                        style={{
+                          color: darkMode ? "#91caff" : "#1677ff",
+                          fontSize: 12,
+                        }}
+                      >
+                        {step.index}
+                      </Text>
+                      <div style={{ marginTop: 6 }}>
+                        <Text strong>{step.title}</Text>
+                      </div>
+                      <Paragraph type="secondary" style={{ margin: "6px 0 0" }}>
+                        {step.description}
+                      </Paragraph>
+                    </div>
+                  ))}
+                </div>
+                <Space wrap>
+                  <Button
+                    type="primary"
+                    icon={<RocketOutlined />}
+                    style={actionButtonStyle}
+                    loading={loading}
+                    onClick={() => void handleStartSession()}
+                  >
+                    新建诊断会话
+                  </Button>
+                  <Button
+                    icon={<ToolOutlined />}
+                    style={actionButtonStyle}
+                    loading={loading}
+                    onClick={() => void handleProbe()}
+                  >
+                    先检查能力
+                  </Button>
+                </Space>
+              </div>
+            </Card>
+          ) : (
+            <>
+              <Card
+                title={renderCardTitle(
+                  <PlayCircleOutlined />,
+                  "命令输入",
+                  "支持自动补全，按 Ctrl/Cmd + Enter 执行",
+                )}
+                variant="borderless"
+                style={cardStyle}
+                styles={compactCardStyles}
+              >
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <Text strong>诊断命令</Text>
+                    <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                      输入 Arthas/诊断命令，例如 thread -n 5、dashboard、jvm；也可以从下方模板一键回填。
+                    </Paragraph>
+                    <div
+                      data-jvm-diagnostic-command-editor-shell="true"
+                      style={commandEditorShellStyle(darkMode)}
+                    >
+                      <Editor
+                        beforeMount={handleCommandEditorBeforeMount}
+                        height={180}
+                        language={JVM_DIAGNOSTIC_EDITOR_LANGUAGE}
+                        theme={
+                          darkMode ? "transparent-dark" : "transparent-light"
+                        }
+                        value={draft.command}
+                        onMount={handleCommandEditorMount}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 13,
+                          automaticLayout: true,
+                          scrollBeyondLastLine: false,
+                          wordWrap: "on",
+                          quickSuggestions: {
+                            other: true,
+                            comments: false,
+                            strings: true,
+                          },
+                          suggestOnTriggerCharacters: true,
+                          lineNumbers: "off",
+                          folding: false,
+                          glyphMargin: false,
+                          renderLineHighlight: "all",
+                          roundedSelection: true,
+                        }}
+                        onChange={(value) =>
+                          setDraft(tab.id, {
+                            command: value || "",
+                            source: "manual",
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <Text strong>诊断原因（可选）</Text>
+                    <Input
+                      value={draft.reason || ""}
+                      placeholder="例如：排查 CPU 飙高、确认线程阻塞、定位慢方法"
+                      onChange={(event) =>
+                        setDraft(tab.id, { reason: event.target.value })
+                      }
+                    />
+                    <Text type="secondary">
+                      用于审计记录和 AI 上下文理解，不会作为 Arthas 命令发送到目标 JVM。
+                    </Text>
+                  </div>
+                </div>
+              </Card>
+
+              <Card
+                title={renderCardTitle(<ToolOutlined />, "命令模板")}
+                variant="borderless"
+                style={cardStyle}
+                styles={compactCardStyles}
+              >
+                <JVMCommandPresetBar
+                  onSelectPreset={(preset) =>
+                    setDraft(tab.id, {
+                      command: preset.command,
+                      reason: preset.description,
+                      source: "manual",
+                    })
+                  }
+                />
+              </Card>
+            </>
+          )}
+
+          {hasSession || chunks.length ? (
+            <Card
+              title={renderCardTitle(
+                <PlayCircleOutlined />,
+                "实时输出",
+                "按后端事件流追加显示",
+              )}
+              variant="borderless"
+              style={cardStyle}
+              styles={compactCardStyles}
+            >
+              <JVMDiagnosticOutput chunks={chunks} maxHeight={320} />
+            </Card>
+          ) : null}
+        </div>
+
+        <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+          <Card
+            title={renderCardTitle(
+              <ToolOutlined />,
+              "会话与能力",
+              "当前通道、权限与快捷维护",
+            )}
+            variant="borderless"
+            style={cardStyle}
+            styles={compactCardStyles}
+          >
+            <Space direction="vertical" size={14} style={{ width: "100%" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 10,
+                  padding: 14,
+                  borderRadius: 16,
+                  background: mutedPanelBg,
+                }}
+              >
+                <Space size={6} wrap>
+                  <Tag color={hasSession ? "green" : "default"}>
+                    {hasSession ? "会话已建立" : "未建会话"}
+                  </Tag>
+                  <Tag>{formatJVMDiagnosticTransportLabel(diagnosticTransport)}</Tag>
+                  <Tag color={commandRunning ? "processing" : "green"}>
+                    {commandRunning ? "命令执行中" : "空闲"}
+                  </Tag>
+                </Space>
+                {effectiveSession?.sessionId ? (
+                  <Text
+                    code
+                    copyable
+                    style={{ whiteSpace: "normal", wordBreak: "break-all" }}
+                  >
+                    {effectiveSession.sessionId}
+                  </Text>
+                ) : (
+                  <Text type="secondary">创建会话后会在这里显示会话 ID。</Text>
+                )}
+              </div>
+              <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                检查能力不会执行命令；执行命令前必须先建会话。审计历史展示最近命令记录，未建会话时也可能包含过去会话的记录。
+              </Paragraph>
+              <Space wrap>
+                <Button
+                  size="small"
+                  icon={<ClearOutlined />}
+                  onClick={() => clearOutput(tab.id)}
+                >
+                  清空输出
+                </Button>
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => void loadAuditRecords()}
+                  loading={historyLoading}
+                >
+                  刷新历史
+                </Button>
+              </Space>
+              {renderCapabilityContent()}
+            </Space>
+          </Card>
+
+          <Card
+            title={renderCardTitle(
+              <HistoryOutlined />,
+              "审计历史",
+              "最近命令和执行状态",
+            )}
+            variant="borderless"
+            style={cardStyle}
+            styles={compactCardStyles}
+          >
+            <JVMDiagnosticHistory
+              session={effectiveSession}
+              records={records}
+              showSession={false}
+              maxHeight={340}
+            />
+          </Card>
+        </div>
       </div>
     </div>
   );

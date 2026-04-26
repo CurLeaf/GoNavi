@@ -155,7 +155,7 @@ describe("JVMDiagnosticConsole", () => {
     expect(isJVMDiagnosticTerminalPhase("running")).toBe(false);
   });
 
-  it("explains the workflow and hides command inputs before session creation", () => {
+  it("keeps a stable workbench shell and hides command inputs before session creation", () => {
     mockState = {
       ...baseState,
       jvmDiagnosticDrafts: {},
@@ -172,10 +172,13 @@ describe("JVMDiagnosticConsole", () => {
       />,
     );
 
-    expect(markup).toContain("使用流程");
-    expect(markup).toContain("检查能力（可选）");
-    expect(markup).toContain("先新建会话，再显示命令编辑区");
+    expect(markup).toContain("开始一次诊断");
+    expect(markup).toContain("命令输入将在会话建立后显示");
+    expect(markup).toContain("先建立会话，再显示命令编辑器和模板");
+    expect(markup).toContain("会话与能力");
+    expect(markup).toContain("审计历史");
     expect(markup).not.toContain("命令模板");
+    expect(markup).not.toContain("实时输出");
     expect(markup).not.toContain('data-monaco-editor-mock="true"');
   });
 
