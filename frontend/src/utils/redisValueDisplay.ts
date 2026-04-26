@@ -88,13 +88,135 @@ const tryDecodeValue = (value: string): { displayValue: string; encoding: string
   return { displayValue: toHexDisplay(value), encoding: 'HEX', needsHex: true };
 };
 
-const tryFormatJson = (value: string): { isJson: boolean; formatted: string } => {
-  try {
-    const parsed = JSON.parse(value);
-    return { isJson: true, formatted: JSON.stringify(parsed, null, 2) };
-  } catch {
-    return { isJson: false, formatted: value };
+const findNextNonWhitespace = (value: string, startIndex: number): string => {
+  for (let i = startIndex; i < value.length; i++) {
+    if (!/\s/.test(value[i])) {
+      return value[i];
+    }
   }
+  return '';
+};
+
+const readJsonStringToken = (value: string, startIndex: number): { token: string; nextIndex: number } => {
+  let index = startIndex + 1;
+  let escaped = false;
+  while (index < value.length) {
+    const char = value[index];
+    if (escaped) {
+      escaped = false;
+      index++;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      index++;
+      continue;
+    }
+    if (char === '"') {
+      return { token: value.slice(startIndex, index + 1), nextIndex: index + 1 };
+    }
+    index++;
+  }
+  return { token: value.slice(startIndex), nextIndex: value.length };
+};
+
+const readJsonPrimitiveToken = (value: string, startIndex: number): { token: string; nextIndex: number } => {
+  let index = startIndex;
+  while (index < value.length && !/[\s,\]}]/.test(value[index])) {
+    index++;
+  }
+  return { token: value.slice(startIndex, index), nextIndex: index };
+};
+
+const formatJsonStringToken = (token: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(token));
+  } catch {
+    return token;
+  }
+};
+
+const formatJsonPreservingNumberLiterals = (value: string): string | null => {
+  try {
+    JSON.parse(value);
+  } catch {
+    return null;
+  }
+
+  const indentUnit = '  ';
+  const indent = (depth: number) => indentUnit.repeat(Math.max(0, depth));
+  let result = '';
+  let depth = 0;
+  let index = 0;
+  let lastToken: 'open' | 'value' | 'close' | 'comma' | 'colon' | '' = '';
+
+  while (index < value.length) {
+    const char = value[index];
+    if (/\s/.test(char)) {
+      index++;
+      continue;
+    }
+
+    if (char === '"') {
+      const { token, nextIndex } = readJsonStringToken(value, index);
+      result += formatJsonStringToken(token);
+      lastToken = 'value';
+      index = nextIndex;
+      continue;
+    }
+
+    if (char === '{' || char === '[') {
+      const closeChar = char === '{' ? '}' : ']';
+      result += char;
+      depth++;
+      lastToken = 'open';
+      if (findNextNonWhitespace(value, index + 1) !== closeChar) {
+        result += `\n${indent(depth)}`;
+      }
+      index++;
+      continue;
+    }
+
+    if (char === '}' || char === ']') {
+      depth--;
+      if (lastToken !== 'open') {
+        result += `\n${indent(depth)}`;
+      }
+      result += char;
+      lastToken = 'close';
+      index++;
+      continue;
+    }
+
+    if (char === ',') {
+      result += `,\n${indent(depth)}`;
+      lastToken = 'comma';
+      index++;
+      continue;
+    }
+
+    if (char === ':') {
+      result += ': ';
+      lastToken = 'colon';
+      index++;
+      continue;
+    }
+
+    const { token, nextIndex } = readJsonPrimitiveToken(value, index);
+    result += token;
+    lastToken = 'value';
+    index = nextIndex;
+  }
+
+  return result;
+};
+
+const tryFormatJson = (value: string): { isJson: boolean; formatted: string } => {
+  const formatted = formatJsonPreservingNumberLiterals(value);
+  if (formatted !== null) {
+    return { isJson: true, formatted };
+  }
+  return { isJson: false, formatted: value };
 };
 
 export const toHexDisplay = (value: string): string => {
