@@ -2,12 +2,38 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import TableDesignerSqlPreview from './TableDesignerSqlPreview';
+import TableDesignerSqlPreview, { resolveSqlChangeHighlights } from './TableDesignerSqlPreview';
 
 const mockMonaco = {
+  Range: class {
+    startLineNumber: number;
+    startColumn: number;
+    endLineNumber: number;
+    endColumn: number;
+
+    constructor(
+      startLineNumber: number,
+      startColumn: number,
+      endLineNumber: number,
+      endColumn: number,
+    ) {
+      this.startLineNumber = startLineNumber;
+      this.startColumn = startColumn;
+      this.endLineNumber = endLineNumber;
+      this.endColumn = endColumn;
+    }
+  },
   editor: {
     defineTheme: vi.fn(),
   },
+};
+
+const mockEditor = {
+  deltaDecorations: vi.fn(() => ['decoration-1']),
+  getModel: vi.fn(() => ({
+    getLineCount: () => 5,
+    getLineMaxColumn: (lineNumber: number) => (lineNumber === 1 ? 22 : 80),
+  })),
 };
 
 vi.mock('@monaco-editor/react', () => ({
@@ -15,6 +41,7 @@ vi.mock('@monaco-editor/react', () => ({
     beforeMount,
     defaultLanguage,
     language,
+    onMount,
     options,
     theme,
     value,
@@ -22,11 +49,13 @@ vi.mock('@monaco-editor/react', () => ({
     beforeMount?: (monaco: any) => void;
     defaultLanguage?: string;
     language?: string;
+    onMount?: (editor: any, monaco: any) => void;
     options?: Record<string, any>;
     theme?: string;
     value?: string;
   }) => {
     beforeMount?.(mockMonaco);
+    onMount?.(mockEditor, mockMonaco);
     return (
       <div
         data-default-language={defaultLanguage}
@@ -43,6 +72,7 @@ vi.mock('@monaco-editor/react', () => ({
 
 describe('TableDesignerSqlPreview', () => {
   beforeEach(() => {
+    mockEditor.deltaDecorations.mockClear();
     mockMonaco.editor.defineTheme.mockClear();
   });
 
@@ -76,6 +106,56 @@ describe('TableDesignerSqlPreview', () => {
         ]),
       }),
     );
+  });
+
+  it('detects only SQL change operation lines instead of highlighting the whole SQL block', () => {
+    const highlights = resolveSqlChangeHighlights([
+      'ALTER TABLE "users"',
+      'ADD COLUMN "age" int NULL;',
+      'ALTER TABLE "users"',
+      'RENAME COLUMN "name" TO "display_name";',
+      '-- DuckDB 不支持通过 COMMENT ON COLUMN 持久化字段备注',
+    ].join('\n'));
+
+    expect(highlights).toEqual([
+      expect.objectContaining({ kind: 'add', lineNumber: 2 }),
+      expect.objectContaining({ kind: 'rename', lineNumber: 4 }),
+    ]);
+  });
+
+  it('adds Monaco decorations to changed SQL lines only', () => {
+    renderToStaticMarkup(
+      <TableDesignerSqlPreview
+        sql={[
+          'ALTER TABLE "users"',
+          'ADD COLUMN "age" int NULL;',
+          'ALTER TABLE "users"',
+          'DROP COLUMN "legacy_name";',
+        ].join('\n')}
+      />,
+    );
+
+    expect(mockEditor.deltaDecorations).toHaveBeenCalledWith(
+      [],
+      expect.arrayContaining([
+        expect.objectContaining({
+          range: expect.objectContaining({ startLineNumber: 2, endLineNumber: 2 }),
+          options: expect.objectContaining({
+            className: expect.stringContaining('gonavi-sql-preview-change-line-add'),
+            isWholeLine: true,
+          }),
+        }),
+        expect.objectContaining({
+          range: expect.objectContaining({ startLineNumber: 4, endLineNumber: 4 }),
+          options: expect.objectContaining({
+            className: expect.stringContaining('gonavi-sql-preview-change-line-drop'),
+            isWholeLine: true,
+          }),
+        }),
+      ]),
+    );
+    const firstDecorationCall = mockEditor.deltaDecorations.mock.calls[0] as unknown as [unknown, unknown[]];
+    expect(firstDecorationCall[1]).toHaveLength(2);
   });
 
   it('uses the dark SQL preview theme when dark mode is enabled', () => {
