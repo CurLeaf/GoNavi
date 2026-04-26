@@ -246,6 +246,66 @@ export function InstallUpdateAndRestart() {
   return window['go']['app']['App']['InstallUpdateAndRestart']();
 }
 
+export function JVMApplyChange(arg1, arg2) {
+  return window['go']['app']['App']['JVMApplyChange'](arg1, arg2);
+}
+
+export function JVMCancelDiagnosticCommand(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['JVMCancelDiagnosticCommand'](arg1, arg2, arg3, arg4);
+}
+
+export function JVMExecuteDiagnosticCommand(arg1, arg2, arg3) {
+  return window['go']['app']['App']['JVMExecuteDiagnosticCommand'](arg1, arg2, arg3);
+}
+
+export function JVMGetMonitoringHistory(arg1, arg2) {
+  return window['go']['app']['App']['JVMGetMonitoringHistory'](arg1, arg2);
+}
+
+export function JVMGetValue(arg1, arg2) {
+  return window['go']['app']['App']['JVMGetValue'](arg1, arg2);
+}
+
+export function JVMListAuditRecords(arg1, arg2) {
+  return window['go']['app']['App']['JVMListAuditRecords'](arg1, arg2);
+}
+
+export function JVMListDiagnosticAuditRecords(arg1, arg2) {
+  return window['go']['app']['App']['JVMListDiagnosticAuditRecords'](arg1, arg2);
+}
+
+export function JVMListResources(arg1, arg2) {
+  return window['go']['app']['App']['JVMListResources'](arg1, arg2);
+}
+
+export function JVMPreviewChange(arg1, arg2) {
+  return window['go']['app']['App']['JVMPreviewChange'](arg1, arg2);
+}
+
+export function JVMProbeCapabilities(arg1) {
+  return window['go']['app']['App']['JVMProbeCapabilities'](arg1);
+}
+
+export function JVMProbeDiagnosticCapabilities(arg1) {
+  return window['go']['app']['App']['JVMProbeDiagnosticCapabilities'](arg1);
+}
+
+export function JVMStartDiagnosticSession(arg1, arg2) {
+  return window['go']['app']['App']['JVMStartDiagnosticSession'](arg1, arg2);
+}
+
+export function JVMStartMonitoring(arg1) {
+  return window['go']['app']['App']['JVMStartMonitoring'](arg1);
+}
+
+export function JVMStopMonitoring(arg1, arg2) {
+  return window['go']['app']['App']['JVMStopMonitoring'](arg1, arg2);
+}
+
+export function ListSQLDirectory(arg1) {
+  return window['go']['app']['App']['ListSQLDirectory'](arg1);
+}
+
 export function LogWindowDiagnostic(arg1, arg2) {
   return window['go']['app']['App']['LogWindowDiagnostic'](arg1, arg2);
 }
@@ -288,10 +348,6 @@ export function OpenDriverDownloadDirectory(arg1) {
 
 export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
-}
-
-export function ListSQLDirectory(arg1) {
-  return window['go']['app']['App']['ListSQLDirectory'](arg1);
 }
 
 export function PreviewImportFile(arg1) {
@@ -438,10 +494,6 @@ export function SaveConnection(arg1) {
   return window['go']['app']['App']['SaveConnection'](arg1);
 }
 
-export function SelectSQLDirectory(arg1) {
-  return window['go']['app']['App']['SelectSQLDirectory'](arg1);
-}
-
 export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
 }
@@ -466,6 +518,10 @@ export function SelectDriverPackageFile(arg1) {
   return window['go']['app']['App']['SelectDriverPackageFile'](arg1);
 }
 
+export function SelectSQLDirectory(arg1) {
+  return window['go']['app']['App']['SelectSQLDirectory'](arg1);
+}
+
 export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
@@ -484,6 +540,10 @@ export function StartSecurityUpdate(arg1) {
 
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
+}
+
+export function TestJVMConnection(arg1) {
+  return window['go']['app']['App']['TestJVMConnection'](arg1);
 }
 
 export function TruncateTables(arg1, arg2, arg3) {

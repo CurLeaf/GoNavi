@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal } from 'antd';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
+import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
@@ -9,6 +9,14 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
+import {
+    TABLE_OVERVIEW_RENDER_BATCH_SIZE,
+    buildTableOverviewSearchIndex,
+    filterAndSortTableOverviewRows,
+    resolveTableOverviewVisibleRows,
+    type TableOverviewSortField,
+    type TableOverviewSortOrder,
+} from '../utils/tableOverviewFilter';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -25,8 +33,8 @@ interface TableStatRow {
     updateTime: string;
 }
 
-type SortField = 'name' | 'rows' | 'dataSize';
-type SortOrder = 'asc' | 'desc';
+type SortField = TableOverviewSortField;
+type SortOrder = TableOverviewSortOrder;
 type ViewMode = 'card' | 'list';
 
 const formatSize = (bytes: number): string => {
@@ -166,6 +174,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
     const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const [visibleTableLimit, setVisibleTableLimit] = useState(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
+    const deferredSearchText = useDeferredValue(searchText);
+    const isSearchPending = searchText !== deferredSearchText;
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
     const metadataDialect = useMemo(
@@ -207,21 +218,21 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         void loadData();
     }, [autoFetchVisible, loadData]);
 
-    const sortedFiltered = useMemo(() => {
-        let list = [...tables];
-        if (searchText.trim()) {
-            const kw = searchText.trim().toLowerCase();
-            list = list.filter(t => t.name.toLowerCase().includes(kw) || t.comment.toLowerCase().includes(kw));
-        }
-        list.sort((a, b) => {
-            let cmp = 0;
-            if (sortField === 'name') cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-            else if (sortField === 'rows') cmp = a.rows - b.rows;
-            else if (sortField === 'dataSize') cmp = a.dataSize - b.dataSize;
-            return sortOrder === 'asc' ? cmp : -cmp;
-        });
-        return list;
-    }, [tables, searchText, sortField, sortOrder]);
+    const tableSearchIndex = useMemo(() => buildTableOverviewSearchIndex(tables), [tables]);
+
+    const sortedFiltered = useMemo(() => (
+        filterAndSortTableOverviewRows(tableSearchIndex, deferredSearchText, sortField, sortOrder)
+    ), [deferredSearchText, sortField, sortOrder, tableSearchIndex]);
+
+    useEffect(() => {
+        setVisibleTableLimit(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
+    }, [deferredSearchText, sortField, sortOrder, viewMode, tables]);
+
+    const visibleOverview = useMemo(() => (
+        resolveTableOverviewVisibleRows(sortedFiltered, visibleTableLimit)
+    ), [sortedFiltered, visibleTableLimit]);
+
+    const visibleTables = visibleOverview.visibleRows;
 
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
@@ -397,11 +408,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         { key: 'dataSize', label: `按大小${sortField === 'dataSize' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}`, onClick: () => toggleSort('dataSize') },
     ];
 
-    const totalRows = tables.reduce((s, t) => s + t.rows, 0);
-    const totalSize = tables.reduce((s, t) => s + t.dataSize + t.indexSize, 0);
-    const maxCombinedSize = sortedFiltered.reduce((max, table) => {
+    const totalRows = useMemo(() => tables.reduce((s, t) => s + t.rows, 0), [tables]);
+    const totalSize = useMemo(() => tables.reduce((s, t) => s + t.dataSize + t.indexSize, 0), [tables]);
+    const maxCombinedSize = useMemo(() => sortedFiltered.reduce((max, table) => {
         return Math.max(max, table.dataSize + table.indexSize);
-    }, 0);
+    }, 0), [sortedFiltered]);
     const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
 
     if (loading) {
@@ -468,6 +479,31 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
             {/* Content Area */}
             <div style={{ flex: 1, overflow: 'auto', padding: '0 16px 16px 16px' }}>
+                {sortedFiltered.length > 0 && (isSearchPending || visibleOverview.hiddenCount > 0 || deferredSearchText.trim()) && (
+                    <div
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                            marginBottom: 10,
+                            padding: '8px 10px',
+                            borderRadius: 10,
+                            background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.025)',
+                            color: textMuted,
+                            fontSize: 12,
+                        }}
+                    >
+                        <span>
+                            {isSearchPending
+                                ? '正在更新筛选结果...'
+                                : `匹配 ${sortedFiltered.length} 张表，当前渲染 ${visibleTables.length} 张`}
+                        </span>
+                        {visibleOverview.hiddenCount > 0 && (
+                            <span>还有 {visibleOverview.hiddenCount} 张未渲染，可继续加载或缩小搜索范围</span>
+                        )}
+                    </div>
+                )}
                 {sortedFiltered.length === 0 ? (
                     <Empty description={searchText ? '无匹配结果' : '暂无表'} style={{ marginTop: 80 }} />
                 ) : viewMode === 'card' ? (
@@ -477,7 +513,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
                         gap: 12,
                     }}>
-                        {sortedFiltered.map(t => (
+                        {visibleTables.map(t => (
                             <Dropdown
                                 key={t.name}
                                 trigger={['contextMenu']}
@@ -556,7 +592,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 ) : (
                     /* ========== 行视图 ========== */
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {sortedFiltered.map(t => {
+                        {visibleTables.map(t => {
                             const combinedSize = t.dataSize + t.indexSize;
                             const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
                             const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
@@ -693,6 +729,16 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                 </Dropdown>
                             );
                         })}
+                    </div>
+                )}
+                {sortedFiltered.length > 0 && visibleOverview.hiddenCount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 4px' }}>
+                        <Button
+                            size="small"
+                            onClick={() => setVisibleTableLimit(limit => limit + TABLE_OVERVIEW_RENDER_BATCH_SIZE)}
+                        >
+                            显示更多表（剩余 {visibleOverview.hiddenCount}）
+                        </Button>
                     </div>
                 )}
             </div>

@@ -20,6 +20,26 @@ describe('redisValueDisplay', () => {
     });
   });
 
+  it('preserves large integer literals when formatting json in auto mode', () => {
+    const value = '{"subSessionIds":["java.util.ArrayList",[1494694751571226624]],"currentSubSessionId":1494694751571226624}';
+    const formatted = formatRedisStringValue(value);
+
+    expect(formatted).toMatchObject({
+      isBinary: false,
+      isJson: true,
+      encoding: 'UTF-8',
+    });
+    expect(formatted.displayValue).toContain('1494694751571226624');
+    expect(formatted.displayValue).not.toContain('1494694751571226600');
+  });
+
+  it('keeps json string escape rendering consistent in auto mode', () => {
+    const formatted = formatRedisStringValue('{"name":"\\u4e2d\\u6587","id":1494694751571226624}');
+
+    expect(formatted.displayValue).toContain('"name": "中文"');
+    expect(formatted.displayValue).toContain('"id": 1494694751571226624');
+  });
+
   it('falls back to hex for obvious binary values', () => {
     expect(formatRedisStringValue('\u0000\u0001\u0002abc')).toMatchObject({
       isBinary: true,

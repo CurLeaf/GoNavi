@@ -15,6 +15,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     postgres:   '#336791',
     redis:      '#DC382D',
     mongodb:    '#47A248',
+    jvm:        '#1677FF',
     kingbase:   '#1890FF',
     dameng:     '#E6002D',
     oracle:     '#F80000',
@@ -136,6 +137,9 @@ const HighGoIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.tdengine} label="TD" />
 );
+const JVMIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.jvm} label="JVM" />
+);
 
 /** Custom — 齿轮图标 */
 const CustomIcon: React.FC<DbIconProps> = ({ size = 16, color }) => {
@@ -166,6 +170,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     postgres: PostgresIcon,
     redis: RedisIcon,
     mongodb: MongoDBIcon,
+    jvm: JVMIcon,
     kingbase: KingBaseIcon,
     dameng: DamengIcon,
     oracle: OracleIcon,
@@ -181,7 +186,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 
 /** 可选图标类型列表（用于图标选择器 UI） */
 export const DB_ICON_TYPES: string[] = [
-    'mysql', 'mariadb', 'postgres', 'redis', 'mongodb',
+    'mysql', 'mariadb', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse',
     'kingbase', 'dameng', 'vastbase', 'highgo', 'tdengine', 'custom',
 ];
@@ -200,7 +205,8 @@ export const getDbIcon = (type: string, color?: string, size?: number): React.Re
 export const getDbIconLabel = (type: string): string => {
     const labels: Record<string, string> = {
         mysql: 'MySQL', mariadb: 'MariaDB', postgres: 'PostgreSQL',
-        redis: 'Redis', mongodb: 'MongoDB', oracle: 'Oracle',
+        redis: 'Redis', mongodb: 'MongoDB', jvm: 'JVM',
+        oracle: 'Oracle',
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
         vastbase: 'VastBase', highgo: '瀚高', tdengine: 'TDengine',

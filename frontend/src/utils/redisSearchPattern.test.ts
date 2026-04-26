@@ -31,6 +31,20 @@ describe('normalizeRedisSearchInput', () => {
     });
   });
 
+  it('uses literal key pattern without fuzzy wildcards in exact mode', () => {
+    expect(normalizeRedisSearchInput('Order:1001', 'exact')).toEqual({
+      keyword: 'Order:1001',
+      pattern: 'Order:1001',
+    });
+  });
+
+  it('escapes redis glob special characters in exact mode without adding wildcards', () => {
+    expect(normalizeRedisSearchInput('user:*:[id]?\\raw', 'exact')).toEqual({
+      keyword: 'user:*:[id]?\\raw',
+      pattern: 'user:\\*:\\[id\\]\\?\\\\raw',
+    });
+  });
+
   it('marks empty draft changes for immediate reset search', () => {
     expect(normalizeRedisSearchDraftChange('')).toEqual({
       keyword: '',

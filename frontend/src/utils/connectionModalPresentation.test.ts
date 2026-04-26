@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getConnectionConfigLayoutKindLabel,
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
+  resolveConnectionConfigLayout,
   resolveConnectionTestFailureFeedback,
+  summarizeConnectionTestFailureMessage,
 } from './connectionModalPresentation';
 
 describe('connectionModalPresentation', () => {
@@ -33,14 +36,14 @@ describe('connectionModalPresentation', () => {
     expect(normalizeConnectionSecretErrorMessage('连接测试超时')).toBe('连接测试超时');
   });
 
-  it('shows a toast-worthy failure message for saved-secret lookup errors during connection tests', () => {
+  it('keeps saved-secret lookup errors inside the modal instead of raising a global toast', () => {
     expect(resolveConnectionTestFailureFeedback({
       kind: 'runtime',
       reason: 'saved connection not found: conn-1',
       fallback: '连接失败',
     })).toEqual({
       message: '测试失败: 未找到当前连接对应的已保存密文，请重新填写密码并保存后再试',
-      shouldToast: true,
+      shouldToast: false,
     });
   });
 
@@ -53,5 +56,90 @@ describe('connectionModalPresentation', () => {
       message: '测试失败: 请先完善必填项后再测试连接',
       shouldToast: false,
     });
+  });
+
+  it('uses only the first line for connection failure toast summaries', () => {
+    expect(summarizeConnectionTestFailureMessage(`测试失败: 当前端口不是 JMX 远程管理端口\n建议：请改填 JMX 端口\n技术细节：raw error`)).toBe(
+      '测试失败: 当前端口不是 JMX 远程管理端口',
+    );
+  });
+
+  it('assigns card-based configuration sections to every supported data source type', () => {
+    const allTypes = [
+      'mysql',
+      'mariadb',
+      'doris',
+      'diros',
+      'sphinx',
+      'clickhouse',
+      'postgres',
+      'sqlserver',
+      'sqlite',
+      'duckdb',
+      'oracle',
+      'dameng',
+      'kingbase',
+      'highgo',
+      'vastbase',
+      'mongodb',
+      'redis',
+      'tdengine',
+      'custom',
+      'jvm',
+    ];
+
+    allTypes.forEach((type) => {
+      const layout = resolveConnectionConfigLayout(type);
+
+      expect(layout.sections.length).toBeGreaterThan(0);
+      expect(layout.sections).toContain('identity');
+      expect(new Set(layout.sections).size).toBe(layout.sections.length);
+    });
+  });
+
+  it('keeps datasource-specific connection options in the layout contract', () => {
+    expect(resolveConnectionConfigLayout('mysql').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'replica',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('mongodb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'mongoDiscovery',
+      'replica',
+      'mongoPolicy',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('redis').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('sqlite').sections).toEqual([
+      'identity',
+      'uri',
+      'fileTarget',
+    ]);
+    expect(resolveConnectionConfigLayout('custom').sections).toEqual([
+      'identity',
+      'customDriver',
+      'customDsn',
+    ]);
+  });
+
+  it('uses localized labels for layout kinds shown in the modal', () => {
+    expect(getConnectionConfigLayoutKindLabel('mysql-compatible')).toBe('MySQL 兼容');
+    expect(getConnectionConfigLayoutKindLabel('file')).toBe('文件型数据库');
   });
 });

@@ -119,6 +119,74 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().connections[0]?.config.password).toBe('secret');
   });
 
+  it('preserves JVM Arthas diagnostic config when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'jvm-1',
+        name: 'Orders JVM',
+        config: {
+          id: 'jvm-1',
+          type: 'jvm',
+          host: '127.0.0.1',
+          port: 9010,
+          user: '',
+          jvm: {
+            allowedModes: ['jmx'],
+            preferredMode: 'jmx',
+            diagnostic: {
+              enabled: true,
+              transport: 'arthas-tunnel',
+              baseUrl: 'http://127.0.0.1:7777',
+              targetId: 'gonavi-local-test',
+              apiKey: 'diag-token',
+              allowObserveCommands: true,
+              allowTraceCommands: true,
+              allowMutatingCommands: false,
+              timeoutSeconds: 20,
+            },
+          },
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.config.jvm?.diagnostic).toEqual({
+      enabled: true,
+      transport: 'arthas-tunnel',
+      baseUrl: 'http://127.0.0.1:7777',
+      targetId: 'gonavi-local-test',
+      apiKey: 'diag-token',
+      allowObserveCommands: true,
+      allowTraceCommands: true,
+      allowMutatingCommands: false,
+      timeoutSeconds: 20,
+    });
+  });
+
+  it('preserves connection icon metadata when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'visual-1',
+        name: 'Visual Orders',
+        iconType: 'postgres',
+        iconColor: '#2f855a',
+        config: {
+          id: 'visual-1',
+          type: 'mysql',
+          host: 'db.local',
+          port: 3306,
+          user: 'root',
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.iconType).toBe('postgres');
+    expect(useStore.getState().connections[0]?.iconColor).toBe('#2f855a');
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

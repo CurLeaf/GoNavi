@@ -26,6 +26,57 @@ type HTTPTunnelConfig struct {
 	Password string `json:"password,omitempty"`
 }
 
+// JVMJMXConfig 存储 JVM JMX 连接配置。
+type JVMJMXConfig struct {
+	Enabled         bool     `json:"enabled,omitempty"`
+	Host            string   `json:"host,omitempty"`
+	Port            int      `json:"port,omitempty"`
+	Username        string   `json:"username,omitempty"`
+	Password        string   `json:"password,omitempty"`
+	DomainAllowlist []string `json:"domainAllowlist,omitempty"`
+}
+
+// JVMEndpointConfig 存储 JVM Management Endpoint 连接配置。
+type JVMEndpointConfig struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	BaseURL        string `json:"baseUrl,omitempty"`
+	APIKey         string `json:"apiKey,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// JVMAgentConfig 存储 JVM Agent 管理端点配置。
+type JVMAgentConfig struct {
+	Enabled        bool   `json:"enabled,omitempty"`
+	BaseURL        string `json:"baseUrl,omitempty"`
+	APIKey         string `json:"apiKey,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+}
+
+// JVMDiagnosticConfig 存储 JVM 诊断增强模式配置。
+type JVMDiagnosticConfig struct {
+	Enabled               bool   `json:"enabled,omitempty"`
+	Transport             string `json:"transport,omitempty"`
+	BaseURL               string `json:"baseUrl,omitempty"`
+	TargetID              string `json:"targetId,omitempty"`
+	APIKey                string `json:"apiKey,omitempty"`
+	AllowObserveCommands  bool   `json:"allowObserveCommands,omitempty"`
+	AllowTraceCommands    bool   `json:"allowTraceCommands,omitempty"`
+	AllowMutatingCommands bool   `json:"allowMutatingCommands,omitempty"`
+	TimeoutSeconds        int    `json:"timeoutSeconds,omitempty"`
+}
+
+// JVMConfig 存储 JVM 连接的协议与能力偏好配置。
+type JVMConfig struct {
+	Environment   string              `json:"environment,omitempty"`
+	ReadOnly      *bool               `json:"readOnly,omitempty"`
+	AllowedModes  []string            `json:"allowedModes,omitempty"`
+	PreferredMode string              `json:"preferredMode,omitempty"`
+	JMX           JVMJMXConfig        `json:"jmx,omitempty"`
+	Endpoint      JVMEndpointConfig   `json:"endpoint,omitempty"`
+	Agent         JVMAgentConfig      `json:"agent,omitempty"`
+	Diagnostic    JVMDiagnosticConfig `json:"diagnostic,omitempty"`
+}
+
 // ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。
 type ConnectionConfig struct {
 	ID                   string           `json:"id,omitempty"`
@@ -62,6 +113,7 @@ type ConnectionConfig struct {
 	MongoAuthMechanism   string           `json:"mongoAuthMechanism,omitempty"`   // MongoDB authMechanism
 	MongoReplicaUser     string           `json:"mongoReplicaUser,omitempty"`     // MongoDB replica auth user
 	MongoReplicaPassword string           `json:"mongoReplicaPassword,omitempty"` // MongoDB replica auth password
+	JVM                  JVMConfig        `json:"jvm,omitempty"`                  // JVM connector config
 }
 
 // ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。

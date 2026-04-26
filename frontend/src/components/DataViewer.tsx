@@ -10,6 +10,11 @@ import { buildOracleApproximateTotalSql, parseApproximateTableCountRow, resolveA
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { resolveDataViewerAutoFetchAction } from '../utils/dataViewerAutoFetch';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import {
+  buildEffectiveFilterConditions,
+  normalizeQuickWhereCondition,
+  validateQuickWhereCondition,
+} from '../utils/dataGridWhereFilter';
 
 type ViewerPaginationState = {
   current: number;
@@ -135,6 +140,7 @@ const reverseOrderBySQL = (orderBySQL: string): string => {
 type ViewerFilterSnapshot = {
   showFilter: boolean;
   conditions: FilterCondition[];
+  quickWhereCondition: string;
   currentPage: number;
   pageSize: number;
   sortInfo: Array<{ columnKey: string, order: string, enabled?: boolean }>;
@@ -165,11 +171,12 @@ const normalizeViewerFilterConditions = (conditions: FilterCondition[] | undefin
 const getViewerFilterSnapshot = (tabId: string): ViewerFilterSnapshot => {
   const cached = viewerFilterSnapshotsByTab.get(String(tabId || '').trim());
   if (!cached) {
-    return { showFilter: false, conditions: [], currentPage: 1, pageSize: 100, sortInfo: [], scrollTop: 0, scrollLeft: 0 };
+    return { showFilter: false, conditions: [], quickWhereCondition: '', currentPage: 1, pageSize: 100, sortInfo: [], scrollTop: 0, scrollLeft: 0 };
   }
   return {
     showFilter: cached.showFilter === true,
     conditions: normalizeViewerFilterConditions(cached.conditions),
+    quickWhereCondition: normalizeQuickWhereCondition(cached.quickWhereCondition),
     currentPage: Number.isFinite(Number(cached.currentPage)) && Number(cached.currentPage) > 0 ? Number(cached.currentPage) : 1,
     pageSize: Number.isFinite(Number(cached.pageSize)) && Number(cached.pageSize) > 0 ? Number(cached.pageSize) : 100,
     sortInfo: Array.isArray(cached.sortInfo)
@@ -226,6 +233,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   
   const [showFilter, setShowFilter] = useState<boolean>(initialViewerSnapshot.showFilter);
   const [filterConditions, setFilterConditions] = useState<FilterCondition[]>(initialViewerSnapshot.conditions);
+  const [quickWhereCondition, setQuickWhereCondition] = useState<string>(initialViewerSnapshot.quickWhereCondition);
   const duckdbSafeSelectCacheRef = useRef<Record<string, string>>({});
   const currentConnConfig = connections.find(c => c.id === tab.connectionId)?.config;
   const currentConnCaps = getDataSourceCapabilities(currentConnConfig);
@@ -239,6 +247,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     viewerFilterSnapshotsByTab.set(normalizedTabId, {
       showFilter,
       conditions: normalizeViewerFilterConditions(filterConditions),
+      quickWhereCondition: normalizeQuickWhereCondition(quickWhereCondition),
       currentPage: pagination.current,
       pageSize: pagination.pageSize,
       sortInfo,
@@ -246,12 +255,13 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
       scrollLeft: scrollSnapshotRef.current.left,
       ...overrides,
     });
-  }, [showFilter, filterConditions, pagination.current, pagination.pageSize, sortInfo]);
+  }, [showFilter, filterConditions, quickWhereCondition, pagination.current, pagination.pageSize, sortInfo]);
 
   useEffect(() => {
     const snapshot = getViewerFilterSnapshot(tab.id);
     setShowFilter(snapshot.showFilter);
     setFilterConditions(snapshot.conditions);
+    setQuickWhereCondition(snapshot.quickWhereCondition);
     setSortInfo(snapshot.sortInfo);
     scrollSnapshotRef.current = { top: snapshot.scrollTop, left: snapshot.scrollLeft };
     initialLoadRef.current = false;
@@ -259,7 +269,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
   useEffect(() => {
     persistViewerSnapshot(tab.id);
-  }, [tab.id, persistViewerSnapshot]);
+  }, [persistViewerSnapshot]);
 
   useEffect(() => {
     return () => {
@@ -399,6 +409,14 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     const dbType = resolveDataSourceType(config);
     const dbTypeLower = String(dbType || '').trim().toLowerCase();
     const isMySQLFamily = dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'diros';
+    const normalizedQuickWhereCondition = normalizeQuickWhereCondition(quickWhereCondition);
+    const quickWhereValidation = validateQuickWhereCondition(normalizedQuickWhereCondition);
+    if (!quickWhereValidation.ok) {
+        message.error(quickWhereValidation.message);
+        if (fetchSeqRef.current === seq) setLoading(false);
+        return;
+    }
+    const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, normalizedQuickWhereCondition);
 
     const dbName = tab.dbName || '';
     const tableName = tab.tableName || '';
@@ -406,7 +424,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     let mongoFilter: Record<string, unknown> | undefined;
     if (isMongoDB) {
         try {
-            mongoFilter = buildMongoFilter(filterConditions);
+            mongoFilter = buildMongoFilter(effectiveFilterConditions);
         } catch (e: any) {
             message.error(`Mongo 筛选条件无效：${String(e?.message || e || '解析失败')}`);
             if (fetchSeqRef.current === seq) setLoading(false);
@@ -416,7 +434,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
     const whereSQL = isMongoDB
       ? JSON.stringify(mongoFilter || {})
-      : buildWhereSQL(dbType, filterConditions);
+      : buildWhereSQL(dbType, effectiveFilterConditions);
     const countSql = isMongoDB
       ? buildMongoCountCommand(tableName, mongoFilter || {})
       : `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
@@ -824,7 +842,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
         });
     }
     if (fetchSeqRef.current === seq) setLoading(false);
-  }, [connections, tab, sortInfo, filterConditions, pkColumns, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages]); 
+  }, [connections, tab, sortInfo, filterConditions, quickWhereCondition, pkColumns, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages]);
   // 依赖 pkColumns：在无手动排序时可回退到主键稳定排序。
   // 主键信息只会在首次加载后更新一次，避免循环查询。
 
@@ -852,13 +870,23 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   const handlePageChange = useCallback((page: number, size: number) => fetchData(page, size), [fetchData]);
   const handleToggleFilter = useCallback(() => setShowFilter(prev => !prev), []);
   const handleApplyFilter = useCallback((conditions: FilterCondition[]) => setFilterConditions(conditions), []);
+  const handleApplyQuickWhereCondition = useCallback((condition: string) => {
+    const normalized = normalizeQuickWhereCondition(condition);
+    const validation = validateQuickWhereCondition(normalized);
+    if (!validation.ok) {
+      message.error(validation.message);
+      return;
+    }
+    setQuickWhereCondition(normalized);
+  }, []);
 
   const exportSqlWithFilter = useMemo(() => {
     const tableName = String(tab.tableName || '').trim();
     const dbType = resolveDataSourceType(currentConnConfig);
     if (!tableName || !dbType) return '';
 
-    const whereSQL = buildWhereSQL(dbType, filterConditions);
+    const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
+    const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
     if (!whereSQL) return '';
 
     let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
@@ -869,7 +897,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
       sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
     }
     return sql;
-  }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, sortInfo, pkColumns]);
+  }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, quickWhereCondition, sortInfo, pkColumns]);
 
   useEffect(() => {
     const action = resolveDataViewerAutoFetchAction({
@@ -886,7 +914,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
       return;
     }
     fetchData(1, pagination.pageSize);
-  }, [tab.id, tab.connectionId, tab.dbName, tab.tableName, sortInfo, filterConditions]); // Initial load and re-load on sort/filter
+  }, [tab.id, tab.connectionId, tab.dbName, tab.tableName, sortInfo, filterConditions, quickWhereCondition]); // Initial load and re-load on sort/filter
 
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, minWidth: 0, height: '100%', width: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -909,6 +937,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
           onToggleFilter={handleToggleFilter}
           onApplyFilter={handleApplyFilter}
           appliedFilterConditions={filterConditions}
+          quickWhereCondition={quickWhereCondition}
+          onApplyQuickWhereCondition={handleApplyQuickWhereCondition}
           readOnly={forceReadOnly}
           sortInfoExternal={sortInfo}
           exportSqlWithFilter={exportSqlWithFilter || undefined}

@@ -16,26 +16,40 @@ import RedisMonitor from './RedisMonitor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
+import JVMOverview from './JVMOverview';
+import JVMResourceBrowser from './JVMResourceBrowser';
+import JVMAuditViewer from './JVMAuditViewer';
+import JVMDiagnosticConsole from './JVMDiagnosticConsole';
+import JVMMonitoringDashboard from './JVMMonitoringDashboard';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
+import { resolveConnectionAccentColor } from '../utils/connectionVisual';
 
 type SortableTabLabelProps = {
   displayTitle: string;
   menuItems: MenuProps['items'];
+  accentColor?: string;
 };
 
 const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
   displayTitle,
   menuItems,
+  accentColor,
 }) => {
+  const labelStyle = accentColor
+    ? ({ '--connection-accent': accentColor } as React.CSSProperties)
+    : undefined;
+
   return (
     <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']}>
       <span
-        className="tab-dnd-label"
+        className={`tab-dnd-label${accentColor ? ' has-connection-accent' : ''}`}
         onContextMenu={(e) => e.preventDefault()}
         title={displayTitle}
+        style={labelStyle}
       >
-        {displayTitle}
+        {accentColor ? <span className="tab-connection-accent" aria-hidden="true" /> : null}
+        <span className="tab-title-text">{displayTitle}</span>
       </span>
     </Dropdown>
   );
@@ -183,6 +197,7 @@ const TabManager: React.FC = () => {
   const items = useMemo(() => tabs.map((tab, index) => {
     const connection = connections.find((conn) => conn.id === tab.connectionId);
     const displayTitle = buildTabDisplayTitle(tab, connection);
+    const accentColor = connection ? resolveConnectionAccentColor(connection) : undefined;
     const tabIsActive = tab.id === activeTabId;
     let content;
     if (tab.type === 'query') {
@@ -203,6 +218,16 @@ const TabManager: React.FC = () => {
       content = <DefinitionViewer tab={tab} />;
     } else if (tab.type === 'table-overview') {
       content = <TableOverview tab={tab} />;
+    } else if (tab.type === 'jvm-overview') {
+      content = <JVMOverview tab={tab} />;
+    } else if (tab.type === 'jvm-resource') {
+      content = <JVMResourceBrowser tab={tab} />;
+    } else if (tab.type === 'jvm-audit') {
+      content = <JVMAuditViewer tab={tab} />;
+    } else if (tab.type === 'jvm-diagnostic') {
+      content = <JVMDiagnosticConsole tab={tab} />;
+    } else if (tab.type === 'jvm-monitoring') {
+      content = <JVMMonitoringDashboard tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [
@@ -238,6 +263,7 @@ const TabManager: React.FC = () => {
         <SortableTabLabel
           displayTitle={displayTitle}
           menuItems={menuItems}
+          accentColor={accentColor}
         />
       ),
       key: tab.id,
@@ -302,7 +328,25 @@ const TabManager: React.FC = () => {
               -webkit-user-select: none;
               display: inline-flex;
               align-items: center;
+              gap: 7px;
               max-width: 100%;
+            }
+            .main-tabs .tab-dnd-label.has-connection-accent {
+              position: relative;
+            }
+            .main-tabs .tab-connection-accent {
+              width: 9px;
+              height: 9px;
+              border-radius: 999px;
+              background: var(--connection-accent);
+              box-shadow: 0 0 0 2px color-mix(in srgb, var(--connection-accent) 22%, transparent);
+              flex: 0 0 auto;
+            }
+            .main-tabs .tab-title-text {
+              min-width: 0;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
             }
             .main-tabs .tab-dnd-node.is-dragging,
             .main-tabs .tab-dnd-node.is-dragging .tab-dnd-label {

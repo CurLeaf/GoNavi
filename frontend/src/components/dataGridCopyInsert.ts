@@ -1,5 +1,6 @@
 import type { IndexDefinition } from '../types';
 import { escapeLiteral, quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
+import { isOracleLikeDialect } from '../utils/sqlDialect';
 
 type BuildCopyInsertSQLParams = {
   dbType: string;
@@ -164,9 +165,35 @@ const toNormalizedLiteralText = (value: any, columnType?: string): string => {
   return String(value);
 };
 
-const formatCopySqlLiteral = (value: any, columnType?: string): string => {
+const formatOracleTemporalLiteral = (value: any, columnType?: string): string | null => {
+  if (!isTemporalColumnType(columnType)) {
+    return null;
+  }
+  const normalized = toNormalizedLiteralText(value, columnType);
+  const escaped = escapeLiteral(normalized);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return `TO_DATE('${escaped}', 'YYYY-MM-DD')`;
+  }
+  if (isTimezoneAwareColumnType(columnType) && /[+-]\d{2}:?\d{2}$/.test(normalized)) {
+    const compactOffset = normalized.replace(/([+-]\d{2}):(\d{2})$/, '$1:$2');
+    return `TO_TIMESTAMP_TZ('${escapeLiteral(compactOffset)}', 'YYYY-MM-DD HH24:MI:SSTZH:TZM')`;
+  }
+  const rawType = String(columnType || '').toLowerCase();
+  if (rawType.includes('timestamp')) {
+    return `TO_TIMESTAMP('${escaped}', 'YYYY-MM-DD HH24:MI:SS')`;
+  }
+  return `TO_DATE('${escaped}', 'YYYY-MM-DD HH24:MI:SS')`;
+};
+
+const formatCopySqlLiteral = (value: any, columnType?: string, dbType = ''): string => {
   if (value === null || value === undefined) {
     return 'NULL';
+  }
+  if (isOracleLikeDialect(dbType)) {
+    const oracleTemporalLiteral = formatOracleTemporalLiteral(value, columnType);
+    if (oracleTemporalLiteral) {
+      return oracleTemporalLiteral;
+    }
   }
   return `'${escapeLiteral(toNormalizedLiteralText(value, columnType))}'`;
 };
@@ -208,7 +235,7 @@ const buildWhereClauseForColumns = ({
       predicates.push(`${quotedColumn} IS NULL`);
       continue;
     }
-    predicates.push(`${quotedColumn} = ${formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, columnName))}`);
+    predicates.push(`${quotedColumn} = ${formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, columnName), dbType)}`);
   }
   if (predicates.length === 0) {
     return null;
@@ -283,7 +310,7 @@ export const buildCopyInsertSQL = ({
   const quotedCols = orderedCols.map((col) => quoteIdentPart(dbType, col));
   const values = orderedCols.map((col) => {
     const { value } = getRecordValue(record, col);
-    return formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, col));
+    return formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, col), dbType);
   });
 
   return `INSERT INTO ${targetTable} (${quotedCols.join(', ')}) VALUES (${values.join(', ')});`;
@@ -341,7 +368,7 @@ const buildCopyMutationSQL = (
 
   const assignments = normalizedOrderedCols.map((columnName) => {
     const { value } = getRecordValue(record, columnName);
-    return `${quoteIdentPart(dbType, columnName)} = ${formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, columnName))}`;
+    return `${quoteIdentPart(dbType, columnName)} = ${formatCopySqlLiteral(value, getColumnType(columnTypesByLowerName, columnName), dbType)}`;
   });
 
   return {
