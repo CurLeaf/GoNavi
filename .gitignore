@@ -20,6 +20,7 @@ GoNavi-Wails.exe
 .superpowers/
 .claude/
 .gemini/
+.playwright-mcp/
 **/tmpclaude-*
 docs/superpowers/
 docs/需求追踪/
