@@ -82,6 +82,12 @@ func (a *App) JVMGetValue(cfg connection.ConnectionConfig, resourcePath string) 
 }
 
 func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRequest) connection.QueryResult {
+	var err error
+	req, err = jvm.NormalizeChangeRequest(req)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
 	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
@@ -96,6 +102,12 @@ func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRe
 }
 
 func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequest) connection.QueryResult {
+	var err error
+	req, err = jvm.NormalizeChangeRequest(req)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
 	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}

@@ -40,7 +40,7 @@ func newFakeArthasTunnelServer(
 	t.Helper()
 
 	fake := &fakeArthasTunnelServer{
-		t:       t,
+		t: t,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
@@ -314,6 +314,78 @@ func TestDiagnosticArthasTunnelCancelCommandInterruptsActiveCommand(t *testing.T
 
 	if len(chunks) == 0 {
 		t.Fatal("expected cancel flow to emit chunks")
+	}
+}
+
+func TestArthasTunnelActiveCommandAcceptsCancelBeforeConnectionAttach(t *testing.T) {
+	activeCommand := &arthasTunnelActiveCommand{commandID: "cmd-before-attach"}
+
+	if err := activeCommand.requestCancel(); err != nil {
+		t.Fatalf("expected pre-attach cancel request to be recorded without error, got %v", err)
+	}
+	if !activeCommand.isCancelRequested() {
+		t.Fatal("expected cancelRequested flag to be recorded")
+	}
+}
+
+func TestDiagnosticArthasTunnelRejectsSessionConfigDrift(t *testing.T) {
+	server := newFakeArthasTunnelServer(t, func(conn *websocket.Conn, frame fakeArthasTTYFrame) {
+		if frame.Action == "read" && strings.Contains(frame.Data, "thread -n 5") {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("thread top 5\r\n[arthas@12345]$ "))
+		}
+	})
+	defer server.close()
+
+	transport, err := NewDiagnosticTransport(DiagnosticTransportArthasTunnel)
+	if err != nil {
+		t.Fatalf("NewDiagnosticTransport returned error: %v", err)
+	}
+
+	tunnel := transport.(*DiagnosticArthasTunnelTransport)
+	cfg := testArthasTunnelConfig(server.wsURL())
+	handle, err := tunnel.StartSession(context.Background(), cfg, DiagnosticSessionRequest{})
+	if err != nil {
+		t.Fatalf("StartSession returned error: %v", err)
+	}
+
+	driftedCfg := cfg
+	driftedCfg.JVM.Diagnostic.TargetID = "orders-prod-02"
+	err = tunnel.ExecuteCommand(context.Background(), driftedCfg, DiagnosticCommandRequest{
+		SessionID: handle.SessionID,
+		CommandID: "cmd-drift",
+		Command:   "thread -n 5",
+	})
+	if err == nil {
+		t.Fatal("expected config drift to reject stale Arthas Tunnel session")
+	}
+	if !strings.Contains(err.Error(), "会话配置已变化") {
+		t.Fatalf("expected config drift error, got %v", err)
+	}
+}
+
+func TestArthasTunnelSessionRegistryPrunesExpiredSessions(t *testing.T) {
+	registry := newArthasTunnelSessionRegistry()
+	cfg := testArthasTunnelConfig("http://127.0.0.1:7777")
+	oldHandle := registry.createSession(cfg)
+
+	registry.mu.Lock()
+	oldMeta := registry.sessions[oldHandle.SessionID]
+	oldMeta.createdAt = time.Now().Add(-24 * time.Hour).UnixMilli()
+	registry.sessions[oldHandle.SessionID] = oldMeta
+	registry.mu.Unlock()
+
+	registry.createSession(cfg)
+
+	registry.mu.Lock()
+	_, oldExists := registry.sessions[oldHandle.SessionID]
+	sessionCount := len(registry.sessions)
+	registry.mu.Unlock()
+
+	if oldExists {
+		t.Fatalf("expected expired session %s to be pruned", oldHandle.SessionID)
+	}
+	if sessionCount != 1 {
+		t.Fatalf("expected only fresh session to remain, got %d", sessionCount)
 	}
 }
 

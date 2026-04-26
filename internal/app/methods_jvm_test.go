@@ -25,6 +25,8 @@ type fakeJVMProvider struct {
 	previewErr error
 	apply      jvm.ApplyResult
 	applyErr   error
+	previewReq *jvm.ChangeRequest
+	applyReq   *jvm.ChangeRequest
 }
 
 func (f fakeJVMProvider) Mode() string { return jvm.ModeJMX }
@@ -40,13 +42,19 @@ func (f fakeJVMProvider) ListResources(context.Context, connection.ConnectionCon
 func (f fakeJVMProvider) GetValue(context.Context, connection.ConnectionConfig, string) (jvm.ValueSnapshot, error) {
 	return f.value, f.valueErr
 }
-func (f fakeJVMProvider) PreviewChange(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ChangePreview, error) {
+func (f fakeJVMProvider) PreviewChange(_ context.Context, _ connection.ConnectionConfig, req jvm.ChangeRequest) (jvm.ChangePreview, error) {
+	if f.previewReq != nil {
+		*f.previewReq = req
+	}
 	if !f.previewSet {
 		return jvm.ChangePreview{Allowed: true, Summary: "preview", RiskLevel: "low"}, f.previewErr
 	}
 	return f.preview, f.previewErr
 }
-func (f fakeJVMProvider) ApplyChange(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ApplyResult, error) {
+func (f fakeJVMProvider) ApplyChange(_ context.Context, _ connection.ConnectionConfig, req jvm.ChangeRequest) (jvm.ApplyResult, error) {
+	if f.applyReq != nil {
+		*f.applyReq = req
+	}
 	return f.apply, f.applyErr
 }
 
@@ -575,6 +583,75 @@ func TestJVMApplyChangePersistsAuditSource(t *testing.T) {
 	}
 	if records[0].Source != "ai-plan" {
 		t.Fatalf("expected audit source %q, got %#v", "ai-plan", records[0])
+	}
+}
+
+func TestJVMApplyChangeNormalizesRequestBeforeProviderAndAudit(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	readOnly := false
+	var previewReq jvm.ChangeRequest
+	var applyReq jvm.ChangeRequest
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+			},
+			previewReq: &previewReq,
+			applyReq:   &applyReq,
+			apply: jvm.ApplyResult{
+				Status: "applied",
+				UpdatedValue: jvm.ValueSnapshot{
+					ResourceID: "/cache/orders",
+					Kind:       "entry",
+					Format:     "json",
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"endpoint"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: " endpoint ",
+		ResourceID:   " /cache/orders ",
+		Action:       " put ",
+		Reason:       " repair cache ",
+		Source:       " manual ",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	})
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if previewReq.ProviderMode != "endpoint" || previewReq.ResourceID != "/cache/orders" || previewReq.Action != "put" || previewReq.Reason != "repair cache" {
+		t.Fatalf("expected normalized preview request, got %#v", previewReq)
+	}
+	if applyReq.ProviderMode != "endpoint" || applyReq.ResourceID != "/cache/orders" || applyReq.Action != "put" || applyReq.Reason != "repair cache" || applyReq.Source != "manual" {
+		t.Fatalf("expected normalized apply request, got %#v", applyReq)
+	}
+
+	listRes := app.JVMListAuditRecords("conn-orders", 10)
+	if !listRes.Success {
+		t.Fatalf("expected audit list success, got %+v", listRes)
+	}
+	records, ok := listRes.Data.([]jvm.AuditRecord)
+	if !ok || len(records) != 1 {
+		t.Fatalf("expected one audit record, got %#v", listRes.Data)
+	}
+	if records[0].ProviderMode != "endpoint" || records[0].ResourceID != "/cache/orders" || records[0].Action != "put" || records[0].Reason != "repair cache" || records[0].Source != "manual" {
+		t.Fatalf("expected normalized audit record, got %#v", records[0])
 	}
 }
 

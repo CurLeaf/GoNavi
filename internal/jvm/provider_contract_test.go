@@ -2,6 +2,8 @@ package jvm
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -86,6 +88,32 @@ func TestHTTPProviderTestConnectionReturnsErrorWhenBaseURLInvalid(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), "endpoint baseURL is invalid") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHTTPProviderProbeStripsBaseURLQueryAndFragment(t *testing.T) {
+	provider := NewHTTPProvider()
+	seen := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.URL.RequestURI()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	err := provider.TestConnection(context.Background(), connection.ConnectionConfig{
+		Type: "jvm",
+		JVM: connection.JVMConfig{
+			Endpoint: connection.JVMEndpointConfig{
+				BaseURL: server.URL + "/gonavi/jvm?api_key=secret-token#debug",
+			},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("expected probe to succeed, got %v", err)
+	}
+	if got := <-seen; got != "/gonavi/jvm" {
+		t.Fatalf("expected query and fragment to be stripped, got %q", got)
 	}
 }
 

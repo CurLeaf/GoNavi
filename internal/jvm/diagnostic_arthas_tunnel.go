@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,11 +20,13 @@ import (
 )
 
 const (
-	arthasTunnelDefaultCols          = 160
-	arthasTunnelDefaultRows          = 48
+	arthasTunnelDefaultCols         = 160
+	arthasTunnelDefaultRows         = 48
 	arthasTunnelReadStep            = 250 * time.Millisecond
 	arthasTunnelPromptDetectionTail = 96
 	arthasTunnelInterruptInput      = "\u0003"
+	arthasTunnelSessionTTL          = 12 * time.Hour
+	arthasTunnelMaxSessions         = 128
 )
 
 var arthasPromptPattern = regexp.MustCompile(`\[arthas@[^\]]+\]\$ `)
@@ -143,7 +146,7 @@ func (t *DiagnosticArthasTunnelTransport) ExecuteCommand(ctx context.Context, cf
 	commandCtx, cancel := context.WithTimeout(ctx, runtime.timeout)
 	defer cancel()
 
-	activeCommand, err := diagnosticArthasTunnelSessions.beginCommand(req.SessionID, req.CommandID)
+	activeCommand, err := diagnosticArthasTunnelSessions.beginCommand(req.SessionID, req.CommandID, cfg)
 	if err != nil {
 		return err
 	}
@@ -155,6 +158,11 @@ func (t *DiagnosticArthasTunnelTransport) ExecuteCommand(ctx context.Context, cf
 	}
 	activeCommand.attachConn(conn)
 	defer conn.Close()
+
+	if activeCommand.isCancelRequested() {
+		t.emitChunk(req, "canceled", "Arthas 命令已取消")
+		return fmt.Errorf("arthas tunnel command canceled")
+	}
 
 	if err := activeCommand.send(arthasTunnelTTYFrame{
 		Action: "resize",
@@ -462,6 +470,7 @@ func (r *arthasTunnelSessionRegistry) createSession(cfg connection.ConnectionCon
 
 	sessionID := "arthas-" + uuid.NewString()
 	startedAt := time.Now().UnixMilli()
+	r.pruneLocked(startedAt)
 	r.sessions[sessionID] = arthasTunnelSessionMeta{
 		createdAt: startedAt,
 		targetID:  strings.TrimSpace(cfg.JVM.Diagnostic.TargetID),
@@ -475,12 +484,17 @@ func (r *arthasTunnelSessionRegistry) createSession(cfg connection.ConnectionCon
 	}
 }
 
-func (r *arthasTunnelSessionRegistry) beginCommand(sessionID string, commandID string) (*arthasTunnelActiveCommand, error) {
+func (r *arthasTunnelSessionRegistry) beginCommand(sessionID string, commandID string, cfg connection.ConnectionConfig) (*arthasTunnelActiveCommand, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.sessions[sessionID]; !ok {
+	r.pruneLocked(time.Now().UnixMilli())
+	meta, ok := r.sessions[sessionID]
+	if !ok {
 		return nil, errors.New("诊断会话不存在，请重新创建 Arthas Tunnel 会话")
+	}
+	if !meta.matchesConfig(cfg) {
+		return nil, errors.New("Arthas Tunnel 会话配置已变化，请重新创建诊断会话")
 	}
 	if existing := r.active[sessionID]; existing != nil {
 		return nil, errors.New("当前 Arthas Tunnel 会话已有命令在执行，请先等待完成或取消")
@@ -502,6 +516,49 @@ func (r *arthasTunnelSessionRegistry) finishCommand(sessionID string, commandID 
 	if activeCommand != nil && activeCommand.commandID == commandID {
 		activeCommand.close()
 	}
+}
+
+func (r *arthasTunnelSessionRegistry) pruneLocked(nowMillis int64) {
+	if len(r.sessions) == 0 {
+		return
+	}
+
+	cutoff := nowMillis - int64(arthasTunnelSessionTTL/time.Millisecond)
+	for sessionID, meta := range r.sessions {
+		if meta.createdAt > 0 && meta.createdAt < cutoff {
+			delete(r.sessions, sessionID)
+			delete(r.active, sessionID)
+		}
+	}
+
+	if len(r.sessions) <= arthasTunnelMaxSessions {
+		return
+	}
+
+	type sessionAge struct {
+		sessionID string
+		createdAt int64
+	}
+	items := make([]sessionAge, 0, len(r.sessions))
+	for sessionID, meta := range r.sessions {
+		items = append(items, sessionAge{sessionID: sessionID, createdAt: meta.createdAt})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].createdAt < items[j].createdAt
+	})
+	for len(r.sessions) > arthasTunnelMaxSessions && len(items) > 0 {
+		victim := items[0].sessionID
+		items = items[1:]
+		if _, active := r.active[victim]; active {
+			continue
+		}
+		delete(r.sessions, victim)
+	}
+}
+
+func (m arthasTunnelSessionMeta) matchesConfig(cfg connection.ConnectionConfig) bool {
+	return strings.TrimSpace(m.targetID) == strings.TrimSpace(cfg.JVM.Diagnostic.TargetID) &&
+		strings.TrimSpace(m.baseURL) == strings.TrimSpace(cfg.JVM.Diagnostic.BaseURL)
 }
 
 func (r *arthasTunnelSessionRegistry) cancelCommand(sessionID string, commandID string) error {
@@ -564,8 +621,12 @@ func (c *arthasTunnelActiveCommand) send(frame arthasTunnelTTYFrame) error {
 func (c *arthasTunnelActiveCommand) requestCancel() error {
 	c.mu.Lock()
 	c.cancelRequested = true
+	conn := c.conn
 	c.mu.Unlock()
 
+	if conn == nil {
+		return nil
+	}
 	return c.send(arthasTunnelTTYFrame{
 		Action: "read",
 		Data:   arthasTunnelInterruptInput,

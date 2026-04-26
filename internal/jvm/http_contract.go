@@ -53,6 +53,8 @@ func normalizeContractBaseURL(rawBaseURL string, errorPrefix string) (*url.URL, 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, fmt.Errorf("%s scheme is unsupported: %s", errorPrefix, parsed.Scheme)
 	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
 	return parsed, nil
 }
 

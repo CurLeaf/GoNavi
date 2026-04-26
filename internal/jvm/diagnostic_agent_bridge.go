@@ -164,8 +164,15 @@ func consumeDiagnosticSSE(body io.Reader, sink DiagnosticEventSink) error {
 			return nil
 		}
 
+		dataPayload := bytes.Join(stringSliceToBytes(dataLines), []byte("\n"))
+		if len(bytes.TrimSpace(dataPayload)) == 0 {
+			eventName = ""
+			dataLines = dataLines[:0]
+			return nil
+		}
+
 		var chunk DiagnosticEventChunk
-		if err := json.Unmarshal([]byte(bytes.Join(stringSliceToBytes(dataLines), []byte("\n"))), &chunk); err != nil {
+		if err := json.Unmarshal(dataPayload, &chunk); err != nil {
 			return fmt.Errorf("diagnostic sse decode failed: %w", err)
 		}
 		if chunk.Event == "" {

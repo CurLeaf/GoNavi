@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -130,5 +131,24 @@ func TestDiagnosticAgentBridgeCancelCommandSendsRequest(t *testing.T) {
 	}
 	if cancelPayload["sessionId"] != "sess-1" || cancelPayload["commandId"] != "cmd-1" {
 		t.Fatalf("unexpected cancel payload: %#v", cancelPayload)
+	}
+}
+
+func TestConsumeDiagnosticSSEToleratesEmptyHeartbeatEvents(t *testing.T) {
+	input := strings.NewReader(": ping\n\ndata:\n\nevent: chunk\ndata: {\"sessionId\":\"sess-1\",\"commandId\":\"cmd-1\",\"phase\":\"running\",\"content\":\"ok\"}\n\n")
+	var chunks []DiagnosticEventChunk
+
+	err := consumeDiagnosticSSE(input, func(chunk DiagnosticEventChunk) {
+		chunks = append(chunks, chunk)
+	})
+
+	if err != nil {
+		t.Fatalf("consumeDiagnosticSSE returned error for heartbeat-only event: %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("expected exactly one diagnostic chunk, got %#v", chunks)
+	}
+	if chunks[0].Content != "ok" || chunks[0].Event != "chunk" {
+		t.Fatalf("unexpected diagnostic chunk: %#v", chunks[0])
 	}
 }

@@ -17,19 +17,18 @@ func BuildChangePreview(
 	cfg connection.ConnectionConfig,
 	req ChangeRequest,
 ) (ChangePreview, error) {
+	req, err := NormalizeChangeRequest(req)
+	if err != nil {
+		return ChangePreview{}, err
+	}
+
 	normalized, err := NormalizeConnectionConfig(cfg)
 	if err != nil {
 		return ChangePreview{}, err
 	}
 
-	resourceID := strings.TrimSpace(req.ResourceID)
-	if resourceID == "" {
-		return ChangePreview{}, fmt.Errorf("resource id is required")
-	}
-	action := strings.TrimSpace(req.Action)
-	if action == "" {
-		return ChangePreview{}, fmt.Errorf("action is required")
-	}
+	resourceID := req.ResourceID
+	action := req.Action
 
 	before := ValueSnapshot{
 		ResourceID: resourceID,
@@ -109,6 +108,28 @@ func BuildChangePreview(
 	}
 
 	return preview, nil
+}
+
+func NormalizeChangeRequest(req ChangeRequest) (ChangeRequest, error) {
+	normalized := req
+	normalized.ProviderMode = strings.ToLower(strings.TrimSpace(normalized.ProviderMode))
+	normalized.ResourceID = strings.TrimSpace(normalized.ResourceID)
+	normalized.Action = strings.TrimSpace(normalized.Action)
+	normalized.Reason = strings.TrimSpace(normalized.Reason)
+	normalized.Source = strings.TrimSpace(normalized.Source)
+	normalized.ExpectedVersion = strings.TrimSpace(normalized.ExpectedVersion)
+
+	if normalized.ResourceID == "" {
+		return ChangeRequest{}, fmt.Errorf("resource id is required")
+	}
+	if normalized.Action == "" {
+		return ChangeRequest{}, fmt.Errorf("action is required")
+	}
+	if normalized.Reason == "" {
+		return ChangeRequest{}, fmt.Errorf("reason is required")
+	}
+
+	return normalized, nil
 }
 
 func hasSnapshotOverride(snapshot ValueSnapshot) bool {

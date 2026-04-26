@@ -76,6 +76,32 @@ func TestPreviewChangeBlocksReadOnlyConnection(t *testing.T) {
 	}
 }
 
+func TestPreviewChangeRejectsMissingReason(t *testing.T) {
+	readOnly := false
+
+	_, err := BuildChangePreview(context.Background(), fakeGuardProvider{}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-writable",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "   ",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reason is required") {
+		t.Fatalf("expected missing reason to be rejected, got %v", err)
+	}
+}
+
 func TestPreviewChangeReturnsProviderPreviewErrorWhenWriteAllowed(t *testing.T) {
 	readOnly := false
 
