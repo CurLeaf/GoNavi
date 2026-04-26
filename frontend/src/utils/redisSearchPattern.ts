@@ -1,6 +1,8 @@
 const REDIS_GLOB_SPECIAL_CHARS = /([*?\[\]\\])/g;
 const ASCII_LETTER = /^[A-Za-z]$/;
 
+export type RedisSearchMode = 'fuzzy' | 'exact';
+
 const escapeRedisGlobLiteral = (value: string): string => {
   return value.replace(REDIS_GLOB_SPECIAL_CHARS, '\\$1');
 };
@@ -17,10 +19,19 @@ const toCaseInsensitiveRedisGlobLiteral = (value: string): string => {
   }).join('');
 };
 
-export const normalizeRedisSearchInput = (rawValue: string): { keyword: string; pattern: string } => {
+export const normalizeRedisSearchInput = (
+  rawValue: string,
+  mode: RedisSearchMode = 'fuzzy',
+): { keyword: string; pattern: string } => {
   const keyword = String(rawValue || '').trim();
   if (!keyword) {
     return { keyword: '', pattern: '*' };
+  }
+  if (mode === 'exact') {
+    return {
+      keyword,
+      pattern: escapeRedisGlobLiteral(keyword),
+    };
   }
   return {
     keyword,
@@ -28,12 +39,12 @@ export const normalizeRedisSearchInput = (rawValue: string): { keyword: string; 
   };
 };
 
-export const normalizeRedisSearchDraftChange = (rawValue: string): {
+export const normalizeRedisSearchDraftChange = (rawValue: string, mode: RedisSearchMode = 'fuzzy'): {
   keyword: string;
   pattern: string;
   shouldSearchImmediately: boolean;
 } => {
-  const normalized = normalizeRedisSearchInput(rawValue);
+  const normalized = normalizeRedisSearchInput(rawValue, mode);
   return {
     ...normalized,
     shouldSearchImmediately: normalized.keyword === '',

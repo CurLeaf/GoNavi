@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Table, Input, Button, Space, Tag, Tree, Spin, message, Modal, Form, InputNumber, Popconfirm, Tooltip, Radio } from 'antd';
+import type { RadioChangeEvent } from 'antd';
 import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
@@ -27,7 +28,7 @@ import {
 } from './redisViewerTree';
 import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput } from '../utils/redisSearchPattern';
+import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput, type RedisSearchMode } from '../utils/redisSearchPattern';
 import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../utils/redisValueDisplay';
 
 const { Search } = Input;
@@ -171,6 +172,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [loading, setLoading] = useState(false);
     const [searchInput, setSearchInput] = useState('');
     const [searchPattern, setSearchPattern] = useState('*');
+    const [searchMode, setSearchMode] = useState<RedisSearchMode>('fuzzy');
     const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -346,20 +348,20 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
     }, [loadKeys, redisDB]);
 
-    const executeSearch = useCallback((value: string) => {
-        const normalized = normalizeRedisSearchInput(value);
+    const executeSearch = useCallback((value: string, mode: RedisSearchMode = searchMode) => {
+        const normalized = normalizeRedisSearchInput(value, mode);
         setSearchInput(normalized.keyword);
         setSearchPattern(normalized.pattern);
         setCursor('0');
         loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
-    }, [loadKeys]);
+    }, [loadKeys, searchMode]);
 
     const handleSearch = (value: string) => {
         executeSearch(value);
     };
 
     const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const normalized = normalizeRedisSearchDraftChange(event.target.value);
+        const normalized = normalizeRedisSearchDraftChange(event.target.value, searchMode);
         setSearchInput(normalized.keyword);
         if (!normalized.shouldSearchImmediately) {
             return;
@@ -368,6 +370,12 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         setCursor('0');
         loadKeys(normalized.pattern, '0', false, getRedisScanLoadCount(normalized.pattern, false));
     };
+
+    const handleSearchModeChange = useCallback((event: RadioChangeEvent) => {
+        const nextMode = event.target.value as RedisSearchMode;
+        setSearchMode(nextMode);
+        executeSearch(searchInput, nextMode);
+    }, [executeSearch, searchInput]);
 
     const handleLoadMore = () => {
         if (!hasMore || loading) {
@@ -1832,9 +1840,19 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <Tag style={mutedPillTagStyle}>{keys.length} Keys</Tag>
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
+                        <Radio.Group
+                            value={searchMode}
+                            onChange={handleSearchModeChange}
+                            buttonStyle="solid"
+                            style={{ flexShrink: 0 }}
+                        >
+                            <Radio.Button value="fuzzy">模糊</Radio.Button>
+                            <Radio.Button value="exact">精确</Radio.Button>
+                        </Radio.Group>
                         <Search
                             {...noAutoCapInputProps}
-                            placeholder="搜索 Key"
+                            style={{ flex: 1 }}
+                            placeholder={searchMode === 'exact' ? '输入完整 Key 精确搜索' : '搜索 Key（模糊匹配）'}
                             value={searchInput}
                             onChange={handleSearchInputChange}
                             onSearch={handleSearch}
