@@ -1,5 +1,5 @@
 export type JVMRuntimeMode = 'jmx' | 'endpoint' | 'agent';
-export type JVMTabKind = 'overview' | 'resource' | 'audit' | 'diagnostic';
+export type JVMTabKind = 'overview' | 'resource' | 'audit' | 'diagnostic' | 'monitoring';
 
 export type JVMModeMeta = {
   mode: string;
@@ -36,6 +36,7 @@ const JVM_TAB_KIND_LABELS: Record<JVMTabKind, string> = {
   resource: 'JVM 资源',
   audit: 'JVM 审计',
   diagnostic: 'JVM 诊断',
+  monitoring: 'JVM 监控',
 };
 
 const normalizeMode = (mode: string): string => String(mode || '').trim().toLowerCase();

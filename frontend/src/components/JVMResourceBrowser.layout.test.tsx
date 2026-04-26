@@ -69,8 +69,12 @@ describe('JVMResourceBrowser layout', () => {
     );
 
     expect(markup).toContain('data-jvm-resource-browser-scroll-shell="true"');
+    expect(markup).toContain('data-jvm-workspace-shell="true"');
+    expect(markup).toContain('data-jvm-workspace-hero="true"');
+    expect(markup).toContain('data-jvm-resource-workbench="true"');
     expect(markup).toContain('height:100%');
     expect(markup).toContain('overflow-y:auto');
+    expect(markup).toContain('grid-template-columns:minmax(0, 1fr) minmax(360px, 440px)');
   });
 
   it('shows the draft action field with a Chinese label', () => {

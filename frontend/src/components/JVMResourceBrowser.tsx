@@ -47,8 +47,13 @@ import {
 import { buildJVMTabTitle } from "../utils/jvmRuntimePresentation";
 import JVMModeBadge from "./jvm/JVMModeBadge";
 import JVMChangePreviewModal from "./jvm/JVMChangePreviewModal";
+import {
+  getJVMWorkspaceCardStyle,
+  JVMWorkspaceHero,
+  JVMWorkspaceShell,
+} from "./jvm/JVMWorkspaceLayout";
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
 const DESCRIPTION_STYLES = { label: { width: 120 } } as const;
 const { TextArea } = Input;
 const DEFAULT_PAYLOAD_TEXT = "{\n  \n}";
@@ -583,6 +588,8 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     );
   }
 
+  const cardStyle = getJVMWorkspaceCardStyle(darkMode);
+
   return (
     <>
       <style>{`
@@ -603,28 +610,37 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         .jvm-resource-browser-code-block::-webkit-scrollbar-track {
           background: transparent;
         }
+        @media (max-width: 1120px) {
+          .jvm-resource-workbench {
+            grid-template-columns: 1fr !important;
+          }
+        }
       `}</style>
-      <div
+      <JVMWorkspaceShell
+        darkMode={darkMode}
         className="jvm-resource-browser-scroll-shell"
         data-jvm-resource-browser-scroll-shell="true"
-        style={{
-          height: "100%",
-          minHeight: 0,
-          overflowY: "auto",
-          overflowX: "hidden",
-          padding: 20,
-          display: "grid",
-          gap: 16,
-          alignContent: "start",
-        }}
       >
-        <Card>
-          <Space direction="vertical" size={12} style={{ width: "100%" }}>
-            <Space size={12} wrap>
+        <JVMWorkspaceHero
+          darkMode={darkMode}
+          eyebrow="JVM Resource"
+          title="JVM 资源工作台"
+          description={
+            <>
+              <Text strong>{connection.name}</Text>
+              <Text type="secondary"> · {resourcePath || "-"}</Text>
+            </>
+          }
+          badges={
+            <>
               <JVMModeBadge mode={providerMode} />
               <Tag color={readOnly ? "blue" : "red"}>
                 {readOnly ? "只读连接" : "可写连接"}
               </Tag>
+            </>
+          }
+          actions={
+            <>
               <Button
                 size="small"
                 icon={<ReloadOutlined />}
@@ -646,99 +662,80 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
               >
                 AI 生成计划
               </Button>
-            </Space>
-            <Paragraph style={{ marginBottom: 0 }}>
-              <Text strong>{connection.name}</Text>
-            </Paragraph>
-            <Text type="secondary">{resourcePath || "-"}</Text>
-          </Space>
-        </Card>
+            </>
+          }
+        />
 
-        <Card title="资源快照">
-          {loading ? (
-            <Skeleton active paragraph={{ rows: 6 }} />
-          ) : (
-            <Space direction="vertical" size={16} style={{ width: "100%" }}>
-              {error ? <Alert type="error" showIcon message={error} /> : null}
-              {snapshot ? (
-                <>
-                  <Descriptions
-                    column={1}
-                    size="small"
-                    styles={DESCRIPTION_STYLES}
-                  >
-                    <Descriptions.Item label="资源 ID">
-                      {snapshot.resourceId || "-"}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="资源类型">
-                      {snapshot.kind || tab.resourceKind || "-"}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="格式">
-                      {snapshot.format || "-"}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="版本">
-                      {snapshot.version || "-"}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="可用动作">
-                      {formatJVMActionSummary(supportedActions)}
-                    </Descriptions.Item>
-                  </Descriptions>
-                  {snapshot.description ? (
-                    <Text type="secondary">{snapshot.description}</Text>
-                  ) : null}
-                  <div>
-                    <Text strong style={{ display: "block", marginBottom: 8 }}>
-                      资源值
-                    </Text>
-                    <div
-                      className="jvm-resource-browser-code-block"
-                      style={{
-                        ...snapshotBlockStyle("rgba(0, 0, 0, 0.04)"),
-                        height: estimateJVMResourceEditorHeight(displayValue),
-                      }}
+        <div
+          className="jvm-resource-workbench"
+          data-jvm-resource-workbench="true"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) minmax(360px, 440px)",
+            gap: 18,
+            alignItems: "start",
+          }}
+        >
+          <Card
+            title="资源快照"
+            variant="borderless"
+            style={{
+              ...cardStyle,
+              gridColumn: readOnly ? "1 / -1" : undefined,
+            }}
+          >
+            {loading ? (
+              <Skeleton active paragraph={{ rows: 6 }} />
+            ) : (
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                {error ? <Alert type="error" showIcon message={error} /> : null}
+                {snapshot ? (
+                  <>
+                    <Descriptions
+                      column={1}
+                      size="small"
+                      styles={DESCRIPTION_STYLES}
                     >
-                      <Editor
-                        height="100%"
-                        language={displayLanguage}
-                        theme={
-                          darkMode ? "transparent-dark" : "transparent-light"
-                        }
-                        value={displayValue}
-                        options={{
-                          readOnly: true,
-                          minimap: { enabled: false },
-                          lineNumbers: "on",
-                          wordWrap: "on",
-                          scrollBeyondLastLine: false,
-                          automaticLayout: true,
-                          folding: true,
-                          renderValidationDecorations: "off",
-                        }}
-                      />
-                    </div>
-                  </div>
-                  {metadataText ? (
+                      <Descriptions.Item label="资源 ID">
+                        {snapshot.resourceId || "-"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="资源类型">
+                        {snapshot.kind || tab.resourceKind || "-"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="格式">
+                        {snapshot.format || "-"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="版本">
+                        {snapshot.version || "-"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="可用动作">
+                        {formatJVMActionSummary(supportedActions)}
+                      </Descriptions.Item>
+                    </Descriptions>
+                    {snapshot.description ? (
+                      <Text type="secondary">{snapshot.description}</Text>
+                    ) : null}
                     <div>
                       <Text
                         strong
                         style={{ display: "block", marginBottom: 8 }}
                       >
-                        元数据
+                        资源值
                       </Text>
                       <div
                         className="jvm-resource-browser-code-block"
                         style={{
-                          ...snapshotBlockStyle("rgba(0, 0, 0, 0.03)"),
-                          height: estimateJVMResourceEditorHeight(metadataText),
+                          ...snapshotBlockStyle("rgba(0, 0, 0, 0.04)"),
+                          height: estimateJVMResourceEditorHeight(displayValue),
                         }}
                       >
                         <Editor
                           height="100%"
-                          language={metadataLanguage}
+                          language={displayLanguage}
                           theme={
                             darkMode ? "transparent-dark" : "transparent-light"
                           }
-                          value={metadataText}
+                          value={displayValue}
                           options={{
                             readOnly: true,
                             minimap: { enabled: false },
@@ -752,136 +749,183 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                         />
                       </div>
                     </div>
-                  ) : null}
-                </>
-              ) : error ? null : (
-                <Empty description="暂无资源数据" />
-              )}
-            </Space>
-          )}
-        </Card>
+                    {metadataText ? (
+                      <div>
+                        <Text
+                          strong
+                          style={{ display: "block", marginBottom: 8 }}
+                        >
+                          元数据
+                        </Text>
+                        <div
+                          className="jvm-resource-browser-code-block"
+                          style={{
+                            ...snapshotBlockStyle("rgba(0, 0, 0, 0.03)"),
+                            height:
+                              estimateJVMResourceEditorHeight(metadataText),
+                          }}
+                        >
+                          <Editor
+                            height="100%"
+                            language={metadataLanguage}
+                            theme={
+                              darkMode
+                                ? "transparent-dark"
+                                : "transparent-light"
+                            }
+                            value={metadataText}
+                            options={{
+                              readOnly: true,
+                              minimap: { enabled: false },
+                              lineNumbers: "on",
+                              wordWrap: "on",
+                              scrollBeyondLastLine: false,
+                              automaticLayout: true,
+                              folding: true,
+                              renderValidationDecorations: "off",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : error ? null : (
+                  <Empty description="暂无资源数据" />
+                )}
+              </Space>
+            )}
+          </Card>
 
-        {!readOnly ? (
-          <Card title="变更草稿">
-            <Space direction="vertical" size={16} style={{ width: "100%" }}>
-              {draftError ? (
-                <Alert type="error" showIcon message={draftError} />
-              ) : null}
-              {applyMessage ? (
-                <Alert type="success" showIcon message={applyMessage} />
-              ) : null}
-              <Descriptions column={1} size="small" styles={DESCRIPTION_STYLES}>
-                <Descriptions.Item label="资源路径">
-                  {resourcePath || "-"}
-                </Descriptions.Item>
-                <Descriptions.Item label="目标资源">
-                  {draftResourceId || resourcePath || "-"}
-                </Descriptions.Item>
-                <Descriptions.Item label="资源版本">
-                  {snapshot?.version || "-"}
-                </Descriptions.Item>
-                <Descriptions.Item label="草稿来源">
-                  {draftSource === "ai-plan" ? "AI 辅助草稿" : "手工编辑"}
-                </Descriptions.Item>
-              </Descriptions>
-              {supportedActions.length > 0 ? (
-                <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                  <Text strong>资源支持动作</Text>
-                  <Space size={8} wrap>
-                    {supportedActions.map((item) => (
-                      <Button
-                        key={item.action}
-                        size="small"
-                        type={action === item.action ? "primary" : "default"}
-                        danger={item.dangerous}
-                        onClick={() => handleSelectAction(item.action, item)}
-                      >
-                        {resolveJVMActionDisplay(item).label}
-                      </Button>
-                    ))}
+          {!readOnly ? (
+            <Card title="变更草稿" variant="borderless" style={cardStyle}>
+              <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                {draftError ? (
+                  <Alert type="error" showIcon message={draftError} />
+                ) : null}
+                {applyMessage ? (
+                  <Alert type="success" showIcon message={applyMessage} />
+                ) : null}
+                <Descriptions
+                  column={1}
+                  size="small"
+                  styles={DESCRIPTION_STYLES}
+                >
+                  <Descriptions.Item label="资源路径">
+                    {resourcePath || "-"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="目标资源">
+                    {draftResourceId || resourcePath || "-"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="资源版本">
+                    {snapshot?.version || "-"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="草稿来源">
+                    {draftSource === "ai-plan" ? "AI 辅助草稿" : "手工编辑"}
+                  </Descriptions.Item>
+                </Descriptions>
+                {supportedActions.length > 0 ? (
+                  <Space
+                    direction="vertical"
+                    size={8}
+                    style={{ width: "100%" }}
+                  >
+                    <Text strong>资源支持动作</Text>
+                    <Space size={8} wrap>
+                      {supportedActions.map((item) => (
+                        <Button
+                          key={item.action}
+                          size="small"
+                          type={action === item.action ? "primary" : "default"}
+                          danger={item.dangerous}
+                          onClick={() => handleSelectAction(item.action, item)}
+                        >
+                          {resolveJVMActionDisplay(item).label}
+                        </Button>
+                      ))}
+                    </Space>
+                    {selectedActionDisplay.description ? (
+                      <Text type="secondary">
+                        {selectedActionDisplay.description}
+                      </Text>
+                    ) : null}
+                    {selectedActionDefinition?.payloadFields?.length ? (
+                      <Text type="secondary">
+                        Payload 字段：
+                        {selectedActionDefinition.payloadFields
+                          .map(
+                            (field) =>
+                              `${field.name}${field.required ? "(必填)" : ""}`,
+                          )
+                          .join("、")}
+                      </Text>
+                    ) : null}
                   </Space>
-                  {selectedActionDisplay.description ? (
+                ) : null}
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Text strong>动作</Text>
+                  <Input
+                    value={action}
+                    onChange={(event) =>
+                      handleSelectAction(
+                        event.target.value,
+                        selectedActionDefinition,
+                      )
+                    }
+                    placeholder={
+                      providerMode === "jmx"
+                        ? "例如 set 或 invoke"
+                        : "例如 put / clear / evict"
+                    }
+                    maxLength={64}
+                  />
+                  {action ? (
                     <Text type="secondary">
-                      {selectedActionDisplay.description}
-                    </Text>
-                  ) : null}
-                  {selectedActionDefinition?.payloadFields?.length ? (
-                    <Text type="secondary">
-                      Payload 字段：
-                      {selectedActionDefinition.payloadFields
-                        .map(
-                          (field) =>
-                            `${field.name}${field.required ? "(必填)" : ""}`,
-                        )
-                        .join("、")}
+                      当前动作：
+                      {formatJVMActionDisplayText(selectedActionDisplay)}
                     </Text>
                   ) : null}
                 </Space>
-              ) : null}
-              <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                <Text strong>动作</Text>
-                <Input
-                  value={action}
-                  onChange={(event) =>
-                    handleSelectAction(
-                      event.target.value,
-                      selectedActionDefinition,
-                    )
-                  }
-                  placeholder={
-                    providerMode === "jmx"
-                      ? "例如 set 或 invoke"
-                      : "例如 put / clear / evict"
-                  }
-                  maxLength={64}
-                />
-                {action ? (
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Text strong>变更原因</Text>
+                  <Input
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    placeholder="填写本次 JVM 资源变更原因"
+                    maxLength={200}
+                  />
+                </Space>
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Text strong>Payload(JSON)</Text>
                   <Text type="secondary">
-                    当前动作：
-                    {formatJVMActionDisplayText(selectedActionDisplay)}
+                    需要输入 JSON 对象，预览和执行都会直接使用这份 payload。
+                    {selectedActionDefinition?.payloadExample
+                      ? " 已按当前动作填充推荐模板。"
+                      : ""}
                   </Text>
-                ) : null}
+                  <TextArea
+                    value={payloadText}
+                    onChange={(event) => setPayloadText(event.target.value)}
+                    autoSize={{ minRows: 8, maxRows: 18 }}
+                    spellCheck={false}
+                  />
+                </Space>
+                <Space size={12} wrap>
+                  <Button
+                    type="primary"
+                    loading={previewLoading}
+                    onClick={() => void handlePreview()}
+                  >
+                    预览变更
+                  </Button>
+                  <Button icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
+                    让 AI 生成计划
+                  </Button>
+                </Space>
               </Space>
-              <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                <Text strong>变更原因</Text>
-                <Input
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  placeholder="填写本次 JVM 资源变更原因"
-                  maxLength={200}
-                />
-              </Space>
-              <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                <Text strong>Payload(JSON)</Text>
-                <Text type="secondary">
-                  需要输入 JSON 对象，预览和执行都会直接使用这份 payload。
-                  {selectedActionDefinition?.payloadExample
-                    ? " 已按当前动作填充推荐模板。"
-                    : ""}
-                </Text>
-                <TextArea
-                  value={payloadText}
-                  onChange={(event) => setPayloadText(event.target.value)}
-                  autoSize={{ minRows: 8, maxRows: 18 }}
-                  spellCheck={false}
-                />
-              </Space>
-              <Space size={12} wrap>
-                <Button
-                  type="primary"
-                  loading={previewLoading}
-                  onClick={() => void handlePreview()}
-                >
-                  预览变更
-                </Button>
-                <Button icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
-                  让 AI 生成计划
-                </Button>
-              </Space>
-            </Space>
-          </Card>
-        ) : null}
-      </div>
+            </Card>
+          ) : null}
+        </div>
+      </JVMWorkspaceShell>
 
       <JVMChangePreviewModal
         open={previewOpen}

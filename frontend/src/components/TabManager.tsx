@@ -20,6 +20,7 @@ import JVMOverview from './JVMOverview';
 import JVMResourceBrowser from './JVMResourceBrowser';
 import JVMAuditViewer from './JVMAuditViewer';
 import JVMDiagnosticConsole from './JVMDiagnosticConsole';
+import JVMMonitoringDashboard from './JVMMonitoringDashboard';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 
@@ -215,6 +216,8 @@ const TabManager: React.FC = () => {
       content = <JVMAuditViewer tab={tab} />;
     } else if (tab.type === 'jvm-diagnostic') {
       content = <JVMDiagnosticConsole tab={tab} />;
+    } else if (tab.type === 'jvm-monitoring') {
+      content = <JVMMonitoringDashboard tab={tab} />;
     }
 
     const menuItems: MenuProps['items'] = [

@@ -148,6 +148,51 @@ export interface JVMCapability {
   displayLabel: string;
 }
 
+export interface JVMMonitoringPoint {
+  timestamp: number;
+  heapUsedBytes?: number;
+  heapCommittedBytes?: number;
+  heapMaxBytes?: number;
+  nonHeapUsedBytes?: number;
+  nonHeapCommittedBytes?: number;
+  gcCollectionCount?: number;
+  gcCollectionTimeMs?: number;
+  gcDeltaCount?: number;
+  gcDeltaTimeMs?: number;
+  threadCount?: number;
+  daemonThreadCount?: number;
+  peakThreadCount?: number;
+  threadStateCounts?: Record<string, number>;
+  loadedClassCount?: number;
+  unloadedClassCount?: number;
+  classLoadDelta?: number;
+  processCpuLoad?: number;
+  systemCpuLoad?: number;
+  processRssBytes?: number;
+  committedVirtualMemoryBytes?: number;
+}
+
+export interface JVMMonitoringRecentGCEvent {
+  timestamp: number;
+  name?: string;
+  cause?: string;
+  action?: string;
+  durationMs?: number;
+  beforeUsedBytes?: number;
+  afterUsedBytes?: number;
+}
+
+export interface JVMMonitoringSessionState {
+  connectionId: string;
+  providerMode: "jmx" | "endpoint" | "agent";
+  running: boolean;
+  points?: JVMMonitoringPoint[];
+  recentGcEvents?: JVMMonitoringRecentGCEvent[];
+  availableMetrics?: string[];
+  missingMetrics?: string[];
+  providerWarnings?: string[];
+}
+
 export interface JVMResourceSummary {
   id: string;
   parentId?: string;
@@ -354,7 +399,8 @@ export interface TabData {
     | "jvm-overview"
     | "jvm-resource"
     | "jvm-audit"
-    | "jvm-diagnostic";
+    | "jvm-diagnostic"
+    | "jvm-monitoring";
   connectionId: string;
   dbName?: string;
   tableName?: string;

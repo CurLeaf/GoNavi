@@ -58,6 +58,8 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
+const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 8;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
@@ -309,6 +311,18 @@ const sanitizeJVMConfig = (
     raw.agent && typeof raw.agent === "object"
       ? (raw.agent as Record<string, unknown>)
       : {};
+  const diagnosticRaw =
+    raw.diagnostic && typeof raw.diagnostic === "object"
+      ? (raw.diagnostic as Record<string, unknown>)
+      : {};
+  const diagnosticTransportRaw = toTrimmedString(
+    diagnosticRaw.transport,
+    "agent-bridge",
+  ).toLowerCase();
+  const diagnosticTransport =
+    diagnosticTransportRaw === "arthas-tunnel"
+      ? "arthas-tunnel"
+      : "agent-bridge";
   const fallbackPort = options.port > 0 ? options.port : DEFAULT_JVM_PORT;
   const fallbackTimeout =
     options.timeout > 0 ? options.timeout : DEFAULT_TIMEOUT_SECONDS;
@@ -346,6 +360,24 @@ const sanitizeJVMConfig = (
         fallbackTimeout,
         1,
         MAX_TIMEOUT_SECONDS,
+      ),
+    },
+    diagnostic: {
+      enabled: diagnosticRaw.enabled === true,
+      transport: diagnosticTransport,
+      baseUrl: toTrimmedString(diagnosticRaw.baseUrl),
+      targetId: toTrimmedString(diagnosticRaw.targetId),
+      apiKey: options.persistSecrets
+        ? toTrimmedString(diagnosticRaw.apiKey)
+        : "",
+      allowObserveCommands: diagnosticRaw.allowObserveCommands !== false,
+      allowTraceCommands: diagnosticRaw.allowTraceCommands === true,
+      allowMutatingCommands: diagnosticRaw.allowMutatingCommands === true,
+      timeoutSeconds: normalizeIntegerInRange(
+        diagnosticRaw.timeoutSeconds,
+        DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS,
+        1,
+        MAX_DIAGNOSTIC_TIMEOUT_SECONDS,
       ),
     },
   };

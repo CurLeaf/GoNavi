@@ -16,8 +16,13 @@ import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { resolveJVMModeMeta } from "../utils/jvmRuntimePresentation";
 import type { JVMCapability, TabData } from "../types";
 import JVMModeBadge from "./jvm/JVMModeBadge";
+import {
+  getJVMWorkspaceCardStyle,
+  JVMWorkspaceHero,
+  JVMWorkspaceShell,
+} from "./jvm/JVMWorkspaceLayout";
 
-const { Paragraph, Text } = Typography;
+const { Text } = Typography;
 const DESCRIPTION_STYLES = { label: { width: 120 } } as const;
 
 type JVMOverviewProps = {
@@ -28,6 +33,8 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
+  const theme = useStore((state) => state.theme);
+  const darkMode = theme === "dark";
   const providerMode =
     tab.providerMode || connection?.config.jvm?.preferredMode || "jmx";
   const readOnly = connection?.config.jvm?.readOnly !== false;
@@ -119,28 +126,35 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
   const jmxHost = connection.config.jvm?.jmx?.host || connection.config.host;
   const jmxPort = connection.config.jvm?.jmx?.port || connection.config.port;
 
+  const cardStyle = getJVMWorkspaceCardStyle(darkMode);
+
   return (
-    <div style={{ padding: 20, display: "grid", gap: 16 }}>
-      <Card>
-        <Space direction="vertical" size={12} style={{ width: "100%" }}>
-          <Space size={12} wrap>
-            <JVMModeBadge mode={providerMode} />
-            <Tag color={readOnly ? "blue" : "red"}>
-              {readOnly ? "只读连接" : "可写连接"}
-            </Tag>
-            <Tag>{connection.config.jvm?.environment || "dev"}</Tag>
-          </Space>
-          <Paragraph style={{ marginBottom: 0 }}>
+    <JVMWorkspaceShell darkMode={darkMode}>
+      <JVMWorkspaceHero
+        darkMode={darkMode}
+        eyebrow="JVM Runtime"
+        title="JVM 运行时概览"
+        description={
+          <>
             <Text strong>{connection.name}</Text>
             <Text type="secondary">
               {" "}
               · {connection.config.host}:{connection.config.port}
             </Text>
-          </Paragraph>
-        </Space>
-      </Card>
+          </>
+        }
+        badges={
+          <>
+            <JVMModeBadge mode={providerMode} />
+            <Tag color={readOnly ? "blue" : "red"}>
+              {readOnly ? "只读连接" : "可写连接"}
+            </Tag>
+            <Tag>{connection.config.jvm?.environment || "dev"}</Tag>
+          </>
+        }
+      />
 
-      <Card title="连接摘要">
+      <Card title="连接摘要" variant="borderless" style={cardStyle}>
         <Descriptions column={1} size="small" styles={DESCRIPTION_STYLES}>
           <Descriptions.Item label="当前模式">
             {resolveJVMModeMeta(providerMode).label}
@@ -161,7 +175,7 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
         </Descriptions>
       </Card>
 
-      <Card title="模式能力">
+      <Card title="模式能力" variant="borderless" style={cardStyle}>
         {capabilityLoading ? (
           <Skeleton active paragraph={{ rows: 3 }} />
         ) : capabilityError ? (
@@ -218,7 +232,7 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
           </Space>
         )}
       </Card>
-    </div>
+    </JVMWorkspaceShell>
   );
 };
 

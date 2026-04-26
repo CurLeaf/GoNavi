@@ -21,6 +21,11 @@ import {
   resolveJVMAuditResultColor,
 } from "../utils/jvmResourcePresentation";
 import JVMModeBadge from "./jvm/JVMModeBadge";
+import {
+  getJVMWorkspaceCardStyle,
+  JVMWorkspaceHero,
+  JVMWorkspaceShell,
+} from "./jvm/JVMWorkspaceLayout";
 
 const { Text } = Typography;
 
@@ -74,6 +79,8 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
+  const theme = useStore((state) => state.theme);
+  const darkMode = theme === "dark";
   const [limit, setLimit] = useState(50);
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<JVMAuditRecord[]>([]);
@@ -197,18 +204,26 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
     );
   }
 
+  const activeMode =
+    tab.providerMode || connection.config.jvm?.preferredMode || "jmx";
+  const cardStyle = getJVMWorkspaceCardStyle(darkMode);
+
   return (
-    <div style={{ padding: 20, display: "grid", gap: 16 }}>
-      <Card>
-        <Space direction="vertical" size={12} style={{ width: "100%" }}>
-          <Space size={12} wrap>
-            <JVMModeBadge
-              mode={
-                tab.providerMode ||
-                connection.config.jvm?.preferredMode ||
-                "jmx"
-              }
-            />
+    <JVMWorkspaceShell darkMode={darkMode}>
+      <JVMWorkspaceHero
+        darkMode={darkMode}
+        eyebrow="JVM Audit"
+        title="JVM 变更审计"
+        description={
+          <>
+            <Text strong>{connection.name}</Text>
+            <Text type="secondary"> · {connection.id}</Text>
+            <Text type="secondary"> · 当前范围：最近 {limit} 条</Text>
+          </>
+        }
+        badges={<JVMModeBadge mode={activeMode} />}
+        actions={
+          <>
             <Button
               size="small"
               icon={<ReloadOutlined />}
@@ -224,17 +239,13 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
                 value: item,
                 label: `最近 ${item} 条`,
               }))}
-              style={{ width: 128 }}
+              style={{ width: 132 }}
             />
-          </Space>
-          <Space size={8} wrap>
-            <Text strong>{connection.name}</Text>
-            <Text type="secondary">{connection.id}</Text>
-          </Space>
-        </Space>
-      </Card>
+          </>
+        }
+      />
 
-      <Card title="审计记录">
+      <Card title="审计记录" variant="borderless" style={cardStyle}>
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           {error ? <Alert type="error" showIcon message={error} /> : null}
           <Table<JVMAuditRecord>
@@ -253,7 +264,7 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
           />
         </Space>
       </Card>
-    </div>
+    </JVMWorkspaceShell>
   );
 };
 
