@@ -141,6 +141,33 @@ describe('buildCopyInsertSQL', () => {
     });
   });
 
+  it('uses Oracle date constructors when all-column DELETE matching includes DATE values', () => {
+    const result = buildCopyDeleteSQL({
+      dbType: 'oracle',
+      tableName: 'LZJ.RIJIE_TABLE',
+      orderedCols: ['NAME', 'CREATED_AT', 'STATUS', 'MEMO'],
+      allTableColumns: ['NAME', 'CREATED_AT', 'STATUS', 'MEMO'],
+      record: {
+        NAME: '张三',
+        CREATED_AT: '2026-04-26T08:30:00+08:00',
+        STATUS: 'DONE',
+        MEMO: null,
+      },
+      columnTypesByLowerName: {
+        name: 'NVARCHAR2',
+        created_at: 'DATE',
+        status: 'VARCHAR2',
+        memo: 'VARCHAR2',
+      },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      whereStrategy: 'all-columns',
+      sql: `DELETE FROM "LZJ"."RIJIE_TABLE" WHERE ("NAME" = '张三' AND "CREATED_AT" = TO_DATE('2026-04-26 08:30:00', 'YYYY-MM-DD HH24:MI:SS') AND "STATUS" = 'DONE' AND "MEMO" IS NULL);`,
+    });
+  });
+
   it('refuses to build UPDATE/DELETE SQL when the result set lacks keys and does not cover all table columns', () => {
     const result = buildCopyDeleteSQL({
       dbType: 'mysql',

@@ -9,9 +9,19 @@ import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, Trigg
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
-import { buildAlterTablePreviewSql, hasAlterTableDraftChanges } from './tableDesignerSchemaSql';
+import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges } from './tableDesignerSchemaSql';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
+import {
+    isMysqlFamilyDialect as isMysqlFamilySqlDialect,
+    isOracleLikeDialect as isOracleLikeSqlDialect,
+    isPgLikeDialect as isPgLikeSqlDialect,
+    isSqlServerDialect as isSqlServerSqlDialect,
+    quoteSqlIdentifierPart,
+    quoteSqlIdentifierPath,
+    resolveColumnTypeOptions,
+    resolveSqlDialect,
+} from '../utils/sqlDialect';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -540,6 +550,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   // Initial Columns Definition
   useEffect(() => {
+      const columnTypeOptions = resolveColumnTypeOptions(getDbType());
       const initialCols = [
           { 
               title: '名', 
@@ -556,7 +567,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
               key: 'type', 
               width: 150,
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <AutoComplete options={DB_TYPE_OPTIONS[getDbType()] || COMMON_TYPES} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />
+                  <AutoComplete options={columnTypeOptions} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />
               )
           },
           { 
@@ -636,7 +647,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
           }])
       ];
       setTableColumns(initialCols);
-  }, [readOnly]); // Re-create if readOnly changes
+  }, [connections, openCommentEditor, readOnly, tab.connectionId]); // Re-create when datasource dialect or readonly state changes
 
   const flushResizeGhost = useCallback(() => {
     resizeRafRef.current = null;
@@ -847,16 +858,9 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const getDbType = (): string => {
     const conn = connections.find(c => c.id === tab.connectionId);
-    const type = normalizeDbType(String(conn?.config?.type || ''));
-    if (!type) return '';
-
-    if (type === 'custom') {
-        return inferDialectFromCustomDriver(String(conn?.config?.driver || ''));
-    }
-
-    if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
-    if (type === 'dameng') return 'dm';
-    return type;
+    const rawType = String(conn?.config?.type || '').trim();
+    if (!rawType) return '';
+    return resolveSqlDialect(rawType, String(conn?.config?.driver || ''));
   };
 
   const generateTriggerTemplate = (): string => {
@@ -865,6 +869,8 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
     switch (dbType) {
       case 'mysql':
+      case 'mariadb':
+      case 'diros':
         return `CREATE TRIGGER trigger_name
 BEFORE INSERT ON \`${tblName}\`
 FOR EACH ROW
@@ -897,6 +903,7 @@ BEGIN
     -- 触发器逻辑
 END;`;
       case 'oracle':
+      case 'dameng':
       case 'dm':
         return `CREATE OR REPLACE TRIGGER trigger_name
 BEFORE INSERT ON "${tblName}"
@@ -922,6 +929,8 @@ END;`;
 
     switch (dbType) {
       case 'mysql':
+      case 'mariadb':
+      case 'diros':
         return `DROP TRIGGER IF EXISTS \`${triggerName}\``;
       case 'postgres':
       case 'kingbase':
@@ -931,6 +940,7 @@ END;`;
       case 'sqlserver':
         return `DROP TRIGGER IF EXISTS [${triggerName}]`;
       case 'oracle':
+      case 'dameng':
       case 'dm':
         return `DROP TRIGGER "${triggerName}"`;
       case 'sqlite':
@@ -1334,36 +1344,20 @@ ${selectedTrigger.statement}`;
       };
   };
 
-  const isPgLikeDialect = (dbType: string): boolean =>
-      dbType === 'postgres' || dbType === 'kingbase' || dbType === 'highgo' || dbType === 'vastbase';
-  const isOracleLikeDialect = (dbType: string): boolean => dbType === 'oracle' || dbType === 'dm';
-  const isSqlServerDialect = (dbType: string): boolean => dbType === 'sqlserver';
-  const isMysqlLikeDialect = (dbType: string): boolean => dbType === 'mysql';
+  const isPgLikeDialect = (dbType: string): boolean => isPgLikeSqlDialect(dbType);
+  const isOracleLikeDialect = (dbType: string): boolean => isOracleLikeSqlDialect(dbType);
+  const isSqlServerDialect = (dbType: string): boolean => isSqlServerSqlDialect(dbType);
+  const isMysqlLikeDialect = (dbType: string): boolean => isMysqlFamilySqlDialect(dbType);
   const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb';
   const lacksAlterForeignKeySupport = (dbType: string): boolean => dbType === 'sqlite' || dbType === 'duckdb' || dbType === 'tdengine';
   const lacksTableCommentSupport = (dbType: string): boolean => dbType === 'sqlite';
 
   const quoteIdentifierPartByDialect = (part: string, dbType: string): string => {
-      const ident = stripIdentifierQuotes(part);
-      if (!ident) return '';
-      if (isMysqlLikeDialect(dbType) || dbType === 'tdengine') {
-          return `\`${escapeBacktickIdentifier(ident)}\``;
-      }
-      if (isSqlServerDialect(dbType)) {
-          return `[${escapeBracketIdentifier(ident)}]`;
-      }
-      return `"${escapeDoubleQuoteIdentifier(ident)}"`;
+      return quoteSqlIdentifierPart(dbType, part);
   };
 
   const quoteIdentifierPathByDialect = (path: string, dbType: string): string => {
-      const raw = String(path || '').trim();
-      if (!raw) return '';
-      const parts = raw
-          .split('.')
-          .map(part => stripIdentifierQuotes(part))
-          .filter(Boolean);
-      if (parts.length === 0) return '';
-      return parts.map(part => quoteIdentifierPartByDialect(part, dbType)).join('.');
+      return quoteSqlIdentifierPath(dbType, path);
   };
 
   const resolveTableInfo = () => {
@@ -1481,19 +1475,13 @@ ${selectedTrigger.statement}`;
   };
 
   const buildCreateTableSql = (targetTableName: string, targetColumns: EditableColumn[], targetCharset: string, targetCollation: string) => {
-      const tableName = `\`${escapeBacktickIdentifier(targetTableName)}\``;
-      const colDefs = targetColumns.map(curr => {
-          let extra = curr.extra || "";
-          if (curr.isAutoIncrement && !extra.toLowerCase().includes('auto_increment')) {
-              extra += " AUTO_INCREMENT";
-          }
-          return `\`${escapeBacktickIdentifier(curr.name)}\` ${curr.type} ${curr.nullable === 'NO' ? 'NOT NULL' : 'NULL'} ${curr.default ? `DEFAULT '${escapeSqlString(String(curr.default))}'` : ''} ${extra} COMMENT '${escapeSqlString(curr.comment || '')}'`;
+      return buildCreateTablePreviewSql({
+          dbType: getDbType(),
+          tableName: targetTableName,
+          columns: targetColumns,
+          charset: targetCharset,
+          collation: targetCollation,
       });
-      const pks = targetColumns.filter(c => c.key === 'PRI').map(c => `\`${escapeBacktickIdentifier(c.name)}\``);
-      if (pks.length > 0) {
-          colDefs.push(`PRIMARY KEY (${pks.join(', ')})`);
-      }
-      return `CREATE TABLE ${tableName} (\n  ${colDefs.join(",\n  ")}\n) ENGINE=InnoDB DEFAULT CHARSET=${targetCharset} COLLATE=${targetCollation};`;
   };
 
   const openCopySelectedColumnsModal = () => {

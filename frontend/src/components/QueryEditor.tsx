@@ -13,6 +13,7 @@ import { convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -521,6 +522,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   startColumn: word.startColumn,
                   endColumn: word.endColumn,
               };
+              const activeConnection = sharedConnections.find(c => c.id === sharedCurrentConnectionId);
+              const activeDialect = resolveSqlDialect(
+                  String(activeConnection?.config?.type || ''),
+                  String(activeConnection?.config?.driver || ''),
+              );
+              const dialectKeywords = resolveSqlKeywords(activeDialect);
+              const dialectFunctions = resolveSqlFunctions(activeDialect);
 
               const stripQuotes = (ident: string) => {
                   let raw = (ident || '').trim();
@@ -776,7 +784,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
               const shouldBoostKeywords = !expectsTableName
                   && wordPrefix.length > 0
-                  && SQL_KEYWORDS.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
+                  && dialectKeywords.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
               const sortGroups = shouldBoostKeywords
                   ? { keyword: '00', func: '05', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
                   : expectsTableName
@@ -878,7 +886,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }));
 
               // 关键字提示
-              const keywordSuggestions = SQL_KEYWORDS
+              const keywordSuggestions = dialectKeywords
                   .filter((k) => startsWithPrefix(k))
                   .map(k => ({
                   label: k,
@@ -889,7 +897,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }));
 
               // 内置函数提示
-              const funcSuggestions = SQL_FUNCTIONS
+              const funcSuggestions = dialectFunctions
                   .filter((f) => startsWithPrefix(f.name))
                   .map(f => ({
                       label: f.name,
