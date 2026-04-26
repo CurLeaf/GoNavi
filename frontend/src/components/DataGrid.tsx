@@ -50,6 +50,7 @@ import {
 } from './dataGridCopyInsert';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
+import { buildCopiedRowsForPaste, buildPastedRowsFromCopiedRows } from './dataGridRowClipboard';
 import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
     TEMPORAL_FORMATS,
@@ -1221,6 +1222,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const lastTableScrollLeftRef = useRef(0);
   const lastExternalScrollLeftRef = useRef(0);
   const pendingScrollToBottomRef = useRef(false);
+  const pastedRowSequenceRef = useRef(0);
   const lastReportedScrollRef = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
   const didRestoreScrollRef = useRef(false);
 
@@ -1228,6 +1230,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [cellEditMode, setCellEditMode] = useState(false);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [copiedCellPatch, setCopiedCellPatch] = useState<{ sourceRowKey: string; values: Record<string, any> } | null>(null);
+  const [copiedRowsForPaste, setCopiedRowsForPaste] = useState<Array<Record<string, any>>>([]);
   const [batchEditModalOpen, setBatchEditModalOpen] = useState(false);
   const [batchEditValue, setBatchEditValue] = useState('');
   const [batchEditSetNull, setBatchEditSetNull] = useState(false);
@@ -2251,6 +2254,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
       setCopiedCellPatch(null);
+      setCopiedRowsForPaste([]);
       setRowEditorOpen(false);
       setRowEditorRowKey('');
       rowEditorBaseRawRef.current = {};
@@ -3622,6 +3626,55 @@ const DataGrid: React.FC<DataGridProps> = ({
       pendingScrollToBottomRef.current = true;
       setAddedRows(prev => [...prev, newRow]);
   };
+
+  const handleCopySelectedRowsForPaste = useCallback(() => {
+      if (selectedRowKeys.length === 0) {
+          void message.info('请先选择要复制的行');
+          return;
+      }
+
+      const copiedRows = buildCopiedRowsForPaste({
+          rows: mergedDisplayData as Array<Record<string, any>>,
+          selectedRowKeys,
+          columnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+          rowKeyToString: rowKeyStr,
+      });
+      if (copiedRows.length === 0) {
+          void message.info('未识别到可复制的行');
+          return;
+      }
+
+      setCopiedRowsForPaste(copiedRows);
+      void message.success(`已复制 ${copiedRows.length} 行，可粘贴为新增行`);
+  }, [selectedRowKeys, mergedDisplayData, columnNames, rowKeyStr]);
+
+  const handlePasteCopiedRowsAsNew = useCallback(() => {
+      if (copiedRowsForPaste.length === 0) {
+          void message.info('请先复制行');
+          return;
+      }
+
+      const nextRows = buildPastedRowsFromCopiedRows({
+          rows: copiedRowsForPaste,
+          columnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+          createRowKey: (index) => {
+              pastedRowSequenceRef.current += 1;
+              return `paste-${Date.now()}-${pastedRowSequenceRef.current}-${index}`;
+          },
+      });
+      if (nextRows.length === 0) {
+          void message.info('没有可粘贴的行');
+          return;
+      }
+
+      pendingScrollToBottomRef.current = true;
+      setAddedRows(prev => [...prev, ...nextRows]);
+      setSelectedRowKeys(nextRows.map(row => row[GONAVI_ROW_KEY]));
+      void message.success(`已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务`);
+  }, [copiedRowsForPaste, columnNames]);
+
   const handleDeleteSelected = () => {
       setDeletedRowKeys(prev => {
           const newDeleted = new Set(prev);
@@ -4921,6 +4974,22 @@ const DataGrid: React.FC<DataGridProps> = ({
 	               <>
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
 	                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
+	                   <Button
+	                       data-grid-copy-row-action="true"
+	                       icon={<CopyOutlined />}
+	                       disabled={selectedRowKeys.length === 0}
+	                       onClick={handleCopySelectedRowsForPaste}
+	                   >
+	                       复制行
+	                   </Button>
+	                   <Button
+	                       data-grid-paste-row-action="true"
+	                       icon={<VerticalAlignBottomOutlined />}
+	                       disabled={copiedRowsForPaste.length === 0}
+	                       onClick={handlePasteCopiedRowsAsNew}
+	                   >
+	                       {copiedRowsForPaste.length > 0 ? `粘贴行 (${copiedRowsForPaste.length})` : '粘贴行'}
+	                   </Button>
 	                   <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
 	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
