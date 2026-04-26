@@ -10,6 +10,7 @@ import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges } from './tableDesignerSchemaSql';
+import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
@@ -3002,25 +3003,7 @@ END;`;
             okText="执行"
             cancelText="取消"
         >
-            <div style={{ maxHeight: '400px', overflow: 'hidden', borderRadius: 8, border: darkMode ? '1px solid #333' : '1px solid #eee' }}>
-                <Editor
-                    height="360px"
-                    defaultLanguage="sql"
-                    language="sql"
-                    theme={darkMode ? 'transparent-dark' : 'transparent-light'}
-                    value={previewSql}
-                    options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
-                        fontSize: 13,
-                        lineNumbers: 'on',
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'on',
-                        automaticLayout: true,
-                        padding: { top: 8, bottom: 8 },
-                    }}
-                />
-            </div>
+            <TableDesignerSqlPreview sql={previewSql} darkMode={darkMode} />
             <p style={{ marginTop: 10, color: '#faad14' }}>请仔细检查 SQL，执行后不可撤销。</p>
         </Modal>
 
