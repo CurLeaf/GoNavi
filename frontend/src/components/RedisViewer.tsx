@@ -1852,7 +1852,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <Search
                             {...noAutoCapInputProps}
                             style={{ flex: 1 }}
-                            placeholder={searchMode === 'exact' ? '输入完整 Key 精确搜索' : '搜索 Key（模糊匹配）'}
+                            placeholder={searchMode === 'exact' ? '输入完整 Key / 命名空间精确搜索' : '搜索 Key（模糊匹配）'}
                             value={searchInput}
                             onChange={handleSearchInputChange}
                             onSearch={handleSearch}

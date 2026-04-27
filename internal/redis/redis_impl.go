@@ -155,6 +155,46 @@ func (r *RedisClientImpl) toPhysicalPattern(pattern string) string {
 	return prefix + normalized
 }
 
+func redisGlobPatternLiteralKey(pattern string) (string, bool) {
+	if pattern == "" {
+		return "", false
+	}
+
+	var builder strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		char := pattern[i]
+		if char == '\\' {
+			if i+1 >= len(pattern) {
+				return "", false
+			}
+			i++
+			builder.WriteByte(pattern[i])
+			continue
+		}
+		if char == '*' || char == '?' || char == '[' {
+			return "", false
+		}
+		builder.WriteByte(char)
+	}
+	return builder.String(), true
+}
+
+func escapeRedisGlobLiteral(value string) string {
+	var builder strings.Builder
+	for i := 0; i < len(value); i++ {
+		char := value[i]
+		if char == '*' || char == '?' || char == '[' || char == ']' || char == '\\' {
+			builder.WriteByte('\\')
+		}
+		builder.WriteByte(char)
+	}
+	return builder.String()
+}
+
+func redisExactSearchPattern(literalKey string) (string, string) {
+	return literalKey, escapeRedisGlobLiteral(literalKey) + ":*"
+}
+
 func (r *RedisClientImpl) toPhysicalKeys(keys []string) []string {
 	if len(keys) == 0 {
 		return nil
@@ -367,6 +407,15 @@ func (r *RedisClientImpl) ScanKeys(pattern string, cursor uint64, count int64) (
 	if pattern == "" {
 		pattern = "*"
 	}
+	exactPhysicalKey := ""
+	if literalKey, ok := redisGlobPatternLiteralKey(pattern); ok {
+		exactKey, namespacePattern := redisExactSearchPattern(literalKey)
+		exactPhysicalKey = r.toPhysicalKey(exactKey)
+		if exactPhysicalKey == "" {
+			return &RedisScanResult{Keys: []RedisKeyInfo{}, Cursor: "0"}, nil
+		}
+		pattern = namespacePattern
+	}
 	physicalPattern := r.toPhysicalPattern(pattern)
 
 	isSearchPattern := pattern != "*"
@@ -393,6 +442,10 @@ func (r *RedisClientImpl) ScanKeys(pattern string, cursor uint64, count int64) (
 		keys := make([]string, 0, int(targetCount))
 		seen := make(map[string]struct{}, int(targetCount))
 		var mu sync.Mutex
+		if exactPhysicalKey != "" {
+			keys = append(keys, exactPhysicalKey)
+			seen[exactPhysicalKey] = struct{}{}
+		}
 
 		err := r.clusterClient.ForEachMaster(ctx, func(nodeCtx context.Context, node *redis.Client) error {
 			var nodeCursor uint64
@@ -453,6 +506,10 @@ func (r *RedisClientImpl) ScanKeys(pattern string, cursor uint64, count int64) (
 
 	keys := make([]string, 0, int(targetCount))
 	seen := make(map[string]struct{}, int(targetCount))
+	if exactPhysicalKey != "" && currentCursor == 0 {
+		keys = append(keys, exactPhysicalKey)
+		seen[exactPhysicalKey] = struct{}{}
+	}
 
 	for len(keys) < int(targetCount) {
 		if time.Since(scanStartedAt) >= maxDuration {
