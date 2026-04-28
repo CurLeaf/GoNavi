@@ -13,18 +13,23 @@ type fakeCreateStatementDB struct {
 	createErr  error
 	columns    []connection.ColumnDefinition
 	columnsErr error
+	queryRows  []map[string]interface{}
+	queryErr   error
 
 	createSchema string
 	createTable  string
 	colsSchema   string
 	colsTable    string
+	columnsCalls int
+	queries      []string
 }
 
 func (f *fakeCreateStatementDB) Connect(config connection.ConnectionConfig) error { return nil }
 func (f *fakeCreateStatementDB) Close() error                                     { return nil }
 func (f *fakeCreateStatementDB) Ping() error                                      { return nil }
 func (f *fakeCreateStatementDB) Query(query string) ([]map[string]interface{}, []string, error) {
-	return nil, nil, nil
+	f.queries = append(f.queries, query)
+	return f.queryRows, []string{"ddl"}, f.queryErr
 }
 func (f *fakeCreateStatementDB) Exec(query string) (int64, error)          { return 0, nil }
 func (f *fakeCreateStatementDB) GetDatabases() ([]string, error)           { return nil, nil }
@@ -35,6 +40,7 @@ func (f *fakeCreateStatementDB) GetCreateStatement(dbName, tableName string) (st
 	return f.createSQL, f.createErr
 }
 func (f *fakeCreateStatementDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+	f.columnsCalls++
 	f.colsSchema = dbName
 	f.colsTable = tableName
 	return f.columns, f.columnsErr
@@ -77,6 +83,46 @@ func TestResolveDDLDBType_CustomDriverAlias(t *testing.T) {
 				t.Fatalf("resolveDDLDBType() mismatch, want=%q got=%q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		dbType     string
+		tableName  string
+		wantSchema string
+		wantTable  string
+	}{
+		{name: "postgres quoted dots", dbType: "postgres", tableName: `"sales.schema"."order.items"`, wantSchema: "sales.schema", wantTable: "order.items"},
+		{name: "highgo escaped quoted", dbType: "highgo", tableName: `\"sales\".\"orders\"`, wantSchema: "sales", wantTable: "orders"},
+		{name: "vastbase quoted table only", dbType: "vastbase", tableName: `"order.items"`, wantSchema: "public", wantTable: "order.items"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gotSchema, gotTable := normalizeSchemaAndTableByType(tt.dbType, "", tt.tableName)
+			if gotSchema != tt.wantSchema || gotTable != tt.wantTable {
+				t.Fatalf("normalizeSchemaAndTableByType(%q,%q)=(%q,%q),want=(%q,%q)", tt.dbType, tt.tableName, gotSchema, gotTable, tt.wantSchema, tt.wantTable)
+			}
+		})
+	}
+}
+
+func TestBuildRunConfigForDDL_CustomHighGoUsesDatabase(t *testing.T) {
+	t.Parallel()
+
+	got := buildRunConfigForDDL(connection.ConnectionConfig{
+		Type:     "custom",
+		Driver:   "highgo",
+		Database: "default_db",
+	}, "highgo", "target_db")
+	if got.Database != "target_db" {
+		t.Fatalf("expected custom highgo DDL database target_db, got %q", got.Database)
 	}
 }
 
@@ -127,6 +173,124 @@ func TestResolveCreateStatementWithFallback_KeepQualifiedSchema(t *testing.T) {
 	}
 	if !strings.Contains(ddl, `CREATE TABLE "sales"."orders"`) {
 		t.Fatalf("expected fallback DDL with sales schema, got: %s", ddl)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_PGLikeQuotedQualifiedName(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "-- SHOW CREATE TABLE not fully supported for PostgreSQL in this MVP.",
+		columns: []connection.ColumnDefinition{
+			{Name: "id", Type: "integer", Nullable: "NO", Key: "PRI"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type: "postgres",
+	}, "", `"sales.schema"."order.items"`)
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if dbInst.createSchema != "sales.schema" || dbInst.createTable != "order.items" {
+		t.Fatalf("expected create target sales.schema.order.items, got %q.%q", dbInst.createSchema, dbInst.createTable)
+	}
+	if dbInst.colsSchema != "sales.schema" || dbInst.colsTable != "order.items" {
+		t.Fatalf("expected column target sales.schema.order.items, got %q.%q", dbInst.colsSchema, dbInst.colsTable)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE "sales.schema"."order.items"`) {
+		t.Fatalf("expected fallback DDL with quoted dotted identifiers, got: %s", ddl)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_ReturnsCreateViewDirectly(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL:  "CREATE VIEW sales.orders_v AS SELECT 1;",
+		columnsErr: errors.New("should not be called"),
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{Type: "postgres"}, "", "sales.orders_v")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if ddl != dbInst.createSQL {
+		t.Fatalf("expected original create view DDL, got: %s", ddl)
+	}
+	if dbInst.columnsCalls != 0 {
+		t.Fatalf("CREATE VIEW path should not call GetColumns, calls=%d", dbInst.columnsCalls)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_PGLikeViewHelperBeforeColumnFallback(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL:  "SHOW CREATE TABLE not directly supported in PostgreSQL",
+		columnsErr: errors.New("should not be called"),
+		queryRows: []map[string]interface{}{
+			{"ddl": "SELECT id FROM sales.orders"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{Type: "postgres"}, "", "sales.orders_v")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE VIEW "sales"."orders_v" AS SELECT id FROM sales.orders`) {
+		t.Fatalf("expected CREATE VIEW DDL from view helper, got: %s", ddl)
+	}
+	if dbInst.columnsCalls != 0 {
+		t.Fatalf("view helper path should not call GetColumns, calls=%d", dbInst.columnsCalls)
+	}
+	if len(dbInst.queries) == 0 || !strings.Contains(dbInst.queries[0], "pg_get_viewdef") {
+		t.Fatalf("expected pg_get_viewdef query, got: %v", dbInst.queries)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_PGLikeViewHelperKeepsQuotedDottedName(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL:  "SHOW CREATE TABLE not directly supported in PostgreSQL",
+		columnsErr: errors.New("should not be called"),
+		queryRows: []map[string]interface{}{
+			{"ddl": "SELECT 1"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{Type: "postgres"}, "", `"sales.schema"."order.items"`)
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE VIEW "sales.schema"."order.items" AS SELECT 1`) {
+		t.Fatalf("expected CREATE VIEW DDL to keep quoted dotted identifiers, got: %s", ddl)
+	}
+	if dbInst.columnsCalls != 0 {
+		t.Fatalf("view helper path should not call GetColumns, calls=%d", dbInst.columnsCalls)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_PGLikeViewHelperMissFallsBackToColumns(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "SHOW CREATE TABLE not directly supported in PostgreSQL",
+		columns: []connection.ColumnDefinition{
+			{Name: "id", Type: "bigint", Nullable: "NO", Key: "PRI"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{Type: "postgres"}, "", "sales.orders")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE "sales"."orders"`) {
+		t.Fatalf("expected CREATE TABLE fallback after view helper miss, got: %s", ddl)
+	}
+	if dbInst.columnsCalls != 1 {
+		t.Fatalf("expected one GetColumns call after view helper miss, calls=%d", dbInst.columnsCalls)
 	}
 }
 

@@ -104,6 +104,27 @@ describe('DataGrid layout', () => {
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
 
+    const schemaTableMarkup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="public.users"
+        dbName=""
+        connectionId="conn-1"
+      />,
+    );
+
+    expect(schemaTableMarkup).toContain('data-grid-ddl-action="true"');
+    expect(schemaTableMarkup).toContain('查看 DDL');
+    expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
+
     const queryMarkup = renderToStaticMarkup(
       <DataGrid
         data={[

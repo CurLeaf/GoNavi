@@ -1661,8 +1661,8 @@ func tryGetViewCreateStatement(
 			continue
 		}
 		if looksLikeSelectOrWith(createSQL) {
-			qualifiedView := qualifyTable(schemaName, viewName)
-			createSQL = fmt.Sprintf("CREATE VIEW %s AS %s", quoteQualifiedIdentByType(config.Type, qualifiedView), strings.TrimSuffix(strings.TrimSpace(createSQL), ";"))
+			dbType := resolveDDLDBType(config)
+			createSQL = fmt.Sprintf("CREATE VIEW %s AS %s", quoteTableIdentByType(dbType, schemaName, viewName), strings.TrimSuffix(strings.TrimSpace(createSQL), ";"))
 		}
 		return ensureSQLTerminator(createSQL), true
 	}

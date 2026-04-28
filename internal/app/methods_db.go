@@ -184,6 +184,16 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 	}
 
+	if dbType == "postgres" || dbType == "highgo" || dbType == "vastbase" {
+		schema, table := db.SplitSQLQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "public", table
+		}
+	}
+
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
 		schema := strings.TrimSpace(parts[0])
 		table := strings.TrimSpace(parts[1])
@@ -214,7 +224,7 @@ func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbN
 	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
 		// custom 连接的 dbName 语义依赖 driver，尽量在常见驱动上对齐内置类型行为。
 		switch dbType {
-		case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "vastbase", "dameng", "clickhouse":
+		case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "dameng", "clickhouse":
 			if strings.TrimSpace(dbName) != "" {
 				runConfig.Database = strings.TrimSpace(dbName)
 			}
@@ -928,6 +938,12 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 		return sqlStr, nil
 	}
 
+	if supportsViewCreateStatementLookup(dbType) {
+		if viewDDL, ok := tryGetViewCreateStatement(dbInst, config, dbName, schemaName, pureTableName); ok {
+			return viewDDL, nil
+		}
+	}
+
 	if !supportsCreateStatementFallback(dbType) {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -962,6 +978,15 @@ func supportsCreateStatementFallback(dbType string) bool {
 	}
 }
 
+func supportsViewCreateStatementLookup(dbType string) bool {
+	switch dbType {
+	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "oracle", "dameng", "sqlite", "duckdb", "clickhouse":
+		return true
+	default:
+		return false
+	}
+}
+
 func shouldFallbackCreateStatement(dbType string, ddl string) bool {
 	if !supportsCreateStatementFallback(dbType) {
 		return false
@@ -971,7 +996,7 @@ func shouldFallbackCreateStatement(dbType string, ddl string) bool {
 	if trimmed == "" {
 		return true
 	}
-	if hasCreateTableHead(trimmed) {
+	if hasCreateTableOrViewHead(trimmed) {
 		return false
 	}
 
@@ -984,7 +1009,7 @@ func shouldFallbackCreateStatement(dbType string, ddl string) bool {
 	return true
 }
 
-func hasCreateTableHead(sqlText string) bool {
+func hasCreateTableOrViewHead(sqlText string) bool {
 	lines := strings.Split(sqlText, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -994,7 +1019,10 @@ func hasCreateTableHead(sqlText string) bool {
 		if strings.HasPrefix(line, "--") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") {
 			continue
 		}
-		return strings.HasPrefix(strings.ToLower(line), "create table")
+		lower := strings.ToLower(line)
+		return strings.HasPrefix(lower, "create table") ||
+			strings.HasPrefix(lower, "create view") ||
+			strings.HasPrefix(lower, "create or replace view")
 	}
 	return false
 }
