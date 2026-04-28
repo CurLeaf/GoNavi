@@ -55,17 +55,20 @@ type queryContext struct {
 
 // App struct
 type App struct {
-	ctx             context.Context
-	startedAt       time.Time
-	dbCache         map[string]cachedDatabase // Cache for DB connections
-	connectFailures map[string]cachedConnectFailure
-	mu              sync.RWMutex // Mutex for cache access
-	updateMu        sync.Mutex
-	updateState     updateState
-	queryMu         sync.RWMutex
-	configDir       string
-	secretStore     secretstore.SecretStore
-	runningQueries  map[string]queryContext // queryID -> cancelFunc and start time
+	ctx                context.Context
+	startedAt          time.Time
+	dbCache            map[string]cachedDatabase // Cache for DB connections
+	connectFailures    map[string]cachedConnectFailure
+	mu                 sync.RWMutex // Mutex for cache access
+	updateMu           sync.Mutex
+	updateState        updateState
+	queryMu            sync.RWMutex
+	configDir          string
+	secretStore        secretstore.SecretStore
+	runningQueries     map[string]queryContext // queryID -> cancelFunc and start time
+	jvmPreviewTokenMu  sync.Mutex
+	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
+	jvmPreviewTokenTTL time.Duration
 }
 
 // NewApp creates a new App application struct
@@ -78,11 +81,13 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		store = secretstore.NewUnavailableStore("secret store unavailable")
 	}
 	return &App{
-		dbCache:         make(map[string]cachedDatabase),
-		connectFailures: make(map[string]cachedConnectFailure),
-		runningQueries:  make(map[string]queryContext),
-		configDir:       resolveAppConfigDir(),
-		secretStore:     store,
+		dbCache:            make(map[string]cachedDatabase),
+		connectFailures:    make(map[string]cachedConnectFailure),
+		runningQueries:     make(map[string]queryContext),
+		configDir:          resolveAppConfigDir(),
+		secretStore:        store,
+		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
+		jvmPreviewTokenTTL: defaultJVMPreviewConfirmationTokenTTL,
 	}
 }
 

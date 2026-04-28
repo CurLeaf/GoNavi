@@ -58,18 +58,20 @@ type ValueSnapshot struct {
 }
 
 type ChangeRequest struct {
-	ProviderMode    string         `json:"providerMode"`
-	ResourceID      string         `json:"resourceId"`
-	Action          string         `json:"action"`
-	Reason          string         `json:"reason"`
-	Source          string         `json:"source,omitempty"`
-	ExpectedVersion string         `json:"expectedVersion,omitempty"`
-	Payload         map[string]any `json:"payload,omitempty"`
+	ProviderMode      string         `json:"providerMode"`
+	ResourceID        string         `json:"resourceId"`
+	Action            string         `json:"action"`
+	Reason            string         `json:"reason"`
+	Source            string         `json:"source,omitempty"`
+	ExpectedVersion   string         `json:"expectedVersion,omitempty"`
+	ConfirmationToken string         `json:"confirmationToken,omitempty"`
+	Payload           map[string]any `json:"payload,omitempty"`
 }
 
 type ChangePreview struct {
 	Allowed              bool          `json:"allowed"`
 	RequiresConfirmation bool          `json:"requiresConfirmation,omitempty"`
+	ConfirmationToken    string        `json:"confirmationToken,omitempty"`
 	Summary              string        `json:"summary"`
 	RiskLevel            string        `json:"riskLevel"`
 	BlockingReason       string        `json:"blockingReason,omitempty"`

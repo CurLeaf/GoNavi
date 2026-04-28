@@ -1,14 +1,43 @@
 package app
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/jvm"
+	"github.com/google/uuid"
 )
 
 var newJVMProvider = jvm.NewProvider
+
+const defaultJVMPreviewConfirmationTokenTTL = 10 * time.Minute
+
+type jvmPreviewConfirmationToken struct {
+	contextHash string
+	expiresAt   time.Time
+}
+
+type jvmPreviewConfirmationContext struct {
+	ConfigHash      string `json:"configHash"`
+	ProviderMode    string `json:"providerMode"`
+	ResourceID      string `json:"resourceId"`
+	Action          string `json:"action"`
+	Reason          string `json:"reason"`
+	Source          string `json:"source"`
+	ExpectedVersion string `json:"expectedVersion"`
+	PayloadHash     string `json:"payloadHash"`
+	PreviewChecksum string `json:"previewChecksum"`
+	RiskLevel       string `json:"riskLevel"`
+	BeforeVersion   string `json:"beforeVersion"`
+	AfterVersion    string `json:"afterVersion"`
+}
 
 func buildJVMCapabilityError(mode string, cfg connection.ConnectionConfig, err error) jvm.Capability {
 	probeCfg := cfg
@@ -38,6 +67,119 @@ func resolveJVMProviderForMode(cfg connection.ConnectionConfig, mode string) (co
 	}
 
 	return normalized, provider, nil
+}
+
+func (a *App) issueJVMPreviewConfirmationToken(cfg connection.ConnectionConfig, req jvm.ChangeRequest, preview jvm.ChangePreview) (string, error) {
+	contextHash, err := buildJVMPreviewConfirmationContextHash(cfg, req, preview)
+	if err != nil {
+		return "", err
+	}
+
+	token := uuid.NewString()
+	now := time.Now()
+	ttl := a.jvmPreviewTokenTTL
+	if ttl <= 0 {
+		ttl = defaultJVMPreviewConfirmationTokenTTL
+	}
+
+	a.jvmPreviewTokenMu.Lock()
+	defer a.jvmPreviewTokenMu.Unlock()
+	if a.jvmPreviewTokens == nil {
+		a.jvmPreviewTokens = make(map[string]jvmPreviewConfirmationToken)
+	}
+	a.pruneExpiredJVMPreviewConfirmationTokensLocked(now)
+	a.jvmPreviewTokens[token] = jvmPreviewConfirmationToken{
+		contextHash: contextHash,
+		expiresAt:   now.Add(ttl),
+	}
+	return token, nil
+}
+
+func (a *App) consumeJVMPreviewConfirmationToken(cfg connection.ConnectionConfig, req jvm.ChangeRequest, preview jvm.ChangePreview) error {
+	if !preview.RequiresConfirmation {
+		return nil
+	}
+
+	if strings.TrimSpace(preview.ConfirmationToken) == "" {
+		return fmt.Errorf("预览确认令牌缺失，请重新预览后再提交")
+	}
+
+	token := strings.TrimSpace(req.ConfirmationToken)
+	if token == "" {
+		return fmt.Errorf("缺少确认令牌，请先完成预览确认")
+	}
+
+	expectedHash, err := buildJVMPreviewConfirmationContextHash(cfg, req, preview)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	a.jvmPreviewTokenMu.Lock()
+	if a.jvmPreviewTokens == nil {
+		a.jvmPreviewTokens = make(map[string]jvmPreviewConfirmationToken)
+	}
+	a.pruneExpiredJVMPreviewConfirmationTokensLocked(now)
+	entry, ok := a.jvmPreviewTokens[token]
+	if ok {
+		delete(a.jvmPreviewTokens, token)
+	}
+	a.jvmPreviewTokenMu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("确认令牌已失效，请重新预览并确认")
+	}
+	if !entry.expiresAt.After(now) {
+		return fmt.Errorf("确认令牌已过期，请重新预览并确认")
+	}
+	if subtle.ConstantTimeCompare([]byte(entry.contextHash), []byte(expectedHash)) != 1 {
+		return fmt.Errorf("确认令牌不匹配，请重新预览并确认")
+	}
+	return nil
+}
+
+func (a *App) pruneExpiredJVMPreviewConfirmationTokensLocked(now time.Time) {
+	for token, entry := range a.jvmPreviewTokens {
+		if !entry.expiresAt.After(now) {
+			delete(a.jvmPreviewTokens, token)
+		}
+	}
+}
+
+func buildJVMPreviewConfirmationContextHash(cfg connection.ConnectionConfig, req jvm.ChangeRequest, preview jvm.ChangePreview) (string, error) {
+	configHash, err := hashJSONValue(cfg)
+	if err != nil {
+		return "", fmt.Errorf("生成 JVM 预览上下文失败: %w", err)
+	}
+	payloadHash, err := hashJSONValue(req.Payload)
+	if err != nil {
+		return "", fmt.Errorf("生成 JVM 预览载荷摘要失败: %w", err)
+	}
+
+	input := jvmPreviewConfirmationContext{
+		ConfigHash:      configHash,
+		ProviderMode:    strings.TrimSpace(cfg.JVM.PreferredMode),
+		ResourceID:      strings.TrimSpace(req.ResourceID),
+		Action:          strings.TrimSpace(req.Action),
+		Reason:          strings.TrimSpace(req.Reason),
+		Source:          strings.TrimSpace(req.Source),
+		ExpectedVersion: strings.TrimSpace(req.ExpectedVersion),
+		PayloadHash:     payloadHash,
+		PreviewChecksum: strings.TrimSpace(preview.ConfirmationToken),
+		RiskLevel:       strings.TrimSpace(preview.RiskLevel),
+		BeforeVersion:   strings.TrimSpace(preview.Before.Version),
+		AfterVersion:    strings.TrimSpace(preview.After.Version),
+	}
+	return hashJSONValue(input)
+}
+
+func hashJSONValue(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (a *App) TestJVMConnection(cfg connection.ConnectionConfig) connection.QueryResult {
@@ -97,6 +239,13 @@ func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRe
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if preview.Allowed && preview.RequiresConfirmation {
+		token, err := a.issueJVMPreviewConfirmationToken(normalized, req, preview)
+		if err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		preview.ConfirmationToken = token
+	}
 
 	return connection.QueryResult{Success: true, Data: preview}
 }
@@ -124,26 +273,66 @@ func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequ
 		}
 		return connection.QueryResult{Success: false, Message: message}
 	}
-
-	result, err := provider.ApplyChange(a.ctx, normalized, req)
-	if err != nil {
+	if err := a.consumeJVMPreviewConfirmationToken(normalized, req, preview); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	if err := jvm.NewAuditStore(filepath.Join(a.auditRootDir(), "jvm_audit.jsonl")).Append(jvm.AuditRecord{
-		ConnectionID: normalized.ID,
-		ProviderMode: normalized.JVM.PreferredMode,
-		ResourceID:   req.ResourceID,
-		Action:       req.Action,
-		Reason:       req.Reason,
-		Source:       req.Source,
-		Result:       result.Status,
-	}); err != nil {
-		if strings.TrimSpace(result.Message) == "" {
-			result.Message = "变更已执行，但审计记录写入失败: " + err.Error()
-		} else {
-			result.Message += "；审计记录写入失败: " + err.Error()
+	auditStore := jvm.NewAuditStore(filepath.Join(a.auditRootDir(), "jvm_audit.jsonl"))
+	appendAuditRecord := func(record jvm.AuditRecord) error {
+		return auditStore.Append(record)
+	}
+	appendAudit := func(result string, timestamp int64) error {
+		return appendAuditRecord(jvm.AuditRecord{
+			Timestamp:    timestamp,
+			ConnectionID: normalized.ID,
+			ProviderMode: normalized.JVM.PreferredMode,
+			ResourceID:   req.ResourceID,
+			Action:       req.Action,
+			Reason:       req.Reason,
+			Source:       req.Source,
+			Result:       result,
+		})
+	}
+	appendWarning := func(message string, warning string) string {
+		message = strings.TrimSpace(message)
+		warning = strings.TrimSpace(warning)
+		if warning == "" {
+			return message
 		}
+		if message == "" {
+			return warning
+		}
+		return message + "；" + warning
+	}
+
+	pendingTimestamp := time.Now().UnixMilli()
+	terminalAuditTimestamp := func() int64 {
+		ts := time.Now().UnixMilli()
+		if ts <= pendingTimestamp {
+			return pendingTimestamp + 1
+		}
+		return ts
+	}
+
+	if err := appendAudit("pending", pendingTimestamp); err != nil {
+		return connection.QueryResult{Success: false, Message: "审计记录写入失败，已阻止 JVM 变更: " + err.Error()}
+	}
+
+	result, err := provider.ApplyChange(a.ctx, normalized, req)
+	if err != nil {
+		if auditErr := appendAudit("failed", terminalAuditTimestamp()); auditErr != nil {
+			return connection.QueryResult{Success: false, Message: err.Error() + "；失败审计写入失败: " + auditErr.Error()}
+		}
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	terminalResult := strings.TrimSpace(result.Status)
+	if terminalResult == "" {
+		terminalResult = "applied"
+	}
+	if err := appendAudit(terminalResult, terminalAuditTimestamp()); err != nil {
+		result.Message = appendWarning(result.Message, "终态审计写入失败: "+err.Error())
+		return connection.QueryResult{Success: true, Message: result.Message, Data: result}
 	}
 
 	return connection.QueryResult{Success: true, Data: result}

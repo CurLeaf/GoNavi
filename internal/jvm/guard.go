@@ -2,6 +2,9 @@ package jvm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -76,7 +79,17 @@ func BuildChangePreview(
 		}
 	}
 
-	if !preview.Allowed || provider == nil {
+	if !preview.Allowed {
+		return preview, nil
+	}
+	if provider == nil {
+		if preview.RequiresConfirmation {
+			confirmationToken, tokenErr := buildChangeConfirmationToken(normalized, req, preview)
+			if tokenErr != nil {
+				return ChangePreview{}, tokenErr
+			}
+			preview.ConfirmationToken = confirmationToken
+		}
 		return preview, nil
 	}
 
@@ -106,6 +119,16 @@ func BuildChangePreview(
 	if hasSnapshotOverride(providerPreview.After) {
 		preview.After = mergeValueSnapshot(preview.After, providerPreview.After)
 	}
+	if strings.EqualFold(strings.TrimSpace(preview.RiskLevel), "high") {
+		preview.RequiresConfirmation = true
+	}
+	if preview.Allowed && preview.RequiresConfirmation {
+		confirmationToken, tokenErr := buildChangeConfirmationToken(normalized, req, preview)
+		if tokenErr != nil {
+			return ChangePreview{}, tokenErr
+		}
+		preview.ConfirmationToken = confirmationToken
+	}
 
 	return preview, nil
 }
@@ -118,6 +141,7 @@ func NormalizeChangeRequest(req ChangeRequest) (ChangeRequest, error) {
 	normalized.Reason = strings.TrimSpace(normalized.Reason)
 	normalized.Source = strings.TrimSpace(normalized.Source)
 	normalized.ExpectedVersion = strings.TrimSpace(normalized.ExpectedVersion)
+	normalized.ConfirmationToken = strings.TrimSpace(normalized.ConfirmationToken)
 
 	if normalized.ResourceID == "" {
 		return ChangeRequest{}, fmt.Errorf("resource id is required")
@@ -138,7 +162,8 @@ func hasSnapshotOverride(snapshot ValueSnapshot) bool {
 		strings.TrimSpace(snapshot.Format) != "" ||
 		strings.TrimSpace(snapshot.Version) != "" ||
 		snapshot.Value != nil ||
-		snapshot.Metadata != nil
+		snapshot.Metadata != nil ||
+		snapshot.Sensitive
 }
 
 func mergeValueSnapshot(base ValueSnapshot, override ValueSnapshot) ValueSnapshot {
@@ -161,5 +186,67 @@ func mergeValueSnapshot(base ValueSnapshot, override ValueSnapshot) ValueSnapsho
 	if override.Metadata != nil {
 		merged.Metadata = override.Metadata
 	}
+	if override.Sensitive {
+		merged.Sensitive = true
+	}
 	return merged
+}
+
+func ValidateChangeConfirmation(preview ChangePreview, req ChangeRequest) error {
+	if !preview.RequiresConfirmation {
+		return nil
+	}
+
+	previewToken := strings.TrimSpace(preview.ConfirmationToken)
+	requestToken := strings.TrimSpace(req.ConfirmationToken)
+	if previewToken == "" {
+		return fmt.Errorf("预览确认令牌缺失，请重新预览后再提交")
+	}
+	if requestToken == "" {
+		return fmt.Errorf("缺少确认令牌，请先完成预览确认")
+	}
+	if previewToken != requestToken {
+		return fmt.Errorf("确认令牌不匹配，请重新预览并确认")
+	}
+	return nil
+}
+
+type confirmationTokenInput struct {
+	ConnectionID    string         `json:"connectionId"`
+	ProviderMode    string         `json:"providerMode"`
+	ResourceID      string         `json:"resourceId"`
+	Action          string         `json:"action"`
+	Reason          string         `json:"reason"`
+	Source          string         `json:"source"`
+	ExpectedVersion string         `json:"expectedVersion"`
+	Payload         map[string]any `json:"payload"`
+	Summary         string         `json:"summary"`
+	RiskLevel       string         `json:"riskLevel"`
+	BeforeVersion   string         `json:"beforeVersion"`
+	AfterVersion    string         `json:"afterVersion"`
+}
+
+func buildChangeConfirmationToken(cfg connection.ConnectionConfig, req ChangeRequest, preview ChangePreview) (string, error) {
+	input := confirmationTokenInput{
+		ConnectionID:    strings.TrimSpace(cfg.ID),
+		ProviderMode:    strings.TrimSpace(cfg.JVM.PreferredMode),
+		ResourceID:      strings.TrimSpace(req.ResourceID),
+		Action:          strings.TrimSpace(req.Action),
+		Reason:          strings.TrimSpace(req.Reason),
+		Source:          strings.TrimSpace(req.Source),
+		ExpectedVersion: strings.TrimSpace(req.ExpectedVersion),
+		Payload:         req.Payload,
+		Summary:         strings.TrimSpace(preview.Summary),
+		RiskLevel:       strings.TrimSpace(preview.RiskLevel),
+		BeforeVersion:   strings.TrimSpace(preview.Before.Version),
+		AfterVersion:    strings.TrimSpace(preview.After.Version),
+	}
+
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("生成 JVM 变更确认令牌失败: %w", err)
+	}
+
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:]), nil
 }

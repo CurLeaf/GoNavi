@@ -68,6 +68,9 @@ func TestPreviewChangeBlocksReadOnlyConnection(t *testing.T) {
 	if preview.BlockingReason == "" || !strings.Contains(preview.BlockingReason, "只读") {
 		t.Fatalf("expected readonly blocking reason, got %#v", preview)
 	}
+	if strings.TrimSpace(preview.ConfirmationToken) != "" {
+		t.Fatalf("expected blocked preview to not include confirmation token, got %#v", preview)
+	}
 	if preview.Before.ResourceID != "/cache/orders" {
 		t.Fatalf("expected before snapshot resource id to be preserved, got %#v", preview.Before)
 	}
@@ -169,6 +172,93 @@ func TestPreviewChangeMarksProdWritesAsConfirmationRequired(t *testing.T) {
 	}
 }
 
+func TestPreviewChangeMarksHighRiskWritesAsConfirmationRequired(t *testing.T) {
+	readOnly := false
+
+	preview, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:   true,
+			Summary:   "provider high risk preview",
+			RiskLevel: "high",
+		},
+	}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-writable",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"args": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error: %v", err)
+	}
+	if !preview.RequiresConfirmation {
+		t.Fatalf("expected high risk preview to require confirmation, got %#v", preview)
+	}
+	if strings.TrimSpace(preview.ConfirmationToken) == "" {
+		t.Fatalf("expected high risk preview to include confirmation token, got %#v", preview)
+	}
+}
+
+func TestPreviewChangeMergesProviderSensitiveFlag(t *testing.T) {
+	readOnly := false
+
+	preview, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		before: ValueSnapshot{
+			ResourceID: "/cache/orders/password",
+			Kind:       "attribute",
+			Format:     "string",
+			Value:      "old-secret",
+		},
+		preview: ChangePreview{
+			Allowed:   true,
+			Summary:   "provider preview",
+			RiskLevel: "high",
+			Before: ValueSnapshot{
+				Value:     "old-secret",
+				Sensitive: true,
+			},
+			After: ValueSnapshot{
+				Value:     "new-secret",
+				Sensitive: true,
+			},
+		},
+	}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-writable",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/cache/orders/password",
+		Action:       "set",
+		Reason:       "rotate secret",
+		Payload: map[string]any{
+			"value": "new-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error: %v", err)
+	}
+	if !preview.Before.Sensitive || !preview.After.Sensitive {
+		t.Fatalf("expected merged preview snapshots to preserve sensitive flag, got %#v", preview)
+	}
+}
+
 func TestPreviewChangeMergesProviderSnapshotsWithoutDroppingDefaults(t *testing.T) {
 	readOnly := false
 
@@ -222,5 +312,204 @@ func TestPreviewChangeMergesProviderSnapshotsWithoutDroppingDefaults(t *testing.
 	}
 	if preview.After.ResourceID != "/cache/orders" || preview.After.Format != "json" {
 		t.Fatalf("expected after snapshot defaults to be preserved, got %#v", preview.After)
+	}
+}
+
+func TestBuildChangePreviewAddsConfirmationTokenWhenRequired(t *testing.T) {
+	readOnly := false
+
+	preview, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:              true,
+			Summary:              "invoke resize",
+			RiskLevel:            "high",
+			RequiresConfirmation: true,
+		},
+	}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-prod",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			Environment:   EnvPROD,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"args": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error: %v", err)
+	}
+	if !preview.RequiresConfirmation {
+		t.Fatalf("expected confirmation requirement, got %#v", preview)
+	}
+	if strings.TrimSpace(preview.ConfirmationToken) == "" {
+		t.Fatalf("expected confirmation token, got %#v", preview)
+	}
+}
+
+func TestBuildChangePreviewUsesNormalizedProviderModeForConfirmationToken(t *testing.T) {
+	readOnly := false
+	cfg := connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-prod",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			Environment:   EnvPROD,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}
+
+	previewWithoutRequestedMode, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:              true,
+			Summary:              "invoke resize",
+			RiskLevel:            "high",
+			RequiresConfirmation: true,
+		},
+	}, cfg, ChangeRequest{
+		ProviderMode: "",
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"args": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error for empty provider mode: %v", err)
+	}
+	if strings.TrimSpace(previewWithoutRequestedMode.ConfirmationToken) == "" {
+		t.Fatalf("expected confirmation token for empty requested provider mode, got %#v", previewWithoutRequestedMode)
+	}
+
+	previewWithRequestedMode, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:              true,
+			Summary:              "invoke resize",
+			RiskLevel:            "high",
+			RequiresConfirmation: true,
+		},
+	}, cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"args": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error for explicit provider mode: %v", err)
+	}
+	if strings.TrimSpace(previewWithRequestedMode.ConfirmationToken) == "" {
+		t.Fatalf("expected confirmation token for explicit requested provider mode, got %#v", previewWithRequestedMode)
+	}
+
+	if previewWithoutRequestedMode.ConfirmationToken != previewWithRequestedMode.ConfirmationToken {
+		t.Fatalf("expected tokens to match when normalized mode is the same, got %q vs %q", previewWithoutRequestedMode.ConfirmationToken, previewWithRequestedMode.ConfirmationToken)
+	}
+}
+
+func TestBuildChangePreviewBlockedByProviderDoesNotGenerateConfirmationToken(t *testing.T) {
+	readOnly := false
+
+	preview, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:              false,
+			RequiresConfirmation: true,
+			BlockingReason:       "provider denied write",
+			Summary:              "blocked by provider",
+			RiskLevel:            "high",
+		},
+	}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-prod",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			Environment:   EnvPROD,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"args": []any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildChangePreview returned error: %v", err)
+	}
+	if preview.Allowed {
+		t.Fatalf("expected provider-blocked preview, got %#v", preview)
+	}
+	if strings.TrimSpace(preview.ConfirmationToken) != "" {
+		t.Fatalf("expected blocked preview to not include confirmation token, got %#v", preview)
+	}
+}
+
+func TestBuildChangePreviewFailsClosedWhenTokenMarshalFails(t *testing.T) {
+	readOnly := false
+	_, err := BuildChangePreview(context.Background(), fakeGuardProvider{
+		preview: ChangePreview{
+			Allowed:              true,
+			Summary:              "invoke resize",
+			RiskLevel:            "high",
+			RequiresConfirmation: true,
+		},
+	}, connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-prod",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			Environment:   EnvPROD,
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   "/mbean/java.lang:type=Memory/operation/gc",
+		Action:       "invoke",
+		Reason:       "manual maintenance",
+		Payload: map[string]any{
+			"invalid": func() {},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected BuildChangePreview to fail when confirmation token marshal fails")
+	}
+	if !strings.Contains(err.Error(), "确认令牌") {
+		t.Fatalf("expected error to mention confirmation token, got %v", err)
+	}
+}
+
+func TestValidateChangeConfirmationRejectsMissingOrMismatchedToken(t *testing.T) {
+	preview := ChangePreview{
+		Allowed:              true,
+		RequiresConfirmation: true,
+		ConfirmationToken:    "token-a",
+	}
+	if err := ValidateChangeConfirmation(preview, ChangeRequest{}); err == nil {
+		t.Fatal("expected missing confirmation token to be rejected")
+	}
+	if err := ValidateChangeConfirmation(preview, ChangeRequest{ConfirmationToken: "token-b"}); err == nil {
+		t.Fatal("expected mismatched confirmation token to be rejected")
+	}
+	if err := ValidateChangeConfirmation(preview, ChangeRequest{ConfirmationToken: "token-a"}); err != nil {
+		t.Fatalf("expected matching confirmation token to pass, got %v", err)
 	}
 }
