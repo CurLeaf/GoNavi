@@ -15,6 +15,14 @@ public final class JMXTestServer {
         if (!server.isRegistered(objectName)) {
             server.registerMBean(new CacheSettings(), objectName);
         }
+        ObjectName defaultDomainObjectName = new ObjectName(":type=CacheSettings,name=DefaultDomainCache");
+        if (!server.isRegistered(defaultDomainObjectName)) {
+            server.registerMBean(new CacheSettings(), defaultDomainObjectName);
+        }
+        ObjectName whitespaceDomainObjectName = new ObjectName("com.gonavi.fixture :type=CacheSettings,name=WhitespaceDomainCache");
+        if (!server.isRegistered(whitespaceDomainObjectName)) {
+            server.registerMBean(new CacheSettings(), whitespaceDomainObjectName);
+        }
 
         System.out.println("READY");
         System.out.flush();

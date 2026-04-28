@@ -52,13 +52,13 @@ final class JmxRuntime {
                 case "list":
                     return listResources(server, connection, target);
                 case "get":
-                    return singleton("snapshot", getValue(server, target));
+                    return singleton("snapshot", getValue(server, connection, target));
                 case "monitor":
-                    return singleton("monitoringSnapshot", getMonitoringSnapshot(server));
+                    return singleton("monitoringSnapshot", getMonitoringSnapshot(server, connection));
                 case "preview":
-                    return singleton("preview", previewChange(server, target, change));
+                    return singleton("preview", previewChange(server, connection, target, change));
                 case "apply":
-                    return singleton("applyResult", applyChange(server, target, change));
+                    return singleton("applyResult", applyChange(server, connection, target, change));
                 default:
                     throw new IllegalArgumentException("unsupported helper command: " + command);
             }
@@ -100,6 +100,7 @@ final class JmxRuntime {
         }
 
         if (target.isDomain()) {
+            requireDomainAllowed(connection, target.domain);
             Set<ObjectName> names = server.queryNames(new ObjectName(target.domain + ":*"), null);
             List<ObjectName> sortedNames = new ArrayList<>(names);
             Collections.sort(sortedNames, Comparator.comparing(ObjectName::getCanonicalName));
@@ -123,6 +124,7 @@ final class JmxRuntime {
 
         if (target.isMBean()) {
             ObjectName objectName = new ObjectName(target.objectName);
+            requireDomainAllowed(connection, objectName);
             MBeanInfo info = server.getMBeanInfo(objectName);
 
             MBeanAttributeInfo[] attributes = info.getAttributes();
@@ -170,10 +172,15 @@ final class JmxRuntime {
         throw new IllegalArgumentException("target kind " + target.kind + " does not support list");
     }
 
-    private static Map<String, Object> getValue(MBeanServerConnection server, TargetSpec target) throws Exception {
+    private static Map<String, Object> getValue(
+        MBeanServerConnection server,
+        ConnectionSpec connection,
+        TargetSpec target
+    ) throws Exception {
         requireTarget(target);
 
         if (target.isDomain()) {
+            requireDomainAllowed(connection, target.domain);
             Set<ObjectName> names = server.queryNames(new ObjectName(target.domain + ":*"), null);
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("domain", target.domain);
@@ -182,6 +189,7 @@ final class JmxRuntime {
         }
 
         ObjectName objectName = new ObjectName(target.objectName);
+        requireDomainAllowed(connection, objectName);
         if (target.isMBean()) {
             MBeanInfo info = server.getMBeanInfo(objectName);
             List<Map<String, Object>> attributes = new ArrayList<>();
@@ -219,7 +227,9 @@ final class JmxRuntime {
         throw new IllegalArgumentException("unsupported target kind: " + target.kind);
     }
 
-    private static Map<String, Object> getMonitoringSnapshot(MBeanServerConnection server) throws Exception {
+    private static Map<String, Object> getMonitoringSnapshot(MBeanServerConnection server, ConnectionSpec connection) throws Exception {
+        requireDomainAllowed(connection, "java.lang");
+
         LinkedHashMap<String, Object> result = new LinkedHashMap<>();
         LinkedHashMap<String, Object> point = new LinkedHashMap<>();
         List<String> availableMetrics = new ArrayList<>();
@@ -423,6 +433,7 @@ final class JmxRuntime {
 
     private static Map<String, Object> previewChange(
         MBeanServerConnection server,
+        ConnectionSpec connection,
         TargetSpec target,
         Map<String, Object> change
     ) throws Exception {
@@ -431,6 +442,7 @@ final class JmxRuntime {
 
         if (target.isAttribute()) {
             ObjectName objectName = new ObjectName(target.objectName);
+            requireDomainAllowed(connection, objectName);
             MBeanAttributeInfo attributeInfo = requireAttributeInfo(server, objectName, target.attribute);
             Map<String, Object> before = attributeSnapshot(objectName, attributeInfo, server.getAttribute(objectName, target.attribute));
             if (!attributeInfo.isWritable()) {
@@ -457,6 +469,7 @@ final class JmxRuntime {
 
         if (target.isOperation()) {
             ObjectName objectName = new ObjectName(target.objectName);
+            requireDomainAllowed(connection, objectName);
             MBeanOperationInfo operationInfo = requireOperationInfo(server, objectName, target.operation, target.signature);
             List<Object> args = argumentList(payload);
             String[] signature = effectiveSignature(target, payload, operationInfo);
@@ -486,6 +499,7 @@ final class JmxRuntime {
 
     private static Map<String, Object> applyChange(
         MBeanServerConnection server,
+        ConnectionSpec connection,
         TargetSpec target,
         Map<String, Object> change
     ) throws Exception {
@@ -494,6 +508,7 @@ final class JmxRuntime {
 
         if (target.isAttribute()) {
             ObjectName objectName = new ObjectName(target.objectName);
+            requireDomainAllowed(connection, objectName);
             MBeanAttributeInfo attributeInfo = requireAttributeInfo(server, objectName, target.attribute);
             if (!attributeInfo.isWritable()) {
                 throw new IllegalArgumentException("attribute " + target.attribute + " is not writable");
@@ -512,6 +527,7 @@ final class JmxRuntime {
 
         if (target.isOperation()) {
             ObjectName objectName = new ObjectName(target.objectName);
+            requireDomainAllowed(connection, objectName);
             MBeanOperationInfo operationInfo = requireOperationInfo(server, objectName, target.operation, target.signature);
             List<Object> args = argumentList(payload);
             String[] signature = effectiveSignature(target, payload, operationInfo);
@@ -590,17 +606,18 @@ final class JmxRuntime {
         Object value
     ) {
         Object jsonValue = toJsonCompatible(value);
+        boolean sensitive = isSensitiveName(attributeInfo.getName());
         List<Map<String, Object>> supportedActions = attributeInfo.isWritable()
             ? Collections.singletonList(actionDefinition(
                 "set",
                 "设置属性",
                 "更新 JMX 属性 " + attributeInfo.getName(),
-                isSensitiveName(attributeInfo.getName()),
+                sensitive,
                 Collections.singletonList(payloadField("value", attributeInfo.getType(), true, "目标属性值")),
-                metadata("value", jsonValue)
+                sensitive ? Collections.<String, Object>emptyMap() : metadata("value", jsonValue)
             ))
             : Collections.emptyList();
-        return snapshot("attribute", inferFormat(jsonValue), jsonValue, attributeInfo.getDescription(), isSensitiveName(attributeInfo.getName()), supportedActions, metadata(
+        return snapshot("attribute", inferFormat(jsonValue), jsonValue, attributeInfo.getDescription(), sensitive, supportedActions, metadata(
             "objectName", objectName.toString(),
             "attribute", attributeInfo.getName(),
             "type", attributeInfo.getType(),
@@ -898,11 +915,45 @@ final class JmxRuntime {
         return lowered.contains("password")
             || lowered.contains("secret")
             || lowered.contains("token")
-            || lowered.contains("credential");
+            || lowered.contains("credential")
+            || lowered.contains("apikey")
+            || lowered.contains("api_key")
+            || lowered.contains("accesskey")
+            || lowered.contains("access_key")
+            || lowered.contains("privatekey")
+            || lowered.contains("private_key")
+            || lowered.contains("secretkey")
+            || lowered.contains("secret_key")
+            || lowered.contains("authkey")
+            || lowered.contains("auth_key");
     }
 
     private static String domainOf(ObjectName objectName) {
         return objectName.getDomain();
+    }
+
+    private static void requireDomainAllowed(ConnectionSpec connection, String domain) {
+        if (connection == null) {
+            return;
+        }
+        String rawDomain = domain == null ? "" : domain;
+        String normalizedDomain = rawDomain.trim();
+        if (normalizedDomain.isEmpty()) {
+            if (connection.hasDomainAllowlist()) {
+                throw new IllegalArgumentException("domain is not allowed: <default>");
+            }
+            return;
+        }
+        if (!rawDomain.equals(normalizedDomain) || !connection.isDomainAllowed(rawDomain)) {
+            throw new IllegalArgumentException("domain is not allowed: " + normalizedDomain);
+        }
+    }
+
+    private static void requireDomainAllowed(ConnectionSpec connection, ObjectName objectName) {
+        if (objectName == null) {
+            return;
+        }
+        requireDomainAllowed(connection, objectName.getDomain());
     }
 
     private static void requireTarget(TargetSpec target) {
@@ -1261,6 +1312,10 @@ final class JmxRuntime {
                 }
             }
             return new ConnectionSpec(host, port, username, password, allowlist);
+        }
+
+        private boolean hasDomainAllowlist() {
+            return !domainAllowlist.isEmpty();
         }
 
         private boolean isDomainAllowed(String domain) {
