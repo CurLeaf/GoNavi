@@ -3,15 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { applyNoAutoCapAttributes, applyNoAutoCapAttributesWithin, noAutoCapInputProps } from './inputAutoCap';
 
 describe('inputAutoCap', () => {
-  it('exports input props that disable auto capitalization and correction', () => {
+  it('exports input props that disable correction without forcing native capitalization state', () => {
     expect(noAutoCapInputProps).toEqual({
-      autoCapitalize: 'none',
       autoCorrect: 'off',
       spellCheck: false,
     });
   });
 
-  it('applies lowercase DOM attributes to inputs and textareas', () => {
+  it('applies correction attributes to inputs and textareas without autocapitalize', () => {
     const inputAttributes: Record<string, string> = {};
     const textareaAttributes: Record<string, string> = {};
     const input = {
@@ -30,10 +29,10 @@ describe('inputAutoCap', () => {
     applyNoAutoCapAttributes(input);
     applyNoAutoCapAttributes(textarea);
 
-    expect(inputAttributes.autocapitalize).toBe('none');
+    expect(inputAttributes.autocapitalize).toBeUndefined();
     expect(inputAttributes.autocorrect).toBe('off');
     expect(inputAttributes.spellcheck).toBe('false');
-    expect(textareaAttributes.autocapitalize).toBe('none');
+    expect(textareaAttributes.autocapitalize).toBeUndefined();
     expect(textareaAttributes.autocorrect).toBe('off');
     expect(textareaAttributes.spellcheck).toBe('false');
   });
@@ -62,9 +61,9 @@ describe('inputAutoCap', () => {
 
     applyNoAutoCapAttributesWithin(root);
 
-    expect(inputAttributes.autocapitalize).toBe('none');
+    expect(inputAttributes.autocapitalize).toBeUndefined();
     expect(inputAttributes.autocorrect).toBe('off');
-    expect(textareaAttributes.autocapitalize).toBe('none');
+    expect(textareaAttributes.autocapitalize).toBeUndefined();
     expect(textareaAttributes.autocorrect).toBe('off');
   });
 });

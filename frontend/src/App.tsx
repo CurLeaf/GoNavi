@@ -18,7 +18,7 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues, resolveTextInputSafeBackdropFilter } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
@@ -836,6 +836,7 @@ function App() {
       fontSize: isSidebarCompact ? 13 : 14,
   }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
   const disableLocalBackdropFilter = isMacLikePlatform();
+  const textInputSafeBackdropFilter = resolveTextInputSafeBackdropFilter(blurFilter, disableLocalBackdropFilter);
   const overlayTheme = useMemo(
       () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
       [darkMode, disableLocalBackdropFilter],
@@ -2565,8 +2566,8 @@ function App() {
             background: 'transparent',
             borderRadius: showLinuxResizeHandles ? 0 : 'var(--gonavi-border-radius)',
             clipPath: showLinuxResizeHandles ? 'none' : 'inset(0 round var(--gonavi-border-radius))',
-            backdropFilter: blurFilter,
-            WebkitBackdropFilter: blurFilter,
+            backdropFilter: textInputSafeBackdropFilter,
+            WebkitBackdropFilter: textInputSafeBackdropFilter,
         }}>
           {/* Custom Title Bar */}
           <div
