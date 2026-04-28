@@ -2,10 +2,11 @@ import React from 'react';
 import { Input, Select, AutoComplete, Tooltip, Modal, Checkbox, Spin, message, Button, Tag } from 'antd';
 import { DatabaseOutlined, SendOutlined, TableOutlined, SearchOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import { useStore } from '../../store';
-import { DBGetTables, DBShowCreateTable, DBGetDatabases } from '../../../wailsjs/go/app/App';
+import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice } from '../../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
+import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 
 interface AIChatInputProps {
     input: string;
@@ -202,24 +203,21 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 if (activeContextItems.find(c => c.dbName === dbName && c.tableName === tableName)) {
                     continue;
                 }
-                const res = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, dbName, tableName);
-                let createSql = '';
-                if (res.success && res.data) {
-                    if (typeof res.data === 'string') {
-                        createSql = res.data;
-                    } else if (Array.isArray(res.data) && res.data.length > 0) {
-                        const row = res.data[0];
-                        createSql = (Object.values(row).find(v => typeof v === 'string' && (v.toUpperCase().includes('CREATE TABLE') || v.toUpperCase().includes('CREATE'))) || Object.values(row)[1] || Object.values(row)[0]) as string;
-                    }
-                } else {
-                    message.error(`获取表 ${dbName}.${tableName} 结构失败: ` + (res.message || '未知错误'));
+                const rpcConfig = buildRpcConnectionConfig(conn.config) as any;
+                const schemaResult = await resolveAITableSchemaToolResult({
+                    tableName,
+                    fetchDDL: () => DBShowCreateTable(rpcConfig, dbName, tableName),
+                    fetchColumns: () => DBGetColumns(rpcConfig, dbName, tableName),
+                });
+                if (!schemaResult.success) {
+                    message.error(`获取表 ${dbName}.${tableName} 结构失败: ${schemaResult.content}`);
                 }
-                
-                if (createSql) {
+
+                if (schemaResult.success && schemaResult.content) {
                     addAIContext(connectionKey, {
                         dbName: dbName,
                         tableName: tableName,
-                        ddl: createSql
+                        ddl: schemaResult.content
                     });
                     addedCount++;
                 }
