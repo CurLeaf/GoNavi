@@ -103,6 +103,160 @@ const SOURCE_LABELS: Record<string, string> = {
   "ai-plan": "AI 计划",
 };
 
+const JVM_DIAGNOSTIC_REDACTION_MASK = "********";
+const JVM_DIAGNOSTIC_SENSITIVE_KEY_PATTERN =
+  "(?:password|passwd|pwd|secret|token|credential|authorization|api[_.\\- \\t]*key|access[_.\\- \\t]*key|private[_.\\- \\t]*key|secret[_.\\- \\t]*key|auth[_.\\- \\t]*key|access[_.\\- \\t]*token|refresh[_.\\- \\t]*token)";
+const JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY =
+  `[A-Za-z0-9_.\\- \\t]*${JVM_DIAGNOSTIC_SENSITIVE_KEY_PATTERN}[A-Za-z0-9_.\\- \\t]*`;
+const JVM_DIAGNOSTIC_PEM_BEGIN_PATTERN =
+  /-----BEGIN [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[^-]*-----/i;
+const JVM_DIAGNOSTIC_PEM_END_PATTERN =
+  /-----END [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[^-]*-----/i;
+const JVM_DIAGNOSTIC_PEM_BEGIN_PREFIX_PATTERN = /-----BEGIN[\s\S]*$/i;
+const JVM_DIAGNOSTIC_PEM_END_CONTINUATION_PATTERN =
+  /^[\s\S]*?-----END [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[^-]*-----/i;
+const JVM_DIAGNOSTIC_COMPLETE_PEM_PATTERN =
+  /-----BEGIN [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[\s\S]*?-----END [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[^-]*-----/gi;
+const JVM_DIAGNOSTIC_PARTIAL_PEM_PATTERN =
+  /-----BEGIN [^-]*(?:PRIVATE KEY|SECRET|TOKEN|CREDENTIAL)[\s\S]*$/gi;
+const JVM_DIAGNOSTIC_SENSITIVE_PEM_LABELS = [
+  "PRIVATE KEY",
+  "RSA PRIVATE KEY",
+  "DSA PRIVATE KEY",
+  "EC PRIVATE KEY",
+  "OPENSSH PRIVATE KEY",
+  "ENCRYPTED PRIVATE KEY",
+  "SECRET",
+  "TOKEN",
+  "CREDENTIAL",
+];
+const JVM_DIAGNOSTIC_DOUBLE_QUOTED_VALUE_PATTERN = new RegExp(
+  `(")(${JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY})(")([ \\t]*:[ \\t]*)(")((?:\\\\.|[^"\\\\])*)(")`,
+  "gi",
+);
+const JVM_DIAGNOSTIC_SINGLE_QUOTED_VALUE_PATTERN = new RegExp(
+  `(')(${JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY})(')([ \\t]*:[ \\t]*)(')((?:\\\\.|[^'\\\\])*)(')`,
+  "gi",
+);
+const JVM_DIAGNOSTIC_UNQUOTED_SCALAR_PATTERN = new RegExp(
+  `(["']?)(${JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY})(\\1)([ \\t]*:[ \\t]*)(true|false|null|-?\\d+(?:\\.\\d+)?)`,
+  "gi",
+);
+const JVM_DIAGNOSTIC_UNQUOTED_KEY_VALUE_PATTERN = new RegExp(
+  `(^|[\\r\\n,;{\\[?&]|\\s)(${JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY})([ \\t]*[:=][ \\t]*)([^\\r\\n&]*)`,
+  "gi",
+);
+
+const redactJVMDiagnosticKeyValues = (value: string): string =>
+  value
+    .replace(
+      JVM_DIAGNOSTIC_DOUBLE_QUOTED_VALUE_PATTERN,
+      (_match, keyOpen: string, key: string, keyClose: string, separator: string, valueOpen: string, _rawValue: string, valueClose: string) =>
+        `${keyOpen}${key}${keyClose}${separator}${valueOpen}${JVM_DIAGNOSTIC_REDACTION_MASK}${valueClose}`,
+    )
+    .replace(
+      JVM_DIAGNOSTIC_SINGLE_QUOTED_VALUE_PATTERN,
+      (_match, keyOpen: string, key: string, keyClose: string, separator: string, valueOpen: string, _rawValue: string, valueClose: string) =>
+        `${keyOpen}${key}${keyClose}${separator}${valueOpen}${JVM_DIAGNOSTIC_REDACTION_MASK}${valueClose}`,
+    )
+    .replace(
+      JVM_DIAGNOSTIC_UNQUOTED_SCALAR_PATTERN,
+      (_match, keyOpen: string, key: string, keyClose: string, separator: string) =>
+        `${keyOpen}${key}${keyClose}${separator}${JVM_DIAGNOSTIC_REDACTION_MASK}`,
+    )
+    .replace(
+      JVM_DIAGNOSTIC_UNQUOTED_KEY_VALUE_PATTERN,
+      (_match, prefix: string, key: string, separator: string) =>
+        `${prefix}${key}${separator}${JVM_DIAGNOSTIC_REDACTION_MASK}`,
+    );
+
+export type JVMDiagnosticRedactionState = {
+  insideSensitivePem: boolean;
+  sawSensitivePem: boolean;
+};
+
+export const createJVMDiagnosticRedactionState = (): JVMDiagnosticRedactionState => ({
+  insideSensitivePem: false,
+  sawSensitivePem: false,
+});
+
+const hasSensitivePemBeginPrefix = (value: string): boolean => {
+  const match = value.match(JVM_DIAGNOSTIC_PEM_BEGIN_PREFIX_PATTERN);
+  if (!match) {
+    return false;
+  }
+  const prefix = match[0];
+  const label = prefix
+    .replace(/^-----BEGIN\s*/i, "")
+    .replace(/-+$/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+  if (
+    !label ||
+    JVM_DIAGNOSTIC_SENSITIVE_PEM_LABELS.some(
+      (item) => item.startsWith(label) || label.startsWith(item),
+    )
+  ) {
+    return true;
+  }
+  return new RegExp(
+    `${JVM_DIAGNOSTIC_SENSITIVE_KEY_BODY}[ \t]*[:=][ \t]*-----BEGIN[\\s\\S]*$`,
+    "i",
+  ).test(value);
+};
+
+const redactJVMDiagnosticOutputWithState = (
+  value: string,
+  state: JVMDiagnosticRedactionState,
+): string => {
+  let text = value;
+  if (state.insideSensitivePem) {
+    const pemEnd = text.search(JVM_DIAGNOSTIC_PEM_END_PATTERN);
+    if (pemEnd < 0) {
+      return JVM_DIAGNOSTIC_REDACTION_MASK;
+    }
+    state.insideSensitivePem = false;
+    state.sawSensitivePem = true;
+    text = `${JVM_DIAGNOSTIC_REDACTION_MASK}${text.slice(pemEnd).replace(JVM_DIAGNOSTIC_PEM_END_PATTERN, "")}`;
+  } else if (state.sawSensitivePem && JVM_DIAGNOSTIC_PEM_END_PATTERN.test(text)) {
+    text = text.replace(
+      JVM_DIAGNOSTIC_PEM_END_CONTINUATION_PATTERN,
+      JVM_DIAGNOSTIC_REDACTION_MASK,
+    );
+  }
+
+  text = text
+    .replace(JVM_DIAGNOSTIC_COMPLETE_PEM_PATTERN, () => {
+      state.sawSensitivePem = true;
+      return JVM_DIAGNOSTIC_REDACTION_MASK;
+    })
+    .replace(JVM_DIAGNOSTIC_PARTIAL_PEM_PATTERN, (match) => {
+      state.sawSensitivePem = true;
+      state.insideSensitivePem = !JVM_DIAGNOSTIC_PEM_END_PATTERN.test(match);
+      return JVM_DIAGNOSTIC_REDACTION_MASK;
+    });
+
+  if (!state.insideSensitivePem && hasSensitivePemBeginPrefix(text)) {
+    state.insideSensitivePem = true;
+    state.sawSensitivePem = true;
+    text = text.replace(
+      JVM_DIAGNOSTIC_PEM_BEGIN_PREFIX_PATTERN,
+      JVM_DIAGNOSTIC_REDACTION_MASK,
+    );
+  }
+
+  return redactJVMDiagnosticKeyValues(text);
+};
+
+export const redactJVMDiagnosticChunkContent = (
+  value?: string | null,
+  state: JVMDiagnosticRedactionState = createJVMDiagnosticRedactionState(),
+): string => redactJVMDiagnosticOutputWithState(String(value || ""), state);
+
+export const redactJVMDiagnosticOutput = (value?: string | null): string =>
+  redactJVMDiagnosticChunkContent(value);
+
 export const formatJVMDiagnosticPresetCategory = (
   category: JVMDiagnosticPresetCategory,
 ): string => CATEGORY_LABELS[category];
@@ -159,14 +313,14 @@ export const groupJVMDiagnosticPresets = (
     items: presets.filter((item) => item.category === category),
   }));
 
-export const formatJVMDiagnosticChunkText = (
+const formatJVMDiagnosticChunkTextWithContent = (
   chunk: JVMDiagnosticEventChunk,
+  content: string,
 ): string => {
   const rawPhase = String(chunk.phase || chunk.event || "").trim();
   const phase = chunk.phase
     ? formatJVMDiagnosticPhaseLabel(chunk.phase)
     : formatJVMDiagnosticEventLabel(chunk.event);
-  const content = String(chunk.content || "").trim();
   if (!rawPhase && !content) {
     return "空事件";
   }
@@ -177,4 +331,24 @@ export const formatJVMDiagnosticChunkText = (
     return phase;
   }
   return `${phase}：${content}`;
+};
+
+export const formatJVMDiagnosticChunkText = (
+  chunk: JVMDiagnosticEventChunk,
+): string =>
+  formatJVMDiagnosticChunkTextWithContent(
+    chunk,
+    redactJVMDiagnosticOutput(chunk.content).trim(),
+  );
+
+export const formatJVMDiagnosticChunksForDisplay = (
+  chunks: JVMDiagnosticEventChunk[],
+): string[] => {
+  const state = createJVMDiagnosticRedactionState();
+  return chunks.map((chunk) =>
+    formatJVMDiagnosticChunkTextWithContent(
+      chunk,
+      redactJVMDiagnosticChunkContent(chunk.content, state).trim(),
+    ),
+  );
 };

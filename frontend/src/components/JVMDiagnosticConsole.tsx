@@ -33,8 +33,12 @@ import type {
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { resolveJVMDiagnosticCompletionItems } from "../utils/jvmDiagnosticCompletion";
 import {
+  createJVMDiagnosticRedactionState,
   formatJVMDiagnosticTransportLabel,
   JVM_DIAGNOSTIC_COMMAND_PRESETS,
+  redactJVMDiagnosticChunkContent,
+  redactJVMDiagnosticOutput,
+  type JVMDiagnosticRedactionState,
 } from "../utils/jvmDiagnosticPresentation";
 import JVMCommandPresetBar from "./jvm/JVMCommandPresetBar";
 import JVMDiagnosticHistory from "./jvm/JVMDiagnosticHistory";
@@ -200,6 +204,10 @@ export const createJVMDiagnosticRunningRecord = ({
   status: "running",
 });
 
+const buildJVMDiagnosticRedactionKey = (
+  chunk: Pick<JVMDiagnosticEventChunk, "sessionId" | "commandId">,
+): string => `${chunk.sessionId || "unknown-session"}::${chunk.commandId || "unknown-command"}`;
+
 const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
@@ -224,6 +232,41 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   const [error, setError] = useState("");
   const activeCommandIdRef = useRef("");
   const terminalCommandIdsRef = useRef<Set<string>>(new Set());
+  const redactionStatesRef = useRef<Record<string, JVMDiagnosticRedactionState>>({});
+
+  const redactDiagnosticContent = useCallback(
+    (
+      content: string,
+      chunk: Pick<JVMDiagnosticEventChunk, "sessionId" | "commandId">,
+    ) => {
+      const key = buildJVMDiagnosticRedactionKey(chunk);
+      const state =
+        redactionStatesRef.current[key] || createJVMDiagnosticRedactionState();
+      redactionStatesRef.current[key] = state;
+      return redactJVMDiagnosticChunkContent(content, state);
+    },
+    [],
+  );
+
+  const redactDiagnosticChunk = useCallback(
+    (chunk: JVMDiagnosticEventChunk, options: { keepState?: boolean } = {}) => {
+      const key = buildJVMDiagnosticRedactionKey(chunk);
+      const safeChunk = {
+        ...chunk,
+        content: redactDiagnosticContent(String(chunk.content || ""), chunk),
+      };
+      if (
+        !options.keepState &&
+        isJVMDiagnosticTerminalPhase(chunk.phase) &&
+        !redactionStatesRef.current[key]?.insideSensitivePem &&
+        !redactionStatesRef.current[key]?.sawSensitivePem
+      ) {
+        delete redactionStatesRef.current[key];
+      }
+      return safeChunk;
+    },
+    [redactDiagnosticContent],
+  );
 
   const finishActiveCommand = useCallback((commandId: string) => {
     if (!commandId || activeCommandIdRef.current !== commandId) {
@@ -283,7 +326,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       }
       setRecords(Array.isArray(result?.data) ? result.data : []);
     } catch (err: any) {
-      setError(err?.message || "加载诊断历史失败");
+      setError(redactJVMDiagnosticOutput(err?.message || "加载诊断历史失败"));
     } finally {
       setHistoryLoading(false);
     }
@@ -332,13 +375,14 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         return;
       }
 
-      appendOutput(tab.id, [payload.chunk]);
-      if (payload.chunk.phase === "failed") {
-        setError(payload.chunk.content || "诊断命令执行失败");
+      const safeChunk = redactDiagnosticChunk(payload.chunk);
+      appendOutput(tab.id, [safeChunk]);
+      if (safeChunk.phase === "failed") {
+        setError(safeChunk.content || "诊断命令执行失败");
       }
-      if (payload.chunk.commandId && isJVMDiagnosticTerminalPhase(payload.chunk.phase)) {
-        terminalCommandIdsRef.current.add(payload.chunk.commandId);
-        finishActiveCommand(payload.chunk.commandId);
+      if (safeChunk.commandId && isJVMDiagnosticTerminalPhase(safeChunk.phase)) {
+        terminalCommandIdsRef.current.add(safeChunk.commandId);
+        finishActiveCommand(safeChunk.commandId);
         void loadAuditRecords();
       }
     });
@@ -348,7 +392,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         stopListening();
       }
     };
-  }, [appendOutput, finishActiveCommand, loadAuditRecords, tab.id]);
+  }, [appendOutput, finishActiveCommand, loadAuditRecords, redactDiagnosticChunk, tab.id]);
 
   const handleProbe = async () => {
     if (!rpcConnectionConfig) {
@@ -372,7 +416,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       setCapabilities(Array.isArray(result?.data) ? result.data : []);
     } catch (err: any) {
       setCapabilities([]);
-      setError(err?.message || "检查诊断能力失败");
+      setError(redactJVMDiagnosticOutput(err?.message || "检查诊断能力失败"));
     } finally {
       setLoading(false);
     }
@@ -409,7 +453,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       void loadAuditRecords();
     } catch (err: any) {
       setSession(null);
-      setError(err?.message || "创建诊断会话失败");
+      setError(redactJVMDiagnosticOutput(err?.message || "创建诊断会话失败"));
     } finally {
       setLoading(false);
     }
@@ -478,22 +522,27 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         throw new Error(String(result?.message || "执行诊断命令失败"));
       }
       if (result?.message) {
-        message.warning(result.message);
+        message.warning(
+          redactDiagnosticContent(String(result.message), { sessionId, commandId }),
+        );
       }
       const terminalSeen = terminalCommandIdsRef.current.has(commandId);
       if (!terminalSeen) {
         appendOutput(tab.id, [
-          {
-            sessionId,
-            commandId,
-            event: "diagnostic",
-            phase: "completed",
-            content: "诊断命令调用已返回，但未收到后端终态事件，前端已兜底结束等待状态。",
-            timestamp: Date.now(),
-            metadata: {
-              source: "frontend-fallback",
+          redactDiagnosticChunk(
+            {
+              sessionId,
+              commandId,
+              event: "diagnostic",
+              phase: "completed",
+              content: "诊断命令调用已返回，但未收到后端终态事件，前端已兜底结束等待状态。",
+              timestamp: Date.now(),
+              metadata: {
+                source: "frontend-fallback",
+              },
             },
-          },
+            { keepState: true },
+          ),
         ]);
       }
       finishActiveCommand(commandId);
@@ -524,21 +573,22 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         });
       }
     } catch (err: any) {
-      const messageText = err?.message || "执行诊断命令失败";
+      const rawMessageText = String(err?.message || "执行诊断命令失败");
+      let messageText = "";
       if (!terminalCommandIdsRef.current.has(commandId)) {
-        appendOutput(tab.id, [
-          {
-            sessionId,
-            commandId,
-            event: "diagnostic",
-            phase: "failed",
-            content: messageText,
-            timestamp: Date.now(),
-            metadata: {
-              source: "frontend-fallback",
-            },
+        const safeChunk = redactDiagnosticChunk({
+          sessionId,
+          commandId,
+          event: "diagnostic",
+          phase: "failed",
+          content: rawMessageText,
+          timestamp: Date.now(),
+          metadata: {
+            source: "frontend-fallback",
           },
-        ]);
+        });
+        messageText = safeChunk.content;
+        appendOutput(tab.id, [safeChunk]);
         setRecords((current) =>
           current.map((record) =>
             record.commandId === commandId
@@ -546,6 +596,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               : record,
           ),
         );
+      } else {
+        messageText = redactDiagnosticContent(rawMessageText, { sessionId, commandId });
       }
       finishActiveCommand(commandId);
       setError(messageText);
@@ -576,7 +628,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       }
       message.info("已发送取消请求");
     } catch (err: any) {
-      setError(err?.message || "取消诊断命令失败");
+      setError(redactJVMDiagnosticOutput(err?.message || "取消诊断命令失败"));
     } finally {
       setLoading(false);
     }

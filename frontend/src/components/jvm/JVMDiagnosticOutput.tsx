@@ -3,7 +3,7 @@ import { Empty, List, Tag, Typography } from "antd";
 
 import type { JVMDiagnosticEventChunk } from "../../types";
 import {
-  formatJVMDiagnosticChunkText,
+  formatJVMDiagnosticChunksForDisplay,
   formatJVMDiagnosticEventLabel,
   formatJVMDiagnosticPhaseLabel,
 } from "../../utils/jvmDiagnosticPresentation";
@@ -28,6 +28,8 @@ const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
     );
   }
 
+  const chunkTexts = formatJVMDiagnosticChunksForDisplay(chunks);
+
   return (
     <div style={{ maxHeight, overflow: "auto", paddingRight: 4 }}>
       <List
@@ -45,7 +47,7 @@ const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
                   fontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
                 }}
               >
-                {formatJVMDiagnosticChunkText(chunk)}
+                {chunkTexts[index]}
               </Text>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {chunk.phase ? (
