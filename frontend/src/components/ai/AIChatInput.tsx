@@ -7,6 +7,8 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice } from '../../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
+import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
+import type { ShortcutBinding } from '../../utils/shortcuts';
 
 interface AIChatInputProps {
     input: string;
@@ -22,6 +24,7 @@ interface AIChatInputProps {
     activeProvider: any;
     dynamicModels: string[];
     loadingModels: boolean;
+    sendShortcutBinding: ShortcutBinding;
     composerNotice?: AIComposerNotice | null;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
@@ -37,7 +40,7 @@ interface AIChatInputProps {
 export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
-    composerNotice,
+    sendShortcutBinding, composerNotice,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars
 }) => {
@@ -379,7 +382,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             }
                         }}
                         onKeyDown={handleKeyDown as any}
-                        placeholder="输入消息... (Enter 发送，Shift+Enter 换行，/ 快捷命令)"
+                        placeholder={`输入消息... (${getAIChatSendShortcutLabel(sendShortcutBinding)}，Shift+Enter 换行，/ 快捷命令)`}
                         variant="borderless"
                         autoSize={{ minRows: 1, maxRows: 8 }}
                         style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}

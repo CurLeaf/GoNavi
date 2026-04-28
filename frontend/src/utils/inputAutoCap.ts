@@ -1,4 +1,5 @@
 export const noAutoCapInputProps = {
+  autoCapitalize: 'none' as const,
   autoCorrect: 'off' as const,
   spellCheck: false,
 };
@@ -9,9 +10,7 @@ export const applyNoAutoCapAttributes = (element: Element) => {
     return;
   }
 
-  if (typeof element.removeAttribute === 'function') {
-    element.removeAttribute('autocapitalize');
-  }
+  element.setAttribute('autocapitalize', 'none');
   element.setAttribute('autocorrect', 'off');
   element.setAttribute('spellcheck', 'false');
 };

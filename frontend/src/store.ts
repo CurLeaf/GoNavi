@@ -61,6 +61,7 @@ const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 8;
+const PERSIST_STORAGE_KEY = "lite-db-storage";
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
@@ -1156,6 +1157,46 @@ const unwrapPersistedAppState = (
   return raw;
 };
 
+let shortcutOptionsExplicitlySet = false;
+
+const readPersistedShortcutOptions = (): ShortcutOptions | null => {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+  try {
+    const payload = localStorage.getItem(PERSIST_STORAGE_KEY);
+    if (!payload) {
+      return null;
+    }
+    const state = unwrapPersistedAppState(JSON.parse(payload));
+    if (state.shortcutOptions === undefined) {
+      return null;
+    }
+    return sanitizeShortcutOptions(state.shortcutOptions);
+  } catch {
+    return null;
+  }
+};
+
+const resolveShortcutOptionsForPersistence = (
+  shortcutOptions: ShortcutOptions,
+): ShortcutOptions => {
+  const safeOptions = sanitizeShortcutOptions(shortcutOptions);
+  if (shortcutOptionsExplicitlySet) {
+    return safeOptions;
+  }
+  return readPersistedShortcutOptions() ?? safeOptions;
+};
+
+const runWithExplicitShortcutPersistence = (callback: () => void): void => {
+  shortcutOptionsExplicitlySet = true;
+  try {
+    callback();
+  } finally {
+    shortcutOptionsExplicitlySet = false;
+  }
+};
+
 // --- AI 会话文件持久化辅助函数 ---
 
 /** 每个 session 独立防抖定时器（2秒） */
@@ -1294,7 +1335,10 @@ export const useStore = create<AppState>()(
           })),
         })),
       replaceConnections: (connections) =>
-        set({ connections: sanitizeConnections(connections) }),
+        set((state) => ({
+          connections: sanitizeConnections(connections),
+          shortcutOptions: readPersistedShortcutOptions() ?? state.shortcutOptions,
+        })),
 
       addConnectionTag: (tag) =>
         set((state) => ({ connectionTags: [...state.connectionTags, tag] })),
@@ -1606,31 +1650,38 @@ export const useStore = create<AppState>()(
           globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }),
         })),
       replaceGlobalProxy: (proxy) =>
-        set({
+        set((state) => ({
           globalProxy: sanitizeGlobalProxy({
             ...DEFAULT_GLOBAL_PROXY,
             ...proxy,
           }),
-        }),
+          shortcutOptions: readPersistedShortcutOptions() ?? state.shortcutOptions,
+        })),
       setSqlFormatOptions: (options) => set({ sqlFormatOptions: options }),
       setQueryOptions: (options) =>
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
         })),
-      updateShortcut: (action, binding) =>
-        set((state) => ({
-          shortcutOptions: {
-            ...state.shortcutOptions,
-            [action]: {
-              ...state.shortcutOptions[action],
-              ...binding,
+      updateShortcut: (action, binding) => {
+        runWithExplicitShortcutPersistence(() => {
+          set((state) => ({
+            shortcutOptions: {
+              ...state.shortcutOptions,
+              [action]: {
+                ...state.shortcutOptions[action],
+                ...binding,
+              },
             },
-          },
-        })),
-      resetShortcutOptions: () =>
-        set({
-          shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
-        }),
+          }));
+        });
+      },
+      resetShortcutOptions: () => {
+        runWithExplicitShortcutPersistence(() => {
+          set({
+            shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
+          });
+        });
+      },
 
       addSqlLog: (log) =>
         set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
@@ -1931,7 +1982,7 @@ export const useStore = create<AppState>()(
         })),
     }),
     {
-      name: "lite-db-storage", // name of the item in the storage (must be unique)
+      name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(
@@ -2054,7 +2105,7 @@ export const useStore = create<AppState>()(
               : toPersistedGlobalProxy(state.globalProxy),
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
-          shortcutOptions: state.shortcutOptions,
+          shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,
           tableColumnOrders: state.tableColumnOrders,

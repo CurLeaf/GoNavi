@@ -255,4 +255,132 @@ describe('store appearance persistence', () => {
       },
     ]);
   });
+
+  it('defaults AI chat send shortcut to Enter in shared shortcut options', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Enter',
+      enabled: true,
+    });
+  });
+
+  it('persists recorded AI chat send shortcut and restores it after reload', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().updateShortcut('sendAIChatMessage', {
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+  });
+
+  it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        shortcutOptions: {
+          sendAIChatMessage: {
+            combo: 'A',
+            enabled: true,
+          },
+        },
+      },
+      version: 8,
+    }));
+
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Enter',
+      enabled: true,
+    });
+  });
+
+  it('does not overwrite recorded AI chat send shortcut during startup config refresh', async () => {
+    const { useStore } = await importStore();
+    useStore.getState().updateShortcut('sendAIChatMessage', {
+      combo: 'Ctrl+Enter',
+      enabled: true,
+    });
+
+    useStore.getState().replaceConnections([]);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Ctrl+Enter',
+      enabled: true,
+    });
+  });
+
+  it('keeps persisted AI chat send shortcut when startup refresh runs before shortcut hydration catches up', async () => {
+    const { useStore } = await importStore();
+    const shortcutOptions = useStore.getState().shortcutOptions;
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        shortcutOptions: {
+          ...shortcutOptions,
+          sendAIChatMessage: {
+            combo: 'Meta+Enter',
+            enabled: true,
+          },
+        },
+      },
+      version: 8,
+    }));
+    useStore.setState({
+      shortcutOptions: {
+        ...shortcutOptions,
+        sendAIChatMessage: {
+          combo: 'Enter',
+          enabled: true,
+        },
+      },
+    });
+
+    useStore.getState().replaceConnections([]);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+  });
+
+  it('does not let a stale default shortcut state overwrite an explicitly recorded AI chat shortcut', async () => {
+    const { useStore } = await importStore();
+    const shortcutOptions = useStore.getState().shortcutOptions;
+
+    useStore.getState().updateShortcut('sendAIChatMessage', {
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+    useStore.setState({
+      shortcutOptions: {
+        ...shortcutOptions,
+        sendAIChatMessage: {
+          combo: 'Enter',
+          enabled: true,
+        },
+      },
+    });
+    useStore.getState().replaceGlobalProxy({});
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
+      combo: 'Meta+Enter',
+      enabled: true,
+    });
+  });
 });

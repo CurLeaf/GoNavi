@@ -18,7 +18,7 @@ import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModa
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues, resolveTextInputSafeBackdropFilter } from './utils/appearance';
+import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
@@ -62,9 +62,9 @@ import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
   ShortcutAction,
+  canRecordShortcutForAction,
   eventToShortcut,
   getShortcutDisplay,
-  hasModifierKey,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
@@ -836,7 +836,6 @@ function App() {
       fontSize: isSidebarCompact ? 13 : 14,
   }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
   const disableLocalBackdropFilter = isMacLikePlatform();
-  const textInputSafeBackdropFilter = resolveTextInputSafeBackdropFilter(blurFilter, disableLocalBackdropFilter);
   const overlayTheme = useMemo(
       () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
       [darkMode, disableLocalBackdropFilter],
@@ -2388,11 +2387,15 @@ function App() {
   useEffect(() => {
       const handleGlobalShortcut = (event: KeyboardEvent) => {
           const matchedAction = SHORTCUT_ACTION_ORDER.find((action) => {
+              const meta = SHORTCUT_ACTION_META[action];
+              if (meta.scope && meta.scope !== 'global') {
+                  return false;
+              }
               const binding = shortcutOptions[action];
               if (!binding?.enabled) {
                   return false;
               }
-              if (isEditableElement(event.target) && !SHORTCUT_ACTION_META[action].allowInEditable) {
+              if (isEditableElement(event.target) && !meta.allowInEditable) {
                   return false;
               }
               return isShortcutMatch(event, binding.combo);
@@ -2456,12 +2459,15 @@ function App() {
           if (!combo) {
               return;
           }
-          if (!hasModifierKey(combo)) {
-              void message.warning('快捷键至少包含 Ctrl / Alt / Shift / Meta 之一');
-              return;
-          }
 
           const normalizedCombo = normalizeShortcutCombo(combo);
+          if (!canRecordShortcutForAction(capturingShortcutAction, normalizedCombo)) {
+              const meta = SHORTCUT_ACTION_META[capturingShortcutAction];
+              void message.warning(meta.scope === 'aiComposer'
+                  ? 'AI 聊天发送快捷键仅支持 Enter / Ctrl+Enter / Cmd+Enter / Alt+Enter，Shift+Enter 保留换行'
+                  : '快捷键至少包含 Ctrl / Alt / Shift / Meta 之一');
+              return;
+          }
           const conflictAction = SHORTCUT_ACTION_ORDER.find((action) => {
               if (action === capturingShortcutAction) {
                   return false;
@@ -2566,8 +2572,8 @@ function App() {
             background: 'transparent',
             borderRadius: showLinuxResizeHandles ? 0 : 'var(--gonavi-border-radius)',
             clipPath: showLinuxResizeHandles ? 'none' : 'inset(0 round var(--gonavi-border-radius))',
-            backdropFilter: textInputSafeBackdropFilter,
-            WebkitBackdropFilter: textInputSafeBackdropFilter,
+            backdropFilter: blurFilter,
+            WebkitBackdropFilter: blurFilter,
         }}>
           {/* Custom Title Bar */}
           <div
@@ -3483,7 +3489,7 @@ function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
                   <div style={utilityPanelStyle}>
                       <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                          点击“录制”后按下快捷键。按 Esc 可取消录制。建议至少包含一个修饰键（Ctrl/Alt/Shift/Meta）。
+                          点击“录制”后按下快捷键。按 Esc 可取消录制。全局快捷键建议包含修饰键；AI 聊天发送仅支持 Enter 相关组合，Shift+Enter 保留换行。
                       </div>
                   </div>
                   {SHORTCUT_ACTION_ORDER.map((action) => {

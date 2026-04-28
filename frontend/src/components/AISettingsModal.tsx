@@ -20,7 +20,6 @@ import {
 } from '../utils/aiSettingsPresetLayout';
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
-
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 
 interface AISettingsModalProps {

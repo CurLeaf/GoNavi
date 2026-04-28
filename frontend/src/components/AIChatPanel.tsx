@@ -27,6 +27,7 @@ import {
 } from '../utils/aiComposerNotice';
 import { buildAIReadonlyPreviewSQL } from '../utils/aiSqlLimit';
 import { resolveAITableSchemaToolResult } from '../utils/aiTableSchemaTool';
+import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 
 interface AIChatPanelProps {
     width?: number;
@@ -256,6 +257,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const tabs = useStore(state => state.tabs);
     const activeTabId = useStore(state => state.activeTabId);
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
+    const aiChatSendShortcutBinding = useStore(state => state.shortcutOptions.sendAIChatMessage);
 
     const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
         const state = useStore.getState();
@@ -1470,11 +1472,8 @@ SELECT * FROM users WHERE status = 1;
     ]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    }, [handleSend]);
+        consumeAIChatSendShortcutOnKeyDown(aiChatSendShortcutBinding, e, handleSend);
+    }, [aiChatSendShortcutBinding, handleSend]);
 
     const handleStop = useCallback(async () => {
         try {
@@ -1705,6 +1704,7 @@ SELECT * FROM users WHERE status = 1;
                 activeProvider={activeProvider}
                 dynamicModels={dynamicModels}
                 loadingModels={loadingModels}
+                sendShortcutBinding={aiChatSendShortcutBinding}
                 composerNotice={composerNotice}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}
