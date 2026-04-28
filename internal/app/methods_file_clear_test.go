@@ -46,6 +46,32 @@ func TestBuildTableDataClearSQL_ClearUsesMongoDeleteCommand(t *testing.T) {
 	}
 }
 
+func TestBuildTableDataClearSQL_KingbaseTruncateNormalizesQuotedQualifiedTable(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "kingbase"}, `\"Idf_server\".\"mes_bip_wip_finished\"`, tableDataClearModeTruncate)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != `TRUNCATE TABLE "Idf_server"."mes_bip_wip_finished"` {
+		t.Fatalf("unexpected kingbase truncate sql: %s", sql)
+	}
+}
+
+func TestBuildTableDataClearSQL_KingbaseClearNormalizesQuotedQualifiedTable(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "kingbase"}, `\"Idf_server\".\"mes_bip_wip_finished\"`, tableDataClearModeDeleteAll)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != `DELETE FROM "Idf_server"."mes_bip_wip_finished"` {
+		t.Fatalf("unexpected kingbase clear sql: %s", sql)
+	}
+}
+
 func TestBuildTableDataClearSQL_TruncateRejectsUnsupportedDialect(t *testing.T) {
 	t.Parallel()
 

@@ -78,6 +78,16 @@ func normalizeKingbaseIdentCommon(raw string) string {
 	return strings.TrimSpace(value)
 }
 
+// NormalizeKingbaseIdentifier removes nested client-side quoting from a Kingbase identifier.
+func NormalizeKingbaseIdentifier(raw string) string {
+	return normalizeKingbaseIdentCommon(raw)
+}
+
+// SplitKingbaseQualifiedName splits a Kingbase schema-qualified identifier safely.
+func SplitKingbaseQualifiedName(raw string) (schema string, table string) {
+	return splitKingbaseQualifiedNameCommon(raw)
+}
+
 func splitKingbaseQualifiedNameCommon(raw string) (schema string, table string) {
 	text := strings.TrimSpace(raw)
 	if text == "" {

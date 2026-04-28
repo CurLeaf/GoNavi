@@ -174,6 +174,16 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
+	if dbType == "kingbase" {
+		schema, table := db.SplitKingbaseQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "public", table
+		}
+	}
+
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
 		schema := strings.TrimSpace(parts[0])
 		table := strings.TrimSpace(parts[1])

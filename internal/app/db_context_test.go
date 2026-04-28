@@ -49,3 +49,16 @@ func TestNormalizeSchemaAndTable_PostgresStillSplitsQualifiedName(t *testing.T) 
 		t.Fatalf("expected postgres qualified split to public.orders, got %q.%q", schema, table)
 	}
 }
+
+func TestQuoteTableIdentByType_KingbaseNormalizesQuotedQualifiedTable(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("kingbase", "", `\"Idf_server\".\"mes_bip_wip_finished\"`)
+	if schema != "Idf_server" || table != "mes_bip_wip_finished" {
+		t.Fatalf("expected kingbase qualified split to Idf_server.mes_bip_wip_finished, got %q.%q", schema, table)
+	}
+
+	if got := quoteTableIdentByType("kingbase", schema, table); got != `"Idf_server"."mes_bip_wip_finished"` {
+		t.Fatalf("unexpected kingbase table identifier: %s", got)
+	}
+}

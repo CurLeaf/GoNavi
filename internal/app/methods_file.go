@@ -1328,6 +1328,12 @@ func quoteIdentByType(dbType string, ident string) string {
 	switch dbType {
 	case "mysql", "mariadb", "diros", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
+	case "kingbase":
+		cleaned := db.NormalizeKingbaseIdentifier(ident)
+		if cleaned == "" {
+			return `""`
+		}
+		return `"` + strings.ReplaceAll(cleaned, `"`, `""`) + `"`
 	case "sqlserver":
 		escaped := strings.ReplaceAll(ident, "]", "]]")
 		return "[" + escaped + "]"
@@ -1340,6 +1346,17 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 	raw := strings.TrimSpace(ident)
 	if raw == "" {
 		return raw
+	}
+
+	if dbType == "kingbase" {
+		schema, table := db.SplitKingbaseQualifiedName(raw)
+		if table == "" {
+			return quoteIdentByType(dbType, raw)
+		}
+		if schema == "" {
+			return quoteIdentByType(dbType, table)
+		}
+		return quoteIdentByType(dbType, schema) + "." + quoteIdentByType(dbType, table)
 	}
 
 	parts := strings.Split(raw, ".")
