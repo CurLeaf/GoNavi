@@ -78,6 +78,21 @@ func normalizeKingbaseIdentCommon(raw string) string {
 	return strings.TrimSpace(value)
 }
 
+// NormalizeKingbaseIdentifier removes nested client-side quoting from a Kingbase identifier.
+func NormalizeKingbaseIdentifier(raw string) string {
+	return normalizeKingbaseIdentCommon(raw)
+}
+
+// SplitKingbaseQualifiedName splits a Kingbase schema-qualified identifier safely.
+func SplitKingbaseQualifiedName(raw string) (schema string, table string) {
+	return splitKingbaseQualifiedNameCommon(raw)
+}
+
+// SplitSQLQualifiedName splits a schema-qualified SQL identifier without splitting dots inside quotes.
+func SplitSQLQualifiedName(raw string) (schema string, table string) {
+	return splitSQLQualifiedNameCommon(raw)
+}
+
 func splitKingbaseQualifiedNameCommon(raw string) (schema string, table string) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
@@ -102,6 +117,124 @@ func splitKingbaseQualifiedNameCommon(raw string) (schema string, table string) 
 		return "", tablePart
 	}
 	return schemaPart, tablePart
+}
+
+func splitSQLQualifiedNameCommon(raw string) (schema string, table string) {
+	text := normalizeSQLIdentifierEscapes(strings.TrimSpace(raw))
+	if text == "" {
+		return "", ""
+	}
+
+	sep := findSQLQualifiedSeparator(text)
+	if sep < 0 {
+		return "", normalizeSQLIdentPartCommon(text)
+	}
+
+	schemaPart := normalizeSQLIdentPartCommon(text[:sep])
+	tablePart := normalizeSQLIdentPartCommon(text[sep+1:])
+
+	if tablePart == "" {
+		if schemaPart == "" {
+			return "", normalizeSQLIdentPartCommon(text)
+		}
+		return "", schemaPart
+	}
+	if schemaPart == "" {
+		return "", tablePart
+	}
+	return schemaPart, tablePart
+}
+
+func normalizeSQLIdentifierEscapes(raw string) string {
+	value := strings.TrimSpace(raw)
+	for i := 0; i < 4; i++ {
+		next := strings.TrimSpace(value)
+		next = strings.ReplaceAll(next, `\\\"`, `\"`)
+		next = strings.ReplaceAll(next, `\"`, `"`)
+		if next == value {
+			break
+		}
+		value = next
+	}
+	return strings.TrimSpace(value)
+}
+
+func normalizeSQLIdentPartCommon(raw string) string {
+	value := normalizeSQLIdentifierEscapes(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	if len(value) >= 2 {
+		first := value[0]
+		last := value[len(value)-1]
+		switch {
+		case first == '"' && last == '"':
+			return strings.TrimSpace(strings.ReplaceAll(value[1:len(value)-1], `""`, `"`))
+		case first == '`' && last == '`':
+			return strings.TrimSpace(strings.ReplaceAll(value[1:len(value)-1], "``", "`"))
+		case first == '[' && last == ']':
+			return strings.TrimSpace(strings.ReplaceAll(value[1:len(value)-1], "]]", "]"))
+		}
+	}
+	return value
+}
+
+func findSQLQualifiedSeparator(raw string) int {
+	inDouble := false
+	inBacktick := false
+	inBracket := false
+
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+
+		if inDouble {
+			if ch == '\\' && i+1 < len(raw) && raw[i+1] == '"' {
+				inDouble = false
+				i++
+				continue
+			}
+			if ch == '"' {
+				if i+1 < len(raw) && raw[i+1] == '"' {
+					i++
+					continue
+				}
+				inDouble = false
+			}
+			continue
+		}
+
+		if inBacktick {
+			if ch == '`' {
+				inBacktick = false
+			}
+			continue
+		}
+
+		if inBracket {
+			if ch == ']' {
+				inBracket = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '\\':
+			if i+1 < len(raw) && raw[i+1] == '"' {
+				inDouble = true
+				i++
+			}
+		case '"':
+			inDouble = true
+		case '`':
+			inBacktick = true
+		case '[':
+			inBracket = true
+		case '.':
+			return i
+		}
+	}
+
+	return -1
 }
 
 func findKingbaseQualifiedSeparator(raw string) int {

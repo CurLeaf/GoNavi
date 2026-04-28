@@ -120,6 +120,69 @@ func TestNormalizeRedisGetValueError(t *testing.T) {
 	}
 }
 
+func TestRedisGlobPatternLiteralKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		pattern   string
+		wantKey   string
+		wantExact bool
+	}{
+		{name: "plain exact key", pattern: "Agent", wantKey: "Agent", wantExact: true},
+		{name: "escaped glob characters stay literal", pattern: `user:\*:\[id\]\?\\raw`, wantKey: `user:*:[id]?\raw`, wantExact: true},
+		{name: "fuzzy wildcard is not exact", pattern: "*[aA][gG][eE][nN][tT]*", wantExact: false},
+		{name: "unescaped suffix wildcard is not exact", pattern: "Agent*", wantExact: false},
+		{name: "unescaped single character wildcard is not exact", pattern: "Agent?", wantExact: false},
+		{name: "unescaped character class is not exact", pattern: "Agent[0-9]", wantExact: false},
+		{name: "empty pattern is not exact", pattern: "", wantExact: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotKey, gotExact := redisGlobPatternLiteralKey(tt.pattern)
+			if gotExact != tt.wantExact {
+				t.Fatalf("redisGlobPatternLiteralKey(%q) exact=%v, want %v", tt.pattern, gotExact, tt.wantExact)
+			}
+			if gotKey != tt.wantKey {
+				t.Fatalf("redisGlobPatternLiteralKey(%q) key=%q, want %q", tt.pattern, gotKey, tt.wantKey)
+			}
+		})
+	}
+}
+
+func TestRedisExactSearchPattern(t *testing.T) {
+	tests := []struct {
+		name          string
+		literalKey    string
+		wantExactKey  string
+		wantNamespace string
+	}{
+		{
+			name:          "plain namespace folder",
+			literalKey:    "Agent",
+			wantExactKey:  "Agent",
+			wantNamespace: "Agent:*",
+		},
+		{
+			name:          "escaped namespace keeps glob chars literal",
+			literalKey:    `user:*:[id]?\raw`,
+			wantExactKey:  `user:*:[id]?\raw`,
+			wantNamespace: `user:\*:\[id\]\?\\raw:*`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotExactKey, gotNamespace := redisExactSearchPattern(tt.literalKey)
+			if gotExactKey != tt.wantExactKey {
+				t.Fatalf("redisExactSearchPattern(%q) exactKey=%q, want %q", tt.literalKey, gotExactKey, tt.wantExactKey)
+			}
+			if gotNamespace != tt.wantNamespace {
+				t.Fatalf("redisExactSearchPattern(%q) namespace=%q, want %q", tt.literalKey, gotNamespace, tt.wantNamespace)
+			}
+		})
+	}
+}
+
 func TestReadRedisHashEntriesWithFallbackUsesHScanWhenHGetAllForbidden(t *testing.T) {
 	scanCalls := 0
 	values, length, err := readRedisHashEntriesWithFallback(

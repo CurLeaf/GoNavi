@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -10,16 +13,17 @@ import (
 )
 
 type fakeDiagnosticTransport struct {
-	testErr        error
-	caps           []jvm.DiagnosticCapability
-	capsErr        error
-	handle         jvm.DiagnosticSessionHandle
-	startErr       error
-	executeReq     jvm.DiagnosticCommandRequest
-	executeErr     error
-	cancelSession  string
-	cancelCommand  string
-	cancelErr      error
+	testErr       error
+	caps          []jvm.DiagnosticCapability
+	capsErr       error
+	handle        jvm.DiagnosticSessionHandle
+	startErr      error
+	executeReq    jvm.DiagnosticCommandRequest
+	executeErr    error
+	executeCalls  int
+	cancelSession string
+	cancelCommand string
+	cancelErr     error
 }
 
 func (f fakeDiagnosticTransport) Mode() string { return jvm.DiagnosticTransportAgentBridge }
@@ -45,6 +49,55 @@ func (f fakeDiagnosticTransport) CancelCommand(context.Context, connection.Conne
 }
 
 func (f fakeDiagnosticTransport) CloseSession(context.Context, connection.ConnectionConfig, string) error {
+	return nil
+}
+
+type fakeStreamingDiagnosticTransport struct {
+	sink       jvm.DiagnosticEventSink
+	chunks     []jvm.DiagnosticEventChunk
+	executeErr error
+}
+
+func (f *fakeStreamingDiagnosticTransport) Mode() string { return jvm.DiagnosticTransportAgentBridge }
+
+func (f *fakeStreamingDiagnosticTransport) TestConnection(context.Context, connection.ConnectionConfig) error {
+	return nil
+}
+
+func (f *fakeStreamingDiagnosticTransport) ProbeCapabilities(context.Context, connection.ConnectionConfig) ([]jvm.DiagnosticCapability, error) {
+	return nil, nil
+}
+
+func (f *fakeStreamingDiagnosticTransport) StartSession(context.Context, connection.ConnectionConfig, jvm.DiagnosticSessionRequest) (jvm.DiagnosticSessionHandle, error) {
+	return jvm.DiagnosticSessionHandle{}, nil
+}
+
+func (f *fakeStreamingDiagnosticTransport) SetEventSink(sink jvm.DiagnosticEventSink) {
+	f.sink = sink
+}
+
+func (f *fakeStreamingDiagnosticTransport) ExecuteCommand(context.Context, connection.ConnectionConfig, jvm.DiagnosticCommandRequest) error {
+	if f.sink != nil {
+		chunks := f.chunks
+		if len(chunks) == 0 {
+			chunks = []jvm.DiagnosticEventChunk{{
+				Event:   "diagnostic",
+				Phase:   "running",
+				Content: "PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nabc123",
+			}}
+		}
+		for _, chunk := range chunks {
+			f.sink(chunk)
+		}
+	}
+	return f.executeErr
+}
+
+func (f *fakeStreamingDiagnosticTransport) CancelCommand(context.Context, connection.ConnectionConfig, string, string) error {
+	return nil
+}
+
+func (f *fakeStreamingDiagnosticTransport) CloseSession(context.Context, connection.ConnectionConfig, string) error {
 	return nil
 }
 
@@ -161,6 +214,417 @@ func TestJVMExecuteDiagnosticCommandReturnsAccepted(t *testing.T) {
 	}
 }
 
+func TestJVMExecuteDiagnosticCommandBlocksTraceWhenConnectionReadOnly(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	readOnly := true
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly: &readOnly,
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:            true,
+				Transport:          jvm.DiagnosticTransportAgentBridge,
+				BaseURL:            "http://127.0.0.1:19091/gonavi/diag",
+				AllowTraceCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-trace-1",
+		Command:   "watch com.foo.OrderService submitOrder '{params,returnObj}' -x 2",
+		Source:    "manual",
+		Reason:    "定位慢调用",
+	})
+
+	if res.Success {
+		t.Fatalf("expected trace command to be blocked in read-only mode, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "只读") {
+		t.Fatalf("expected read-only message, got %+v", res)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandBlocksMutatingWhenConnectionReadOnly(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	readOnly := true
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly: &readOnly,
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:               true,
+				Transport:             jvm.DiagnosticTransportAgentBridge,
+				BaseURL:               "http://127.0.0.1:19091/gonavi/diag",
+				AllowMutatingCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-mutating-1",
+		Command:   "ognl '@java.lang.System@getProperty(\"user.dir\")'",
+		Source:    "manual",
+		Reason:    "读取系统属性",
+	})
+
+	if res.Success {
+		t.Fatalf("expected mutating command to be blocked in read-only mode, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "只读") {
+		t.Fatalf("expected read-only message, got %+v", res)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandBlocksMultilineCommandWhenConnectionReadOnly(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	readOnly := true
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly: &readOnly,
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:               true,
+				Transport:             jvm.DiagnosticTransportAgentBridge,
+				BaseURL:               "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands:  true,
+				AllowTraceCommands:    true,
+				AllowMutatingCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-multiline-1",
+		Command:   "thread -n 1\nognl '@java.lang.System@setProperty(\"x\",\"y\")'",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if res.Success {
+		t.Fatalf("expected multiline command to be blocked in read-only mode, got %+v", res)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandAllowsObserveWhenConnectionReadOnly(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	readOnly := true
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly: &readOnly,
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-1",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if !res.Success {
+		t.Fatalf("expected observe command to be allowed in read-only mode, got %+v", res)
+	}
+	if recorder.executeCalls != 1 {
+		t.Fatalf("expected transport ExecuteCommand called once, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandRedactsExecuteErrorMessage(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{executeErr: errors.New("Authorization: Bearer header-secret")}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-secret",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if res.Success {
+		t.Fatalf("expected execute failure, got %+v", res)
+	}
+	if strings.Contains(res.Message, "header-secret") {
+		t.Fatalf("expected execute error message to be redacted, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "Authorization: ********") {
+		t.Fatalf("expected redacted authorization message, got %q", res.Message)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandRedactsExecuteErrorWithStreamingPEMState(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return &fakeStreamingDiagnosticTransport{executeErr: errors.New("def456\n-----END PRIVATE KEY-----")}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-pem",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if res.Success {
+		t.Fatalf("expected execute failure, got %+v", res)
+	}
+	if strings.Contains(res.Message, "def456") || strings.Contains(res.Message, "PRIVATE KEY") {
+		t.Fatalf("expected execute error PEM continuation to be redacted, got %q", res.Message)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandRedactsPolicyErrorMessage(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-policy-secret",
+		Command:   "watch com.foo.OrderService submitOrder '{params}' password=plain-secret",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if res.Success {
+		t.Fatalf("expected policy failure, got %+v", res)
+	}
+	if strings.Contains(res.Message, "plain-secret") {
+		t.Fatalf("expected policy error message to be redacted, got %q", res.Message)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandEmitsRedactedChunksWithRequestIDs(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.configDir = t.TempDir()
+	app.ctx = context.Background()
+
+	var emitted []diagnosticChunkEventPayload
+	prevEmitter := emitJVMDiagnosticRuntimeEvent
+	emitJVMDiagnosticRuntimeEvent = func(ctx context.Context, eventName string, optionalData ...interface{}) {
+		if eventName != diagnosticChunkEvent {
+			return
+		}
+		payload, ok := optionalData[0].(diagnosticChunkEventPayload)
+		if !ok {
+			t.Fatalf("expected diagnostic chunk event payload, got %#v", optionalData[0])
+		}
+		emitted = append(emitted, payload)
+	}
+	defer func() { emitJVMDiagnosticRuntimeEvent = prevEmitter }()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return &fakeStreamingDiagnosticTransport{
+			chunks: []jvm.DiagnosticEventChunk{
+				{
+					SessionID: "remote-sess",
+					CommandID: "remote-cmd-1",
+					Event:     "diagnostic",
+					Phase:     "running",
+					Content:   "PRIVATE_KEY=-----BEG",
+				},
+				{
+					SessionID: "remote-sess",
+					CommandID: "remote-cmd-2",
+					Event:     "diagnostic",
+					Phase:     "failed",
+					Content:   "IN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----",
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-event-secret",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if !res.Success {
+		t.Fatalf("expected accepted command, got %+v", res)
+	}
+	if len(emitted) != 2 {
+		t.Fatalf("expected 2 emitted chunks, got %#v", emitted)
+	}
+	combined := ""
+	for _, payload := range emitted {
+		if payload.TabID != "tab-diag-1" {
+			t.Fatalf("unexpected tab id in emitted payload: %#v", payload)
+		}
+		if payload.Chunk.SessionID != "sess-1" || payload.Chunk.CommandID != "cmd-event-secret" {
+			t.Fatalf("expected emitted chunk to use request ids, got %#v", payload.Chunk)
+		}
+		combined += payload.Chunk.Content
+	}
+	for _, leaked := range []string{"PRIVATE KEY", "abc123", "-----END"} {
+		if strings.Contains(combined, leaked) {
+			t.Fatalf("expected emitted chunks to be redacted, leaked %q in %q", leaked, combined)
+		}
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandFailsClosedWhenAuditWriteFails(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	tempDir := t.TempDir()
+	blockerPath := filepath.Join(tempDir, "audit-blocker")
+	if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	app.configDir = blockerPath
+
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	readOnly := true
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly: &readOnly,
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-audit",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "观察线程",
+	})
+
+	if res.Success {
+		t.Fatalf("expected command to fail closed when initial audit write fails, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "审计") {
+		t.Fatalf("expected audit failure message, got %+v", res)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
 func TestJVMCancelDiagnosticCommandDelegatesToTransport(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	recorder := &fakeDiagnosticTransport{}
@@ -241,6 +705,7 @@ func (d diagnosticTransportRecorder) StartSession(ctx context.Context, cfg conne
 
 func (d diagnosticTransportRecorder) ExecuteCommand(ctx context.Context, cfg connection.ConnectionConfig, req jvm.DiagnosticCommandRequest) error {
 	d.recorder.executeReq = req
+	d.recorder.executeCalls++
 	return d.recorder.ExecuteCommand(ctx, cfg, req)
 }
 

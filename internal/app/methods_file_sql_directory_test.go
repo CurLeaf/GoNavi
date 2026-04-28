@@ -41,6 +41,40 @@ func TestBuildSQLDirectoryEntriesKeepsOnlySQLFilesAndNestedFolders(t *testing.T)
 	}
 }
 
+func TestWriteSQLFileByPathOverwritesExistingSQLFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "report.sql")
+	if err := os.WriteFile(filePath, []byte("select 1;"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := writeSQLFileByPath(filePath, "select 2;\n")
+	if !result.Success {
+		t.Fatalf("expected sql file write to succeed, got %#v", result)
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(content) != "select 2;\n" {
+		t.Fatalf("expected file content to be overwritten, got %q", string(content))
+	}
+}
+
+func TestWriteSQLFileByPathRejectsDirectories(t *testing.T) {
+	result := writeSQLFileByPath(t.TempDir(), "select 1;")
+	if result.Success {
+		t.Fatalf("expected directory write to fail, got %#v", result)
+	}
+}
+
+func TestWriteSQLFileByPathRejectsEmptyPath(t *testing.T) {
+	result := writeSQLFileByPath("   ", "select 1;")
+	if result.Success {
+		t.Fatalf("expected empty path write to fail, got %#v", result)
+	}
+}
+
 func TestReadSQLFileByPathReturnsLargeFileMetadata(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "big.sql")
 	file, err := os.Create(filePath)

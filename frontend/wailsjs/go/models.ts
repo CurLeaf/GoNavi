@@ -948,6 +948,7 @@ export namespace jvm {
 	    reason: string;
 	    source?: string;
 	    expectedVersion?: string;
+	    confirmationToken?: string;
 	    payload?: Record<string, any>;
 	
 	    static createFrom(source: any = {}) {
@@ -962,6 +963,7 @@ export namespace jvm {
 	        this.reason = source["reason"];
 	        this.source = source["source"];
 	        this.expectedVersion = source["expectedVersion"];
+	        this.confirmationToken = source["confirmationToken"];
 	        this.payload = source["payload"];
 	    }
 	}

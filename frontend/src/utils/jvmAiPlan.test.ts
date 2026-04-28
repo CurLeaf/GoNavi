@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildJVMChangeDraftFromAIPlan, extractJVMChangePlan, resolveJVMAIPlanResourceId, resolveJVMAIPlanTargetTabId } from './jvmAiPlan';
+import {
+  buildJVMChangeDraftFromAIPlan,
+  buildJVMAIPlanPrompt,
+  extractJVMChangePlan,
+  resolveJVMAIPlanResourceId,
+  resolveJVMAIPlanTargetTabId,
+} from './jvmAiPlan';
 
 describe('extractJVMChangePlan', () => {
   it('parses fenced json plan with namespace and key selector', () => {
@@ -99,6 +105,34 @@ describe('buildJVMChangeDraftFromAIPlan', () => {
         value: true,
       },
     });
+  });
+});
+
+describe('buildJVMAIPlanPrompt', () => {
+  it('masks sensitive snapshot values before injecting the AI prompt', () => {
+    const prompt = buildJVMAIPlanPrompt({
+      connectionName: 'orders-jvm',
+      host: '127.0.0.1',
+      providerMode: 'jmx',
+      resourcePath: 'jmx:/attribute/app/Password',
+      readOnly: false,
+      snapshot: {
+        resourceId: 'jmx:/attribute/app/Password',
+        kind: 'attribute',
+        format: 'string',
+        value: 'secret-token',
+        sensitive: true,
+        supportedActions: [
+          {
+            action: 'set',
+            payloadExample: { value: 'secret-token' },
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain('********');
+    expect(prompt).not.toContain('secret-token');
   });
 });
 

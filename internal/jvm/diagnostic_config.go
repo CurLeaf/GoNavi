@@ -80,10 +80,34 @@ func ValidateDiagnosticCommandPolicy(cfg connection.JVMDiagnosticConfig, command
 	return category, nil
 }
 
+func ValidateDiagnosticExecutionPolicy(cfg connection.ConnectionConfig, command string) (string, error) {
+	diagnosticCfg, err := NormalizeDiagnosticConfig(cfg)
+	if err != nil {
+		return "", err
+	}
+
+	category, err := ValidateDiagnosticCommandPolicy(diagnosticCfg, command)
+	if err != nil {
+		return "", err
+	}
+
+	if cfg.JVM.ReadOnly != nil && *cfg.JVM.ReadOnly {
+		switch category {
+		case DiagnosticCommandCategoryTrace, DiagnosticCommandCategoryMutating:
+			return "", fmt.Errorf("当前连接为只读模式，仅允许观察类诊断命令")
+		}
+	}
+
+	return category, nil
+}
+
 func classifyDiagnosticCommand(command string) (string, string, error) {
 	normalizedCommand := strings.TrimSpace(command)
 	if normalizedCommand == "" {
 		return "", "", fmt.Errorf("诊断命令不能为空")
+	}
+	if strings.ContainsAny(normalizedCommand, "\r\n") {
+		return "", "", fmt.Errorf("诊断命令不支持换行或多命令输入")
 	}
 
 	fields := strings.Fields(strings.ToLower(normalizedCommand))

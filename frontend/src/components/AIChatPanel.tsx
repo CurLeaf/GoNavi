@@ -25,6 +25,9 @@ import {
     buildMissingProviderNotice,
     buildModelFetchFailedNotice,
 } from '../utils/aiComposerNotice';
+import { buildAIReadonlyPreviewSQL } from '../utils/aiSqlLimit';
+import { resolveAITableSchemaToolResult } from '../utils/aiTableSchemaTool';
+import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 
 interface AIChatPanelProps {
     width?: number;
@@ -254,6 +257,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const tabs = useStore(state => state.tabs);
     const activeTabId = useStore(state => state.activeTabId);
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
+    const aiChatSendShortcutBinding = useStore(state => state.shortcutOptions.sendAIChatMessage);
 
     const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
         const state = useStore.getState();
@@ -1145,12 +1149,15 @@ SELECT * FROM users WHERE status = 1;
                             try {
                                 const safeDbName = args.dbName ? String(args.dbName).trim() : '';
                                 const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBShowCreateTable } = await import('../../wailsjs/go/app/App');
-                                const ddlRes = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
-                                if (ddlRes?.success) {
-                                    resStr = typeof ddlRes.data === 'string' ? ddlRes.data : JSON.stringify(ddlRes.data);
-                                    success = true;
-                                } else { resStr = ddlRes?.message || 'Failed to fetch DDL'; }
+                                const { DBShowCreateTable, DBGetColumns } = await import('../../wailsjs/go/app/App');
+                                const rpcConfig = buildRpcConnectionConfig(conn.config) as any;
+                                const toolResult = await resolveAITableSchemaToolResult({
+                                    tableName: safeTable,
+                                    fetchDDL: () => DBShowCreateTable(rpcConfig, safeDbName, safeTable),
+                                    fetchColumns: () => DBGetColumns(rpcConfig, safeDbName, safeTable),
+                                });
+                                resStr = toolResult.content;
+                                success = toolResult.success;
                             } catch (e: any) {
                                 resStr = `获取建表语句失败: ${e?.message || e}`;
                             }
@@ -1173,14 +1180,8 @@ SELECT * FROM users WHERE status = 1;
                                     }
                                 }
                                 const { DBQuery } = await import('../../wailsjs/go/app/App');
-                                // 只对只读查询自动追加 LIMIT，写操作（UPDATE/DELETE/INSERT等）不追加
-                                const sqlTrimmed = safeSql.replace(/;\s*$/, ''); // 去掉末尾分号防止拼接出 "; LIMIT 50"
-                                const sqlFirstWord = sqlTrimmed.trimStart().split(/\s/)[0]?.toLowerCase() || '';
-                                const isReadQuery = ['select', 'show', 'describe', 'desc', 'explain', 'with'].includes(sqlFirstWord);
-                                const finalSql = (isReadQuery && !sqlTrimmed.toLowerCase().includes('limit'))
-                                    ? sqlTrimmed + ' LIMIT 50'
-                                    : sqlTrimmed;
-                                const qRes = await DBQuery(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeSql + (safeSql.toLowerCase().includes('limit') ? '' : ' LIMIT 50'));
+                                const finalSql = buildAIReadonlyPreviewSQL(conn.config?.type || '', safeSql, 50, conn.config?.driver || '');
+                                const qRes = await DBQuery(buildRpcConnectionConfig(conn.config) as any, safeDbName, finalSql);
                                 if (qRes?.success) {
                                     const rows = Array.isArray(qRes.data) ? qRes.data : [];
                                     const limitedRows = rows.slice(0, 50);
@@ -1471,11 +1472,8 @@ SELECT * FROM users WHERE status = 1;
     ]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            handleSend();
-        }
-    }, [handleSend]);
+        consumeAIChatSendShortcutOnKeyDown(aiChatSendShortcutBinding, e, handleSend);
+    }, [aiChatSendShortcutBinding, handleSend]);
 
     const handleStop = useCallback(async () => {
         try {
@@ -1706,6 +1704,7 @@ SELECT * FROM users WHERE status = 1;
                 activeProvider={activeProvider}
                 dynamicModels={dynamicModels}
                 loadingModels={loadingModels}
+                sendShortcutBinding={aiChatSendShortcutBinding}
                 composerNotice={composerNotice}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}

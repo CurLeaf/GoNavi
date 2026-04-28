@@ -44,6 +44,7 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   ApplyChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
+  DBShowCreateTable: vi.fn(),
 }));
 
 vi.mock('@monaco-editor/react', () => ({
@@ -76,6 +77,73 @@ describe('DataGrid layout', () => {
 
     expect(markup).toContain('data-grid-secondary-actions="true"');
     expect(markup).toContain('data-grid-view-switcher="true"');
+    expect(markup).toContain('data-grid-page-find="true"');
+    expect(markup).toContain('data-grid-page-find-prev="true"');
+    expect(markup).toContain('data-grid-page-find-next="true"');
+    expect(markup).toContain('当前页查找...');
+  });
+
+  it('renders a DDL action for table data pages only', () => {
+    const tableMarkup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+      />,
+    );
+
+    expect(tableMarkup).toContain('data-grid-ddl-action="true"');
+    expect(tableMarkup).toContain('查看 DDL');
+
+    const schemaTableMarkup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="public.users"
+        dbName=""
+        connectionId="conn-1"
+      />,
+    );
+
+    expect(schemaTableMarkup).toContain('data-grid-ddl-action="true"');
+    expect(schemaTableMarkup).toContain('查看 DDL');
+    expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
+
+    const queryMarkup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+        exportScope="queryResult"
+      />,
+    );
+
+    expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
   });
 
   it('renders row copy and paste actions in editable table toolbar', () => {

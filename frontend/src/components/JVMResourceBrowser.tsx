@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import {
   Alert,
@@ -38,9 +38,14 @@ import {
   type JVMAIChangePlan,
 } from "../utils/jvmAiPlan";
 import {
+  buildJVMActionPayloadTemplate,
+  buildJVMPreviewApplyRequest,
   estimateJVMResourceEditorHeight,
   formatJVMActionDisplayText,
   formatJVMActionSummary,
+  formatJVMMetadataForDisplay,
+  formatJVMValueForDisplay,
+  JVM_DEFAULT_PAYLOAD_TEMPLATE,
   resolveJVMActionDisplay,
   resolveJVMValueEditorLanguage,
 } from "../utils/jvmResourcePresentation";
@@ -56,7 +61,7 @@ import {
 const { Text } = Typography;
 const DESCRIPTION_STYLES = { label: { width: 120 } } as const;
 const { TextArea } = Input;
-const DEFAULT_PAYLOAD_TEXT = "{\n  \n}";
+const DEFAULT_PAYLOAD_TEXT = JVM_DEFAULT_PAYLOAD_TEMPLATE;
 
 type JVMResourceBrowserProps = {
   tab: TabData;
@@ -76,6 +81,66 @@ const buildJVMRuntimeConfig = (
   });
 };
 
+const buildJVMPreviewConfigRevision = (value: unknown): string => {
+  let text = "";
+  try {
+    text = JSON.stringify(value ?? null);
+  } catch {
+    return "unserializable";
+  }
+
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+};
+
+const buildJVMPreviewRuntimeFingerprint = (
+  connection: SavedConnection | undefined,
+  providerMode: string,
+): string => {
+  const config = connection?.config;
+  const jvm = config?.jvm || {};
+  return JSON.stringify({
+    configRevision: buildJVMPreviewConfigRevision(config),
+    type: config?.type || "",
+    host: config?.host || "",
+    port: config?.port || 0,
+    user: config?.user || "",
+    providerMode,
+    environment: jvm.environment || "",
+    readOnly: jvm.readOnly !== false,
+    allowedModes: jvm.allowedModes || [],
+    preferredMode: jvm.preferredMode || "",
+    jmx: {
+      enabled: jvm.jmx?.enabled || false,
+      host: jvm.jmx?.host || "",
+      port: jvm.jmx?.port || 0,
+      username: jvm.jmx?.username || "",
+      domainAllowlist: jvm.jmx?.domainAllowlist || [],
+    },
+    endpoint: {
+      enabled: jvm.endpoint?.enabled || false,
+      baseUrl: jvm.endpoint?.baseUrl || "",
+      timeoutSeconds: jvm.endpoint?.timeoutSeconds || 0,
+    },
+    agent: {
+      enabled: jvm.agent?.enabled || false,
+      baseUrl: jvm.agent?.baseUrl || "",
+      timeoutSeconds: jvm.agent?.timeoutSeconds || 0,
+    },
+  });
+};
+
+const buildJVMPreviewContextKey = (
+  connectionId: string,
+  mode: string,
+  path: string,
+  runtimeFingerprint: string,
+): string => `${connectionId}::${mode}::${path}::${runtimeFingerprint}`;
+
 const snapshotBlockStyle = (background: string): React.CSSProperties => ({
   margin: 0,
   borderRadius: 8,
@@ -83,36 +148,12 @@ const snapshotBlockStyle = (background: string): React.CSSProperties => ({
   overflow: "auto",
 });
 
-const formatValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-};
-
 const formatDraftPayload = (draft: JVMAIChangeDraft): string => {
   try {
     return JSON.stringify(draft.payload ?? {}, null, 2);
   } catch {
     return "{}";
   }
-};
-
-const buildActionPayloadTemplate = (
-  definition?: JVMActionDefinition | null,
-): string => {
-  if (definition?.payloadExample) {
-    try {
-      return JSON.stringify(definition.payloadExample, null, 2);
-    } catch {
-      return DEFAULT_PAYLOAD_TEXT;
-    }
-  }
-  return DEFAULT_PAYLOAD_TEXT;
 };
 
 const resolveDefaultAction = (
@@ -164,6 +205,10 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     "jmx") as "jmx" | "endpoint" | "agent";
   const resourcePath = String(tab.resourcePath || "").trim();
   const readOnly = connection?.config.jvm?.readOnly !== false;
+  const runtimeFingerprint = useMemo(
+    () => buildJVMPreviewRuntimeFingerprint(connection, providerMode),
+    [connection, providerMode],
+  );
   const [loading, setLoading] = useState(true);
   const [snapshot, setSnapshot] = useState<JVMValueSnapshot | null>(null);
   const [error, setError] = useState("");
@@ -181,24 +226,50 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   const [previewResult, setPreviewResult] = useState<JVMChangePreview | null>(
     null,
   );
+  const [previewRequest, setPreviewRequest] = useState<JVMChangeRequest | null>(
+    null,
+  );
+  const [previewRuntimeConfig, setPreviewRuntimeConfig] = useState<any | null>(
+    null,
+  );
+  const [previewContextKey, setPreviewContextKey] = useState("");
   const [applyLoading, setApplyLoading] = useState(false);
+  const previewSequenceRef = useRef(0);
+  const currentPreviewContextKey = buildJVMPreviewContextKey(
+    tab.connectionId,
+    providerMode,
+    resourcePath,
+    runtimeFingerprint,
+  );
+  const previewContextKeyRef = useRef(currentPreviewContextKey);
+  previewContextKeyRef.current = currentPreviewContextKey;
 
-  const displayValue = useMemo(() => formatValue(snapshot?.value), [snapshot]);
+  const clearPreviewState = () => {
+    setPreviewOpen(false);
+    setPreviewResult(null);
+    setPreviewRequest(null);
+    setPreviewRuntimeConfig(null);
+    setPreviewContextKey("");
+  };
+
+  const displayValue = useMemo(() => formatJVMValueForDisplay(snapshot), [snapshot]);
   const displayLanguage = useMemo(
     () =>
-      resolveJVMValueEditorLanguage(snapshot?.format || "", snapshot?.value),
-    [snapshot?.format, snapshot?.value],
+      snapshot?.sensitive
+        ? "plaintext"
+        : resolveJVMValueEditorLanguage(snapshot?.format || "", snapshot?.value),
+    [snapshot?.format, snapshot?.sensitive, snapshot?.value],
   );
   const metadataText = useMemo(
-    () =>
-      snapshot?.metadata && Object.keys(snapshot.metadata).length > 0
-        ? JSON.stringify(snapshot.metadata, null, 2)
-        : "",
-    [snapshot?.metadata],
+    () => formatJVMMetadataForDisplay(snapshot),
+    [snapshot],
   );
   const metadataLanguage = useMemo(
-    () => resolveJVMValueEditorLanguage("json", snapshot?.metadata),
-    [snapshot?.metadata],
+    () =>
+      snapshot?.sensitive
+        ? "plaintext"
+        : resolveJVMValueEditorLanguage("json", snapshot?.metadata),
+    [snapshot?.metadata, snapshot?.sensitive],
   );
   const supportedActions = useMemo(() => {
     if (!Array.isArray(snapshot?.supportedActions)) {
@@ -218,6 +289,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   );
 
   const loadSnapshot = async () => {
+    const loadContextKey = currentPreviewContextKey;
     if (!connection) {
       setLoading(false);
       setSnapshot(null);
@@ -247,6 +319,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         buildJVMRuntimeConfig(connection, providerMode),
         resourcePath,
       );
+      if (loadContextKey !== previewContextKeyRef.current) {
+        return;
+      }
       if (!result?.success) {
         setSnapshot(null);
         setError(String(result?.message || "读取 JVM 资源失败"));
@@ -263,9 +338,10 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   useEffect(() => {
     void loadSnapshot();
-  }, [connection, providerMode, resourcePath, tab.connectionId]);
+  }, [connection, providerMode, resourcePath, runtimeFingerprint, tab.connectionId]);
 
   useEffect(() => {
+    setSnapshot(null);
     setAction("");
     setReason("");
     setPayloadText(DEFAULT_PAYLOAD_TEXT);
@@ -273,9 +349,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     setDraftResourceId("");
     setDraftError("");
     setApplyMessage("");
-    setPreviewOpen(false);
-    setPreviewResult(null);
-  }, [providerMode, resourcePath, tab.connectionId]);
+    previewSequenceRef.current += 1;
+    clearPreviewState();
+  }, [currentPreviewContextKey]);
 
   useEffect(() => {
     if (action.trim()) {
@@ -290,7 +366,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       String(payloadText || "").trim() === "" ||
       payloadText === DEFAULT_PAYLOAD_TEXT
     ) {
-      setPayloadText(buildActionPayloadTemplate(nextDefinition));
+      setPayloadText(buildJVMActionPayloadTemplate(nextDefinition, snapshot?.sensitive));
     }
   }, [action, payloadText, providerMode, supportedActions]);
 
@@ -328,8 +404,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
           "AI 计划缺少来源上下文，请在目标 JVM 资源页重新生成后再应用。",
         );
         setApplyMessage("");
-        setPreviewOpen(false);
-        setPreviewResult(null);
+        clearPreviewState();
         return;
       }
 
@@ -338,8 +413,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
           "当前 JVM 页签与 AI 计划的来源上下文不一致，已拒绝自动应用。",
         );
         setApplyMessage("");
-        setPreviewOpen(false);
-        setPreviewResult(null);
+        clearPreviewState();
         return;
       }
 
@@ -349,8 +423,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       } catch (err: any) {
         setDraftError(err?.message || "AI 计划暂时无法转换为 JVM 预览草稿");
         setApplyMessage("");
-        setPreviewOpen(false);
-        setPreviewResult(null);
+        clearPreviewState();
         return;
       }
 
@@ -363,8 +436,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       setApplyMessage(
         `已从 AI 计划填充草稿，目标资源为 ${draftFromPlan.resourceId}，请先执行“预览变更”再确认写入。`,
       );
-      setPreviewOpen(false);
-      setPreviewResult(null);
+      clearPreviewState();
     };
 
     window.addEventListener(
@@ -393,7 +465,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       currentPayload === "{}" ||
       payloadText === DEFAULT_PAYLOAD_TEXT
     ) {
-      setPayloadText(buildActionPayloadTemplate(definition));
+      setPayloadText(buildJVMActionPayloadTemplate(definition, snapshot?.sensitive));
     }
   };
 
@@ -414,9 +486,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       payload = parsed as Record<string, any>;
     }
 
-    const resourceId = String(
-      draftResourceId || snapshot?.resourceId || resourcePath,
-    ).trim();
+    const resourceId = String(draftResourceId || resourcePath).trim();
     if (!resourceId) {
       throw new Error("资源 ID 为空，无法生成变更草稿");
     }
@@ -497,34 +567,45 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       return;
     }
 
+    const previewSequence = ++previewSequenceRef.current;
+    const previewContextKey = currentPreviewContextKey;
+    const runtimeConfig = buildJVMRuntimeConfig(connection, providerMode);
+
     setPreviewLoading(true);
     setDraftError("");
     setApplyMessage("");
     try {
       const result = await backendApp.JVMPreviewChange(
-        buildJVMRuntimeConfig(connection, providerMode),
+        runtimeConfig,
         draftPlan,
       );
+      if (
+        previewSequence !== previewSequenceRef.current ||
+        previewContextKey !== previewContextKeyRef.current
+      ) {
+        return;
+      }
+
       if (result?.success === false) {
-        setPreviewResult(null);
-        setPreviewOpen(false);
+        clearPreviewState();
         setDraftError(String(result?.message || "预览 JVM 变更失败"));
         return;
       }
 
       const preview = normalizePreviewResult(result);
       if (!preview) {
-        setPreviewResult(null);
-        setPreviewOpen(false);
+        clearPreviewState();
         setDraftError("预览结果格式不正确");
         return;
       }
 
       setPreviewResult(preview);
+      setPreviewRequest(draftPlan);
+      setPreviewRuntimeConfig(runtimeConfig);
+      setPreviewContextKey(previewContextKey);
       setPreviewOpen(true);
     } catch (err: any) {
-      setPreviewResult(null);
-      setPreviewOpen(false);
+      clearPreviewState();
       setDraftError(err?.message || "预览 JVM 变更失败");
     } finally {
       setPreviewLoading(false);
@@ -532,6 +613,8 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   };
 
   const handleApply = async () => {
+    await Promise.resolve();
+
     if (!connection) {
       setDraftError("连接不存在或已被删除");
       return;
@@ -543,11 +626,21 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       return;
     }
 
-    let draftPlan: JVMChangeRequest;
+    if (!previewResult || !previewRequest || !previewRuntimeConfig) {
+      setDraftError("请先预览变更，再确认执行");
+      return;
+    }
+    if (previewContextKey !== previewContextKeyRef.current) {
+      clearPreviewState();
+      setDraftError("资源上下文已变化，请重新预览后再执行");
+      return;
+    }
+
+    let applyRequest: JVMChangeRequest;
     try {
-      draftPlan = buildDraftPlan();
+      applyRequest = buildJVMPreviewApplyRequest(previewRequest, previewResult);
     } catch (err: any) {
-      setDraftError(err?.message || "变更草稿不合法");
+      setDraftError(err?.message || "确认令牌缺失，请重新预览后再执行");
       return;
     }
 
@@ -556,8 +649,8 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     setApplyMessage("");
     try {
       const result = await backendApp.JVMApplyChange(
-        buildJVMRuntimeConfig(connection, providerMode),
-        draftPlan,
+        previewRuntimeConfig,
+        applyRequest,
       );
       if (result?.success === false) {
         setDraftError(String(result?.message || "执行 JVM 变更失败"));
@@ -569,8 +662,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         setSnapshot(applyResult.updatedValue);
       }
 
-      setPreviewOpen(false);
-      setPreviewResult(null);
+      clearPreviewState();
       setApplyMessage(
         applyResult?.message || result?.message || "JVM 变更已执行",
       );
@@ -897,8 +989,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                 <Space direction="vertical" size={8} style={{ width: "100%" }}>
                   <Text strong>Payload(JSON)</Text>
                   <Text type="secondary">
-                    需要输入 JSON 对象，预览和执行都会直接使用这份 payload。
-                    {selectedActionDefinition?.payloadExample
+                    预览会使用当前草稿；确认执行会使用最近一次成功预览的
+                    request，修改草稿后请重新预览。
+                    {selectedActionDefinition?.payloadExample && !snapshot?.sensitive
                       ? " 已按当前动作填充推荐模板。"
                       : ""}
                   </Text>

@@ -36,6 +36,7 @@ describe('AIChatInput notice layout', () => {
         activeProvider={{ model: '', models: [] }}
         dynamicModels={[]}
         loadingModels={false}
+        sendShortcutBinding={{ combo: 'Enter', enabled: true }}
         composerNotice={{
           tone: 'error',
           title: '模型列表加载失败',
@@ -57,5 +58,36 @@ describe('AIChatInput notice layout', () => {
     expect(noticeIndex).toBeGreaterThanOrEqual(0);
     expect(inputIndex).toBeGreaterThanOrEqual(0);
     expect(noticeIndex).toBeLessThan(inputIndex);
+  });
+
+  it('renders the selected send shortcut in the composer placeholder', () => {
+    const markup = renderToStaticMarkup(
+      <AIChatInput
+        input=""
+        setInput={() => {}}
+        draftImages={[]}
+        setDraftImages={() => {}}
+        sending={false}
+        onSend={() => {}}
+        onStop={() => {}}
+        handleKeyDown={() => {}}
+        activeConnName=""
+        activeContext={null}
+        activeProvider={{ model: '', models: [] }}
+        dynamicModels={[]}
+        loadingModels={false}
+        sendShortcutBinding={{ combo: 'Meta+Enter', enabled: true }}
+        composerNotice={null}
+        onModelChange={() => {}}
+        onFetchModels={() => {}}
+        textareaRef={React.createRef<HTMLTextAreaElement>()}
+        darkMode={false}
+        textColor="#162033"
+        mutedColor="rgba(16,24,40,0.55)"
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+      />
+    );
+
+    expect(markup).toContain('Meta+Enter 发送');
   });
 });

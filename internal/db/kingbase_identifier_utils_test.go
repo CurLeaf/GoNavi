@@ -51,6 +51,30 @@ func TestSplitKingbaseQualifiedNameCommon(t *testing.T) {
 	}
 }
 
+func TestSplitSQLQualifiedName(t *testing.T) {
+	tests := []struct {
+		name       string
+		in         string
+		wantSchema string
+		wantTable  string
+	}{
+		{name: "plain", in: "sales.orders", wantSchema: "sales", wantTable: "orders"},
+		{name: "quoted dots", in: `"sales.schema"."order.items"`, wantSchema: "sales.schema", wantTable: "order.items"},
+		{name: "escaped quoted dots", in: `\"sales.schema\".\"order.items\"`, wantSchema: "sales.schema", wantTable: "order.items"},
+		{name: "quoted table only with dot", in: `"order.items"`, wantSchema: "", wantTable: "order.items"},
+		{name: "escaped quoted", in: `\"sales\".\"orders\"`, wantSchema: "sales", wantTable: "orders"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotSchema, gotTable := SplitSQLQualifiedName(tt.in)
+			if gotSchema != tt.wantSchema || gotTable != tt.wantTable {
+				t.Fatalf("SplitSQLQualifiedName(%q)=(%q,%q),want=(%q,%q)", tt.in, gotSchema, gotTable, tt.wantSchema, tt.wantTable)
+			}
+		})
+	}
+}
+
 func TestBuildKingbaseSearchPathCommon(t *testing.T) {
 	tests := []struct {
 		name    string

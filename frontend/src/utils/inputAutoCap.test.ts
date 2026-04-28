@@ -11,7 +11,7 @@ describe('inputAutoCap', () => {
     });
   });
 
-  it('applies lowercase DOM attributes to inputs and textareas', () => {
+  it('applies no-auto-cap attributes to inputs and textareas', () => {
     const inputAttributes: Record<string, string> = {};
     const textareaAttributes: Record<string, string> = {};
     const input = {

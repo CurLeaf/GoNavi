@@ -2,7 +2,10 @@ import React, { useMemo } from "react";
 import { Alert, Descriptions, Modal, Space, Tag, Typography } from "antd";
 
 import type { JVMChangePreview } from "../../types";
-import { formatJVMRiskLevelText } from "../../utils/jvmResourcePresentation";
+import {
+  formatJVMRiskLevelText,
+  formatJVMValueForDisplay,
+} from "../../utils/jvmResourcePresentation";
 
 const { Text } = Typography;
 const DESCRIPTION_STYLES = { label: { width: 120 } } as const;
@@ -19,17 +22,6 @@ const riskColorMap: Record<string, string> = {
   low: "green",
   medium: "orange",
   high: "red",
-};
-
-const formatValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 };
 
 const previewBlockStyle: React.CSSProperties = {
@@ -135,7 +127,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
               </Descriptions.Item>
             </Descriptions>
             <pre style={previewBlockStyle}>
-              {formatValue(preview.before?.value)}
+              {formatJVMValueForDisplay(preview.before)}
             </pre>
           </div>
 
@@ -160,7 +152,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
               </Descriptions.Item>
             </Descriptions>
             <pre style={previewBlockStyle}>
-              {formatValue(preview.after?.value)}
+              {formatJVMValueForDisplay(preview.after)}
             </pre>
           </div>
         </Space>

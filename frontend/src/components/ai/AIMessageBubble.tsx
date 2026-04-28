@@ -15,6 +15,7 @@ import {
     parseJVMDiagnosticPlan,
     resolveJVMDiagnosticPlanTargetTabId,
 } from '../../utils/jvmDiagnosticPlan';
+import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
@@ -260,7 +261,13 @@ const AIBlockHashRender = ({ match, darkMode, overlayTheme, children, activeConn
         setPreviewData(null);
         try {
             const { DBQuery } = await import('../../../wailsjs/go/app/App');
-            const res = await DBQuery(activeConnectionConfig, activeDbName || '', displayText + ' LIMIT 50');
+            const previewSql = buildAIReadonlyPreviewSQL(
+                activeConnectionConfig?.type || '',
+                displayText,
+                50,
+                activeConnectionConfig?.driver || '',
+            );
+            const res = await DBQuery(activeConnectionConfig, activeDbName || '', previewSql);
             if (res.success && Array.isArray(res.data)) {
                 const rows = res.data as any[];
                 const cols = rows.length > 0 ? Object.keys(rows[0]) : [];

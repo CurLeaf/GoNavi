@@ -389,10 +389,117 @@ func (o *OracleDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 	return triggers, nil
 }
 
+func splitOracleQualifiedTableName(raw string) (string, string) {
+	table := strings.TrimSpace(raw)
+	schema := ""
+	if parts := strings.SplitN(table, ".", 2); len(parts) == 2 {
+		schema = strings.Trim(strings.TrimSpace(parts[0]), "\"")
+		table = strings.TrimSpace(parts[1])
+	}
+	table = strings.Trim(strings.TrimSpace(table), "\"")
+	return schema, table
+}
+
+func (o *OracleDB) loadColumnTypeMap(tableName string) map[string]string {
+	result := map[string]string{}
+	schema, table := splitOracleQualifiedTableName(tableName)
+	if table == "" {
+		return result
+	}
+
+	columns, err := o.GetColumns(schema, table)
+	if err != nil {
+		logger.Warnf("加载 Oracle 列元数据失败（不影响提交）：表=%s err=%v", tableName, err)
+		return result
+	}
+
+	for _, col := range columns {
+		name := strings.ToLower(strings.TrimSpace(col.Name))
+		if name == "" {
+			continue
+		}
+		result[name] = strings.TrimSpace(col.Type)
+	}
+	return result
+}
+
+func normalizeOracleValueForWrite(columnName string, value interface{}, columnTypeMap map[string]string) interface{} {
+	columnType := columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]
+	if !isOracleTemporalColumnType(columnType) {
+		return value
+	}
+	if value == nil {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return value
+	}
+	raw := strings.TrimSpace(text)
+	if raw == "" {
+		return nil
+	}
+	if parsed, ok := parseOracleTemporalString(raw); ok {
+		return parsed
+	}
+	return value
+}
+
+func isOracleTemporalColumnType(columnType string) bool {
+	typ := strings.ToUpper(strings.TrimSpace(columnType))
+	return strings.Contains(typ, "DATE") || strings.Contains(typ, "TIMESTAMP")
+}
+
+func parseOracleTemporalString(raw string) (time.Time, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return time.Time{}, false
+	}
+	text = strings.ReplaceAll(text, "+ ", "+")
+	text = strings.ReplaceAll(text, "- ", "-")
+
+	candidates := []string{text}
+	if len(text) >= 19 && text[10] == ' ' && (strings.HasSuffix(text, "Z") || hasTimezoneOffset(text)) {
+		candidates = append(candidates, strings.Replace(text, " ", "T", 1))
+	}
+
+	layoutsWithZone := []string{
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05.999999999 -0700",
+		"2006-01-02 15:04:05 -0700",
+		time.RFC3339Nano,
+		time.RFC3339,
+	}
+	for _, candidate := range candidates {
+		for _, layout := range layoutsWithZone {
+			if parsed, err := time.Parse(layout, candidate); err == nil {
+				return parsed, true
+			}
+		}
+	}
+
+	layoutsWithoutZone := []string{
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layoutsWithoutZone {
+		if parsed, err := time.ParseInLocation(layout, text, time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
+}
+
 func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if o.conn == nil {
 		return fmt.Errorf("连接未打开")
 	}
+
+	columnTypeMap := o.loadColumnTypeMap(tableName)
 
 	tx, err := o.conn.Begin()
 	if err != nil {
@@ -432,7 +539,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		for k, v := range pk {
 			idx++
 			wheres = append(wheres, fmt.Sprintf("%s = :%d", quoteIdent(k), idx))
-			args = append(args, v)
+			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
 		}
 		if len(wheres) == 0 {
 			continue
@@ -452,7 +559,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		for k, v := range update.Values {
 			idx++
 			sets = append(sets, fmt.Sprintf("%s = :%d", quoteIdent(k), idx))
-			args = append(args, v)
+			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
 		}
 
 		if len(sets) == 0 {
@@ -463,7 +570,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		for k, v := range update.Keys {
 			idx++
 			wheres = append(wheres, fmt.Sprintf("%s = :%d", quoteIdent(k), idx))
-			args = append(args, v)
+			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
 		}
 
 		if len(wheres) == 0 {
@@ -487,7 +594,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 			idx++
 			cols = append(cols, quoteIdent(k))
 			placeholders = append(placeholders, fmt.Sprintf(":%d", idx))
-			args = append(args, v)
+			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
 		}
 
 		if len(cols) == 0 {

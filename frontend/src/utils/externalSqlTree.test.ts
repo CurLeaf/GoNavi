@@ -41,6 +41,7 @@ describe('externalSqlTree helpers', () => {
     });
 
     expect(node.type).toBe('external-sql-root');
+    expect(node.title).toBe('外部 SQL 目录 (1)');
     expect(node.children).toHaveLength(1);
     expect(node.children?.[0]).toMatchObject({
       title: 'scripts',

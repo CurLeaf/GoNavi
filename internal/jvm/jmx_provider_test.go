@@ -287,6 +287,10 @@ func TestJMXProviderRealJMXRoundTrip(t *testing.T) {
 	}
 
 	provider := NewJMXProvider()
+	monitoringProvider, ok := provider.(MonitoringCapableProvider)
+	if !ok {
+		t.Fatal("expected JMX provider to implement monitoring snapshots")
+	}
 	fixture := startJMXFixture(t)
 	readOnly := false
 	cfg := connection.ConnectionConfig{
@@ -335,13 +339,309 @@ func TestJMXProviderRealJMXRoundTrip(t *testing.T) {
 	}
 	mbean := mbeans[0]
 
+	blockedDomainPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:   jmxResourceKindDomain,
+		Domain: "java.lang",
+	})
+	_, err = provider.ListResources(context.Background(), cfg, blockedDomainPath)
+	if err == nil {
+		t.Fatal("expected list on blocked domain to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain list context, got %v", err)
+	}
+
+	_, err = provider.GetValue(context.Background(), cfg, blockedDomainPath)
+	if err == nil {
+		t.Fatal("expected get on blocked domain to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain get context, got %v", err)
+	}
+
+	blockedMBeanPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindMBean,
+		ObjectName: "java.lang:type=Memory",
+	})
+	_, err = provider.ListResources(context.Background(), cfg, blockedMBeanPath)
+	if err == nil {
+		t.Fatal("expected list on blocked domain mbean to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain mbean list context, got %v", err)
+	}
+
+	_, err = provider.GetValue(context.Background(), cfg, blockedMBeanPath)
+	if err == nil {
+		t.Fatal("expected direct mbean get on blocked domain to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain mbean get context, got %v", err)
+	}
+
+	blockedAttributePath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindAttribute,
+		ObjectName: "java.lang:type=Memory",
+		Attribute:  "HeapMemoryUsage",
+	})
+	_, err = provider.GetValue(context.Background(), cfg, blockedAttributePath)
+	if err == nil {
+		t.Fatal("expected direct attribute get on blocked domain to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain attribute get context, got %v", err)
+	}
+
+	blockedOperationPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindOperation,
+		ObjectName: "java.lang:type=Memory",
+		Operation:  "gc",
+	})
+	_, err = provider.GetValue(context.Background(), cfg, blockedOperationPath)
+	if err == nil {
+		t.Fatal("expected direct operation get on blocked domain to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain operation get context, got %v", err)
+	}
+
+	_, err = provider.PreviewChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   blockedOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试跨域操作预览",
+	})
+	if err == nil {
+		t.Fatal("expected preview on blocked domain operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain operation preview context, got %v", err)
+	}
+
+	_, err = provider.ApplyChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   blockedOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试跨域操作调用",
+	})
+	if err == nil {
+		t.Fatal("expected apply on blocked domain operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain operation apply context, got %v", err)
+	}
+
+	_, err = provider.PreviewChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   blockedAttributePath,
+		Action:       "update",
+		Reason:       "尝试跨域属性预览",
+		Payload: map[string]any{
+			"value": "blocked",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preview on blocked domain attribute to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain attribute preview context, got %v", err)
+	}
+
+	_, err = provider.ApplyChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   blockedAttributePath,
+		Action:       "update",
+		Reason:       "尝试跨域属性修改",
+		Payload: map[string]any{
+			"value": "blocked",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected apply on blocked domain attribute to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain attribute apply context, got %v", err)
+	}
+
+	defaultDomainMBeanPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindMBean,
+		ObjectName: ":type=CacheSettings,name=DefaultDomainCache",
+	})
+	_, err = provider.ListResources(context.Background(), cfg, defaultDomainMBeanPath)
+	if err == nil {
+		t.Fatal("expected list on default domain alias mbean to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain") {
+		t.Fatalf("expected default domain alias mbean list context, got %v", err)
+	}
+
+	defaultDomainAttributePath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindAttribute,
+		ObjectName: ":type=CacheSettings,name=DefaultDomainCache",
+		Attribute:  "Mode",
+	})
+	_, err = provider.GetValue(context.Background(), cfg, defaultDomainAttributePath)
+	if err == nil {
+		t.Fatal("expected get on default domain alias attribute to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain") {
+		t.Fatalf("expected default domain alias attribute get context, got %v", err)
+	}
+
+	defaultDomainOperationPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindOperation,
+		ObjectName: ":type=CacheSettings,name=DefaultDomainCache",
+		Operation:  "resize",
+		Signature:  []string{"int", "boolean"},
+	})
+	_, err = provider.PreviewChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   defaultDomainOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试默认域别名操作预览",
+		Payload: map[string]any{
+			"args": []any{3, true},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preview on default domain alias operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain") {
+		t.Fatalf("expected default domain alias operation preview context, got %v", err)
+	}
+
+	_, err = provider.ApplyChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   defaultDomainOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试默认域别名操作调用",
+		Payload: map[string]any{
+			"args": []any{3, true},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected apply on default domain alias operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain") {
+		t.Fatalf("expected default domain alias operation apply context, got %v", err)
+	}
+
+	whitespaceDomainMBeanPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindMBean,
+		ObjectName: "com.gonavi.fixture :type=CacheSettings,name=WhitespaceDomainCache",
+	})
+	_, err = provider.ListResources(context.Background(), cfg, whitespaceDomainMBeanPath)
+	if err == nil {
+		t.Fatal("expected list on whitespace-suffixed domain mbean to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "com.gonavi.fixture") {
+		t.Fatalf("expected whitespace-suffixed domain mbean list context, got %v", err)
+	}
+
+	whitespaceDomainAttributePath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindAttribute,
+		ObjectName: "com.gonavi.fixture :type=CacheSettings,name=WhitespaceDomainCache",
+		Attribute:  "Mode",
+	})
+	_, err = provider.GetValue(context.Background(), cfg, whitespaceDomainAttributePath)
+	if err == nil {
+		t.Fatal("expected get on whitespace-suffixed domain attribute to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "com.gonavi.fixture") {
+		t.Fatalf("expected whitespace-suffixed domain attribute get context, got %v", err)
+	}
+
+	whitespaceDomainOperationPath := buildJMXResourcePath(jmxResourceTarget{
+		Kind:       jmxResourceKindOperation,
+		ObjectName: "com.gonavi.fixture :type=CacheSettings,name=WhitespaceDomainCache",
+		Operation:  "resize",
+		Signature:  []string{"int", "boolean"},
+	})
+	_, err = provider.PreviewChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   whitespaceDomainOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试空白后缀域操作预览",
+		Payload: map[string]any{
+			"args": []any{4, true},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected preview on whitespace-suffixed domain operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "com.gonavi.fixture") {
+		t.Fatalf("expected whitespace-suffixed domain operation preview context, got %v", err)
+	}
+
+	_, err = provider.ApplyChange(context.Background(), cfg, ChangeRequest{
+		ProviderMode: ModeJMX,
+		ResourceID:   whitespaceDomainOperationPath,
+		Action:       "invoke",
+		Reason:       "尝试空白后缀域操作调用",
+		Payload: map[string]any{
+			"args": []any{4, true},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected apply on whitespace-suffixed domain operation to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "com.gonavi.fixture") {
+		t.Fatalf("expected whitespace-suffixed domain operation apply context, got %v", err)
+	}
+
+	_, err = monitoringProvider.GetMonitoringSnapshot(context.Background(), cfg, nil)
+	if err == nil {
+		t.Fatal("expected monitor on blocked domain allowlist to fail")
+	}
+	if got := err.Error(); !containsAll(got, "domain", "java.lang") {
+		t.Fatalf("expected blocked domain monitor context, got %v", err)
+	}
+
+	monitoringCfg := cfg
+	monitoringCfg.JVM.JMX.DomainAllowlist = []string{"com.gonavi.fixture", "java.lang"}
+	monitoringSnapshot, err := monitoringProvider.GetMonitoringSnapshot(context.Background(), monitoringCfg, nil)
+	if err != nil {
+		t.Fatalf("expected monitor with java.lang allowlist to succeed: %v", err)
+	}
+	if monitoringSnapshot.Point.Timestamp <= 0 {
+		t.Fatalf("unexpected monitor snapshot point: %#v", monitoringSnapshot.Point)
+	}
+
 	children, err := provider.ListResources(context.Background(), cfg, mbean.Path)
 	if err != nil {
 		t.Fatalf("ListResources(mbean) returned error: %v", err)
 	}
 	modeAttr := findResourceByName(t, children, "Mode")
+	passwordAttr := findResourceByName(t, children, "Password")
+	apiKeyAttr := findResourceByName(t, children, "ApiKey")
 	lastInvocationAttr := findResourceByName(t, children, "LastInvocation")
 	resizeOp := findResourceByName(t, children, "resize(int,boolean)")
+
+	passwordSnapshot, err := provider.GetValue(context.Background(), cfg, passwordAttr.Path)
+	if err != nil {
+		t.Fatalf("GetValue(password) returned error: %v", err)
+	}
+	if !passwordSnapshot.Sensitive {
+		t.Fatalf("expected password snapshot to be sensitive: %#v", passwordSnapshot)
+	}
+	for _, action := range passwordSnapshot.SupportedActions {
+		if payloadValue, ok := action.PayloadExample["value"]; ok && payloadValue == "secret-token" {
+			t.Fatalf("sensitive payload example leaked raw password: %#v", action.PayloadExample)
+		}
+	}
+
+	apiKeySnapshot, err := provider.GetValue(context.Background(), cfg, apiKeyAttr.Path)
+	if err != nil {
+		t.Fatalf("GetValue(api key) returned error: %v", err)
+	}
+	if !apiKeySnapshot.Sensitive {
+		t.Fatalf("expected api key snapshot to be sensitive: %#v", apiKeySnapshot)
+	}
+	for _, action := range apiKeySnapshot.SupportedActions {
+		if payloadValue, ok := action.PayloadExample["value"]; ok && payloadValue == "api-key-secret" {
+			t.Fatalf("sensitive payload example leaked raw api key: %#v", action.PayloadExample)
+		}
+	}
 
 	modeBefore, err := provider.GetValue(context.Background(), cfg, modeAttr.Path)
 	if err != nil {

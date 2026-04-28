@@ -96,6 +96,29 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 	return connection.QueryResult{Success: true, Data: string(content)}
 }
 
+func writeSQLFileByPath(filePath string, content string) connection.QueryResult {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+	if info.IsDir() {
+		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+	}
+
+	if err := os.WriteFile(target, []byte(content), info.Mode().Perm()); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法写入 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
+}
+
 func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -213,6 +236,10 @@ func (a *App) ListSQLDirectory(directory string) connection.QueryResult {
 
 func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
 	return readSQLFileByPath(filePath)
+}
+
+func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
+	return writeSQLFileByPath(filePath, content)
 }
 
 // ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
@@ -1328,6 +1355,12 @@ func quoteIdentByType(dbType string, ident string) string {
 	switch dbType {
 	case "mysql", "mariadb", "diros", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
+	case "kingbase":
+		cleaned := db.NormalizeKingbaseIdentifier(ident)
+		if cleaned == "" {
+			return `""`
+		}
+		return `"` + strings.ReplaceAll(cleaned, `"`, `""`) + `"`
 	case "sqlserver":
 		escaped := strings.ReplaceAll(ident, "]", "]]")
 		return "[" + escaped + "]"
@@ -1340,6 +1373,17 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 	raw := strings.TrimSpace(ident)
 	if raw == "" {
 		return raw
+	}
+
+	if dbType == "kingbase" {
+		schema, table := db.SplitKingbaseQualifiedName(raw)
+		if table == "" {
+			return quoteIdentByType(dbType, raw)
+		}
+		if schema == "" {
+			return quoteIdentByType(dbType, table)
+		}
+		return quoteIdentByType(dbType, schema) + "." + quoteIdentByType(dbType, table)
 	}
 
 	parts := strings.Split(raw, ".")
@@ -1617,8 +1661,8 @@ func tryGetViewCreateStatement(
 			continue
 		}
 		if looksLikeSelectOrWith(createSQL) {
-			qualifiedView := qualifyTable(schemaName, viewName)
-			createSQL = fmt.Sprintf("CREATE VIEW %s AS %s", quoteQualifiedIdentByType(config.Type, qualifiedView), strings.TrimSuffix(strings.TrimSpace(createSQL), ";"))
+			dbType := resolveDDLDBType(config)
+			createSQL = fmt.Sprintf("CREATE VIEW %s AS %s", quoteTableIdentByType(dbType, schemaName, viewName), strings.TrimSuffix(strings.TrimSpace(createSQL), ";"))
 		}
 		return ensureSQLTerminator(createSQL), true
 	}

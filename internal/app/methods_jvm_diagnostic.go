@@ -13,6 +13,7 @@ import (
 )
 
 var newJVMDiagnosticTransport = jvm.NewDiagnosticTransport
+var emitJVMDiagnosticRuntimeEvent = runtime.EventsEmit
 
 const diagnosticChunkEvent = "jvm:diagnostic:chunk"
 
@@ -81,6 +82,8 @@ func (a *App) JVMExecuteDiagnosticCommand(cfg connection.ConnectionConfig, tabID
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
+	redactor := jvm.NewDiagnosticOutputRedactor()
+
 	req.SessionID = strings.TrimSpace(req.SessionID)
 	req.CommandID = strings.TrimSpace(req.CommandID)
 	req.Command = strings.TrimSpace(req.Command)
@@ -100,9 +103,10 @@ func (a *App) JVMExecuteDiagnosticCommand(cfg connection.ConnectionConfig, tabID
 		req.Source = "manual"
 	}
 
-	commandType, err := jvm.ValidateDiagnosticCommandPolicy(normalized.JVM.Diagnostic, req.Command)
+	commandType, err := jvm.ValidateDiagnosticExecutionPolicy(normalized, req.Command)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		message := redactor.RedactContent(req.SessionID, req.CommandID, err.Error())
+		return connection.QueryResult{Success: false, Message: message}
 	}
 	riskLevel := diagnosticRiskLevel(commandType)
 	auditStore := jvm.NewDiagnosticAuditStore(filepath.Join(a.auditRootDir(), "jvm_diag_audit.jsonl"))
@@ -120,7 +124,7 @@ func (a *App) JVMExecuteDiagnosticCommand(cfg connection.ConnectionConfig, tabID
 		RiskLevel:    riskLevel,
 		Status:       "running",
 	}); err != nil {
-		auditWarnings = append(auditWarnings, "审计记录写入失败: "+err.Error())
+		return connection.QueryResult{Success: false, Message: "诊断审计记录写入失败，已阻止命令执行: " + err.Error()}
 	}
 
 	terminalSeen := false
@@ -150,12 +154,9 @@ func (a *App) JVMExecuteDiagnosticCommand(cfg connection.ConnectionConfig, tabID
 			if chunk.Timestamp == 0 {
 				chunk.Timestamp = time.Now().UnixMilli()
 			}
-			if strings.TrimSpace(chunk.SessionID) == "" {
-				chunk.SessionID = req.SessionID
-			}
-			if strings.TrimSpace(chunk.CommandID) == "" {
-				chunk.CommandID = req.CommandID
-			}
+			chunk.SessionID = req.SessionID
+			chunk.CommandID = req.CommandID
+			chunk = redactor.RedactChunk(chunk)
 			a.emitDiagnosticChunk(tabID, chunk)
 			if isDiagnosticTerminalPhase(chunk.Phase) {
 				appendTerminalAudit(chunk.Phase)
@@ -168,19 +169,20 @@ func (a *App) JVMExecuteDiagnosticCommand(cfg connection.ConnectionConfig, tabID
 		if strings.Contains(strings.ToLower(err.Error()), "canceled") {
 			phase = "canceled"
 		}
+		redactedError := redactor.RedactContent(req.SessionID, req.CommandID, err.Error())
 		if !terminalSeen {
 			chunk := jvm.DiagnosticEventChunk{
 				SessionID: req.SessionID,
 				CommandID: req.CommandID,
 				Event:     "diagnostic",
 				Phase:     phase,
-				Content:   err.Error(),
+				Content:   redactedError,
 				Timestamp: time.Now().UnixMilli(),
 			}
 			a.emitDiagnosticChunk(tabID, chunk)
 			appendTerminalAudit(phase)
 		}
-		return connection.QueryResult{Success: false, Message: joinDiagnosticMessages(err.Error(), auditWarnings)}
+		return connection.QueryResult{Success: false, Message: joinDiagnosticMessages(redactedError, auditWarnings)}
 	}
 
 	if !terminalSeen {
@@ -253,7 +255,7 @@ func (a *App) emitDiagnosticChunk(tabID string, chunk jvm.DiagnosticEventChunk) 
 	if a.ctx == nil {
 		return
 	}
-	runtime.EventsEmit(a.ctx, diagnosticChunkEvent, diagnosticChunkEventPayload{
+	emitJVMDiagnosticRuntimeEvent(a.ctx, diagnosticChunkEvent, diagnosticChunkEventPayload{
 		TabID: strings.TrimSpace(tabID),
 		Chunk: chunk,
 	})

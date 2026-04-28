@@ -2,6 +2,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 export type ShortcutAction =
   | 'runQuery'
+  | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
   | 'toggleLogPanel'
@@ -20,6 +21,10 @@ export interface ShortcutActionMeta {
   label: string;
   description: string;
   allowInEditable?: boolean;
+  allowWithoutModifier?: boolean;
+  scope?: 'global' | 'aiComposer';
+  requiredKey?: string;
+  disallowShift?: boolean;
   platformOnly?: 'mac';
 }
 
@@ -73,6 +78,7 @@ const KEY_ALIASES: Record<string, string> = {
 
 export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
+  'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
   'toggleLogPanel',
@@ -85,6 +91,15 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
   runQuery: {
     label: '执行 SQL',
     description: '在当前查询页执行 SQL',
+  },
+  sendAIChatMessage: {
+    label: 'AI 聊天发送',
+    description: '在 AI 输入框中发送当前消息，Shift+Enter 始终换行',
+    allowInEditable: true,
+    allowWithoutModifier: true,
+    scope: 'aiComposer',
+    requiredKey: 'Enter',
+    disallowShift: true,
   },
   focusSidebarSearch: {
     label: '聚焦侧边栏搜索',
@@ -117,6 +132,7 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   runQuery: { combo: 'Ctrl+Shift+R', enabled: true },
+  sendAIChatMessage: { combo: 'Enter', enabled: true },
   focusSidebarSearch: { combo: 'Ctrl+F', enabled: true },
   newQueryTab: { combo: 'Ctrl+Shift+N', enabled: true },
   toggleLogPanel: { combo: 'Ctrl+Shift+L', enabled: true },
@@ -213,6 +229,37 @@ export const hasModifierKey = (combo: string): boolean => {
   return normalized.split('+').some(part => MODIFIER_SET.has(part as typeof MODIFIER_ORDER[number]));
 };
 
+const getShortcutKeyToken = (combo: string): string => {
+  const parts = normalizeShortcutCombo(combo).split('+').filter(Boolean);
+  const key = parts[parts.length - 1] || '';
+  return MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number]) ? '' : key;
+};
+
+const getShortcutModifierTokens = (combo: string): string[] => (
+  normalizeShortcutCombo(combo)
+    .split('+')
+    .filter(part => MODIFIER_SET.has(part as typeof MODIFIER_ORDER[number]))
+);
+
+export const canRecordShortcutForAction = (action: ShortcutAction, combo: string): boolean => {
+  const normalized = normalizeShortcutCombo(combo);
+  if (!normalized || !getShortcutKeyToken(normalized)) {
+    return false;
+  }
+
+  const meta = SHORTCUT_ACTION_META[action];
+  if (meta.requiredKey && getShortcutKeyToken(normalized) !== normalizeShortcutCombo(meta.requiredKey)) {
+    return false;
+  }
+  if (meta.disallowShift && normalized.split('+').includes('Shift')) {
+    return false;
+  }
+  if (meta.allowWithoutModifier) {
+    return getShortcutModifierTokens(normalized).length <= 1;
+  }
+  return hasModifierKey(normalized);
+};
+
 export const cloneShortcutOptions = (value: ShortcutOptions): ShortcutOptions => {
   return SHORTCUT_ACTION_ORDER.reduce((acc, action) => {
     acc[action] = {
@@ -235,7 +282,7 @@ export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
     const binding = actionRaw as Record<string, unknown>;
     const combo = normalizeShortcutCombo(String(binding.combo || defaults[action].combo));
     defaults[action] = {
-      combo: combo || defaults[action].combo,
+      combo: combo && canRecordShortcutForAction(action, combo) ? combo : defaults[action].combo,
       enabled: binding.enabled === false ? false : true,
     };
   });

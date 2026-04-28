@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildJVMActionPayloadTemplate,
+  buildJVMPreviewApplyRequest,
   estimateJVMResourceEditorHeight,
   formatJVMAuditResultLabel,
   formatJVMActionSummary,
+  formatJVMMetadataForDisplay,
   formatJVMRiskLevelText,
+  formatJVMValueForDisplay,
   resolveJVMAuditResultColor,
   resolveJVMActionDisplay,
   resolveJVMValueEditorLanguage,
@@ -66,6 +70,121 @@ describe("jvmResourcePresentation", () => {
     expect(resolveJVMValueEditorLanguage("string", "cache-enabled")).toBe(
       "plaintext",
     );
+  });
+
+  it("masks sensitive JVM snapshot values for display", () => {
+    expect(
+      formatJVMValueForDisplay({
+        resourceId: "jmx:/attribute/app/Password",
+        kind: "attribute",
+        format: "string",
+        value: "secret-token",
+        sensitive: true,
+      }),
+    ).toBe("********");
+    expect(
+      formatJVMValueForDisplay({
+        resourceId: "jmx:/attribute/app/State",
+        kind: "attribute",
+        format: "json",
+        value: { state: "READY" },
+      }),
+    ).toBe(JSON.stringify({ state: "READY" }, null, 2));
+  });
+
+  it("masks sensitive JVM snapshot metadata for display", () => {
+    expect(
+      formatJVMMetadataForDisplay({
+        metadata: { token: "secret-token" },
+        sensitive: true,
+      }),
+    ).toBe("********");
+    expect(
+      formatJVMMetadataForDisplay({
+        metadata: { owner: "orders" },
+      }),
+    ).toBe(JSON.stringify({ owner: "orders" }, null, 2));
+  });
+
+  it("masks sensitive action payload examples", () => {
+    expect(
+      buildJVMActionPayloadTemplate(
+        {
+          action: "set",
+          payloadExample: { value: "secret-token" },
+        },
+        true,
+      ),
+    ).toBe("{\n  \n}");
+  });
+
+  it("builds apply requests from the previewed request and confirmation token", () => {
+    const previewedRequest = {
+      providerMode: "jmx" as const,
+      resourceId: "jmx:/attribute/app/Mode",
+      action: "set",
+      reason: "修复运行模式",
+      source: "manual" as const,
+      expectedVersion: "v1",
+      payload: { value: "warm" },
+    };
+
+    expect(
+      buildJVMPreviewApplyRequest(previewedRequest, {
+        allowed: true,
+        requiresConfirmation: true,
+        confirmationToken: "token-from-preview",
+        summary: "设置 Mode",
+        riskLevel: "high",
+        before: {
+          resourceId: "jmx:/attribute/app/Mode",
+          kind: "attribute",
+          format: "string",
+          value: "cold",
+        },
+        after: {
+          resourceId: "jmx:/attribute/app/Mode",
+          kind: "attribute",
+          format: "string",
+          value: "warm",
+        },
+      }),
+    ).toEqual({
+      ...previewedRequest,
+      confirmationToken: "token-from-preview",
+    });
+  });
+
+  it("rejects confirmed apply requests when preview token is missing", () => {
+    expect(() =>
+      buildJVMPreviewApplyRequest(
+        {
+          providerMode: "jmx",
+          resourceId: "jmx:/attribute/app/Mode",
+          action: "set",
+          reason: "修复运行模式",
+          payload: { value: "warm" },
+        },
+        {
+          allowed: true,
+          requiresConfirmation: true,
+          summary: "设置 Mode",
+          riskLevel: "high",
+          before: {
+            resourceId: "jmx:/attribute/app/Mode",
+            kind: "attribute",
+            format: "string",
+            value: "cold",
+          },
+          after: {
+            resourceId: "jmx:/attribute/app/Mode",
+            kind: "attribute",
+            format: "string",
+            value: "warm",
+          },
+        },
+      ),
+    ).toThrow("确认令牌缺失");
   });
 
   it("caps editor height for very long payloads while keeping short content compact", () => {
