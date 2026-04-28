@@ -1,4 +1,5 @@
 import type { JVMActionDefinition, JVMChangeRequest, JVMAIPlanContext, JVMValueSnapshot, TabData } from '../types';
+import { JVM_SENSITIVE_VALUE_MASK } from './jvmResourcePresentation';
 
 export type JVMAIChangePlan = {
   targetType: 'cacheEntry' | 'managedBean' | 'attribute' | 'operation';
@@ -105,6 +106,9 @@ const normalizePlan = (value: unknown): JVMAIChangePlan | null => {
 const formatSnapshotValue = (snapshot?: JVMValueSnapshot | null): string => {
   if (!snapshot) {
     return '当前资源快照尚未加载成功。';
+  }
+  if (snapshot.sensitive) {
+    return JVM_SENSITIVE_VALUE_MASK;
   }
   if (typeof snapshot.value === 'string') {
     return snapshot.value;

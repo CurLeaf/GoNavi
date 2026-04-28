@@ -237,6 +237,7 @@ export interface JVMValueSnapshot {
 export interface JVMChangePreview {
   allowed: boolean;
   requiresConfirmation?: boolean;
+  confirmationToken?: string;
   summary: string;
   riskLevel: "low" | "medium" | "high";
   blockingReason?: string;
@@ -251,6 +252,7 @@ export interface JVMChangeRequest {
   reason: string;
   source?: "manual" | "ai-plan";
   expectedVersion?: string;
+  confirmationToken?: string;
   payload?: Record<string, any>;
 }
 

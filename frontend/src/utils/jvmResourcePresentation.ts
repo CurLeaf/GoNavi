@@ -1,4 +1,9 @@
-import type { JVMActionDefinition } from "../types";
+import type {
+  JVMActionDefinition,
+  JVMChangePreview,
+  JVMChangeRequest,
+  JVMValueSnapshot,
+} from "../types";
 
 type JVMActionDisplay = {
   action: string;
@@ -189,6 +194,69 @@ export const formatJVMAuditResultLabel = (value?: string | null): string => {
     return "失败";
   }
   return normalizeText(value);
+};
+
+export const JVM_SENSITIVE_VALUE_MASK = "********";
+export const JVM_DEFAULT_PAYLOAD_TEMPLATE = "{\n  \n}";
+
+const formatRawJVMValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+export const formatJVMValueForDisplay = (
+  snapshot?: JVMValueSnapshot | null,
+): string => {
+  if (snapshot?.sensitive) {
+    return JVM_SENSITIVE_VALUE_MASK;
+  }
+  return formatRawJVMValue(snapshot?.value);
+};
+
+export const formatJVMMetadataForDisplay = (
+  snapshot?: Pick<JVMValueSnapshot, "metadata" | "sensitive"> | null,
+): string => {
+  if (!snapshot?.metadata || Object.keys(snapshot.metadata).length === 0) {
+    return "";
+  }
+  if (snapshot.sensitive) {
+    return JVM_SENSITIVE_VALUE_MASK;
+  }
+  return formatRawJVMValue(snapshot.metadata);
+};
+
+export const buildJVMActionPayloadTemplate = (
+  definition?: JVMActionDefinition | null,
+  sensitive = false,
+): string => {
+  if (sensitive || !definition?.payloadExample) {
+    return JVM_DEFAULT_PAYLOAD_TEMPLATE;
+  }
+  try {
+    return JSON.stringify(definition.payloadExample, null, 2);
+  } catch {
+    return JVM_DEFAULT_PAYLOAD_TEMPLATE;
+  }
+};
+
+export const buildJVMPreviewApplyRequest = (
+  previewRequest: JVMChangeRequest,
+  preview: JVMChangePreview,
+): JVMChangeRequest => {
+  const confirmationToken = String(preview.confirmationToken || "").trim();
+  if (preview.requiresConfirmation && !confirmationToken) {
+    throw new Error("确认令牌缺失，请重新预览后再执行");
+  }
+  return {
+    ...previewRequest,
+    confirmationToken: confirmationToken || undefined,
+  };
 };
 
 export const resolveJVMValueEditorLanguage = (
