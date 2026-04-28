@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID } from '../../wailsjs/go/app/App';
+import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { convertMongoShellToJsonCommand } from '../utils/mongodb';
@@ -2204,7 +2204,31 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return saved;
   };
 
-  const handleQuickSave = () => {
+  const handleQuickSave = async () => {
+      const filePath = String(tab.filePath || '').trim();
+      if (filePath) {
+          const sql = getCurrentQuery();
+          try {
+              const res = await WriteSQLFile(filePath, sql);
+              if (!res.success) {
+                  message.error('保存 SQL 文件失败: ' + (res.message || '未知错误'));
+                  return;
+              }
+              addTab({
+                  ...tab,
+                  query: sql,
+                  connectionId: currentConnectionId,
+                  dbName: currentDb || tab.dbName || '',
+                  filePath,
+                  savedQueryId: undefined,
+              });
+              message.success('SQL 文件已保存！');
+          } catch (error) {
+              message.error('保存 SQL 文件失败: ' + (error instanceof Error ? error.message : String(error)));
+          }
+          return;
+      }
+
       const existed = currentSavedQuery || null;
       const fallbackSavedId = String(tab.savedQueryId || '').trim();
       const saveId = existed?.id || fallbackSavedId || '';

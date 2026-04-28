@@ -279,3 +279,5 @@ export function TestConnection(arg1:connection.ConnectionConfig):Promise<connect
 export function TestJVMConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function TruncateTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
+
+export function WriteSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;

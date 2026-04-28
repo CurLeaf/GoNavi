@@ -117,7 +117,7 @@ export const buildExternalSQLRootNode = ({
   });
 
   return {
-    title: children.length > 0 ? `外部 SQL 文件 (${children.length})` : '外部 SQL 文件',
+    title: children.length > 0 ? `外部 SQL 目录 (${children.length})` : '外部 SQL 目录',
     key: `${dbNodeKey}-external-sql`,
     type: 'external-sql-root',
     isLeaf: children.length === 0,

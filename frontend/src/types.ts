@@ -407,6 +407,7 @@ export interface TabData {
   dbName?: string;
   tableName?: string;
   query?: string;
+  filePath?: string;
   initialTab?: string;
   readOnly?: boolean;
   providerMode?: "jmx" | "endpoint" | "agent";

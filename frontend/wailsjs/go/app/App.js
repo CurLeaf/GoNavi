@@ -549,3 +549,7 @@ export function TestJVMConnection(arg1) {
 export function TruncateTables(arg1, arg2, arg3) {
   return window['go']['app']['App']['TruncateTables'](arg1, arg2, arg3);
 }
+
+export function WriteSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['WriteSQLFile'](arg1, arg2);
+}

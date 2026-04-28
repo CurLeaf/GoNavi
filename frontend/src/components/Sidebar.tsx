@@ -2411,6 +2411,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           connectionId,
           dbName,
           query: String(data || ''),
+          filePath,
       });
   };
 
@@ -4211,6 +4212,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                     size="small"
                     type="text"
                     icon={<PlusOutlined />}
+                    title="添加外部 SQL 目录"
+                    aria-label="添加外部 SQL 目录"
                     onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
