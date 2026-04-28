@@ -1,10 +1,10 @@
 // cspell:ignore anticon sqls uuidv uuidv4 hscroll
-import React, { useState, useEffect, useRef, useContext, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useContext, useMemo, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker, AutoComplete } from 'antd';
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { 
     DndContext, 
@@ -23,7 +23,7 @@ import {
     arrayMove 
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns, DBGetIndexes } from '../../wailsjs/go/app/App';
+import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns, DBGetIndexes, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
 import type { ColumnDefinition, IndexDefinition } from '../types';
@@ -68,6 +68,17 @@ import {
     resolveWhereConditionSuggestions,
     validateQuickWhereCondition,
 } from '../utils/dataGridWhereFilter';
+import {
+    attachDataGridFindRenderVersion,
+    collectDataGridFindMatches,
+    findDataGridTextRanges,
+    hasDataGridFindRenderVersionChanged,
+    normalizeDataGridFindQuery,
+    resolveDataGridFindNavigationIndex,
+    summarizeDataGridFindMatches,
+    type DataGridFindMatch,
+    type DataGridFindNavigationDirection,
+} from '../utils/dataGridFind';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -185,9 +196,9 @@ const normalizeDateTimeString = (val: string) => {
 };
 
 // --- Helper: Format Value ---
-const formatCellValue = (val: any) => {
+const formatCellDisplayText = (val: any): string => {
     try {
-        if (val === null) return <span style={{ color: '#ccc' }}>NULL</span>;
+        if (val === null) return 'NULL';
         if (typeof val === 'object') {
             if (!Array.isArray(val) && !isPlainObject(val)) {
                 return String(val);
@@ -221,6 +232,38 @@ const formatCellValue = (val: any) => {
         return '[Error]';
     }
 };
+
+const renderHighlightedCellText = (text: string, query: string): React.ReactNode => {
+    const ranges = findDataGridTextRanges(text, query);
+    if (ranges.length === 0) return text;
+
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+    ranges.forEach((range, index) => {
+        if (range.start > cursor) {
+            nodes.push(text.slice(cursor, range.start));
+        }
+        nodes.push(
+            <mark key={`${range.start}-${range.end}-${index}`} className="data-grid-find-highlight">
+                {text.slice(range.start, range.end)}
+            </mark>,
+        );
+        cursor = range.end;
+    });
+    if (cursor < text.length) {
+        nodes.push(text.slice(cursor));
+    }
+    return <>{nodes}</>;
+};
+
+const renderCellDisplayValue = (val: any, query: string): React.ReactNode => {
+    const text = formatCellDisplayText(val);
+    const content = renderHighlightedCellText(text, query);
+    if (val === null) return <span style={{ color: '#ccc' }}>{content}</span>;
+    return content;
+};
+
+const formatCellValue = (val: any) => renderCellDisplayValue(val, '');
 
 const toEditableText = (val: any): string => {
     if (val === null || val === undefined) return '';
@@ -965,6 +1008,15 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [displayColumnNames, setDisplayColumnNames] = useState<string[]>([]);
   const [localHiddenColumns, setLocalHiddenColumns] = useState<string[]>([]);
   const [columnSearchText, setColumnSearchText] = useState('');
+  const [pageFindText, setPageFindText] = useState('');
+  const [activePageFindMatchIndex, setActivePageFindMatchIndex] = useState(-1);
+  const deferredPageFindText = useDeferredValue(pageFindText);
+  const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);
+
+  useEffect(() => {
+      setPageFindText('');
+      setActivePageFindMatchIndex(-1);
+  }, [connectionId, dbName, tableName]);
 
   // Sync hidden columns from store
   useEffect(() => {
@@ -1081,6 +1133,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const isQueryResultExport = exportScope === 'queryResult';
   const canImport = exportScope === 'table' && !!tableName;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
+  const canViewDdl = exportScope === 'table' && !!connectionId && !!dbName && !!tableName;
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
@@ -1192,6 +1245,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const cellEditorApplyRef = useRef<((val: string) => void) | null>(null);
   const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
   const [jsonEditorValue, setJsonEditorValue] = useState('');
+  const [ddlModalOpen, setDdlModalOpen] = useState(false);
+  const [ddlLoading, setDdlLoading] = useState(false);
+  const [ddlText, setDdlText] = useState('');
+  const ddlRequestSeqRef = useRef(0);
 
   // --- Data Preview Panel State ---
   const [dataPanelOpen, setDataPanelOpen] = useState(false);
@@ -1755,6 +1812,12 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-sticky-scroll {
                     display: none !important;
                 }
+                .${gridId} .data-grid-find-highlight {
+                    padding: 0 1px;
+                    border-radius: 3px;
+                    background: ${darkMode ? 'rgba(246, 196, 83, 0.42)' : 'rgba(255, 193, 7, 0.42)'};
+                    color: inherit;
+                }
                 /* 虚拟表列对齐：阻止 header <table> 通过 min-width:100% 拉伸到视口，
                    使 header 列宽与虚拟 body 单元格宽度精确一致 */
                 .${gridId} .ant-table-header > table {
@@ -2294,6 +2357,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       rowEditorBaseRawRef.current = {};
       rowEditorDisplayRef.current = {};
       rowEditorNullColsRef.current = new Set();
+      ddlRequestSeqRef.current += 1;
+      setDdlModalOpen(false);
+      setDdlLoading(false);
+      setDdlText('');
       rowEditorForm.resetFields();
       closeCellEditor();
       form.resetFields();
@@ -3184,6 +3251,43 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [displayData, modifiedRows]);
 
+  const pageFindMatches = useMemo(() => collectDataGridFindMatches(
+      mergedDisplayData,
+      displayColumnNames,
+      normalizedPageFindText,
+      (value) => formatCellDisplayText(value),
+      (row, rowIndex) => String(row?.[GONAVI_ROW_KEY] ?? `row-${rowIndex}`),
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText]);
+
+  const pageFindSummary = useMemo(() => summarizeDataGridFindMatches(
+      mergedDisplayData,
+      displayColumnNames,
+      normalizedPageFindText,
+      (value) => formatCellDisplayText(value),
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText]);
+
+  useEffect(() => {
+      setActivePageFindMatchIndex(-1);
+  }, [normalizedPageFindText, mergedDisplayData, displayColumnNames]);
+
+  useEffect(() => {
+      if (normalizedPageFindText) return;
+      const emptySelection = new Set<string>();
+      setSelectedCells(emptySelection);
+      currentSelectionRef.current = emptySelection;
+      selectionStartRef.current = null;
+      updateCellSelection(emptySelection);
+  }, [normalizedPageFindText, updateCellSelection]);
+
+  const activePageFindPosition = activePageFindMatchIndex >= 0 && activePageFindMatchIndex < pageFindMatches.length
+      ? activePageFindMatchIndex + 1
+      : 0;
+
+  const tableRenderData = useMemo(
+      () => attachDataGridFindRenderVersion(mergedDisplayData, normalizedPageFindText),
+      [mergedDisplayData, normalizedPageFindText]
+  );
+
   useEffect(() => {
       setTextRecordIndex(prev => {
           if (mergedDisplayData.length === 0) return 0;
@@ -3532,12 +3636,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           editable: canModifyData, // Only editable if table name known and not readonly
           render: (text: any) => (
               <div style={CELL_ELLIPSIS_STYLE}>
-                  {formatCellValue(text)}
+                  {renderCellDisplayValue(text, normalizedPageFindText)}
               </div>
           ),
           shouldCellUpdate: (record: Item, prevRecord: Item) => {
               const rowKeyChanged = record?.[GONAVI_ROW_KEY] !== prevRecord?.[GONAVI_ROW_KEY];
               if (rowKeyChanged) return true;
+              if (hasDataGridFindRenderVersionChanged(record, prevRecord)) return true;
               return !isCellValueEqualForRender(record?.[key], prevRecord?.[key]);
           },
           onHeaderCell: (column: any) => ({
@@ -3568,7 +3673,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, canModifyData, onSort, renderColumnTitle, dataTableColumnWidthMode]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, canModifyData, onSort, renderColumnTitle, dataTableColumnWidthMode, normalizedPageFindText]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -3839,6 +3944,43 @@ const DataGrid: React.FC<DataGridProps> = ({
       navigator.clipboard.writeText(text).catch(console.error);
       void message.success("Copied to clipboard");
   }, []);
+
+  const handleOpenTableDdl = useCallback(async () => {
+      if (!canViewDdl || !currentConnConfig || !tableName) {
+          void message.error('当前表缺少连接或表名，无法查看 DDL');
+          return;
+      }
+      const requestSeq = ++ddlRequestSeqRef.current;
+      setDdlModalOpen(true);
+      setDdlLoading(true);
+      setDdlText('');
+      try {
+          const res = await DBShowCreateTable(buildRpcConnectionConfig(currentConnConfig) as any, dbName || '', tableName);
+          if (requestSeq !== ddlRequestSeqRef.current) return;
+          if (res.success) {
+              setDdlText(String(res.data ?? ''));
+              return;
+          }
+          void message.error(res.message || '获取 DDL 失败');
+      } catch (error: any) {
+          if (requestSeq !== ddlRequestSeqRef.current) return;
+          void message.error(error?.message || '获取 DDL 失败');
+      } finally {
+          if (requestSeq === ddlRequestSeqRef.current) {
+              setDdlLoading(false);
+          }
+      }
+  }, [canViewDdl, currentConnConfig, dbName, tableName]);
+
+  const handleCopyDdl = useCallback(() => {
+      if (!ddlText.trim()) {
+          void message.info('暂无可复制的 DDL');
+          return;
+      }
+      navigator.clipboard.writeText(ddlText)
+          .then(() => message.success('DDL 已复制到剪贴板'))
+          .catch(() => message.error('复制 DDL 失败'));
+  }, [ddlText]);
 
   const handleCopySelectedCellsToClipboard = useCallback(() => {
       const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
@@ -4563,6 +4705,67 @@ const DataGrid: React.FC<DataGridProps> = ({
       const body = tableContainer.querySelector('.ant-table-body') as HTMLElement | null;
       return virtualHolder || rcVirtualHolder || body;
   }, []);
+
+  const focusPageFindMatch = useCallback((match: DataGridFindMatch) => {
+      if (!match) return;
+      const nextSelection = new Set([makeCellKey(match.rowKey, match.columnName)]);
+      setSelectedCells(nextSelection);
+      currentSelectionRef.current = nextSelection;
+      selectionStartRef.current = {
+          rowKey: match.rowKey,
+          colName: match.columnName,
+          rowIndex: match.rowIndex,
+          colIndex: match.columnIndex,
+      };
+
+      const targetRow = mergedDisplayData[match.rowIndex] || mergedDisplayData.find((row) => {
+          const rowKey = row?.[GONAVI_ROW_KEY];
+          return rowKey !== undefined && rowKey !== null && rowKeyStr(rowKey) === match.rowKey;
+      });
+      if (targetRow && dataPanelOpenRef.current) {
+          updateFocusedCell(targetRow, match.columnName);
+      }
+
+      const applyVisibleFocus = () => {
+          const root = containerRef.current;
+          if (!root) return false;
+          const cell = Array.from(root.querySelectorAll('.ant-table-cell[data-row-key][data-col-name]')).find((node) => {
+              const el = node as HTMLElement;
+              return el.getAttribute('data-row-key') === match.rowKey && el.getAttribute('data-col-name') === match.columnName;
+          }) as HTMLElement | undefined;
+          updateCellSelection(nextSelection);
+          if (!cell) return false;
+          cell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          return true;
+      };
+
+      if (applyVisibleFocus()) return;
+
+      const tableContainer = tableContainerRef.current;
+      if (tableContainer instanceof HTMLElement) {
+          const verticalTarget = pickVerticalScrollTarget(tableContainer);
+          if (verticalTarget) {
+              const firstCell = tableContainer.querySelector('.ant-table-cell[data-row-key]') as HTMLElement | null;
+              const rowHeight = Math.max(24, Math.ceil(firstCell?.getBoundingClientRect().height || 38));
+              verticalTarget.scrollTop = Math.max(0, (match.rowIndex - 1) * rowHeight);
+          }
+      }
+
+      requestAnimationFrame(() => {
+          if (applyVisibleFocus()) return;
+          requestAnimationFrame(() => {
+              applyVisibleFocus();
+          });
+      });
+  }, [mergedDisplayData, pickVerticalScrollTarget, rowKeyStr, updateCellSelection, updateFocusedCell]);
+
+  const handleNavigatePageFind = useCallback((direction: DataGridFindNavigationDirection) => {
+      const nextIndex = resolveDataGridFindNavigationIndex(activePageFindMatchIndex, pageFindMatches.length, direction);
+      if (nextIndex < 0) return;
+      setActivePageFindMatchIndex(nextIndex);
+      const match = pageFindMatches[nextIndex];
+      if (match) focusPageFindMatch(match);
+  }, [activePageFindMatchIndex, pageFindMatches, focusPageFindMatch]);
 
   const syncExternalScrollFromTargets = useCallback((targets?: HTMLElement[], source?: HTMLElement | null) => {
       const externalScroll = externalHorizontalScrollRef.current;
@@ -5619,6 +5822,39 @@ const DataGrid: React.FC<DataGridProps> = ({
                 />
             )}
         </Modal>
+        <Modal
+            title={tableName ? `DDL - ${tableName}` : 'DDL'}
+            open={ddlModalOpen}
+            onCancel={() => setDdlModalOpen(false)}
+            destroyOnHidden
+            width={960}
+            footer={[
+                <Button key="copy" icon={<CopyOutlined />} onClick={handleCopyDdl} disabled={!ddlText.trim()}>
+                    复制 DDL
+                </Button>,
+                <Button key="close" type="primary" onClick={() => setDdlModalOpen(false)}>
+                    关闭
+                </Button>,
+            ]}
+        >
+            {ddlModalOpen && (
+                <Editor
+                    height="56vh"
+                    language="sql"
+                    theme={darkMode ? "transparent-dark" : "transparent-light"}
+                    value={ddlLoading ? '正在加载 DDL...' : ddlText}
+                    options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: "off",
+                        fontSize: 12,
+                        tabSize: 2,
+                        automaticLayout: true,
+                    }}
+                />
+            )}
+        </Modal>
 
         {viewMode === 'table' ? (
             <div
@@ -5640,7 +5876,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                         <SortableContext items={displayColumnNames} strategy={horizontalListSortingStrategy}>
                                             <Table
                                                 components={tableComponents}
-                                                dataSource={mergedDisplayData}
+                                                dataSource={tableRenderData}
                                                 columns={mergedColumns}
                                                 showSorterTooltip={{ target: 'sorter-icon' }}
                                                 size="small"
@@ -6110,6 +6346,53 @@ const DataGrid: React.FC<DataGridProps> = ({
                >
                    <Button icon={<FileTextOutlined />}>字段信息</Button>
                </Popover>
+               {canViewDdl && (
+                   <Button
+                       data-grid-ddl-action="true"
+                       icon={<FileTextOutlined />}
+                       loading={ddlLoading}
+                       onClick={handleOpenTableDdl}
+                   >
+                       查看 DDL
+                   </Button>
+               )}
+               <Tooltip title="仅查找当前页已加载数据，不改变 WHERE 条件">
+                   <div data-grid-page-find="true" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                       <Input
+                           {...noAutoCapInputProps}
+                           allowClear
+                           size="small"
+                           prefix={<SearchOutlined />}
+                           placeholder="当前页查找..."
+                           value={pageFindText}
+                           onChange={(event) => setPageFindText(event.target.value)}
+                           style={{ width: 220 }}
+                       />
+                       <Button
+                           data-grid-page-find-prev="true"
+                           size="small"
+                           icon={<LeftOutlined />}
+                           disabled={pageFindMatches.length === 0}
+                           onClick={() => handleNavigatePageFind('previous')}
+                       >
+                           上一个
+                       </Button>
+                       <Button
+                           data-grid-page-find-next="true"
+                           size="small"
+                           icon={<RightOutlined />}
+                           disabled={pageFindMatches.length === 0}
+                           onClick={() => handleNavigatePageFind('next')}
+                       >
+                           下一个
+                       </Button>
+                       {normalizedPageFindText && (
+                           <span aria-live="polite" style={{ fontSize: 12, color: darkMode ? '#999' : '#666', whiteSpace: 'nowrap' }}>
+                               {pageFindMatches.length > 0 ? `${activePageFindPosition} / ${pageFindMatches.length} · ` : ''}匹配 {pageFindSummary.occurrenceCount} 处 / {pageFindSummary.matchedCellCount} 个单元格
+                           </span>
+                       )}
+                   </div>
+               </Tooltip>
            </div>
            <div data-grid-view-switcher="true" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>结果视图</span>
