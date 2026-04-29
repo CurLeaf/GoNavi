@@ -36,6 +36,11 @@ var optionalGoDrivers = map[string]struct{}{
 	"clickhouse": {},
 }
 
+// optionalDriverAgentRevisions 记录 GoNavi 对各可选 driver-agent 包装逻辑的兼容版本。
+// 该 map 由 tools/generate-driver-agent-revisions.sh 按 driver-agent 源码依赖自动生成，
+// 避免人工判断需要 bump 哪个驱动 revision。
+var optionalDriverAgentRevisions = map[string]string{}
+
 var (
 	externalDriverDirMu sync.RWMutex
 	externalDriverDir   string
@@ -103,6 +108,10 @@ func IsOptionalGoDriver(driverType string) bool {
 
 func IsOptionalGoDriverBuildIncluded(driverType string) bool {
 	return optionalGoDriverBuildIncluded(normalizeRuntimeDriverType(driverType))
+}
+
+func OptionalDriverAgentRevision(driverType string) string {
+	return strings.TrimSpace(optionalDriverAgentRevisions[normalizeRuntimeDriverType(driverType)])
 }
 
 // IsBuiltinDriver 返回指定驱动类型是否为核心内置驱动（始终可用，无需安装）。

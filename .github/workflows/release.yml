@@ -237,6 +237,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}"
           if [ -n "${{ matrix.wails_tags }}" ]; then
             wails build -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -tags "${{ matrix.wails_tags }}" -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
           else
