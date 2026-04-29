@@ -44,6 +44,10 @@ func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 		q.Set("SSL", "TRUE")
 		q.Set("SSL VERIFY", "FALSE")
 	}
+	// 提高 prefetch 行数，减少大结果集的网络往返次数（默认仅 25 行/次）
+	q.Set("PREFETCH_ROWS", "10000")
+	// LOB 数据延迟加载，避免大 LOB 列影响普通查询性能
+	q.Set("LOB FETCH", "POST")
 	if encoded := q.Encode(); encoded != "" {
 		u.RawQuery = encoded
 	}

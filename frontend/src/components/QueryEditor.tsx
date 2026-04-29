@@ -9,11 +9,12 @@ import { useStore } from '../store';
 import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
-import { convertMongoShellToJsonCommand } from '../utils/mongodb';
+import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
+import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -1184,359 +1185,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     return statements;
   };
 
-  const getLeadingKeyword = (sql: string): string => {
-      const text = (sql || '').replace(/\r\n/g, '\n');
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  }
-                  continue;
-              }
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-              continue;
-          }
-          if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-              continue;
-          }
-
-          if (!inDouble && !inBacktick && ch === '\'') {
-              inSingle = !inSingle;
-              continue;
-          }
-          if (!inSingle && !inBacktick && ch === '"') {
-              inDouble = !inDouble;
-              continue;
-          }
-          if (!inSingle && !inDouble && ch === '`') {
-              inBacktick = !inBacktick;
-              continue;
-          }
-
-          if (inSingle || inDouble || inBacktick || dollarTag) continue;
-          if (isWS(ch)) continue;
-
-          if (isWord(ch)) {
-              let j = i;
-              while (j < text.length && isWord(text[j])) j++;
-              return text.slice(i, j).toLowerCase();
-          }
-          return '';
-      }
-      return '';
-  };
-
-  const splitSqlTail = (sql: string): { main: string; tail: string } => {
-      const text = (sql || '').replace(/\r\n/g, '\n');
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-      let lastMeaningful = -1;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      lastMeaningful = i + dollarTag.length - 1;
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  } else if (!isWS(ch)) {
-                      lastMeaningful = i;
-                  }
-                  continue;
-              }
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              // Start comments
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      lastMeaningful = i + dollarTag.length - 1;
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-          } else if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-          } else {
-              if (!inDouble && !inBacktick && ch === '\'') inSingle = !inSingle;
-              else if (!inSingle && !inBacktick && ch === '"') inDouble = !inDouble;
-              else if (!inSingle && !inDouble && ch === '`') inBacktick = !inBacktick;
-          }
-
-          if (!inLineComment && !inBlockComment && !isWS(ch)) {
-              lastMeaningful = i;
-          }
-      }
-
-      if (lastMeaningful < 0) return { main: '', tail: text };
-      return { main: text.slice(0, lastMeaningful + 1), tail: text.slice(lastMeaningful + 1) };
-  };
-
-  const findTopLevelKeyword = (sql: string, keyword: string): number => {
-      const text = sql;
-      const kw = keyword.toLowerCase();
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-      let parenDepth = 0;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  }
-                  continue;
-              }
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-              continue;
-          }
-          if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-              continue;
-          }
-
-          if (!inDouble && !inBacktick && ch === '\'') {
-              inSingle = !inSingle;
-              continue;
-          }
-          if (!inSingle && !inBacktick && ch === '"') {
-              inDouble = !inDouble;
-              continue;
-          }
-          if (!inSingle && !inDouble && ch === '`') {
-              inBacktick = !inBacktick;
-              continue;
-          }
-
-          if (inSingle || inDouble || inBacktick || dollarTag) continue;
-
-          if (ch === '(') { parenDepth++; continue; }
-          if (ch === ')') { if (parenDepth > 0) parenDepth--; continue; }
-          if (parenDepth !== 0) continue;
-
-          if (!isWord(ch)) continue;
-
-          if (text.slice(i, i + kw.length).toLowerCase() !== kw) continue;
-          const before = i - 1 >= 0 ? text[i - 1] : '';
-          const after = i + kw.length < text.length ? text[i + kw.length] : '';
-          if ((before && isWord(before)) || (after && isWord(after))) continue;
-          return i;
-      }
-      return -1;
-  };
-
-  const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
-      if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
-      const normalizedType = (dbType || 'mysql').toLowerCase();
-
-      // 只对 SELECT 语句自动加限制
-      const keyword = getLeadingKeyword(sql);
-      if (keyword !== 'SELECT') return { sql, applied: false, maxRows };
-
-      const { main, tail } = splitSqlTail(sql);
-      if (!main.trim()) return { sql, applied: false, maxRows };
-
-      const fromPos = findTopLevelKeyword(main, 'from');
-      const limitPos = findTopLevelKeyword(main, 'limit');
-      // 已有 LIMIT → 不注入
-      if (limitPos >= 0 && (fromPos < 0 || limitPos > fromPos)) return { sql, applied: false, maxRows };
-      const fetchPos = findTopLevelKeyword(main, 'fetch');
-      // 已有 FETCH → 不注入
-      if (fetchPos >= 0 && (fromPos < 0 || fetchPos > fromPos)) return { sql, applied: false, maxRows };
-
-      // SQL Server / mssql: 检查是否已有 TOP，未有则注入 SELECT TOP N
-      if (normalizedType === 'sqlserver' || normalizedType === 'mssql') {
-          const topPos = findTopLevelKeyword(main, 'top');
-          if (topPos >= 0) return { sql, applied: false, maxRows }; // 已有 TOP
-          // 在 SELECT 关键字之后插入 TOP N
-          const selectPos = findTopLevelKeyword(main, 'select');
-          if (selectPos < 0) return { sql, applied: false, maxRows };
-          const afterSelect = selectPos + 'SELECT'.length;
-          // 处理 SELECT DISTINCT 的情况
-          const restAfterSelect = main.slice(afterSelect);
-          const distinctMatch = restAfterSelect.match(/^(\s+DISTINCT\b)/i);
-          const insertOffset = distinctMatch ? afterSelect + distinctMatch[1].length : afterSelect;
-          const nextMain = main.slice(0, insertOffset) + ` TOP ${maxRows}` + main.slice(insertOffset);
-          return { sql: nextMain + tail, applied: true, maxRows };
-      }
-
-      // Oracle / Dameng: 使用 FETCH FIRST N ROWS ONLY（Oracle 12c+ 标准语法）
-      if (normalizedType === 'oracle' || normalizedType === 'dameng') {
-          // 检查是否已有 ROWNUM 限制
-          const rownumPos = findTopLevelKeyword(main, 'rownum');
-          if (rownumPos >= 0) return { sql, applied: false, maxRows };
-          const offsetPos = findTopLevelKeyword(main, 'offset');
-          if (offsetPos >= 0 && (fromPos < 0 || offsetPos > fromPos)) return { sql, applied: false, maxRows };
-          const nextMain = main.trimEnd() + ` FETCH FIRST ${maxRows} ROWS ONLY`;
-          return { sql: nextMain + tail, applied: true, maxRows };
-      }
-
-      // 通用 LIMIT 语法（MySQL, PostgreSQL, SQLite, ClickHouse, DuckDB 等）
-      const offsetPos = findTopLevelKeyword(main, 'offset');
-      const forPos = findTopLevelKeyword(main, 'for');
-      const lockPos = findTopLevelKeyword(main, 'lock');
-
-      const candidates = [offsetPos, forPos, lockPos]
-          .filter(pos => pos >= 0 && (fromPos < 0 || pos > fromPos));
-
-      const insertAt = candidates.length > 0 ? Math.min(...candidates) : main.length;
-      const before = main.slice(0, insertAt).trimEnd();
-      const after = main.slice(insertAt).trimStart();
-      const nextMain = [before, `LIMIT ${maxRows}`, after].filter(Boolean).join(' ').trim();
-      return { sql: nextMain + tail, applied: true, maxRows };
-  };
-
   const getSelectedSQL = (): string => {
       const editor = editorRef.current;
       if (!editor) return '';
@@ -1662,8 +1310,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
     try {
         const rawSQL = getSelectedSQL() || currentQuery;
-        const dbType = String((buildRpcConnectionConfig(config) as any).type || 'mysql');
-        const normalizedDbType = dbType.trim().toLowerCase();
+        const rpcConfig = buildRpcConnectionConfig(config) as any;
+        const dbType = String(rpcConfig.type || 'mysql');
+        const driver = String((config as any).driver || '');
+        const normalizedDbType = String(resolveSqlDialect(dbType, driver)).trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
 
         // MongoDB 仍走逐条执行的旧路径
@@ -1701,6 +1351,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     }
                     if (shellConvert.command) {
                         executedSql = shellConvert.command;
+                    }
+                }
+                if (wantsLimitProbe) {
+                    const limitResult = applyMongoQueryAutoLimit(executedSql, maxRows);
+                    if (limitResult.applied) {
+                        executedSql = limitResult.command;
                     }
                 }
                 const startTime = Date.now();
@@ -1797,7 +1453,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             if (Number.isFinite(maxRowsForLimit) && maxRowsForLimit > 0) {
                 const stmts = splitSQLStatements(fullSQL);
                 const limitedStmts = stmts.map(s => {
-                    const result = applyAutoLimit(s, normalizedDbType, maxRowsForLimit);
+                    const result = applyQueryAutoLimit(s, normalizedDbType, maxRowsForLimit, driver);
                     if (result.applied) anyLimitApplied = true;
                     return result.sql;
                 });

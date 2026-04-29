@@ -321,7 +321,7 @@ const parseCollectionAndMethod = (raw: string): {
     pos = nextPos;
   } else {
     let end = pos;
-    while (end < input.length && /[A-Za-z0-9_$.-]/.test(input[end])) end++;
+    while (end < input.length && /[A-Za-z0-9_$-]/.test(input[end])) end++;
     collection = input.slice(pos, end).trim();
     pos = end;
   }
@@ -662,7 +662,7 @@ export const buildMongoFindCommand = (params: {
   if (params.sort && Object.keys(params.sort).length > 0) {
     command.sort = params.sort;
   }
-  if (Number.isFinite(params.limit) && Number(params.limit) > 0) {
+  if (Number.isFinite(params.limit) && Number(params.limit) >= 0) {
     command.limit = Math.floor(Number(params.limit));
   }
   if (Number.isFinite(params.skip) && Number(params.skip) > 0) {
@@ -676,6 +676,45 @@ export const buildMongoCountCommand = (collection: string, filter: Record<string
     count: String(collection || '').trim(),
     query: filter || {},
   });
+};
+
+const hasOwn = (obj: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(obj, key);
+
+const isMongoCommandObject = (value: unknown): value is Record<string, unknown> => (
+  !!value && typeof value === 'object' && !Array.isArray(value)
+);
+
+export const applyMongoQueryAutoLimit = (
+  command: string,
+  maxRows: number,
+): { command: string; applied: boolean; maxRows: number } => {
+  if (!Number.isFinite(maxRows) || maxRows <= 0) return { command, applied: false, maxRows };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(command || '').trim());
+  } catch {
+    return { command, applied: false, maxRows };
+  }
+  if (!isMongoCommandObject(parsed)) return { command, applied: false, maxRows };
+
+  const nextMaxRows = Math.floor(Number(maxRows));
+  if (hasOwn(parsed, 'find')) {
+    if (hasOwn(parsed, 'limit')) return { command, applied: false, maxRows };
+    parsed.limit = nextMaxRows;
+    return { command: JSON.stringify(parsed), applied: true, maxRows };
+  }
+
+  if (hasOwn(parsed, 'aggregate') && Array.isArray(parsed.pipeline)) {
+    const pipeline = parsed.pipeline as unknown[];
+    const hasExplicitLimit = pipeline.some((stage) => isMongoCommandObject(stage) && hasOwn(stage, '$limit'));
+    const hasWriteStage = pipeline.some((stage) => isMongoCommandObject(stage) && (hasOwn(stage, '$out') || hasOwn(stage, '$merge')));
+    if (hasExplicitLimit || hasWriteStage) return { command, applied: false, maxRows };
+    pipeline.push({ $limit: nextMaxRows });
+    return { command: JSON.stringify(parsed), applied: true, maxRows };
+  }
+
+  return { command, applied: false, maxRows };
 };
 
 const buildMongoInsertCommand = (
