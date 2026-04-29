@@ -467,6 +467,13 @@ func formatConnSummary(config connection.ConnectionConfig) string {
 			b.WriteString(fmt.Sprintf(" 认证库=%s", strings.TrimSpace(config.AuthSource)))
 		}
 	}
+	if strings.EqualFold(strings.TrimSpace(config.Type), "clickhouse") {
+		protocol := strings.ToLower(strings.TrimSpace(config.ClickHouseProtocol))
+		if protocol == "" {
+			protocol = "auto"
+		}
+		b.WriteString(fmt.Sprintf(" ClickHouse协议=%s", protocol))
+	}
 
 	if config.UseSSH {
 		b.WriteString(fmt.Sprintf(" SSH=%s:%d 用户=%s", config.SSH.Host, config.SSH.Port, config.SSH.User))

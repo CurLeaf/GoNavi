@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { message } from 'antd';
-import { TabData, ColumnDefinition } from '../types';
+import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBGetColumns } from '../../wailsjs/go/app/App';
+import { DBQuery, DBGetColumns, DBGetIndexes } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
@@ -15,6 +15,12 @@ import {
   normalizeQuickWhereCondition,
   validateQuickWhereCondition,
 } from '../utils/dataGridWhereFilter';
+import {
+  ORACLE_ROWID_LOCATOR_COLUMN,
+  resolveEditRowLocator,
+  type EditRowLocator,
+} from '../utils/rowLocator';
+import { isOracleLikeDialect } from '../utils/sqlDialect';
 
 type ViewerPaginationState = {
   current: number;
@@ -77,6 +83,47 @@ const parseTotalFromCountRow = (row: any): number | null => {
   }
 
   return null;
+};
+
+const buildDataViewerReadOnlyLocator = (reason: string): EditRowLocator => ({
+  strategy: 'none',
+  columns: [],
+  valueColumns: [],
+  readOnly: true,
+  reason,
+});
+
+const formatDataViewerTableName = (dbName: string, tableName: string): string => (
+  dbName ? `${dbName}.${tableName}` : tableName
+);
+
+const getTableColumnNames = (columns: ColumnDefinition[] | undefined): string[] => (
+  (columns || [])
+    .map((column) => String(column?.name || '').trim())
+    .filter(Boolean)
+);
+
+const resolveDataViewerOrderFallbackColumns = (locator: EditRowLocator | undefined, pkColumns: string[]): string[] => {
+  if (locator && !locator.readOnly && locator.strategy !== 'oracle-rowid') {
+    return locator.valueColumns.length > 0 ? locator.valueColumns : locator.columns;
+  }
+  return pkColumns;
+};
+
+const buildDataViewerBaseSelectSQL = (
+  dbType: string,
+  tableName: string,
+  whereSQL: string,
+  locator?: EditRowLocator,
+): string => {
+  const quotedTableName = quoteQualifiedIdent(dbType, tableName);
+  if (locator?.strategy !== 'oracle-rowid') {
+    return `SELECT * FROM ${quotedTableName} ${whereSQL}`;
+  }
+
+  const alias = 'gonavi_row_source';
+  const rowIDAlias = quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN);
+  return `SELECT ${alias}.*, ${alias}.ROWID AS ${rowIDAlias} FROM ${quotedTableName} ${alias} ${whereSQL}`;
 };
 
 const normalizeDuckDBIdentifier = (raw: string): string => {
@@ -193,6 +240,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   const [data, setData] = useState<any[]>([]);
   const [columnNames, setColumnNames] = useState<string[]>([]);
   const [pkColumns, setPkColumns] = useState<string[]>([]);
+  const [editLocator, setEditLocator] = useState<EditRowLocator | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const connections = useStore(state => state.connections);
   const addSqlLog = useStore(state => state.addSqlLog);
@@ -280,6 +328,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   useEffect(() => {
     const snapshot = getViewerFilterSnapshot(tab.id);
     setPkColumns([]);
+    setEditLocator(undefined);
     pkKeyRef.current = '';
     countKeyRef.current = '';
     duckdbApproxKeyRef.current = '';
@@ -435,10 +484,84 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     const whereSQL = isMongoDB
       ? JSON.stringify(mongoFilter || {})
       : buildWhereSQL(dbType, effectiveFilterConditions);
+
+    let pkColumnsForQuery = pkColumns;
+    let editLocatorForQuery = editLocator;
+    if (!isMongoDB && !forceReadOnly && tableName) {
+        const locatorKey = `${tab.connectionId}|${dbTypeLower}|${dbName}|${tableName}`;
+        if (pkKeyRef.current !== locatorKey || !editLocatorForQuery) {
+            pkKeyRef.current = locatorKey;
+            const locatorSeq = ++pkSeqRef.current;
+            try {
+                const [resCols, resIndexes] = await Promise.all([
+                    DBGetColumns(buildRpcConnectionConfig(config) as any, dbName, tableName),
+                    DBGetIndexes(buildRpcConnectionConfig(config) as any, dbName, tableName)
+                        .catch((error: any) => ({ success: false, message: String(error?.message || error || '加载索引失败'), data: [] })),
+                ]);
+                if (fetchSeqRef.current !== seq) return;
+                if (pkSeqRef.current !== locatorSeq) return;
+                if (pkKeyRef.current !== locatorKey) return;
+
+                if (!resCols?.success || !Array.isArray(resCols.data)) {
+                    const nextLocator = buildDataViewerReadOnlyLocator('无法加载主键/唯一索引元数据，无法安全提交修改。');
+                    pkColumnsForQuery = [];
+                    editLocatorForQuery = nextLocator;
+                    setPkColumns([]);
+                    setEditLocator(nextLocator);
+                    message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason}`);
+                } else {
+                    const columnDefs = resCols.data as ColumnDefinition[];
+                    const primaryKeys = columnDefs
+                        .filter((column: any) => column?.key === 'PRI')
+                        .map((column: any) => String(column?.name || '').trim())
+                        .filter(Boolean);
+                    const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
+                        ? resIndexes.data as IndexDefinition[]
+                        : [];
+                    const resultColumns = getTableColumnNames(columnDefs);
+                    const locatorColumns = isOracleLikeDialect(dbType)
+                        ? [...resultColumns, ORACLE_ROWID_LOCATOR_COLUMN]
+                        : resultColumns;
+                    let nextLocator = resolveEditRowLocator({
+                        dbType,
+                        resultColumns: locatorColumns,
+                        primaryKeys,
+                        indexes,
+                        allowOracleRowID: true,
+                    });
+
+                    if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {
+                        nextLocator = buildDataViewerReadOnlyLocator('无法加载唯一索引元数据，无法安全提交修改。');
+                    }
+
+                    pkColumnsForQuery = primaryKeys;
+                    editLocatorForQuery = nextLocator;
+                    setPkColumns(primaryKeys);
+                    setEditLocator(nextLocator);
+                    if (nextLocator.readOnly) {
+                        message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason || '当前结果没有可用的安全行定位方式，无法提交修改。'}`);
+                    }
+                }
+            } catch {
+                if (fetchSeqRef.current !== seq) return;
+                if (pkSeqRef.current !== locatorSeq) return;
+                if (pkKeyRef.current !== locatorKey) return;
+                const nextLocator = buildDataViewerReadOnlyLocator('无法加载主键/唯一索引元数据，无法安全提交修改。');
+                pkColumnsForQuery = [];
+                editLocatorForQuery = nextLocator;
+                setPkColumns([]);
+                setEditLocator(nextLocator);
+                message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason}`);
+            }
+        }
+    }
+
     const countSql = isMongoDB
       ? buildMongoCountCommand(tableName, mongoFilter || {})
       : `SELECT COUNT(*) as total FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-    const orderBySQL = isMongoDB ? '' : buildOrderBySQL(dbType, sortInfo, pkColumns);
+    const orderBySQL = isMongoDB
+      ? ''
+      : buildOrderBySQL(dbType, sortInfo, resolveDataViewerOrderFallbackColumns(editLocatorForQuery, pkColumnsForQuery));
     const totalRows = Number(pagination.total);
     const hasFiniteTotal = Number.isFinite(totalRows) && totalRows >= 0;
     const totalKnown = pagination.totalKnown && hasFiniteTotal;
@@ -469,7 +592,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
             skip: offset,
         });
     } else {
-        const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+        const baseSql = buildDataViewerBaseSelectSQL(dbType, tableName, whereSQL, editLocatorForQuery);
         sql = `${baseSql}${orderBySQL}`;
         // ClickHouse 深分页在超大 OFFSET 下容易超时。对于总数已知且存在 ORDER BY 的场景，
         // 当“尾部偏移”小于“头部偏移”时，改为反向 ORDER BY + 小 OFFSET，并在前端翻转结果。
@@ -557,7 +680,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
             if (safeSelect) {
                 let fallbackSql = `SELECT ${safeSelect} FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-                fallbackSql = buildPaginatedSelectSQL(dbType, fallbackSql, buildOrderBySQL(dbType, sortInfo, pkColumns), size + 1, offset);
+                fallbackSql = buildPaginatedSelectSQL(dbType, fallbackSql, buildOrderBySQL(dbType, sortInfo, resolveDataViewerOrderFallbackColumns(editLocatorForQuery, pkColumnsForQuery)), size + 1, offset);
                 executedSql = fallbackSql;
                 resData = await executeDataQuery(fallbackSql, '复杂类型降级重试');
             }
@@ -578,26 +701,6 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
             }
             if (resData.success) {
                 message.warning('已自动提升排序缓冲并重试成功。');
-            }
-        }
-        
-        if (pkColumns.length === 0) {
-            const pkKey = `${tab.connectionId}|${dbName}|${tableName}`;
-            if (pkKeyRef.current !== pkKey) {
-                pkKeyRef.current = pkKey;
-                const pkSeq = ++pkSeqRef.current;
-                DBGetColumns(buildRpcConnectionConfig(config) as any, dbName, tableName)
-                    .then((resCols: any) => {
-                        if (pkSeqRef.current !== pkSeq) return;
-                        if (pkKeyRef.current !== pkKey) return;
-                        if (!resCols?.success) return;
-                        const pks = (resCols.data as ColumnDefinition[]).filter((c: any) => c.key === 'PRI').map((c: any) => c.name);
-                        setPkColumns(pks);
-                    })
-                    .catch(() => {
-                        if (pkSeqRef.current !== pkSeq) return;
-                        if (pkKeyRef.current !== pkKey) return;
-                    });
             }
         }
 
@@ -842,9 +945,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
         });
     }
     if (fetchSeqRef.current === seq) setLoading(false);
-  }, [connections, tab, sortInfo, filterConditions, quickWhereCondition, pkColumns, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages]);
-  // 依赖 pkColumns：在无手动排序时可回退到主键稳定排序。
-  // 主键信息只会在首次加载后更新一次，避免循环查询。
+  }, [connections, tab, sortInfo, filterConditions, quickWhereCondition, pkColumns, editLocator, forceReadOnly, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages]);
+  // 依赖定位列：在无手动排序时可回退到安全定位列稳定排序。
+  // 定位信息只会在表上下文变化后重新加载，避免循环查询。
 
   // Handlers memoized
   const handleReload = useCallback(() => {
@@ -890,14 +993,14 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     if (!whereSQL) return '';
 
     let sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
-    sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
+    sql += buildOrderBySQL(dbType, sortInfo, resolveDataViewerOrderFallbackColumns(editLocator, pkColumns));
     const normalizedType = dbType.toLowerCase();
     const hasSortForBuffer = hasExplicitSort(sortInfo);
     if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
       sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
     }
     return sql;
-  }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, quickWhereCondition, sortInfo, pkColumns]);
+  }, [tab.tableName, currentConnConfig?.type, currentConnConfig?.driver, filterConditions, quickWhereCondition, sortInfo, editLocator, pkColumns]);
 
   useEffect(() => {
     const action = resolveDataViewerAutoFetchAction({
@@ -927,6 +1030,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
           dbName={tab.dbName}
           connectionId={tab.connectionId}
           pkColumns={pkColumns}
+          editLocator={editLocator}
           onReload={handleReload}
           onSort={handleSort}
           onPageChange={handlePageChange}
@@ -939,7 +1043,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
           appliedFilterConditions={filterConditions}
           quickWhereCondition={quickWhereCondition}
           onApplyQuickWhereCondition={handleApplyQuickWhereCondition}
-          readOnly={forceReadOnly}
+          readOnly={forceReadOnly || !editLocator || editLocator.readOnly}
           sortInfoExternal={sortInfo}
           exportSqlWithFilter={exportSqlWithFilter || undefined}
           scrollSnapshot={scrollSnapshotRef.current}

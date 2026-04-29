@@ -102,6 +102,7 @@ type ConnectionConfig struct {
 	Timeout              int              `json:"timeout,omitempty"`              // Connection timeout in seconds (default: 30)
 	RedisDB              int              `json:"redisDB,omitempty"`              // Redis database index (0-15)
 	URI                  string           `json:"uri,omitempty"`                  // Connection URI for copy/paste
+	ClickHouseProtocol   string           `json:"clickHouseProtocol,omitempty"`   // auto | http | native
 	Hosts                []string         `json:"hosts,omitempty"`                // Multi-host addresses: host:port
 	Topology             string           `json:"topology,omitempty"`             // single | replica | cluster
 	MySQLReplicaUser     string           `json:"mysqlReplicaUser,omitempty"`     // MySQL replica auth user
@@ -184,9 +185,10 @@ type UpdateRow struct {
 
 // ChangeSet 表示一组批量变更，包含新增、修改和删除操作。
 type ChangeSet struct {
-	Inserts []map[string]interface{} `json:"inserts"`
-	Updates []UpdateRow              `json:"updates"`
-	Deletes []map[string]interface{} `json:"deletes"`
+	Inserts         []map[string]interface{} `json:"inserts"`
+	Updates         []UpdateRow              `json:"updates"`
+	Deletes         []map[string]interface{} `json:"deletes"`
+	LocatorStrategy string                   `json:"locatorStrategy,omitempty"`
 }
 
 // MongoMemberInfo 描述 MongoDB 副本集成员的信息。

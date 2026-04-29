@@ -4,16 +4,21 @@ import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Sele
 import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
-import { TabData, ColumnDefinition } from '../types';
+import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
+import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
-import { convertMongoShellToJsonCommand } from '../utils/mongodb';
+import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from '../utils/mongodb';
 import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
+import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
+import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
+import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
+import { quoteIdentPart } from '../utils/sql';
+import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
+import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -186,6 +191,290 @@ let sharedAllColumnsData: {dbName: string, tableName: string, name: string, type
 let sharedVisibleDbs: string[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 
+const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
+
+const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
+    strategy: 'none',
+    columns: [],
+    valueColumns: [],
+    readOnly: true,
+    reason,
+});
+
+type SimpleSelectInfo = {
+    selectsAll: boolean;
+    resultColumns: string[];
+};
+
+type QueryStatementPlan = {
+    originalSql: string;
+    executedSql: string;
+    tableRef?: QueryResultTableRef;
+    pkColumns: string[];
+    editLocator?: EditRowLocator;
+    warning?: string;
+};
+
+const stripQueryIdentifierQuotes = (part: string): string => {
+    const text = String(part || '').trim();
+    if (!text) return '';
+    if ((text.startsWith('`') && text.endsWith('`')) || (text.startsWith('"') && text.endsWith('"'))) {
+        return text.slice(1, -1).trim();
+    }
+    if (text.startsWith('[') && text.endsWith(']')) {
+        return text.slice(1, -1).trim();
+    }
+    return text;
+};
+
+const splitTopLevelComma = (text: string): string[] => {
+    const parts: string[] = [];
+    let current = '';
+    let parenDepth = 0;
+    let inSingle = false;
+    let inDouble = false;
+    let inBacktick = false;
+    let escaped = false;
+
+    for (let index = 0; index < text.length; index++) {
+        const ch = text[index];
+        if (escaped) {
+            current += ch;
+            escaped = false;
+            continue;
+        }
+        if ((inSingle || inDouble) && ch === '\\') {
+            current += ch;
+            escaped = true;
+            continue;
+        }
+        if (!inDouble && !inBacktick && ch === "'") {
+            inSingle = !inSingle;
+            current += ch;
+            continue;
+        }
+        if (!inSingle && !inBacktick && ch === '"') {
+            inDouble = !inDouble;
+            current += ch;
+            continue;
+        }
+        if (!inSingle && !inDouble && ch === '`') {
+            inBacktick = !inBacktick;
+            current += ch;
+            continue;
+        }
+        if (!inSingle && !inDouble && !inBacktick) {
+            if (ch === '(') parenDepth++;
+            if (ch === ')' && parenDepth > 0) parenDepth--;
+            if (ch === ',' && parenDepth === 0) {
+                parts.push(current.trim());
+                current = '';
+                continue;
+            }
+        }
+        current += ch;
+    }
+
+    if (current.trim()) parts.push(current.trim());
+    return parts;
+};
+
+const SIMPLE_IDENTIFIER_PATH_RE = /^(?:[`"\[]?[A-Za-z_][\w$]*[`"\]]?\s*\.\s*){0,2}[`"\[]?[A-Za-z_][\w$]*[`"\]]?$/;
+const QUERY_ALIAS_RESERVED = new Set([
+    'where', 'group', 'order', 'having', 'limit', 'fetch', 'offset', 'join', 'left', 'right', 'inner', 'outer', 'on', 'union',
+]);
+
+const getLastIdentifierPart = (path: string): string => {
+    const parts = String(path || '').split('.').map((part) => stripQueryIdentifierQuotes(part.trim())).filter(Boolean);
+    return parts[parts.length - 1] || '';
+};
+
+const resolveSimpleSelectItemColumn = (item: string): { name: string } | 'all' | undefined => {
+    const text = String(item || '').trim();
+    if (!text) return undefined;
+    if (text === '*' || /\.\s*\*$/.test(text)) return 'all';
+
+    let expr = text;
+    let alias = '';
+    const asMatch = text.match(/^(.*?)\s+AS\s+([`"\[]?[A-Za-z_][\w$]*[`"\]]?)$/i);
+    if (asMatch) {
+        expr = asMatch[1].trim();
+        alias = stripQueryIdentifierQuotes(asMatch[2]);
+    } else {
+        const bareAliasMatch = text.match(/^(.*?)\s+([`"\[]?[A-Za-z_][\w$]*[`"\]]?)$/);
+        if (bareAliasMatch && SIMPLE_IDENTIFIER_PATH_RE.test(bareAliasMatch[1].trim())) {
+            const candidateAlias = stripQueryIdentifierQuotes(bareAliasMatch[2]);
+            if (candidateAlias && !QUERY_ALIAS_RESERVED.has(candidateAlias.toLowerCase())) {
+                expr = bareAliasMatch[1].trim();
+                alias = candidateAlias;
+            }
+        }
+    }
+
+    if (!SIMPLE_IDENTIFIER_PATH_RE.test(expr)) return undefined;
+    const name = alias || getLastIdentifierPart(expr);
+    return name ? { name } : undefined;
+};
+
+const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
+    const match = String(sql || '').match(/^\s*SELECT\s+([\s\S]+?)\s+FROM\s+/i);
+    if (!match) return undefined;
+    const selectList = match[1].trim();
+    if (!selectList || /^DISTINCT\b/i.test(selectList)) return undefined;
+
+    const resultColumns: string[] = [];
+    let selectsAll = false;
+    for (const item of splitTopLevelComma(selectList)) {
+        const resolved = resolveSimpleSelectItemColumn(item);
+        if (!resolved) return undefined;
+        if (resolved === 'all') {
+            selectsAll = true;
+            continue;
+        }
+        resultColumns.push(resolved.name);
+    }
+    return { selectsAll, resultColumns };
+};
+
+const appendQuerySelectExpressions = (sql: string, expressions: string[]): string => {
+    if (expressions.length === 0) return sql;
+    return String(sql || '').replace(
+        /^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+[\s\S]*)$/i,
+        (_match, prefix, selectList, rest) => `${prefix}${String(selectList).trimEnd()}, ${expressions.join(', ')}${rest}`,
+    );
+};
+
+const findQueryResultColumn = (columns: string[], target: string): string | undefined => {
+    const normalizedTarget = String(target || '').trim().toLowerCase();
+    return (columns || []).find((column) => String(column || '').trim().toLowerCase() === normalizedTarget);
+};
+
+const buildQueryLocatorAlias = (column: string, index: number): string => {
+    const normalized = String(column || '').trim().replace(/[^A-Za-z0-9_]/g, '_').slice(0, 48) || 'column';
+    return `${QUERY_LOCATOR_ALIAS_PREFIX}${index}_${normalized}`;
+};
+
+const buildQueryLocatorColumnExpression = (dbType: string, column: string, alias: string): string => (
+    `${quoteIdentPart(dbType, column)} AS ${quoteIdentPart(dbType, alias)}`
+);
+
+const buildQueryRowIDExpression = (dbType: string): string => (
+    `ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
+);
+
+const resolveQueryLocatorPlan = async ({
+    statement,
+    dbType,
+    currentDb,
+    config,
+    forceReadOnly,
+}: {
+    statement: string;
+    dbType: string;
+    currentDb: string;
+    config: any;
+    forceReadOnly: boolean;
+}): Promise<QueryStatementPlan> => {
+    const plan: QueryStatementPlan = {
+        originalSql: statement,
+        executedSql: statement,
+        pkColumns: [],
+    };
+    if (forceReadOnly) return plan;
+
+    const tableRef = extractQueryResultTableRef(statement, dbType, currentDb);
+    if (!tableRef) return plan;
+    plan.tableRef = tableRef;
+
+    const selectInfo = parseSimpleSelectInfo(statement);
+    if (!selectInfo) {
+        const reason = '当前 SELECT 列表不是简单列或 *，无法安全提交修改。';
+        plan.editLocator = buildQueryReadOnlyLocator(reason);
+        plan.warning = `查询结果保持只读：${reason}`;
+        return plan;
+    }
+
+    try {
+        const [resCols, resIndexes] = await Promise.all([
+            DBGetColumns(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName),
+            DBGetIndexes(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName)
+                .catch((error: any) => ({ success: false, message: String(error?.message || error || '加载索引失败'), data: [] })),
+        ]);
+        if (!resCols?.success || !Array.isArray(resCols.data)) {
+            const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
+            plan.editLocator = buildQueryReadOnlyLocator(reason);
+            plan.warning = `查询结果保持只读：${reason}`;
+            return plan;
+        }
+
+        const tableColumns = resCols.data as ColumnDefinition[];
+        const primaryKeys = tableColumns
+            .filter((column: any) => column?.key === 'PRI')
+            .map((column: any) => String(column?.name || '').trim())
+            .filter(Boolean);
+        const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
+            ? resIndexes.data as IndexDefinition[]
+            : [];
+        const selectedColumns = selectInfo.selectsAll
+            ? tableColumns.map((column) => String(column?.name || '').trim()).filter(Boolean)
+            : selectInfo.resultColumns;
+        const appendExpressions: string[] = [];
+        const hiddenColumns: string[] = [];
+
+        const buildColumnLocator = (strategy: 'primary-key' | 'unique-key', locatorColumns: string[]): EditRowLocator => {
+            const valueColumns = locatorColumns.map((column, index) => {
+                const selectedColumn = findQueryResultColumn(selectedColumns, column);
+                if (selectedColumn) return selectedColumn;
+                const alias = buildQueryLocatorAlias(column, index + 1);
+                appendExpressions.push(buildQueryLocatorColumnExpression(dbType, column, alias));
+                hiddenColumns.push(alias);
+                return alias;
+            });
+            return {
+                strategy,
+                columns: locatorColumns,
+                valueColumns,
+                hiddenColumns: hiddenColumns.length > 0 ? [...hiddenColumns] : undefined,
+                readOnly: false,
+            };
+        };
+
+        if (primaryKeys.length > 0) {
+            plan.pkColumns = primaryKeys;
+            plan.editLocator = buildColumnLocator('primary-key', primaryKeys);
+        } else {
+            const uniqueKeyGroups = resolveUniqueKeyGroupsFromIndexes(indexes);
+            const uniqueKeyGroup = uniqueKeyGroups.find((group) => group.length > 0);
+            if (uniqueKeyGroup) {
+                plan.editLocator = buildColumnLocator('unique-key', uniqueKeyGroup);
+            } else if (isOracleLikeDialect(dbType)) {
+                appendExpressions.push(buildQueryRowIDExpression(dbType));
+                plan.editLocator = {
+                    strategy: 'oracle-rowid',
+                    columns: ['ROWID'],
+                    valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+                    hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+                    readOnly: false,
+                };
+            } else {
+                const reason = !resIndexes?.success
+                    ? '无法加载唯一索引元数据，无法安全提交修改。'
+                    : '未检测到主键或可用唯一索引，无法安全提交修改。';
+                plan.editLocator = buildQueryReadOnlyLocator(reason);
+                plan.warning = `查询结果保持只读：${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`;
+            }
+        }
+
+        plan.executedSql = appendQuerySelectExpressions(statement, appendExpressions);
+        return plan;
+    } catch {
+        const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
+        plan.editLocator = buildQueryReadOnlyLocator(reason);
+        plan.warning = `查询结果保持只读：${reason}`;
+        return plan;
+    }
+};
+
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const [query, setQuery] = useState(tab.query || 'SELECT * FROM ');
   
@@ -197,6 +486,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       columns: string[];
       tableName?: string;
       pkColumns: string[];
+      editLocator?: EditRowLocator;
       readOnly: boolean;
       truncated?: boolean;
       pkLoading?: boolean;
@@ -1184,359 +1474,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     return statements;
   };
 
-  const getLeadingKeyword = (sql: string): string => {
-      const text = (sql || '').replace(/\r\n/g, '\n');
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  }
-                  continue;
-              }
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-              continue;
-          }
-          if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-              continue;
-          }
-
-          if (!inDouble && !inBacktick && ch === '\'') {
-              inSingle = !inSingle;
-              continue;
-          }
-          if (!inSingle && !inBacktick && ch === '"') {
-              inDouble = !inDouble;
-              continue;
-          }
-          if (!inSingle && !inDouble && ch === '`') {
-              inBacktick = !inBacktick;
-              continue;
-          }
-
-          if (inSingle || inDouble || inBacktick || dollarTag) continue;
-          if (isWS(ch)) continue;
-
-          if (isWord(ch)) {
-              let j = i;
-              while (j < text.length && isWord(text[j])) j++;
-              return text.slice(i, j).toLowerCase();
-          }
-          return '';
-      }
-      return '';
-  };
-
-  const splitSqlTail = (sql: string): { main: string; tail: string } => {
-      const text = (sql || '').replace(/\r\n/g, '\n');
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-      let lastMeaningful = -1;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      lastMeaningful = i + dollarTag.length - 1;
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  } else if (!isWS(ch)) {
-                      lastMeaningful = i;
-                  }
-                  continue;
-              }
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              // Start comments
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      lastMeaningful = i + dollarTag.length - 1;
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-          } else if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-          } else {
-              if (!inDouble && !inBacktick && ch === '\'') inSingle = !inSingle;
-              else if (!inSingle && !inBacktick && ch === '"') inDouble = !inDouble;
-              else if (!inSingle && !inDouble && ch === '`') inBacktick = !inBacktick;
-          }
-
-          if (!inLineComment && !inBlockComment && !isWS(ch)) {
-              lastMeaningful = i;
-          }
-      }
-
-      if (lastMeaningful < 0) return { main: '', tail: text };
-      return { main: text.slice(0, lastMeaningful + 1), tail: text.slice(lastMeaningful + 1) };
-  };
-
-  const findTopLevelKeyword = (sql: string, keyword: string): number => {
-      const text = sql;
-      const kw = keyword.toLowerCase();
-      const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-      const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
-
-      let inSingle = false;
-      let inDouble = false;
-      let inBacktick = false;
-      let escaped = false;
-      let inLineComment = false;
-      let inBlockComment = false;
-      let dollarTag: string | null = null;
-      let parenDepth = 0;
-
-      for (let i = 0; i < text.length; i++) {
-          const ch = text[i];
-          const next = i + 1 < text.length ? text[i + 1] : '';
-          const prev = i > 0 ? text[i - 1] : '';
-          const next2 = i + 2 < text.length ? text[i + 2] : '';
-
-          if (!inSingle && !inDouble && !inBacktick) {
-              if (inLineComment) {
-                  if (ch === '\n') inLineComment = false;
-                  continue;
-              }
-              if (inBlockComment) {
-                  if (ch === '*' && next === '/') {
-                      i++;
-                      inBlockComment = false;
-                  }
-                  continue;
-              }
-
-              if (ch === '/' && next === '*') {
-                  i++;
-                  inBlockComment = true;
-                  continue;
-              }
-              if (ch === '#') {
-                  inLineComment = true;
-                  continue;
-              }
-              if (ch === '-' && next === '-' && (i === 0 || isWS(prev)) && (next2 === '' || isWS(next2))) {
-                  i++;
-                  inLineComment = true;
-                  continue;
-              }
-
-              if (dollarTag) {
-                  if (text.startsWith(dollarTag, i)) {
-                      i += dollarTag.length - 1;
-                      dollarTag = null;
-                  }
-                  continue;
-              }
-              if (ch === '$') {
-                  const m = text.slice(i).match(/^\$[A-Za-z0-9_]*\$/);
-                  if (m && m[0]) {
-                      dollarTag = m[0];
-                      i += dollarTag.length - 1;
-                      continue;
-                  }
-              }
-          }
-
-          if (escaped) {
-              escaped = false;
-              continue;
-          }
-          if ((inSingle || inDouble) && ch === '\\') {
-              escaped = true;
-              continue;
-          }
-
-          if (!inDouble && !inBacktick && ch === '\'') {
-              inSingle = !inSingle;
-              continue;
-          }
-          if (!inSingle && !inBacktick && ch === '"') {
-              inDouble = !inDouble;
-              continue;
-          }
-          if (!inSingle && !inDouble && ch === '`') {
-              inBacktick = !inBacktick;
-              continue;
-          }
-
-          if (inSingle || inDouble || inBacktick || dollarTag) continue;
-
-          if (ch === '(') { parenDepth++; continue; }
-          if (ch === ')') { if (parenDepth > 0) parenDepth--; continue; }
-          if (parenDepth !== 0) continue;
-
-          if (!isWord(ch)) continue;
-
-          if (text.slice(i, i + kw.length).toLowerCase() !== kw) continue;
-          const before = i - 1 >= 0 ? text[i - 1] : '';
-          const after = i + kw.length < text.length ? text[i + kw.length] : '';
-          if ((before && isWord(before)) || (after && isWord(after))) continue;
-          return i;
-      }
-      return -1;
-  };
-
-  const applyAutoLimit = (sql: string, dbType: string, maxRows: number): { sql: string; applied: boolean; maxRows: number } => {
-      if (!Number.isFinite(maxRows) || maxRows <= 0) return { sql, applied: false, maxRows };
-      const normalizedType = (dbType || 'mysql').toLowerCase();
-
-      // 只对 SELECT 语句自动加限制
-      const keyword = getLeadingKeyword(sql);
-      if (keyword !== 'SELECT') return { sql, applied: false, maxRows };
-
-      const { main, tail } = splitSqlTail(sql);
-      if (!main.trim()) return { sql, applied: false, maxRows };
-
-      const fromPos = findTopLevelKeyword(main, 'from');
-      const limitPos = findTopLevelKeyword(main, 'limit');
-      // 已有 LIMIT → 不注入
-      if (limitPos >= 0 && (fromPos < 0 || limitPos > fromPos)) return { sql, applied: false, maxRows };
-      const fetchPos = findTopLevelKeyword(main, 'fetch');
-      // 已有 FETCH → 不注入
-      if (fetchPos >= 0 && (fromPos < 0 || fetchPos > fromPos)) return { sql, applied: false, maxRows };
-
-      // SQL Server / mssql: 检查是否已有 TOP，未有则注入 SELECT TOP N
-      if (normalizedType === 'sqlserver' || normalizedType === 'mssql') {
-          const topPos = findTopLevelKeyword(main, 'top');
-          if (topPos >= 0) return { sql, applied: false, maxRows }; // 已有 TOP
-          // 在 SELECT 关键字之后插入 TOP N
-          const selectPos = findTopLevelKeyword(main, 'select');
-          if (selectPos < 0) return { sql, applied: false, maxRows };
-          const afterSelect = selectPos + 'SELECT'.length;
-          // 处理 SELECT DISTINCT 的情况
-          const restAfterSelect = main.slice(afterSelect);
-          const distinctMatch = restAfterSelect.match(/^(\s+DISTINCT\b)/i);
-          const insertOffset = distinctMatch ? afterSelect + distinctMatch[1].length : afterSelect;
-          const nextMain = main.slice(0, insertOffset) + ` TOP ${maxRows}` + main.slice(insertOffset);
-          return { sql: nextMain + tail, applied: true, maxRows };
-      }
-
-      // Oracle / Dameng: 使用 FETCH FIRST N ROWS ONLY（Oracle 12c+ 标准语法）
-      if (normalizedType === 'oracle' || normalizedType === 'dameng') {
-          // 检查是否已有 ROWNUM 限制
-          const rownumPos = findTopLevelKeyword(main, 'rownum');
-          if (rownumPos >= 0) return { sql, applied: false, maxRows };
-          const offsetPos = findTopLevelKeyword(main, 'offset');
-          if (offsetPos >= 0 && (fromPos < 0 || offsetPos > fromPos)) return { sql, applied: false, maxRows };
-          const nextMain = main.trimEnd() + ` FETCH FIRST ${maxRows} ROWS ONLY`;
-          return { sql: nextMain + tail, applied: true, maxRows };
-      }
-
-      // 通用 LIMIT 语法（MySQL, PostgreSQL, SQLite, ClickHouse, DuckDB 等）
-      const offsetPos = findTopLevelKeyword(main, 'offset');
-      const forPos = findTopLevelKeyword(main, 'for');
-      const lockPos = findTopLevelKeyword(main, 'lock');
-
-      const candidates = [offsetPos, forPos, lockPos]
-          .filter(pos => pos >= 0 && (fromPos < 0 || pos > fromPos));
-
-      const insertAt = candidates.length > 0 ? Math.min(...candidates) : main.length;
-      const before = main.slice(0, insertAt).trimEnd();
-      const after = main.slice(insertAt).trimStart();
-      const nextMain = [before, `LIMIT ${maxRows}`, after].filter(Boolean).join(' ').trim();
-      return { sql: nextMain + tail, applied: true, maxRows };
-  };
-
   const getSelectedSQL = (): string => {
       const editor = editorRef.current;
       if (!editor) return '';
@@ -1662,8 +1599,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
     try {
         const rawSQL = getSelectedSQL() || currentQuery;
-        const dbType = String((buildRpcConnectionConfig(config) as any).type || 'mysql');
-        const normalizedDbType = dbType.trim().toLowerCase();
+        const rpcConfig = buildRpcConnectionConfig(config) as any;
+        const dbType = String(rpcConfig.type || 'mysql');
+        const driver = String((config as any).driver || '');
+        const normalizedDbType = String(resolveSqlDialect(dbType, driver)).trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
 
         // MongoDB 仍走逐条执行的旧路径
@@ -1701,6 +1640,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     }
                     if (shellConvert.command) {
                         executedSql = shellConvert.command;
+                    }
+                }
+                if (wantsLimitProbe) {
+                    const limitResult = applyMongoQueryAutoLimit(executedSql, maxRows);
+                    if (limitResult.applied) {
+                        executedSql = limitResult.command;
                     }
                 }
                 const startTime = Date.now();
@@ -1783,26 +1728,36 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
         } else {
             // 非 MongoDB：使用 DBQueryMulti 一次性执行多条 SQL，后端返回多结果集
-            let fullSQL = normalizedRawSQL;
-            if (!fullSQL.trim()) {
+            const sourceStatements = splitSQLStatements(normalizedRawSQL);
+            if (sourceStatements.length === 0) {
                 message.info('没有可执行的 SQL。');
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
             }
 
+            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
+            const statementPlans: QueryStatementPlan[] = [];
+            for (const statement of sourceStatements) {
+                statementPlans.push(await resolveQueryLocatorPlan({
+                    statement,
+                    dbType: normalizedDbType,
+                    currentDb,
+                    config,
+                    forceReadOnly: forceReadOnlyResult,
+                }));
+            }
+
             // 自动给 SELECT 语句注入行数限制（防止大结果集卡死）
             const maxRowsForLimit = Number(queryOptions?.maxRows) || 0;
             let anyLimitApplied = false;
-            if (Number.isFinite(maxRowsForLimit) && maxRowsForLimit > 0) {
-                const stmts = splitSQLStatements(fullSQL);
-                const limitedStmts = stmts.map(s => {
-                    const result = applyAutoLimit(s, normalizedDbType, maxRowsForLimit);
-                    if (result.applied) anyLimitApplied = true;
-                    return result.sql;
-                });
-                fullSQL = limitedStmts.join(';\n');
-            }
+            const executablePlans = statementPlans.map((plan) => {
+                if (!Number.isFinite(maxRowsForLimit) || maxRowsForLimit <= 0) return plan;
+                const result = applyQueryAutoLimit(plan.executedSql, normalizedDbType, maxRowsForLimit, driver);
+                if (result.applied) anyLimitApplied = true;
+                return { ...plan, executedSql: result.sql };
+            });
+            const fullSQL = executablePlans.map((plan) => plan.executedSql).join(';\n');
 
             const startTime = Date.now();
             let queryId: string;
@@ -1859,16 +1814,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
             const nextResultSets: ResultSet[] = [];
             const maxRows = Number(queryOptions?.maxRows) || 0;
-            const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
             let anyTruncated = false;
-            const pendingPk: Array<{ resultKey: string; tableName: string }> = [];
-
-            // 前端也拆分语句用于匹配原始 SQL（展示和表名检测）
-            const statements = splitSQLStatements(fullSQL);
 
             for (let idx = 0; idx < resultSetDataArray.length; idx++) {
                 const rsData = resultSetDataArray[idx];
-                const rawStatement = (idx < statements.length) ? statements[idx] : '';
+                const plan = executablePlans[idx];
+                const originalSql = plan?.originalSql || '';
+                const executedSql = plan?.executedSql || originalSql;
 
                 // 检查是否为 affectedRows 类结果集
                 const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
@@ -1881,8 +1833,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     (row as any)[GONAVI_ROW_KEY] = 0;
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
-                        sql: rawStatement,
-                        exportSql: rawStatement,
+                        sql: executedSql,
+                        exportSql: originalSql,
                         rows: [row],
                         columns: ['affectedRows'],
                         pkColumns: [],
@@ -1905,32 +1857,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
                     });
 
-                    let simpleTableName: string | undefined = undefined;
-                    if (rawStatement) {
-                        // 支持多行 SQL：SELECT [cols] FROM [schema.]table [WHERE...] [ORDER BY...] [LIMIT...] 等
-                        // JOIN 查询表名歧义，不提取
-                        const hasJoin = /\bJOIN\b/i.test(rawStatement);
-                        const tableMatch = !hasJoin
-                            ? rawStatement.match(/^\s*SELECT\s+.+?\s+FROM\s+(?:[\w`"\[\].]+\.)?[`"\[]?(\w+)[`"\]]?\s*(?:$|[\s;])/im)
-                            : null;
-                        if (tableMatch) {
-                            simpleTableName = tableMatch[1];
-                            if (!forceReadOnlyResult) {
-                                pendingPk.push({ resultKey: `result-${idx + 1}`, tableName: simpleTableName });
-                            }
-                        }
-                    }
-
+                    const tableRef = plan?.tableRef;
+                    const editLocator = plan?.editLocator;
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
-                        sql: rawStatement,
-                        exportSql: rawStatement,
+                        sql: executedSql,
+                        exportSql: originalSql,
                         rows,
                         columns: cols,
-                        tableName: simpleTableName,
-                        pkColumns: [],
-                        readOnly: true,
-                        pkLoading: !!simpleTableName,
+                        tableName: tableRef?.tableName,
+                        pkColumns: plan?.pkColumns || [],
+                        editLocator,
+                        readOnly: forceReadOnlyResult || !editLocator || editLocator.readOnly,
                         truncated
                     });
                 }
@@ -1939,21 +1877,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             setResultSets(nextResultSets);
             setActiveResultKey(nextResultSets[0]?.key || '');
 
-            pendingPk.forEach(({ resultKey, tableName }) => {
-                DBGetColumns(buildRpcConnectionConfig(config) as any, currentDb, tableName)
-                    .then((resCols: any) => {
-                        if (runSeqRef.current !== runSeq) return;
-                        if (!resCols?.success) {
-                            setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                            return;
-                        }
-                        const primaryKeys = (resCols.data as ColumnDefinition[]).filter(c => c.key === 'PRI').map(c => c.name);
-                        setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkColumns: primaryKeys, pkLoading: false, readOnly: false } : rs));
-                    })
-                    .catch(() => {
-                        if (runSeqRef.current !== runSeq) return;
-                        setResultSets(prev => prev.map(rs => rs.key === resultKey ? { ...rs, pkLoading: false, readOnly: false } : rs));
-                    });
+            executablePlans.forEach((plan) => {
+                if (plan.warning) message.warning(plan.warning);
             });
 
             // 后端附带的提示信息（如数据源不支持原生多语句执行的回退提示）
@@ -2486,6 +2411,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                   dbName={currentDb}
                                   connectionId={currentConnectionId}
                                   pkColumns={rs.pkColumns}
+                                  editLocator={rs.editLocator}
                                   onReload={() => handleReloadResult(rs.key, rs.sql)}
                                   readOnly={rs.readOnly}
                               />

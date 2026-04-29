@@ -3,6 +3,7 @@ package db
 import (
 	"GoNavi-Wails/internal/connection"
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -62,6 +63,20 @@ type BatchWriteExecer interface {
 type BatchApplier interface {
 	// ApplyChanges 将一组变更（新增、修改、删除）批量提交到指定表。
 	ApplyChanges(tableName string, changes connection.ChangeSet) error
+}
+
+func requireSingleRowAffected(result sql.Result, action string) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s未生效：无法确认影响行数：%v", action, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("%s未生效：未匹配到任何行", action)
+	}
+	if affected != 1 {
+		return fmt.Errorf("%s未生效：影响了 %d 行，期望只影响 1 行", action, affected)
+	}
+	return nil
 }
 
 type databaseFactory func() Database

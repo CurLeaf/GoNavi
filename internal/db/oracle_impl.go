@@ -44,6 +44,10 @@ func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 		q.Set("SSL", "TRUE")
 		q.Set("SSL VERIFY", "FALSE")
 	}
+	// 提高 prefetch 行数，减少大结果集的网络往返次数（默认仅 25 行/次）
+	q.Set("PREFETCH_ROWS", "10000")
+	// LOB 数据延迟加载，避免大 LOB 列影响普通查询性能
+	q.Set("LOB FETCH", "POST")
 	if encoded := q.Encode(); encoded != "" {
 		u.RawQuery = encoded
 	}
@@ -263,16 +267,31 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
-	query := fmt.Sprintf(`SELECT column_name, data_type, nullable, data_default 
-		FROM all_tab_columns 
-		WHERE owner = '%s' AND table_name = '%s' 
-		ORDER BY column_id`, strings.ToUpper(dbName), strings.ToUpper(tableName))
+	query := fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+		FROM all_tab_columns c
+		LEFT JOIN (
+			SELECT cols.owner, cols.table_name, cols.column_name
+			FROM all_constraints cons
+			JOIN all_cons_columns cols
+			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
+			WHERE cons.constraint_type = 'P'
+		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
+		WHERE c.owner = '%s' AND c.table_name = '%s'
+		ORDER BY c.column_id`, strings.ToUpper(dbName), strings.ToUpper(tableName))
 
 	if dbName == "" {
-		query = fmt.Sprintf(`SELECT column_name, data_type, nullable, data_default 
-			FROM user_tab_columns 
-			WHERE table_name = '%s' 
-			ORDER BY column_id`, strings.ToUpper(tableName))
+		query = fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
+			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+			FROM user_tab_columns c
+			LEFT JOIN (
+				SELECT cols.table_name, cols.column_name
+				FROM user_constraints cons
+				JOIN user_cons_columns cols USING (constraint_name)
+				WHERE cons.constraint_type = 'P'
+			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+			WHERE c.table_name = '%s'
+			ORDER BY c.column_id`, strings.ToUpper(tableName))
 	}
 
 	data, _, err := o.Query(query)
@@ -286,6 +305,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 			Name:     fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:     fmt.Sprintf("%v", row["DATA_TYPE"]),
 			Nullable: fmt.Sprintf("%v", row["NULLABLE"]),
+			Key:      fmt.Sprintf("%v", row["COLUMN_KEY"]),
 		}
 
 		if row["DATA_DEFAULT"] != nil {
@@ -299,17 +319,31 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 }
 
 func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
-	query := fmt.Sprintf(`SELECT index_name, column_name, uniqueness 
-		FROM all_ind_columns 
-		JOIN all_indexes USING (index_name, owner) 
-		WHERE table_owner = '%s' AND table_name = '%s'`,
-		strings.ToUpper(dbName), strings.ToUpper(tableName))
+	esc := func(s string) string { return strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(s)), "'", "''") }
+	table := esc(tableName)
+	if table == "" {
+		return nil, fmt.Errorf("表名不能为空")
+	}
 
-	if dbName == "" {
-		query = fmt.Sprintf(`SELECT index_name, column_name, uniqueness 
-			FROM user_ind_columns 
-			JOIN user_indexes USING (index_name) 
-			WHERE table_name = '%s'`, strings.ToUpper(tableName))
+	query := fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
+		FROM all_ind_columns c
+		JOIN all_indexes i ON i.owner = c.index_owner AND i.index_name = c.index_name
+		WHERE c.table_owner = '%s'
+		  AND c.table_name = '%s'
+		  AND c.column_name IS NOT NULL
+		  AND c.column_name NOT LIKE 'SYS_NC%%$'
+		  AND i.index_type NOT LIKE 'FUNCTION-BASED%%'
+		ORDER BY c.index_name, c.column_position`, esc(dbName), table)
+
+	if strings.TrimSpace(dbName) == "" {
+		query = fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
+			FROM user_ind_columns c
+			JOIN user_indexes i ON i.index_name = c.index_name
+			WHERE c.table_name = '%s'
+			  AND c.column_name IS NOT NULL
+			  AND c.column_name NOT LIKE 'SYS_NC%%$'
+			  AND i.index_type NOT LIKE 'FUNCTION-BASED%%'
+			ORDER BY c.index_name, c.column_position`, table)
 	}
 
 	data, _, err := o.Query(query)
@@ -317,19 +351,46 @@ func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 		return nil, err
 	}
 
+	getValue := func(row map[string]interface{}, names ...string) interface{} {
+		for _, name := range names {
+			if value, ok := row[name]; ok {
+				return value
+			}
+			for key, value := range row {
+				if strings.EqualFold(key, name) {
+					return value
+				}
+			}
+		}
+		return nil
+	}
+	parseInt := func(value interface{}) int {
+		var n int
+		_, _ = fmt.Sscanf(strings.TrimSpace(fmt.Sprintf("%v", value)), "%d", &n)
+		return n
+	}
+
 	var indexes []connection.IndexDefinition
 	for _, row := range data {
-		unique := 1
-		if val, ok := row["UNIQUENESS"]; ok && val == "UNIQUE" {
-			unique = 0
+		uniqueness := strings.ToUpper(strings.TrimSpace(fmt.Sprintf("%v", getValue(row, "UNIQUENESS"))))
+		nonUnique := 1
+		if uniqueness == "UNIQUE" {
+			nonUnique = 0
+		}
+		indexType := strings.ToUpper(strings.TrimSpace(fmt.Sprintf("%v", getValue(row, "INDEX_TYPE"))))
+		if indexType == "" || indexType == "<NIL>" {
+			indexType = "BTREE"
 		}
 
 		idx := connection.IndexDefinition{
-			Name:       fmt.Sprintf("%v", row["INDEX_NAME"]),
-			ColumnName: fmt.Sprintf("%v", row["COLUMN_NAME"]),
-			NonUnique:  unique,
-			// SeqInIndex is harder to get in simple join, omitting or estimating
-			IndexType: "BTREE", // Default assumption
+			Name:       strings.TrimSpace(fmt.Sprintf("%v", getValue(row, "INDEX_NAME"))),
+			ColumnName: strings.TrimSpace(fmt.Sprintf("%v", getValue(row, "COLUMN_NAME"))),
+			NonUnique:  nonUnique,
+			SeqInIndex: parseInt(getValue(row, "COLUMN_POSITION")),
+			IndexType:  indexType,
+		}
+		if idx.Name == "" || idx.ColumnName == "" || strings.EqualFold(idx.ColumnName, "<nil>") {
+			continue
 		}
 		indexes = append(indexes, idx)
 	}
@@ -531,22 +592,37 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		qualifiedTable = quoteIdent(table)
 	}
 
-	// 1. Deletes
-	for _, pk := range changes.Deletes {
+	isOracleRowIDLocator := strings.EqualFold(strings.TrimSpace(changes.LocatorStrategy), "oracle-rowid")
+	buildWhere := func(keys map[string]interface{}, startIndex int) ([]string, []interface{}, int) {
 		var wheres []string
 		var args []interface{}
-		idx := 0
-		for k, v := range pk {
+		idx := startIndex
+		for k, v := range keys {
 			idx++
+			if isOracleRowIDLocator && strings.EqualFold(strings.TrimSpace(k), "ROWID") {
+				wheres = append(wheres, fmt.Sprintf("ROWID = :%d", idx))
+				args = append(args, v)
+				continue
+			}
 			wheres = append(wheres, fmt.Sprintf("%s = :%d", quoteIdent(k), idx))
 			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
 		}
+		return wheres, args, idx
+	}
+
+	// 1. Deletes
+	for _, pk := range changes.Deletes {
+		wheres, args, _ := buildWhere(pk, 0)
 		if len(wheres) == 0 {
 			continue
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
+		}
+		if err := requireSingleRowAffected(res, "删除"); err != nil {
+			return err
 		}
 	}
 
@@ -566,20 +642,20 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 			continue
 		}
 
-		var wheres []string
-		for k, v := range update.Keys {
-			idx++
-			wheres = append(wheres, fmt.Sprintf("%s = :%d", quoteIdent(k), idx))
-			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
-		}
+		wheres, whereArgs, _ := buildWhere(update.Keys, idx)
+		args = append(args, whereArgs...)
 
 		if len(wheres) == 0 {
 			return fmt.Errorf("更新操作需要主键条件")
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
+		}
+		if err := requireSingleRowAffected(res, "更新"); err != nil {
+			return err
 		}
 	}
 
@@ -602,8 +678,12 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("插入失败：%v", err)
+		}
+		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
+			return fmt.Errorf("插入未生效：未影响任何行")
 		}
 	}
 

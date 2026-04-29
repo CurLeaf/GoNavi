@@ -624,8 +624,8 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-			return fmt.Errorf("删除未生效：未匹配到任何行")
+		if err := requireSingleRowAffected(res, "删除"); err != nil {
+			return err
 		}
 	}
 
@@ -658,8 +658,8 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-			return fmt.Errorf("更新未生效：未匹配到任何行")
+		if err := requireSingleRowAffected(res, "更新"); err != nil {
+			return err
 		}
 	}
 

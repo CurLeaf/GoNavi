@@ -152,6 +152,8 @@ echo "🚀 开始构建 optional-driver-agent"
 echo "   平台：$goos/$goarch"
 echo "   输出目录：$output_dir_abs"
 echo "   驱动列表：${drivers[*]}"
+echo "🧭 生成 driver-agent revision 指纹"
+"$SCRIPT_DIR/tools/generate-driver-agent-revisions.sh" --platform "$target_platform"
 
 for driver in "${drivers[@]}"; do
   if [[ "$driver" == "duckdb" && "$goos" == "windows" && "$goarch" != "amd64" ]]; then

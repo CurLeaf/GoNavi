@@ -36,9 +36,9 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-	import { SavedConnection, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-	import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -80,6 +80,33 @@ interface BatchObjectItem {
   objectType: BatchObjectType;
   dataRef: any;
 }
+
+type DriverStatusSnapshot = {
+  type: string;
+  name: string;
+  connectable: boolean;
+  expectedRevision?: string;
+  needsUpdate?: boolean;
+  updateReason?: string;
+  message?: string;
+};
+
+const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
+
+const normalizeDriverType = (value: string): string => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'postgresql') return 'postgres';
+  if (normalized === 'doris') return 'diros';
+  return normalized;
+};
+
+const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): string => {
+  const type = normalizeDriverType(conn?.config?.type || '');
+  if (type !== 'custom') {
+    return type;
+  }
+  return normalizeDriverType(conn?.config?.driver || '');
+};
 
 const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
   { value: 'smart', label: '智能' },
@@ -211,10 +238,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [autoExpandParent, setAutoExpandParent] = useState(true);
   const [loadedKeys, setLoadedKeys] = useState<React.Key[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const selectedNodesRef = useRef<any[]>([]);
-  const loadingNodesRef = useRef<Set<string>>(new Set());
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
+	  const selectedNodesRef = useRef<any[]>([]);
+	  const loadingNodesRef = useRef<Set<string>>(new Set());
+	  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	  const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
+	  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
+	  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
   
   // Virtual Scroll State
   const [treeHeight, setTreeHeight] = useState(500);
@@ -956,13 +985,72 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               const typeLabel = normalizedType === 'PROCEDURE' ? 'P' : 'F';
               routines.push({ displayName: `${fullName} [${typeLabel}]`, routineName: fullName, routineType: normalizedType });
           });
-      });
-      return { routines, supported: hasSuccessfulQuery };
-  };
+	      });
+	      return { routines, supported: hasSuccessfulQuery };
+	  };
 
-	  const loadDatabases = async (node: any) => {
-	      const conn = node.dataRef as SavedConnection;
-	      const loadKey = `dbs-${conn.id}`;
+	  const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
+	      const cached = driverStatusCacheRef.current;
+	      if (cached && Date.now() - cached.fetchedAt < DRIVER_STATUS_CACHE_TTL_MS) {
+	          return cached.items;
+	      }
+	      const result: Record<string, DriverStatusSnapshot> = {};
+	      const res = await GetDriverStatusList('', '');
+	      if (!res?.success) {
+	          return result;
+	      }
+	      const data = (res.data || {}) as any;
+	      const drivers = Array.isArray(data.drivers) ? data.drivers : [];
+	      drivers.forEach((item: any) => {
+	          const type = normalizeDriverType(String(item.type || '').trim());
+	          if (!type) return;
+	          result[type] = {
+	              type,
+	              name: String(item.name || item.type || type).trim(),
+	              connectable: !!item.connectable,
+	              expectedRevision: String(item.expectedRevision || '').trim() || undefined,
+	              needsUpdate: !!item.needsUpdate,
+	              updateReason: String(item.updateReason || '').trim() || undefined,
+	              message: String(item.message || '').trim() || undefined,
+	          };
+	      });
+	      driverStatusCacheRef.current = { fetchedAt: Date.now(), items: result };
+	      return result;
+	  };
+
+	  const warnIfConnectionDriverAgentNeedsUpdate = async (conn: SavedConnection) => {
+	      try {
+	          const driverType = resolveSavedConnectionDriverType(conn);
+	          if (!driverType || driverType === 'custom') {
+	              return;
+	          }
+	          const statusMap = await fetchDriverStatusMap();
+	          const status = statusMap[driverType];
+	          if (!status?.connectable || !status.needsUpdate) {
+	              return;
+	          }
+	          const revisionKey = status.expectedRevision || status.updateReason || status.message || 'unknown';
+	          const warningKey = `${conn.id}:${driverType}:${revisionKey}`;
+	          if (driverUpdateWarningKeysRef.current.has(warningKey)) {
+	              return;
+	          }
+	          driverUpdateWarningKeysRef.current.add(warningKey);
+	          const driverName = status.name || driverType;
+	          const reason = status.message || status.updateReason || `${driverName} driver-agent 与当前 GoNavi 版本要求不一致`;
+	          message.warning({
+	              content: `${driverName} 驱动代理需要重装：${reason}`,
+	              key: `driver-agent-update-${conn.id}`,
+	              duration: 10,
+	          });
+	      } catch (error) {
+	          console.warn('检查驱动代理更新状态失败', error);
+	      }
+	  };
+
+		  const loadDatabases = async (node: any) => {
+		      const conn = node.dataRef as SavedConnection;
+		      void warnIfConnectionDriverAgentNeedsUpdate(conn);
+		      const loadKey = `dbs-${conn.id}`;
 	      if (loadingNodesRef.current.has(loadKey)) return;
 	      loadingNodesRef.current.add(loadKey);
 	      const config = {
@@ -1845,8 +1933,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       setIsBatchModalOpen(true);
   };
 
-  const loadDatabasesForBatch = async (conn: SavedConnection) => {
-      const config = {
+	  const loadDatabasesForBatch = async (conn: SavedConnection) => {
+	      void warnIfConnectionDriverAgentNeedsUpdate(conn);
+	      const config = {
           ...conn.config,
           port: Number(conn.config.port),
           password: conn.config.password || "",
@@ -2154,10 +2243,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       setIsBatchDbModalOpen(true);
   };
 
-  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
-      setBatchConnContext(conn);
+	  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
+	      setBatchConnContext(conn);
+	      void warnIfConnectionDriverAgentNeedsUpdate(conn);
 
-      const config = {
+	      const config = {
           ...conn.config,
           port: Number(conn.config.port),
           password: conn.config.password || "",

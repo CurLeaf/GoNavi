@@ -31,6 +31,17 @@ func TestBuiltinLikeDriversRemainAvailable(t *testing.T) {
 	}
 }
 
+func TestOptionalDriverAgentRevisionsGeneratedForOptionalDrivers(t *testing.T) {
+	for driverType := range optionalGoDrivers {
+		if revision := OptionalDriverAgentRevision(driverType); revision == "" {
+			t.Fatalf("%s 缺少自动生成的 driver-agent revision", driverType)
+		}
+	}
+	if OptionalDriverAgentRevision("doris") != OptionalDriverAgentRevision("diros") {
+		t.Fatalf("doris/diros revision 应归一一致")
+	}
+}
+
 func TestManagedDriverRequiresInstallMarker(t *testing.T) {
 	tmpDir := t.TempDir()
 	SetExternalDriverDownloadDirectory(tmpDir)

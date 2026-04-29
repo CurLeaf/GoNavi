@@ -408,6 +408,12 @@ JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = x.attnum
 WHERE t.relkind IN ('r', 'p')
   AND t.relname = '%s'
   AND n.nspname = '%s'
+  AND ix.indisvalid
+  AND ix.indpred IS NULL
+  AND x.ordinality <= ix.indnkeyatts
+  AND NOT EXISTS (
+    SELECT 1 FROM unnest(ix.indkey) AS expr_key(attnum) WHERE expr_key.attnum <= 0
+  )
 ORDER BY i.relname, x.ordinality`, esc(table), esc(schema))
 
 	data, _, err := p.Query(query)
@@ -758,8 +764,12 @@ func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet
 			continue
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
+		}
+		if err := requireSingleRowAffected(res, "删除"); err != nil {
+			return err
 		}
 	}
 
@@ -791,8 +801,12 @@ func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
+		}
+		if err := requireSingleRowAffected(res, "更新"); err != nil {
+			return err
 		}
 	}
 

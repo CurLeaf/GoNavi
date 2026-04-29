@@ -39,6 +39,19 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.database).toBe('app');
   });
 
+  it('preserves ClickHouse protocol override for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-clickhouse',
+      type: 'clickhouse',
+      host: 'clickhouse.local',
+      port: 8125,
+      user: 'default',
+      clickHouseProtocol: 'http',
+    } as any);
+
+    expect(result.clickHouseProtocol).toBe('http');
+  });
+
   it('fills default nested config blocks needed by RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-redis',

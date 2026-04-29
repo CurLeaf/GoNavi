@@ -127,6 +127,7 @@ type driverDefinition struct {
 type installedDriverPackage struct {
 	DriverType     string `json:"driverType"`
 	Version        string `json:"version,omitempty"`
+	AgentRevision  string `json:"agentRevision,omitempty"`
 	FilePath       string `json:"filePath"`
 	FileName       string `json:"fileName"`
 	ExecutablePath string `json:"executablePath,omitempty"`
@@ -136,23 +137,28 @@ type installedDriverPackage struct {
 }
 
 type driverStatusItem struct {
-	Type               string `json:"type"`
-	Name               string `json:"name"`
-	Engine             string `json:"engine,omitempty"`
-	BuiltIn            bool   `json:"builtIn"`
-	PinnedVersion      string `json:"pinnedVersion,omitempty"`
-	InstalledVersion   string `json:"installedVersion,omitempty"`
-	PackageSizeText    string `json:"packageSizeText,omitempty"`
-	RuntimeAvailable   bool   `json:"runtimeAvailable"`
-	PackageInstalled   bool   `json:"packageInstalled"`
-	Connectable        bool   `json:"connectable"`
-	DefaultDownloadURL string `json:"defaultDownloadUrl,omitempty"`
-	InstallDir         string `json:"installDir,omitempty"`
-	PackagePath        string `json:"packagePath,omitempty"`
-	PackageFileName    string `json:"packageFileName,omitempty"`
-	ExecutablePath     string `json:"executablePath,omitempty"`
-	DownloadedAt       string `json:"downloadedAt,omitempty"`
-	Message            string `json:"message,omitempty"`
+	Type                string `json:"type"`
+	Name                string `json:"name"`
+	Engine              string `json:"engine,omitempty"`
+	BuiltIn             bool   `json:"builtIn"`
+	PinnedVersion       string `json:"pinnedVersion,omitempty"`
+	InstalledVersion    string `json:"installedVersion,omitempty"`
+	PackageSizeText     string `json:"packageSizeText,omitempty"`
+	RuntimeAvailable    bool   `json:"runtimeAvailable"`
+	PackageInstalled    bool   `json:"packageInstalled"`
+	Connectable         bool   `json:"connectable"`
+	DefaultDownloadURL  string `json:"defaultDownloadUrl,omitempty"`
+	InstallDir          string `json:"installDir,omitempty"`
+	PackagePath         string `json:"packagePath,omitempty"`
+	PackageFileName     string `json:"packageFileName,omitempty"`
+	ExecutablePath      string `json:"executablePath,omitempty"`
+	DownloadedAt        string `json:"downloadedAt,omitempty"`
+	AgentRevision       string `json:"agentRevision,omitempty"`
+	ExpectedRevision    string `json:"expectedRevision,omitempty"`
+	NeedsUpdate         bool   `json:"needsUpdate,omitempty"`
+	UpdateReason        string `json:"updateReason,omitempty"`
+	AffectedConnections int    `json:"affectedConnections,omitempty"`
+	Message             string `json:"message,omitempty"`
 }
 
 const driverDownloadProgressEvent = "driver:download-progress"
@@ -758,29 +764,36 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 	definitions := allDriverDefinitionsWithPackages(effectivePackages)
 	triggerDriverVersionMetadataWarmup(definitions)
 	packageSizeBytesMap := preloadOptionalDriverPackageSizes(definitions)
+	usageCounts := a.savedConnectionDriverUsageCounts()
 	items := make([]driverStatusItem, 0, len(definitions))
 	for _, definition := range definitions {
 		engine := effectiveDriverEngine(definition)
 		runtimeAvailable, runtimeReason := db.DriverRuntimeSupportStatus(definition.Type)
 		pkg, packageMetaExists := readInstalledDriverPackage(resolvedDir, definition.Type)
+		needsUpdate, updateReason, expectedRevision := optionalDriverAgentRevisionStatus(definition.Type, pkg, packageMetaExists)
 		packageInstalled := definition.BuiltIn || packageMetaExists
 		if runtimeAvailable && db.IsOptionalGoDriver(definition.Type) {
 			packageInstalled = true
 		}
 
 		item := driverStatusItem{
-			Type:               definition.Type,
-			Name:               definition.Name,
-			Engine:             engine,
-			BuiltIn:            definition.BuiltIn,
-			PinnedVersion:      definition.PinnedVersion,
-			InstalledVersion:   strings.TrimSpace(pkg.Version),
-			PackageSizeText:    resolveDriverPackageSizeText(definition, pkg, packageMetaExists, packageSizeBytesMap),
-			RuntimeAvailable:   runtimeAvailable,
-			PackageInstalled:   packageInstalled,
-			Connectable:        runtimeAvailable,
-			DefaultDownloadURL: definition.DefaultDownloadURL,
-			InstallDir:         driverInstallDir(resolvedDir, definition.Type),
+			Type:                definition.Type,
+			Name:                definition.Name,
+			Engine:              engine,
+			BuiltIn:             definition.BuiltIn,
+			PinnedVersion:       definition.PinnedVersion,
+			InstalledVersion:    strings.TrimSpace(pkg.Version),
+			PackageSizeText:     resolveDriverPackageSizeText(definition, pkg, packageMetaExists, packageSizeBytesMap),
+			RuntimeAvailable:    runtimeAvailable,
+			PackageInstalled:    packageInstalled,
+			Connectable:         runtimeAvailable,
+			DefaultDownloadURL:  definition.DefaultDownloadURL,
+			InstallDir:          driverInstallDir(resolvedDir, definition.Type),
+			AgentRevision:       strings.TrimSpace(pkg.AgentRevision),
+			ExpectedRevision:    expectedRevision,
+			NeedsUpdate:         needsUpdate,
+			UpdateReason:        updateReason,
+			AffectedConnections: usageCounts[normalizeDriverType(definition.Type)],
 		}
 		if packageMetaExists {
 			item.PackagePath = pkg.FilePath
@@ -792,6 +805,12 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 		switch {
 		case definition.BuiltIn:
 			item.Message = "内置驱动，可直接连接"
+		case needsUpdate:
+			if item.AffectedConnections > 0 {
+				item.Message = fmt.Sprintf("%s；检测到 %d 个已保存连接正在使用该驱动，请在工具-驱动管理中重装", updateReason, item.AffectedConnections)
+			} else {
+				item.Message = updateReason + "，请在工具-驱动管理中重装"
+			}
 		case runtimeAvailable:
 			item.Message = "纯 Go 驱动已启用，可直接连接"
 		case packageInstalled && strings.TrimSpace(runtimeReason) != "":
@@ -2702,6 +2721,47 @@ func readInstalledDriverPackage(downloadDir string, driverType string) (installe
 	return meta, true
 }
 
+func optionalDriverAgentRevisionStatus(driverType string, pkg installedDriverPackage, packageMetaExists bool) (bool, string, string) {
+	expected := db.OptionalDriverAgentRevision(driverType)
+	if strings.TrimSpace(expected) == "" || !packageMetaExists || !db.IsOptionalGoDriver(driverType) {
+		return false, "", expected
+	}
+	actual := strings.TrimSpace(pkg.AgentRevision)
+	if actual == expected {
+		return false, "", expected
+	}
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	updateReason := fmt.Sprintf("当前 GoNavi 版本要求更新后的 %s driver-agent（revision: %s）", displayName, expected)
+	impact := "driver-agent 是独立二进制，不会随主程序自动更新；如果不重装，会继续使用旧 agent 逻辑，驱动侧已修复或优化的行为不会生效，可能继续出现旧版本问题。强烈建议重装对应驱动代理"
+	if actual == "" {
+		return true, fmt.Sprintf("原因：%s。影响：%s", updateReason, impact), expected
+	}
+	return true, fmt.Sprintf("原因：%s。影响：%s（已安装标记：%s，当前需要：%s）", updateReason, impact, actual, expected), expected
+}
+
+func (a *App) savedConnectionDriverUsageCounts() map[string]int {
+	counts := map[string]int{}
+	if a == nil || strings.TrimSpace(a.configDir) == "" {
+		return counts
+	}
+	items, err := a.savedConnectionRepository().List()
+	if err != nil {
+		logger.Warnf("统计驱动连接使用数失败：%v", err)
+		return counts
+	}
+	for _, item := range items {
+		driverType := normalizeDriverType(item.Config.Type)
+		if driverType == "custom" {
+			driverType = normalizeDriverType(item.Config.Driver)
+		}
+		if driverType == "" || !db.IsOptionalGoDriver(driverType) {
+			continue
+		}
+		counts[driverType]++
+	}
+	return counts
+}
+
 func writeInstalledDriverPackage(downloadDir string, driverType string, meta installedDriverPackage) error {
 	driverDir := driverInstallDir(downloadDir, driverType)
 	if err := os.MkdirAll(driverDir, 0o755); err != nil {
@@ -2765,9 +2825,11 @@ func installOptionalDriverAgentPackage(a *App, definition driverDefinition, sele
 	if strings.TrimSpace(downloadSource) == "" {
 		downloadSource = strings.TrimSpace(downloadURL)
 	}
+	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, runtimePath)
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
+		AgentRevision:  agentRevision,
 		FilePath:       installPath,
 		FileName:       filepath.Base(installPath),
 		ExecutablePath: runtimePath,
@@ -2837,9 +2899,11 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 	if hashErr != nil {
 		return installedDriverPackage{}, fmt.Errorf("计算 %s 驱动代理摘要失败：%w", displayName, hashErr)
 	}
+	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, executablePath)
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
+		AgentRevision:  agentRevision,
 		FilePath:       sourcePath,
 		FileName:       sourceName,
 		ExecutablePath: executablePath,
@@ -2847,6 +2911,19 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 		SHA256:         hash,
 		DownloadedAt:   time.Now().Format(time.RFC3339),
 	}, nil
+}
+
+func probeInstalledOptionalDriverAgentRevision(driverType string, executablePath string) string {
+	expectedRevision := db.OptionalDriverAgentRevision(driverType)
+	if strings.TrimSpace(expectedRevision) == "" {
+		return ""
+	}
+	metadata, err := db.ProbeOptionalDriverAgentMetadata(driverType, executablePath)
+	if err != nil {
+		logger.Warnf("%s 驱动代理未返回版本元数据：%v", resolveDriverDisplayName(driverDefinition{Type: driverType}), err)
+		return ""
+	}
+	return strings.TrimSpace(metadata.AgentRevision)
 }
 
 type localDriverCandidate struct {

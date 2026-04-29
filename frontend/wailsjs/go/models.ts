@@ -426,6 +426,7 @@ export namespace connection {
 	    inserts: any[];
 	    updates: UpdateRow[];
 	    deletes: any[];
+	    locatorStrategy?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChangeSet(source);
@@ -436,6 +437,7 @@ export namespace connection {
 	        this.inserts = source["inserts"];
 	        this.updates = this.convertValues(source["updates"], UpdateRow);
 	        this.deletes = source["deletes"];
+	        this.locatorStrategy = source["locatorStrategy"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -668,6 +670,7 @@ export namespace connection {
 	    timeout?: number;
 	    redisDB?: number;
 	    uri?: string;
+	    clickHouseProtocol?: string;
 	    hosts?: string[];
 	    topology?: string;
 	    mysqlReplicaUser?: string;
@@ -710,6 +713,7 @@ export namespace connection {
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
 	        this.uri = source["uri"];
+	        this.clickHouseProtocol = source["clickHouseProtocol"];
 	        this.hosts = source["hosts"];
 	        this.topology = source["topology"];
 	        this.mysqlReplicaUser = source["mysqlReplicaUser"];

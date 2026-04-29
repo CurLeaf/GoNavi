@@ -24,8 +24,16 @@ var (
 )
 
 type oracleRecordingState struct {
-	mu       sync.Mutex
-	execArgs [][]driver.NamedValue
+	mu           sync.Mutex
+	execQueries  []string
+	execArgs     [][]driver.NamedValue
+	rowsAffected int64
+}
+
+func (s *oracleRecordingState) snapshotExecQueries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.execQueries...)
 }
 
 func (s *oracleRecordingState) snapshotExecArgs() [][]driver.NamedValue {
@@ -63,11 +71,12 @@ func (c *oracleRecordingConn) Close() error { return nil }
 
 func (c *oracleRecordingConn) Begin() (driver.Tx, error) { return oracleRecordingTx{}, nil }
 
-func (c *oracleRecordingConn) ExecContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Result, error) {
+func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.state.mu.Lock()
 	defer c.state.mu.Unlock()
+	c.state.execQueries = append(c.state.execQueries, query)
 	c.state.execArgs = append(c.state.execArgs, append([]driver.NamedValue(nil), args...))
-	return driver.RowsAffected(1), nil
+	return driver.RowsAffected(c.state.rowsAffected), nil
 }
 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
@@ -126,7 +135,7 @@ func openOracleRecordingDB(t *testing.T) (*sql.DB, *oracleRecordingState) {
 	oracleRecordingDriverMu.Lock()
 	oracleRecordingDriverSeq++
 	dsn := fmt.Sprintf("oracle-recording-%d", oracleRecordingDriverSeq)
-	state := &oracleRecordingState{}
+	state := &oracleRecordingState{rowsAffected: 1}
 	oracleRecordingDriverStates[dsn] = state
 	oracleRecordingDriverMu.Unlock()
 
@@ -143,6 +152,82 @@ func openOracleRecordingDB(t *testing.T) (*sql.DB, *oracleRecordingState) {
 	})
 
 	return dbConn, state
+}
+
+func TestOracleApplyChangesReturnsErrorWhenUpdateMatchesNoRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 0
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": 7,
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
+	}
+
+	err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes)
+	if err == nil {
+		t.Fatal("期望更新未匹配到行时返回错误，实际为 nil")
+	}
+	if !strings.Contains(err.Error(), "更新未生效") {
+		t.Fatalf("错误信息应提示更新未生效，实际=%v", err)
+	}
+}
+
+func TestOracleApplyChangesReturnsErrorWhenUpdateAffectsMultipleRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 2
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": 7,
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
+	}
+
+	err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes)
+	if err == nil {
+		t.Fatal("期望更新影响多行时返回错误，实际为 nil")
+	}
+	if !strings.Contains(err.Error(), "影响了 2 行") {
+		t.Fatalf("错误信息应提示影响多行，实际=%v", err)
+	}
+}
+
+func TestOracleApplyChangesReturnsErrorWhenDeleteAffectsMultipleRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 2
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Deletes: []map[string]interface{}{{
+			"STATUS": "stale",
+		}},
+	}
+
+	err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes)
+	if err == nil {
+		t.Fatal("期望删除影响多行时返回错误，实际为 nil")
+	}
+	if !strings.Contains(err.Error(), "影响了 2 行") {
+		t.Fatalf("错误信息应提示影响多行，实际=%v", err)
+	}
 }
 
 func TestOracleApplyChangesNormalizesTemporalStringsForUpdate(t *testing.T) {
@@ -179,5 +264,89 @@ func TestOracleApplyChangesNormalizesTemporalStringsForUpdate(t *testing.T) {
 	}
 	if _, ok := args[1].Value.(time.Time); !ok {
 		t.Fatalf("日期主键字段应绑定为 time.Time，实际=%#v(%T)", args[1].Value, args[1].Value)
+	}
+}
+
+func TestOracleApplyChangesUsesUnquotedRowIDLocator(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		LocatorStrategy: "oracle-rowid",
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ROWID": "AAAA",
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
+	}
+
+	if err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes); err != nil {
+		t.Fatalf("ApplyChanges 返回错误: %v", err)
+	}
+
+	executions := state.snapshotExecQueries()
+	if len(executions) != 1 {
+		t.Fatalf("期望执行 1 条更新，实际 %d 条", len(executions))
+	}
+	query := executions[0]
+	if !strings.Contains(query, "ROWID = :2") {
+		t.Fatalf("ROWID 定位条件不正确: %s", query)
+	}
+	if strings.Contains(query, "\"ROWID\" =") {
+		t.Fatalf("ROWID 不应被当作普通列引用: %s", query)
+	}
+}
+
+func TestMySQLApplyChangesReturnsErrorWhenUpdateAffectsMultipleRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 2
+	mysqlDB := &MySQLDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"id": 7,
+			},
+			Values: map[string]interface{}{
+				"name": "new-name",
+			},
+		}},
+	}
+
+	err := mysqlDB.ApplyChanges("users", changes)
+	if err == nil {
+		t.Fatal("期望 MySQL 更新影响多行时返回错误，实际为 nil")
+	}
+	if !strings.Contains(err.Error(), "影响了 2 行") {
+		t.Fatalf("错误信息应提示影响多行，实际=%v", err)
+	}
+}
+
+func TestPostgresApplyChangesReturnsErrorWhenDeleteAffectsMultipleRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 2
+	postgresDB := &PostgresDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Deletes: []map[string]interface{}{{
+			"id": 7,
+		}},
+	}
+
+	err := postgresDB.ApplyChanges("public.users", changes)
+	if err == nil {
+		t.Fatal("期望 PostgreSQL 删除影响多行时返回错误，实际为 nil")
+	}
+	if !strings.Contains(err.Error(), "影响了 2 行") {
+		t.Fatalf("错误信息应提示影响多行，实际=%v", err)
 	}
 }

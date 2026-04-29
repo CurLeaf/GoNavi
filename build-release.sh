@@ -155,6 +155,7 @@ package_macos_release() {
     local archive_suffix="$2"
 
     echo -e "${GREEN}🍎 正在构建 macOS (${platform})...${NC}"
+    generate_driver_agent_revisions "darwin/${platform}"
     wails build -platform "darwin/${platform}" -clean -ldflags "$LDFLAGS"
     if [ $? -ne 0 ]; then
         echo -e "${RED}   ❌ macOS ${platform} 构建失败。${NC}"
@@ -185,6 +186,12 @@ package_macos_release() {
     echo "   ✅ 已生成 $zip_name"
 }
 
+generate_driver_agent_revisions() {
+    local platform="$1"
+    echo "   🧭 正在生成 driver-agent revision 指纹 (${platform})..."
+    ./tools/generate-driver-agent-revisions.sh --platform "$platform"
+}
+
 echo -e "${GREEN}🚀 开始构建 $APP_NAME $VERSION...${NC}"
 
 # 清理并创建输出目录
@@ -197,6 +204,7 @@ package_macos_release "amd64" "mac-amd64"
 # --- Windows AMD64 构建 ---
 echo -e "${GREEN}🪟 正在构建 Windows (amd64)...${NC}"
 if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
+    generate_driver_agent_revisions "windows/amd64"
     wails build -platform windows/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_EXE="$DIST_DIR/${APP_NAME}-${VERSION}-windows-amd64.exe"
@@ -213,6 +221,7 @@ fi
 # --- Windows ARM64 构建 ---
 echo -e "${GREEN}🪟 正在构建 Windows (arm64)...${NC}"
 if command -v aarch64-w64-mingw32-gcc &> /dev/null; then
+    generate_driver_agent_revisions "windows/arm64"
     wails build -platform windows/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_EXE="$DIST_DIR/${APP_NAME}-${VERSION}-windows-arm64.exe"
@@ -235,6 +244,7 @@ CURRENT_ARCH=$(uname -m)
 
 if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "x86_64" ]; then
     # 本机 Linux amd64，直接构建
+    generate_driver_agent_revisions "linux/amd64"
     wails build -platform linux/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
@@ -255,6 +265,7 @@ elif command -v x86_64-linux-gnu-gcc &> /dev/null; then
     export CC=x86_64-linux-gnu-gcc
     export CXX=x86_64-linux-gnu-g++
     export CGO_ENABLED=1
+    generate_driver_agent_revisions "linux/amd64"
     wails build -platform linux/amd64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-amd64"
@@ -279,6 +290,7 @@ fi
 echo -e "${GREEN}🐧 正在构建 Linux (arm64)...${NC}"
 if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "aarch64" ]; then
     # 本机 Linux arm64，直接构建
+    generate_driver_agent_revisions "linux/arm64"
     wails build -platform linux/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
@@ -298,6 +310,7 @@ elif command -v aarch64-linux-gnu-gcc &> /dev/null; then
     export CC=aarch64-linux-gnu-gcc
     export CXX=aarch64-linux-gnu-g++
     export CGO_ENABLED=1
+    generate_driver_agent_revisions "linux/arm64"
     wails build -platform linux/arm64 -clean -ldflags "$LDFLAGS"
     if [ $? -eq 0 ]; then
         TARGET_LINUX_BIN="$DIST_DIR/${APP_NAME}-${VERSION}-linux-arm64"
