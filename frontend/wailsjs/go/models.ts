@@ -426,6 +426,7 @@ export namespace connection {
 	    inserts: any[];
 	    updates: UpdateRow[];
 	    deletes: any[];
+	    locatorStrategy?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChangeSet(source);
@@ -436,6 +437,7 @@ export namespace connection {
 	        this.inserts = source["inserts"];
 	        this.updates = this.convertValues(source["updates"], UpdateRow);
 	        this.deletes = source["deletes"];
+	        this.locatorStrategy = source["locatorStrategy"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

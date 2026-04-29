@@ -2,7 +2,8 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import DataGrid from './DataGrid';
+import DataGrid, { buildDataGridCommitChangeSet, GONAVI_ROW_KEY } from './DataGrid';
+import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -215,6 +216,115 @@ const waitForEffects = async () => {
     await Promise.resolve();
   });
 };
+
+const normalizeValue = (_columnName: string, value: any) => value;
+const rowKeyToString = (key: any) => String(key);
+
+const commitColumnGuard = (columnName: string) => (
+  columnName !== GONAVI_ROW_KEY && columnName !== ORACLE_ROWID_LOCATOR_COLUMN
+);
+
+describe('DataGrid commit change set', () => {
+  it('uses unique locator values instead of falling back to the whole row', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': { [GONAVI_ROW_KEY]: 'row-1', EMAIL: 'a@example.com', NAME: 'new-name', AGE: 42 },
+      },
+      deletedRowKeys: new Set(),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', EMAIL: 'a@example.com', NAME: 'old-name', AGE: 42 }],
+      editLocator: {
+        strategy: 'unique-key',
+        columns: ['EMAIL'],
+        valueColumns: ['EMAIL'],
+        readOnly: false,
+      },
+      visibleColumnNames: ['EMAIL', 'NAME', 'AGE'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [],
+        updates: [{ keys: { EMAIL: 'a@example.com' }, values: { NAME: 'new-name' } }],
+        deletes: [],
+      },
+    });
+  });
+
+  it('uses hidden Oracle ROWID only as locator and excludes it from update values', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': { [GONAVI_ROW_KEY]: 'row-1', NAME: 'new-name', [ORACLE_ROWID_LOCATOR_COLUMN]: 'BBBB' },
+      },
+      deletedRowKeys: new Set(),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', NAME: 'old-name', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }],
+      editLocator: {
+        strategy: 'oracle-rowid',
+        columns: ['ROWID'],
+        valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+        hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+        readOnly: false,
+      },
+      visibleColumnNames: ['NAME'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [],
+        updates: [{ keys: { ROWID: 'AAAA' }, values: { NAME: 'new-name' } }],
+        deletes: [],
+      },
+    });
+  });
+
+  it('fails closed when no safe locator is available', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': { [GONAVI_ROW_KEY]: 'row-1', NAME: 'new-name' },
+      },
+      deletedRowKeys: new Set(),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', NAME: 'old-name' }],
+      editLocator: undefined,
+      visibleColumnNames: ['NAME'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({ ok: false, error: '当前结果没有可用的安全行定位方式，无法提交修改。' });
+  });
+
+  it('rejects delete rows when unique locator value is null', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {},
+      deletedRowKeys: new Set(['row-1']),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', EMAIL: null, NAME: 'old-name' }],
+      editLocator: {
+        strategy: 'unique-key',
+        columns: ['EMAIL'],
+        valueColumns: ['EMAIL'],
+        readOnly: false,
+      },
+      visibleColumnNames: ['EMAIL', 'NAME'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({ ok: false, error: '定位列 EMAIL 的值为空，无法安全提交修改。' });
+  });
+});
 
 describe('DataGrid DDL interactions', () => {
   beforeEach(() => {

@@ -159,6 +159,7 @@ describe('DataGrid layout', () => {
         columnNames={['id', 'name']}
         loading={false}
         tableName="users"
+        pkColumns={['id']}
       />,
     );
 

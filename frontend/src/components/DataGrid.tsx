@@ -79,6 +79,12 @@ import {
     type DataGridFindMatch,
     type DataGridFindNavigationDirection,
 } from '../utils/dataGridFind';
+import {
+    filterHiddenLocatorColumns,
+    isHiddenLocatorColumn,
+    resolveRowLocatorValues,
+    type EditRowLocator,
+} from '../utils/rowLocator';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -916,6 +922,7 @@ interface DataGridProps {
     dbName?: string;
     connectionId?: string;
     pkColumns?: string[];
+    editLocator?: EditRowLocator;
     readOnly?: boolean;
     onReload?: () => void;
     onSort?: (field: string, order: string) => void;
@@ -960,12 +967,110 @@ type ColumnMeta = {
     comment: string;
 };
 
+type NormalizeCommitCellValue = (columnName: string, value: any, mode: 'insert' | 'update') => any;
+
+type DataGridCommitChangeSet = {
+    inserts: any[];
+    updates: any[];
+    deletes: any[];
+};
+
+export const buildDataGridCommitChangeSet = ({
+    addedRows,
+    modifiedRows,
+    deletedRowKeys,
+    data,
+    editLocator,
+    visibleColumnNames,
+    rowKeyToString,
+    normalizeCommitCellValue,
+    shouldCommitColumn,
+}: {
+    addedRows: any[];
+    modifiedRows: Record<string, any>;
+    deletedRowKeys: Set<string>;
+    data: any[];
+    editLocator?: EditRowLocator;
+    visibleColumnNames: string[];
+    rowKeyToString: (key: any) => string;
+    normalizeCommitCellValue: NormalizeCommitCellValue;
+    shouldCommitColumn: (columnName: string) => boolean;
+}): { ok: true; changes: DataGridCommitChangeSet } | { ok: false; error: string } => {
+    if (!editLocator || editLocator.readOnly || editLocator.strategy === 'none') {
+        return { ok: false, error: editLocator?.reason || '当前结果没有可用的安全行定位方式，无法提交修改。' };
+    }
+
+    const normalizeValues = (values: Record<string, any>, mode: 'insert' | 'update') => {
+        const normalizedValues: Record<string, any> = {};
+        Object.entries(values).forEach(([col, val]) => {
+            if (!shouldCommitColumn(col)) return;
+            const normalizedVal = normalizeCommitCellValue(col, val, mode);
+            if (normalizedVal !== undefined) {
+                normalizedValues[col] = normalizedVal;
+            }
+        });
+        return normalizedValues;
+    };
+
+    const originalRowsByKey = new Map<string, any>();
+    data.forEach((row) => {
+        const key = row?.[GONAVI_ROW_KEY];
+        if (key === undefined || key === null) return;
+        originalRowsByKey.set(rowKeyToString(key), row);
+    });
+
+    const inserts: any[] = [];
+    const updates: any[] = [];
+    const deletes: any[] = [];
+
+    addedRows.forEach(row => {
+        const key = row?.[GONAVI_ROW_KEY];
+        if (key !== undefined && key !== null && deletedRowKeys.has(rowKeyToString(key))) return;
+        inserts.push(normalizeValues(row, 'insert'));
+    });
+
+    for (const keyStr of deletedRowKeys) {
+        const originalRow = originalRowsByKey.get(keyStr);
+        if (!originalRow) continue;
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
+        deletes.push(locatorValues.values);
+    }
+
+    for (const [keyStr, newRow] of Object.entries(modifiedRows)) {
+        if (deletedRowKeys.has(keyStr)) continue;
+        const originalRow = originalRowsByKey.get(keyStr);
+        if (!originalRow) continue;
+
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
+
+        const hasRowKey = Object.prototype.hasOwnProperty.call(newRow as any, GONAVI_ROW_KEY);
+        let values: Record<string, any> = {};
+        if (!hasRowKey) {
+            values = { ...(newRow as any) };
+        } else {
+            visibleColumnNames.forEach((col) => {
+                const nextVal = (newRow as any)?.[col];
+                const prevVal = (originalRow as any)?.[col];
+                if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
+            });
+        }
+
+        const normalizedValues = normalizeValues(values, 'update');
+        if (Object.keys(normalizedValues).length === 0) continue;
+        updates.push({ keys: locatorValues.values, values: normalizedValues });
+    }
+
+    return { ok: true, changes: { inserts, updates, deletes } };
+};
+
 // P2 性能优化：提取内联 style 对象为模块级常量，避免每次 render 创建新对象
 const CELL_ELLIPSIS_STYLE: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 const VIRTUAL_CELL_WRAPPER_STYLE: React.CSSProperties = { margin: -8, padding: '8px 8px 8px 8px' };
 
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], readOnly = false,
+    data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange
@@ -999,7 +1104,25 @@ const DataGrid: React.FC<DataGridProps> = ({
       darkMode,
       visible: showDataTableVerticalBorders,
   });
-  const canModifyData = !readOnly && !!tableName;
+  const effectiveEditLocator = useMemo<EditRowLocator | undefined>(() => {
+      if (editLocator) return editLocator;
+      if (pkColumns.length === 0) return undefined;
+      return {
+          strategy: 'primary-key',
+          columns: pkColumns,
+          valueColumns: pkColumns,
+          readOnly: false,
+      };
+  }, [editLocator, pkColumns]);
+  const visibleColumnNames = useMemo(
+      () => filterHiddenLocatorColumns(columnNames, effectiveEditLocator),
+      [columnNames, effectiveEditLocator]
+  );
+  const shouldCommitColumn = useCallback((columnName: string): boolean => {
+      const normalized = String(columnName || '').trim();
+      return normalized !== GONAVI_ROW_KEY && !isHiddenLocatorColumn(normalized, effectiveEditLocator);
+  }, [effectiveEditLocator]);
+  const canModifyData = !readOnly && !!tableName && !!effectiveEditLocator && !effectiveEditLocator.readOnly && effectiveEditLocator.strategy !== 'none';
   const showColumnComment = queryOptions?.showColumnComment ?? true;
   const showColumnType = queryOptions?.showColumnType ?? true;
 
@@ -1053,7 +1176,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   // Sync display order from incoming prop and store memory
   useEffect(() => {
-    let nextOrder = [...columnNames];
+    let nextOrder = [...visibleColumnNames];
     if (enableColumnOrderMemory && connectionId && dbName && tableName) {
       const storedOrder = tableColumnOrders[`${connectionId}-${dbName}-${tableName}`];
       if (Array.isArray(storedOrder) && storedOrder.length > 0) {
@@ -1066,7 +1189,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
     }
     setAllOrderedColumnNames(nextOrder);
-  }, [columnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
+  }, [visibleColumnNames, tableColumnOrders, enableColumnOrderMemory, connectionId, dbName, tableName]);
 
   // Compute final display columns
   useEffect(() => {
@@ -1378,7 +1501,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   const exportData = async (rows: any[], format: string) => {
       const hide = message.loading(`正在导出 ${rows.length} 条数据...`, 0);
       try {
-          const cleanRows = rows.map(({ [GONAVI_ROW_KEY]: _rowKey, ...rest }) => rest);
+          const cleanRows = rows.map((row) => {
+              const next: Record<string, any> = {};
+              displayColumnNames.forEach((columnName) => {
+                  next[columnName] = row?.[columnName];
+              });
+              return next;
+          });
           // Pass tableName (or 'export') as default filename
           const res = await ExportData(cleanRows, displayColumnNames, tableName || 'export', format);
           if (res.success) {
@@ -1538,10 +1667,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           return metaColumns;
       }
       if (exportScope === 'table') {
-          return columnNames.filter((columnName) => columnName !== GONAVI_ROW_KEY);
+          return visibleColumnNames.filter((columnName) => columnName !== GONAVI_ROW_KEY);
       }
       return [];
-  }, [columnMetaMap, exportScope, columnNames]);
+  }, [columnMetaMap, exportScope, visibleColumnNames]);
 
   const normalizeCommitCellValue = useCallback(
       (columnName: string, value: any, mode: 'insert' | 'update') => {
@@ -3298,19 +3427,25 @@ const DataGrid: React.FC<DataGridProps> = ({
   const jsonViewText = useMemo(() => {
       if (viewMode !== 'json') return '';
       const cleanRows = mergedDisplayData.map((row) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...rest } = row || {};
-          return normalizeValueForJsonView(rest);
+          const next: Record<string, any> = {};
+          visibleColumnNames.forEach((columnName) => {
+              next[columnName] = row?.[columnName];
+          });
+          return normalizeValueForJsonView(next);
       });
       return JSON.stringify(cleanRows, null, 2);
-  }, [viewMode, mergedDisplayData]);
+  }, [viewMode, mergedDisplayData, visibleColumnNames]);
 
   const textViewRows = useMemo(() => {
       if (viewMode !== 'text') return [];
       return mergedDisplayData.map((row) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...rest } = row || {};
-          return rest;
+          const next: Record<string, any> = {};
+          visibleColumnNames.forEach((columnName) => {
+              next[columnName] = row?.[columnName];
+          });
+          return next;
       });
-  }, [viewMode, mergedDisplayData]);
+  }, [viewMode, mergedDisplayData, visibleColumnNames]);
 
   const currentTextRow = useMemo(() => {
       if (viewMode !== 'text') return null;
@@ -3363,7 +3498,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const formMap: Record<string, any> = {};
       const nullCols = new Set<string>();
 
-      columnNames.forEach((col) => {
+      visibleColumnNames.forEach((col) => {
           const baseVal = (baseRow as any)?.[col];
           const displayVal = (displayRow as any)?.[col];
           baseRawMap[col] = baseVal;
@@ -3511,7 +3646,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const keyStr = rowKeyStr(rowKey);
           const normalizedNext: Record<string, any> = {};
           let hasAnyVisibleChange = false;
-          columnNames.forEach((col) => {
+          visibleColumnNames.forEach((col) => {
               const currentVal = (currentRow as any)?.[col];
               const editedVal = Object.prototype.hasOwnProperty.call(nextItem, col) ? (nextItem as any)[col] : currentVal;
               if (!isJsonViewValueEqual(currentVal, editedVal)) hasAnyVisibleChange = true;
@@ -3530,7 +3665,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const originalRow = originalMap.get(keyStr);
           if (!originalRow) continue;
           const patch: Record<string, any> = {};
-          columnNames.forEach((col) => {
+          visibleColumnNames.forEach((col) => {
               const prevVal = (originalRow as any)?.[col];
               const nextVal = normalizedNext[col];
               if (!isCellValueEqualForDiff(prevVal, nextVal)) patch[col] = nextVal;
@@ -3595,7 +3730,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const baseRawMap = rowEditorBaseRawRef.current || {};
       const patch: Record<string, any> = {};
-      columnNames.forEach((col) => {
+      visibleColumnNames.forEach((col) => {
           let nextVal = values[col];
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           if (nextVal && dayjs.isDayjs(nextVal)) {
@@ -3615,7 +3750,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, columnNames, rowKeyStr, closeRowEditor]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor]);
 
 
   const enableVirtual = viewMode === 'table';
@@ -3761,7 +3896,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
       const newRow: any = { [GONAVI_ROW_KEY]: newKey };
-      columnNames.forEach(col => newRow[col] = ''); 
+      visibleColumnNames.forEach(col => newRow[col] = '');
       pendingScrollToBottomRef.current = true;
       setAddedRows(prev => [...prev, newRow]);
   };
@@ -3775,7 +3910,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const copiedRows = buildCopiedRowsForPaste({
           rows: mergedDisplayData as Array<Record<string, any>>,
           selectedRowKeys,
-          columnNames,
+          columnNames: visibleColumnNames,
           rowKeyField: GONAVI_ROW_KEY,
           rowKeyToString: rowKeyStr,
       });
@@ -3786,7 +3921,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       setCopiedRowsForPaste(copiedRows);
       void message.success(`已复制 ${copiedRows.length} 行，可粘贴为新增行`);
-  }, [selectedRowKeys, mergedDisplayData, columnNames, rowKeyStr]);
+  }, [selectedRowKeys, mergedDisplayData, visibleColumnNames, rowKeyStr]);
 
   const handlePasteCopiedRowsAsNew = useCallback(() => {
       if (copiedRowsForPaste.length === 0) {
@@ -3796,7 +3931,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const nextRows = buildPastedRowsFromCopiedRows({
           rows: copiedRowsForPaste,
-          columnNames,
+          columnNames: visibleColumnNames,
           rowKeyField: GONAVI_ROW_KEY,
           createRowKey: (index) => {
               pastedRowSequenceRef.current += 1;
@@ -3812,7 +3947,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setAddedRows(prev => [...prev, ...nextRows]);
       setSelectedRowKeys(nextRows.map(row => row[GONAVI_ROW_KEY]));
       void message.success(`已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务`);
-  }, [copiedRowsForPaste, columnNames]);
+  }, [copiedRowsForPaste, visibleColumnNames]);
 
   const handleDeleteSelected = () => {
       setDeletedRowKeys(prev => {
@@ -3827,66 +3962,23 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!connectionId || !tableName) return;
       const conn = connections.find(c => c.id === connectionId);
       if (!conn) return;
-
-      const inserts: any[] = [];
-      const updates: any[] = [];
-      const deletes: any[] = [];
-
-      addedRows.forEach(row => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = row;
-          const normalizedValues: Record<string, any> = {};
-          Object.entries(vals).forEach(([col, val]) => {
-              const normalizedVal = normalizeCommitCellValue(col, val, 'insert');
-              if (normalizedVal !== undefined) {
-                  normalizedValues[col] = normalizedVal;
-              }
-          });
-          inserts.push(normalizedValues);
+      const changeSetResult = buildDataGridCommitChangeSet({
+          addedRows,
+          modifiedRows,
+          deletedRowKeys,
+          data,
+          editLocator: effectiveEditLocator,
+          visibleColumnNames,
+          rowKeyToString: rowKeyStr,
+          normalizeCommitCellValue,
+          shouldCommitColumn,
       });
-      deletedRowKeys.forEach(keyStr => {
-          // Find original data
-          const originalRow = data.find(d => rowKeyStr(d?.[GONAVI_ROW_KEY]) === keyStr) || addedRows.find(d => rowKeyStr(d?.[GONAVI_ROW_KEY]) === keyStr);
-          if (originalRow) {
-              const pkData: any = {};
-              if (pkColumns.length > 0) pkColumns.forEach(k => pkData[k] = originalRow[k]);
-              else { const { [GONAVI_ROW_KEY]: _rowKey, ...rest } = originalRow; Object.assign(pkData, rest); }
-              deletes.push(pkData);
-          }
-      });
-      Object.entries(modifiedRows).forEach(([keyStr, newRow]) => {
-          if (deletedRowKeys.has(keyStr)) return;
-          const originalRow = data.find(d => rowKeyStr(d?.[GONAVI_ROW_KEY]) === keyStr);
-          if (!originalRow) return; // Should not happen for modified rows unless deleted
-          
-          const pkData: any = {};
-          if (pkColumns.length > 0) pkColumns.forEach(k => pkData[k] = originalRow[k]);
-          else { const { [GONAVI_ROW_KEY]: _rowKey, ...rest } = originalRow; Object.assign(pkData, rest); }
+      if (!changeSetResult.ok) {
+          void message.error(changeSetResult.error);
+          return;
+      }
 
-          const hasRowKey = Object.prototype.hasOwnProperty.call(newRow as any, GONAVI_ROW_KEY);
-          let values: any = {};
-
-          if (!hasRowKey) {
-              values = { ...(newRow as any) };
-          } else {
-              columnNames.forEach((col) => {
-                  const nextVal = (newRow as any)?.[col];
-                  const prevVal = (originalRow as any)?.[col];
-                  if (!isCellValueEqualForDiff(prevVal, nextVal)) values[col] = nextVal;
-              });
-          }
-
-          const normalizedValues: Record<string, any> = {};
-          Object.entries(values).forEach(([col, val]) => {
-              const normalizedVal = normalizeCommitCellValue(col, val, 'update');
-              if (normalizedVal !== undefined) {
-                  normalizedValues[col] = normalizedVal;
-              }
-          });
-
-          if (Object.keys(normalizedValues).length === 0) return;
-          updates.push({ keys: pkData, values: normalizedValues });
-      });
-
+      const { inserts, updates, deletes } = changeSetResult.changes;
       if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {
           void message.info("没有可提交的变更");
           return;
@@ -3902,7 +3994,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
       
       const startTime = Date.now();
-      const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, { inserts, updates, deletes } as any);
+      const res = await ApplyChanges(buildRpcConnectionConfig(config) as any, dbName || '', tableName, { inserts, updates, deletes, locatorStrategy: effectiveEditLocator?.strategy } as any);
       const duration = Date.now() - startTime;
       
       // Construct a pseudo-SQL representation for the log
@@ -4051,7 +4143,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return null;
       }
       const records = getTargets(record);
-      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const orderedCols = visibleColumnNames.filter(c => c !== GONAVI_ROW_KEY);
       if (mode === 'insert') {
           return records.map((row: any) => buildCopyInsertSQL({
               dbType,
@@ -4100,7 +4192,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [
       supportsCopyInsert,
       getTargets,
-      columnNames,
+      visibleColumnNames,
       dbType,
       tableName,
       columnTypeMapByLowerName,
@@ -4130,16 +4222,18 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
       const cleanRecords = records.map((r: any) => {
-          const { [GONAVI_ROW_KEY]: _rowKey, ...rest } = r;
-          return rest;
+          const next: Record<string, any> = {};
+          visibleColumnNames.forEach((columnName) => {
+              next[columnName] = r?.[columnName];
+          });
+          return next;
       });
       copyToClipboard(JSON.stringify(cleanRecords, null, 2));
-  }, [getTargets, copyToClipboard]);
+  }, [getTargets, visibleColumnNames, copyToClipboard]);
 
   const handleCopyCsv = useCallback((record: any) => {
       const records = getTargets(record);
-      // 使用 columnNames 保持表定义的字段顺序
-      const orderedCols = columnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const orderedCols = visibleColumnNames.filter(c => c !== GONAVI_ROW_KEY);
       const header = orderedCols.map(c => `"${c}"`).join(',');
       const lines = records.map((r: any) => {
           const values = orderedCols.map(c => {
@@ -4152,7 +4246,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return values.join(',');
       });
       copyToClipboard([header, ...lines].join('\n'));
-  }, [getTargets, columnNames, copyToClipboard]);
+  }, [getTargets, visibleColumnNames, copyToClipboard]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;

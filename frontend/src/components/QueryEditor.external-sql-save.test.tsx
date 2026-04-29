@@ -3,6 +3,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SavedQuery, TabData } from '../types';
+import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import QueryEditor from './QueryEditor';
 
 const storeState = vi.hoisted(() => ({
@@ -44,6 +45,7 @@ const backendApp = vi.hoisted(() => ({
   DBGetAllColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
   DBGetColumns: vi.fn(),
+  DBGetIndexes: vi.fn(),
   CancelQuery: vi.fn(),
   GenerateQueryID: vi.fn(),
   WriteSQLFile: vi.fn(),
@@ -54,6 +56,10 @@ const messageApi = vi.hoisted(() => ({
   info: vi.fn(),
   success: vi.fn(),
   warning: vi.fn(),
+}));
+
+const dataGridState = vi.hoisted(() => ({
+  latestProps: null as any,
 }));
 
 const editorState = vi.hoisted(() => {
@@ -114,7 +120,10 @@ vi.mock('@monaco-editor/react', () => ({
 }));
 
 vi.mock('./DataGrid', () => ({
-  default: () => null,
+  default: (props: any) => {
+    dataGridState.latestProps = props;
+    return <div data-grid="true" />;
+  },
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
@@ -152,7 +161,7 @@ vi.mock('antd', () => {
     Dropdown: ({ children }: any) => <>{children}</>,
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
-    Tabs: () => null,
+    Tabs: ({ items }: any) => <div>{items?.[0]?.children}</div>,
   };
 });
 
@@ -187,7 +196,15 @@ describe('QueryEditor external SQL save', () => {
     storeState.activeTabId = 'tab-1';
     messageApi.success.mockReset();
     messageApi.error.mockReset();
+    messageApi.warning.mockReset();
     backendApp.WriteSQLFile.mockResolvedValue({ success: true });
+    backendApp.DBQueryMulti.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
+    backendApp.GenerateQueryID.mockResolvedValue('query-1');
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    dataGridState.latestProps = null;
     editorState.value = '';
     editorState.editor.getValue.mockClear();
     editorState.editor.setValue.mockClear();
@@ -275,5 +292,157 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       createdAt: 100,
     }));
+  });
+
+  it('automatically appends hidden primary key locator columns for editable query results', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_locator_1_ID'], rows: [{ NAME: 'old-name', __gonavi_locator_1_ID: 7 }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ANONYMOUS', query: 'SELECT NAME FROM MYCIMLED.EDC_LOG' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBe('MYCIMLED.EDC_LOG');
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['ID']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['ID'],
+      valueColumns: ['__gonavi_locator_1_ID'],
+      hiddenColumns: ['__gonavi_locator_1_ID'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(dataGridState.latestProps?.resultSql).toBe('SELECT NAME FROM MYCIMLED.EDC_LOG');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('"ID" AS "__gonavi_locator_1_ID"');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it('uses a unique index locator for query results without primary keys', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_locator_1_EMAIL'], rows: [{ NAME: 'old-name', __gonavi_locator_1_EMAIL: 'a@example.com' }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'EMAIL', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'UK_EMAIL', columnName: 'EMAIL', nonUnique: 0, seqInIndex: 1, indexType: 'BTREE' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ANONYMOUS', query: 'SELECT NAME FROM MYCIMLED.EDC_LOG' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'unique-key',
+      columns: ['EMAIL'],
+      valueColumns: ['__gonavi_locator_1_EMAIL'],
+      hiddenColumns: ['__gonavi_locator_1_EMAIL'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('"EMAIL" AS "__gonavi_locator_1_EMAIL"');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it('uses hidden Oracle ROWID for query results without primary or unique keys', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', ORACLE_ROWID_LOCATOR_COLUMN], rows: [{ NAME: 'old-name', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ANONYMOUS', query: 'SELECT NAME FROM MYCIMLED.EDC_LOG' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'oracle-rowid',
+      columns: ['ROWID'],
+      valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-Oracle query results read-only when no safe locator exists', async () => {
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME'], rows: [{ NAME: 'old-name' }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'SELECT NAME FROM users' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBe('users');
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'none',
+      readOnly: true,
+      reason: '未检测到主键或可用唯一索引，无法安全提交修改。',
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(true);
+    expect(messageApi.warning).toHaveBeenCalledWith('查询结果保持只读：main.users 未检测到主键或可用唯一索引，无法安全提交修改。');
   });
 });
