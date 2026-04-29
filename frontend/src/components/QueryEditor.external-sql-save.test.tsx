@@ -445,4 +445,101 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.readOnly).toBe(true);
     expect(messageApi.warning).toHaveBeenCalledWith('查询结果保持只读：main.users 未检测到主键或可用唯一索引，无法安全提交修改。');
   });
+
+  it('allows editable table columns while leaving expression columns out of commits', async () => {
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['DISPLAY_NAME', 'NAME_UPPER', '__gonavi_locator_1_ID'],
+        rows: [{ DISPLAY_NAME: 'old-name', NAME_UPPER: 'OLD-NAME', __gonavi_locator_1_ID: 7 }],
+      }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'SELECT NAME AS DISPLAY_NAME, UPPER(NAME) AS NAME_UPPER FROM users',
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBe('users');
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['ID'],
+      valueColumns: ['__gonavi_locator_1_ID'],
+      hiddenColumns: ['__gonavi_locator_1_ID'],
+      writableColumns: {
+        DISPLAY_NAME: 'NAME',
+      },
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('`ID` AS `__gonavi_locator_1_ID`');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'mysql',
+    'mariadb',
+    'diros',
+    'sphinx',
+    'postgres',
+    'kingbase',
+    'highgo',
+    'vastbase',
+    'sqlserver',
+    'sqlite',
+    'duckdb',
+    'oracle',
+    'dameng',
+    'tdengine',
+    'clickhouse',
+  ])(
+    'keeps aggregate query results silently read-only for %s',
+    async (dbType) => {
+      storeState.connections[0].config.type = dbType;
+      storeState.connections[0].config.database = dbType === 'oracle' || dbType === 'dameng' ? 'APP' : 'main';
+      const forceReadOnlyQueryResult = dbType === 'tdengine' || dbType === 'clickhouse';
+      backendApp.DBQueryMulti.mockResolvedValueOnce({
+        success: true,
+        data: [{ columns: ['COUNT'], rows: [{ COUNT: 1 }] }],
+      });
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({
+          dbName: storeState.connections[0].config.database,
+          query: 'SELECT count(1) FROM users',
+        })} />);
+      });
+
+      await act(async () => {
+        await findButton(renderer!, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(dataGridState.latestProps?.tableName).toBe(forceReadOnlyQueryResult ? undefined : 'users');
+      expect(dataGridState.latestProps?.editLocator).toBeUndefined();
+      expect(dataGridState.latestProps?.readOnly).toBe(true);
+      expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
+      expect(backendApp.DBGetIndexes).not.toHaveBeenCalled();
+      expect(messageApi.warning).not.toHaveBeenCalled();
+    },
+  );
 });
