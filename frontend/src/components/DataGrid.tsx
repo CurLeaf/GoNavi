@@ -81,7 +81,8 @@ import {
 } from '../utils/dataGridFind';
 import {
     filterHiddenLocatorColumns,
-    isHiddenLocatorColumn,
+    isWritableResultColumn,
+    resolveWritableColumnName,
     resolveRowLocatorValues,
     type EditRowLocator,
 } from '../utils/rowLocator';
@@ -1004,9 +1005,11 @@ export const buildDataGridCommitChangeSet = ({
         const normalizedValues: Record<string, any> = {};
         Object.entries(values).forEach(([col, val]) => {
             if (!shouldCommitColumn(col)) return;
+            const commitColumnName = resolveWritableColumnName(col, editLocator);
+            if (!commitColumnName) return;
             const normalizedVal = normalizeCommitCellValue(col, val, mode);
             if (normalizedVal !== undefined) {
-                normalizedValues[col] = normalizedVal;
+                normalizedValues[commitColumnName] = normalizedVal;
             }
         });
         return normalizedValues;
@@ -1120,7 +1123,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   );
   const shouldCommitColumn = useCallback((columnName: string): boolean => {
       const normalized = String(columnName || '').trim();
-      return normalized !== GONAVI_ROW_KEY && !isHiddenLocatorColumn(normalized, effectiveEditLocator);
+      return normalized !== GONAVI_ROW_KEY && isWritableResultColumn(normalized, effectiveEditLocator);
   }, [effectiveEditLocator]);
   const canModifyData = !readOnly && !!tableName && !!effectiveEditLocator && !effectiveEditLocator.readOnly && effectiveEditLocator.strategy !== 'none';
   const showColumnComment = queryOptions?.showColumnComment ?? true;
@@ -3768,7 +3771,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           }),
           sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
           sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
-          editable: canModifyData, // Only editable if table name known and not readonly
+          editable: canModifyData && isWritableResultColumn(key, effectiveEditLocator),
           render: (text: any) => (
               <div style={CELL_ELLIPSIS_STYLE}>
                   {renderCellDisplayValue(text, normalizedPageFindText)}

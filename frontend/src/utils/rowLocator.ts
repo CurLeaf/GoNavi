@@ -11,6 +11,7 @@ export type EditRowLocator = {
   columns: string[];
   valueColumns: string[];
   hiddenColumns?: string[];
+  writableColumns?: Record<string, string>;
   readOnly: boolean;
   reason?: string;
 };
@@ -131,3 +132,21 @@ export const isHiddenLocatorColumn = (column: string, locator?: EditRowLocator):
   const normalized = normalizeColumnName(column).toLowerCase();
   return (locator?.hiddenColumns || []).some((hidden) => normalizeColumnName(hidden).toLowerCase() === normalized);
 };
+
+export const resolveWritableColumnName = (column: string, locator?: EditRowLocator): string | undefined => {
+  const normalized = normalizeColumnName(column);
+  if (!normalized || isHiddenLocatorColumn(normalized, locator)) return undefined;
+  const writableColumns = locator?.writableColumns;
+  if (!writableColumns) return normalized;
+
+  const normalizedTarget = normalized.toLowerCase();
+  const matchedEntry = Object.entries(writableColumns).find(([resultColumn]) => (
+    normalizeColumnName(resultColumn).toLowerCase() === normalizedTarget
+  ));
+  const tableColumnName = normalizeColumnName(matchedEntry?.[1] || '');
+  return tableColumnName || undefined;
+};
+
+export const isWritableResultColumn = (column: string, locator?: EditRowLocator): boolean => (
+  resolveWritableColumnName(column, locator) !== undefined
+);

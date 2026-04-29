@@ -203,7 +203,7 @@ const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
 
 type SimpleSelectInfo = {
     selectsAll: boolean;
-    resultColumns: string[];
+    writableColumns: Record<string, string>;
 };
 
 type QueryStatementPlan = {
@@ -289,7 +289,7 @@ const getLastIdentifierPart = (path: string): string => {
     return parts[parts.length - 1] || '';
 };
 
-const resolveSimpleSelectItemColumn = (item: string): { name: string } | 'all' | undefined => {
+const resolveSimpleSelectItemColumn = (item: string): { resultName: string; sourceName: string } | 'all' | undefined => {
     const text = String(item || '').trim();
     if (!text) return undefined;
     if (text === '*' || /\.\s*\*$/.test(text)) return 'all';
@@ -312,8 +312,9 @@ const resolveSimpleSelectItemColumn = (item: string): { name: string } | 'all' |
     }
 
     if (!SIMPLE_IDENTIFIER_PATH_RE.test(expr)) return undefined;
-    const name = alias || getLastIdentifierPart(expr);
-    return name ? { name } : undefined;
+    const sourceName = getLastIdentifierPart(expr);
+    const resultName = alias || sourceName;
+    return sourceName && resultName ? { resultName, sourceName } : undefined;
 };
 
 const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
@@ -322,18 +323,18 @@ const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
     const selectList = match[1].trim();
     if (!selectList || /^DISTINCT\b/i.test(selectList)) return undefined;
 
-    const resultColumns: string[] = [];
+    const writableColumns: Record<string, string> = {};
     let selectsAll = false;
     for (const item of splitTopLevelComma(selectList)) {
         const resolved = resolveSimpleSelectItemColumn(item);
-        if (!resolved) return undefined;
+        if (!resolved) continue;
         if (resolved === 'all') {
             selectsAll = true;
             continue;
         }
-        resultColumns.push(resolved.name);
+        writableColumns[resolved.resultName] = resolved.sourceName;
     }
-    return { selectsAll, resultColumns };
+    return { selectsAll, writableColumns };
 };
 
 const appendQuerySelectExpressions = (sql: string, expressions: string[]): string => {
@@ -344,9 +345,11 @@ const appendQuerySelectExpressions = (sql: string, expressions: string[]): strin
     );
 };
 
-const findQueryResultColumn = (columns: string[], target: string): string | undefined => {
+const findWritableResultColumnForSource = (writableColumns: Record<string, string>, target: string): string | undefined => {
     const normalizedTarget = String(target || '').trim().toLowerCase();
-    return (columns || []).find((column) => String(column || '').trim().toLowerCase() === normalizedTarget);
+    return Object.entries(writableColumns || {}).find(([, sourceColumn]) => (
+        String(sourceColumn || '').trim().toLowerCase() === normalizedTarget
+    ))?.[0];
 };
 
 const buildQueryLocatorAlias = (column: string, index: number): string => {
@@ -388,9 +391,10 @@ const resolveQueryLocatorPlan = async ({
 
     const selectInfo = parseSimpleSelectInfo(statement);
     if (!selectInfo) {
-        const reason = '当前 SELECT 列表不是简单列或 *，无法安全提交修改。';
-        plan.editLocator = buildQueryReadOnlyLocator(reason);
-        plan.warning = `查询结果保持只读：${reason}`;
+        // 聚合、函数和表达式结果天然无法安全回写到单行，静默保持只读即可。
+        return plan;
+    }
+    if (!selectInfo.selectsAll && Object.keys(selectInfo.writableColumns).length === 0) {
         return plan;
     }
 
@@ -408,6 +412,7 @@ const resolveQueryLocatorPlan = async ({
         }
 
         const tableColumns = resCols.data as ColumnDefinition[];
+        const tableColumnNames = tableColumns.map((column) => String(column?.name || '').trim()).filter(Boolean);
         const primaryKeys = tableColumns
             .filter((column: any) => column?.key === 'PRI')
             .map((column: any) => String(column?.name || '').trim())
@@ -415,15 +420,18 @@ const resolveQueryLocatorPlan = async ({
         const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
             ? resIndexes.data as IndexDefinition[]
             : [];
-        const selectedColumns = selectInfo.selectsAll
-            ? tableColumns.map((column) => String(column?.name || '').trim()).filter(Boolean)
-            : selectInfo.resultColumns;
+        const writableColumns: Record<string, string> = selectInfo.selectsAll
+            ? Object.fromEntries(tableColumnNames.map((column) => [column, column]))
+            : {};
+        Object.entries(selectInfo.writableColumns).forEach(([resultColumn, sourceColumn]) => {
+            writableColumns[resultColumn] = sourceColumn;
+        });
         const appendExpressions: string[] = [];
         const hiddenColumns: string[] = [];
 
         const buildColumnLocator = (strategy: 'primary-key' | 'unique-key', locatorColumns: string[]): EditRowLocator => {
             const valueColumns = locatorColumns.map((column, index) => {
-                const selectedColumn = findQueryResultColumn(selectedColumns, column);
+                const selectedColumn = findWritableResultColumnForSource(writableColumns, column);
                 if (selectedColumn) return selectedColumn;
                 const alias = buildQueryLocatorAlias(column, index + 1);
                 appendExpressions.push(buildQueryLocatorColumnExpression(dbType, column, alias));
@@ -435,6 +443,7 @@ const resolveQueryLocatorPlan = async ({
                 columns: locatorColumns,
                 valueColumns,
                 hiddenColumns: hiddenColumns.length > 0 ? [...hiddenColumns] : undefined,
+                writableColumns,
                 readOnly: false,
             };
         };
@@ -454,6 +463,7 @@ const resolveQueryLocatorPlan = async ({
                     columns: ['ROWID'],
                     valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
                     hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+                    writableColumns,
                     readOnly: false,
                 };
             } else {

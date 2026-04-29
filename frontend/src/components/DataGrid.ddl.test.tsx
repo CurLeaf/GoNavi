@@ -286,6 +286,48 @@ describe('DataGrid commit change set', () => {
     });
   });
 
+  it('commits only writable result columns and maps aliases back to table columns', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': {
+          [GONAVI_ROW_KEY]: 'row-1',
+          DISPLAY_NAME: 'new-name',
+          NAME_UPPER: 'NEW-NAME',
+        },
+      },
+      deletedRowKeys: new Set(),
+      data: [{
+        [GONAVI_ROW_KEY]: 'row-1',
+        ID: 7,
+        DISPLAY_NAME: 'old-name',
+        NAME_UPPER: 'OLD-NAME',
+      }],
+      editLocator: {
+        strategy: 'primary-key',
+        columns: ['ID'],
+        valueColumns: ['ID'],
+        writableColumns: {
+          DISPLAY_NAME: 'NAME',
+        },
+        readOnly: false,
+      },
+      visibleColumnNames: ['DISPLAY_NAME', 'NAME_UPPER'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [],
+        updates: [{ keys: { ID: 7 }, values: { NAME: 'new-name' } }],
+        deletes: [],
+      },
+    });
+  });
+
   it('fails closed when no safe locator is available', () => {
     const result = buildDataGridCommitChangeSet({
       addedRows: [],
