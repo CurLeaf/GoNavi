@@ -23,9 +23,24 @@ func normalizeTestConnectionConfig(config connection.ConnectionConfig) connectio
 	return normalized
 }
 
+func validateTestConnectionInput(config connection.ConnectionConfig) error {
+	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType == "" {
+		return fmt.Errorf("请先选择数据源类型")
+	}
+	if dbType == "clickhouse" && strings.TrimSpace(config.Host) == "" && strings.TrimSpace(config.URI) == "" {
+		return fmt.Errorf("请填写 ClickHouse 主机地址或连接 URI")
+	}
+	return nil
+}
+
 // Generic DB Methods
 
 func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResult {
+	if err := validateTestConnectionInput(config); err != nil {
+		logger.Warnf("DBConnect 参数校验失败：%s %s", err.Error(), formatConnSummary(config))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	// 连接测试需要强制 ping，避免缓存命中但连接已失效时误判成功。
 	_, err := a.getDatabaseForcePing(config)
 	if err != nil {
@@ -41,6 +56,10 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 	testConfig := normalizeTestConnectionConfig(config)
 	started := time.Now()
 	logger.Infof("TestConnection 开始：%s", formatConnSummary(testConfig))
+	if err := validateTestConnectionInput(testConfig); err != nil {
+		logger.Warnf("TestConnection 参数校验失败：耗时=%s %s 原因=%s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig), err.Error())
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	_, err := a.getDatabaseForcePing(testConfig)
 	if err != nil {
 		logger.Error(err, "TestConnection 连接测试失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))

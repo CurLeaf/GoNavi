@@ -80,3 +80,22 @@ func TestGetCacheKey_KeepDatabaseIsolation(t *testing.T) {
 		t.Fatalf("expected different cache key for different database targets")
 	}
 }
+
+func TestGetCacheKey_KeepClickHouseProtocolIsolation(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:               "clickhouse",
+		Host:               "clickhouse.local",
+		Port:               8125,
+		User:               "default",
+		Database:           "default",
+		ClickHouseProtocol: "native",
+	}
+	modified := base
+	modified.ClickHouseProtocol = "http"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left == right {
+		t.Fatalf("expected different cache key for different ClickHouse protocols")
+	}
+}

@@ -670,6 +670,7 @@ export namespace connection {
 	    timeout?: number;
 	    redisDB?: number;
 	    uri?: string;
+	    clickHouseProtocol?: string;
 	    hosts?: string[];
 	    topology?: string;
 	    mysqlReplicaUser?: string;
@@ -712,6 +713,7 @@ export namespace connection {
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
 	        this.uri = source["uri"];
+	        this.clickHouseProtocol = source["clickHouseProtocol"];
 	        this.hosts = source["hosts"];
 	        this.topology = source["topology"];
 	        this.mysqlReplicaUser = source["mysqlReplicaUser"];

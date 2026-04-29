@@ -187,6 +187,29 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().connections[0]?.iconColor).toBe('#2f855a');
   });
 
+  it('normalizes ClickHouse protocol override when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'clickhouse-http',
+        name: 'ClickHouse HTTP',
+        config: {
+          id: 'clickhouse-http',
+          type: 'clickhouse',
+          host: 'clickhouse.local',
+          port: 8125,
+          user: 'default',
+          clickHouseProtocol: 'https' as any,
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.config.clickHouseProtocol).toBe(
+      'http',
+    );
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

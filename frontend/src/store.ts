@@ -163,6 +163,15 @@ const toTrimmedString = (value: unknown, fallback = ""): string => {
   return fallback;
 };
 
+const normalizeClickHouseProtocol = (
+  value: unknown,
+): "auto" | "http" | "native" => {
+  const text = toTrimmedString(value).toLowerCase();
+  if (text === "http" || text === "https") return "http";
+  if (text === "native" || text === "tcp") return "native";
+  return "auto";
+};
+
 const normalizePort = (value: unknown, fallbackPort: number): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallbackPort;
@@ -511,6 +520,12 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
 
   if (type === "redis") {
     safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+  }
+
+  if (type === "clickhouse") {
+    safeConfig.clickHouseProtocol = normalizeClickHouseProtocol(
+      raw.clickHouseProtocol,
+    );
   }
 
   if (type === "custom") {

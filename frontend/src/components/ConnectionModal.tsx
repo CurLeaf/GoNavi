@@ -95,6 +95,7 @@ type ChoiceCardOption = {
   label: string;
   description?: string;
 };
+type ClickHouseProtocolChoice = "auto" | "http" | "native";
 const MAX_URI_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
@@ -102,6 +103,25 @@ const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
+const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
+  value: ClickHouseProtocolChoice;
+  label: string;
+}> = [
+  { value: "auto", label: "自动" },
+  { value: "http", label: "HTTP" },
+  { value: "native", label: "Native" },
+];
+
+const normalizeClickHouseProtocolValue = (
+  value: unknown,
+): ClickHouseProtocolChoice => {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (text === "http" || text === "https") return "http";
+  if (text === "native" || text === "tcp") return "native";
+  return "auto";
+};
 type ConnectionSecretKey =
   | "primaryPassword"
   | "sshPassword"
@@ -848,9 +868,7 @@ const ConnectionModal: React.FC<{
     }
   };
 
-  const resolveDriverUnavailableReason = async (
-    type: string,
-  ): Promise<string> => {
+  const resolveDriverUnavailableReason = async (type: string): Promise<string> => {
     const normalized = normalizeDriverType(type);
     if (!normalized || normalized === "custom") {
       return "";
@@ -1000,6 +1018,13 @@ const ConnectionModal: React.FC<{
     }
   };
 
+  const normalizeUriBool = (raw: unknown) => {
+    const text = String(raw ?? "")
+      .trim()
+      .toLowerCase();
+    return text === "1" || text === "true" || text === "yes" || text === "on";
+  };
+
   const normalizeFileDbPath = (rawPath: string): string => {
     let pathText = String(rawPath || "").trim();
     if (!pathText) {
@@ -1114,6 +1139,44 @@ const ConnectionModal: React.FC<{
       password: parsed.password,
       database: parsed.database || "",
       params: parsed.params,
+    };
+  };
+
+  const parseClickHouseHTTPUriToValues = (
+    uriText: string,
+    fallbackPort?: number,
+  ): Record<string, any> | null => {
+    const trimmed = String(uriText || "").trim();
+    const lower = trimmed.toLowerCase();
+    const isHttps = lower.startsWith("https://");
+    const isHttp = lower.startsWith("http://");
+    if (!isHttp && !isHttps) {
+      return null;
+    }
+    const defaultPort =
+      Number.isFinite(Number(fallbackPort)) && Number(fallbackPort) > 0
+        ? Number(fallbackPort)
+        : isHttps
+          ? 8443
+          : 8123;
+    const parsed = parseSingleHostUri(
+      trimmed,
+      [isHttps ? "https" : "http"],
+      defaultPort,
+    );
+    if (!parsed) {
+      return null;
+    }
+    const skipVerify = normalizeUriBool(parsed.params.get("skip_verify"));
+    return {
+      host: parsed.host,
+      port: parsed.port,
+      user: parsed.username,
+      password: parsed.password,
+      database: parsed.database || "",
+      clickHouseProtocol: "http",
+      useSSL: isHttps,
+      sslMode: isHttps ? (skipVerify ? "skip-verify" : "required") : "disable",
     };
   };
 
@@ -1337,6 +1400,13 @@ const ConnectionModal: React.FC<{
       };
     }
 
+    if (type === "clickhouse") {
+      const httpValues = parseClickHouseHTTPUriToValues(trimmedUri);
+      if (httpValues) {
+        return httpValues;
+      }
+    }
+
     const singleHostSchemes = singleHostUriSchemesByType[type];
     if (singleHostSchemes && singleHostSchemes.length > 0) {
       const parsed = parseSingleHostUri(
@@ -1412,6 +1482,9 @@ const ConnectionModal: React.FC<{
             parsedValues.sslMode = "disable";
           }
         } else if (type === "clickhouse") {
+          parsedValues.clickHouseProtocol = normalizeClickHouseProtocolValue(
+            parsed.params.get("protocol"),
+          );
           const secure = String(
             parsed.params.get("secure") || parsed.params.get("tls") || "",
           )
@@ -1707,7 +1780,18 @@ const ConnectionModal: React.FC<{
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
-    const scheme = type === "postgres" ? "postgresql" : type;
+    const clickHouseProtocol =
+      type === "clickhouse"
+        ? normalizeClickHouseProtocolValue(values.clickHouseProtocol)
+        : "auto";
+    const scheme =
+      type === "postgres"
+        ? "postgresql"
+        : type === "clickhouse" && clickHouseProtocol === "http"
+          ? values.useSSL
+            ? "https"
+            : "http"
+          : type;
     const dbPath = database ? `/${encodeURIComponent(database)}` : "";
     const params = new URLSearchParams();
     if (supportsSSLForType(type) && values.useSSL) {
@@ -1728,9 +1812,15 @@ const ConnectionModal: React.FC<{
           mode === "skip-verify" || mode === "preferred" ? "true" : "false",
         );
       } else if (type === "clickhouse") {
-        params.set("secure", "true");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
+        if (clickHouseProtocol === "http") {
+          if (mode === "skip-verify" || mode === "preferred") {
+            params.set("skip_verify", "true");
+          }
+        } else {
+          params.set("secure", "true");
+          if (mode === "skip-verify" || mode === "preferred") {
+            params.set("skip_verify", "true");
+          }
         }
       } else if (type === "dameng") {
         const certPath = String(values.sslCertPath || "").trim();
@@ -1760,6 +1850,9 @@ const ConnectionModal: React.FC<{
       } else if (type === "tdengine") {
         params.set("protocol", "ws");
       }
+    }
+    if (type === "clickhouse" && clickHouseProtocol !== "auto") {
+      params.set("protocol", clickHouseProtocol);
     }
     const query = params.toString();
     return `${scheme}://${encodedAuth}${toAddress(host, port, defaultPort)}${dbPath}${query ? `?${query}` : ""}`;
@@ -1967,6 +2060,10 @@ const ConnectionModal: React.FC<{
           password: config.password,
           database: config.database,
           uri: config.uri || "",
+          clickHouseProtocol:
+            configType === "clickhouse"
+              ? normalizeClickHouseProtocolValue(config.clickHouseProtocol)
+              : "auto",
           includeDatabases: initialValues.includeDatabases,
           includeRedisDatabases: initialValues.includeRedisDatabases,
           useSSL: !!config.useSSL,
@@ -2285,9 +2382,7 @@ const ConnectionModal: React.FC<{
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true);
-      const unavailableReason = await resolveDriverUnavailableReason(
-        values.type,
-      );
+      const unavailableReason = await resolveDriverUnavailableReason(values.type);
       if (unavailableReason) {
         message.warning(unavailableReason);
         promptInstallDriver(values.type, unavailableReason);
@@ -2443,9 +2538,7 @@ const ConnectionModal: React.FC<{
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true);
-      const unavailableReason = await resolveDriverUnavailableReason(
-        values.type,
-      );
+      const unavailableReason = await resolveDriverUnavailableReason(values.type);
       if (unavailableReason) {
         applyTestFailureFeedback(
           resolveConnectionTestFailureFeedback({
@@ -2740,6 +2833,15 @@ const ConnectionModal: React.FC<{
       (Array.isArray(value) && value.length === 0);
     if (parsedUriValues) {
       Object.entries(parsedUriValues).forEach(([key, value]) => {
+        if (
+          key === "clickHouseProtocol" &&
+          normalizeClickHouseProtocolValue((mergedValues as any)[key]) ===
+            "auto" &&
+          normalizeClickHouseProtocolValue(value) !== "auto"
+        ) {
+          (mergedValues as any)[key] = value;
+          return;
+        }
         if (isEmptyField((mergedValues as any)[key])) {
           (mergedValues as any)[key] = value;
         }
@@ -2748,6 +2850,35 @@ const ConnectionModal: React.FC<{
 
     const type = String(mergedValues.type || "").toLowerCase();
     const defaultPort = getDefaultPortByType(type);
+    if (type === "clickhouse") {
+      const requestedProtocol = normalizeClickHouseProtocolValue(
+        mergedValues.clickHouseProtocol,
+      );
+      const hostSchemeValues = parseClickHouseHTTPUriToValues(
+        mergedValues.host,
+        Number(mergedValues.port || defaultPort),
+      );
+      if (hostSchemeValues) {
+        mergedValues.host = hostSchemeValues.host;
+        mergedValues.port = hostSchemeValues.port;
+        if (requestedProtocol !== "native") {
+          mergedValues.clickHouseProtocol = "http";
+          mergedValues.useSSL = hostSchemeValues.useSSL;
+          mergedValues.sslMode = hostSchemeValues.sslMode;
+        } else {
+          mergedValues.clickHouseProtocol = "native";
+        }
+        if (isEmptyField(mergedValues.user)) {
+          mergedValues.user = hostSchemeValues.user;
+        }
+        if (isEmptyField(mergedValues.password)) {
+          mergedValues.password = hostSchemeValues.password;
+        }
+        if (isEmptyField(mergedValues.database)) {
+          mergedValues.database = hostSchemeValues.database;
+        }
+      }
+    }
     const isFileDbType = isFileDatabaseType(type);
     const sslCapableType = supportsSSLForType(type);
 
@@ -2990,6 +3121,10 @@ const ConnectionModal: React.FC<{
         ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
         : 0,
       uri: String(mergedValues.uri || "").trim(),
+      clickHouseProtocol:
+        type === "clickhouse"
+          ? normalizeClickHouseProtocolValue(mergedValues.clickHouseProtocol)
+          : undefined,
       hosts: hosts,
       topology: topology,
       mysqlReplicaUser: mysqlReplicaUser,
@@ -3017,7 +3152,10 @@ const ConnectionModal: React.FC<{
     }
     setTypeSelectWarning(null);
     setDbType(type);
-    form.setFieldsValue({ type: type });
+    form.setFieldsValue({
+      type: type,
+      clickHouseProtocol: type === "clickhouse" ? "auto" : undefined,
+    });
 
     const defaultPort = getDefaultPortByType(type);
     if (type === "jvm") {
@@ -4293,6 +4431,25 @@ const ConnectionModal: React.FC<{
                   </div>
                 ),
               })}
+
+              {dbType === "clickhouse" &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="clickHouseProtocol"
+                      label="连接协议"
+                      help="自动模式按 URI scheme 和常见端口判断；非标 HTTP/Native 端口可手动指定。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        options={CLICKHOUSE_PROTOCOL_OPTIONS}
+                        onChange={() => clearConnectionTestResultForChoice()}
+                      />
+                    </Form.Item>
+                  ),
+                })}
 
               {(dbType === "postgres" ||
                 dbType === "kingbase" ||

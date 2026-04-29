@@ -31,6 +31,26 @@ func TestNormalizeTestConnectionConfig_ZeroTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateTestConnectionInput_ClickHouseRequiresTarget(t *testing.T) {
+	err := validateTestConnectionInput(connection.ConnectionConfig{Type: "clickhouse"})
+	if err == nil {
+		t.Fatal("expected ClickHouse target validation error")
+	}
+	if !strings.Contains(err.Error(), "ClickHouse 主机地址") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateTestConnectionInput_ClickHouseAllowsURI(t *testing.T) {
+	err := validateTestConnectionInput(connection.ConnectionConfig{
+		Type: "clickhouse",
+		URI:  "http://clickhouse.example.com:8125/default",
+	})
+	if err != nil {
+		t.Fatalf("expected ClickHouse URI to satisfy target validation, got %v", err)
+	}
+}
+
 func TestFormatConnSummary_BasicMySQL(t *testing.T) {
 	cfg := connection.ConnectionConfig{
 		Type:     "mysql",

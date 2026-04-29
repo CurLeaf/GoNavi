@@ -161,6 +161,13 @@ func TestDetectClickHouseProtocolTreatsHTTPPortsAsHTTP(t *testing.T) {
 			expected: clickhouse.HTTP,
 		},
 		{
+			name: "custom http port 8125",
+			config: connection.ConnectionConfig{
+				Port: 8125,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
 			name: "https port",
 			config: connection.ConnectionConfig{
 				Port: 8443,
@@ -181,6 +188,30 @@ func TestDetectClickHouseProtocolTreatsHTTPPortsAsHTTP(t *testing.T) {
 			},
 			expected: clickhouse.Native,
 		},
+		{
+			name: "host http scheme",
+			config: connection.ConnectionConfig{
+				Host: "http://clickhouse.example.com",
+				Port: 8125,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "manual http overrides native port",
+			config: connection.ConnectionConfig{
+				ClickHouseProtocol: "http",
+				Port:               9000,
+			},
+			expected: clickhouse.HTTP,
+		},
+		{
+			name: "manual native overrides http port",
+			config: connection.ConnectionConfig{
+				ClickHouseProtocol: "native",
+				Port:               8123,
+			},
+			expected: clickhouse.Native,
+		},
 	}
 
 	for _, tt := range tests {
@@ -190,6 +221,172 @@ func TestDetectClickHouseProtocolTreatsHTTPPortsAsHTTP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNormalizeClickHouseConfigParsesHTTPHostScheme(t *testing.T) {
+	config := normalizeClickHouseConfig(connection.ConnectionConfig{
+		Type:     "clickhouse",
+		Host:     "https://clickhouse.example.com:8125/analytics",
+		User:     "alice",
+		Password: "secret",
+	})
+
+	if config.Host != "clickhouse.example.com" {
+		t.Fatalf("expected host without scheme, got %q", config.Host)
+	}
+	if config.Port != 8125 {
+		t.Fatalf("expected port 8125, got %d", config.Port)
+	}
+	if config.Database != "analytics" {
+		t.Fatalf("expected database analytics, got %q", config.Database)
+	}
+	if config.ClickHouseProtocol != "http" {
+		t.Fatalf("expected http protocol hint, got %q", config.ClickHouseProtocol)
+	}
+	if !config.UseSSL || config.SSLMode != sslModeRequired {
+		t.Fatalf("expected https host to enable required SSL, got useSSL=%v sslMode=%q", config.UseSSL, config.SSLMode)
+	}
+}
+
+func TestNormalizeClickHouseConfigKeepsManualNativeWhenHostHasHTTPScheme(t *testing.T) {
+	config := normalizeClickHouseConfig(connection.ConnectionConfig{
+		Type:               "clickhouse",
+		Host:               "http://clickhouse.example.com:9001/analytics",
+		ClickHouseProtocol: "native",
+		User:               "alice",
+		Password:           "secret",
+	})
+
+	if config.Host != "clickhouse.example.com" {
+		t.Fatalf("expected host without scheme, got %q", config.Host)
+	}
+	if config.Port != 9001 {
+		t.Fatalf("expected user-provided native port 9001, got %d", config.Port)
+	}
+	if config.Database != "analytics" {
+		t.Fatalf("expected database analytics, got %q", config.Database)
+	}
+	if config.ClickHouseProtocol != "native" {
+		t.Fatalf("expected manual native protocol to be preserved, got %q", config.ClickHouseProtocol)
+	}
+	if config.UseSSL {
+		t.Fatalf("manual native protocol should not be forced to HTTP TLS by http scheme")
+	}
+}
+
+func TestNormalizeClickHouseConfigUsesNativeDefaultPortForManualNativeHTTPScheme(t *testing.T) {
+	config := normalizeClickHouseConfig(connection.ConnectionConfig{
+		Type:               "clickhouse",
+		Host:               "https://clickhouse.example.com/analytics",
+		ClickHouseProtocol: "native",
+	})
+
+	if config.Host != "clickhouse.example.com" {
+		t.Fatalf("expected host without scheme, got %q", config.Host)
+	}
+	if config.Port != defaultClickHousePort {
+		t.Fatalf("expected native default port %d, got %d", defaultClickHousePort, config.Port)
+	}
+	if config.ClickHouseProtocol != "native" {
+		t.Fatalf("expected manual native protocol to be preserved, got %q", config.ClickHouseProtocol)
+	}
+}
+
+func TestClickHouseProtocolMismatchIncludesHTTPParseBinaryResponse(t *testing.T) {
+	err := errors.New("code: 27, message: Cannot parse input: expected '(' before: '\x02\x00\x01\x00'")
+	if !isClickHouseProtocolMismatch(err) {
+		t.Fatalf("expected binary parse response to be treated as protocol mismatch")
+	}
+
+	message := clickHouseAttemptFailureMessage(clickhouse.Native, err)
+	if !strings.Contains(message, "不像 Native") || strings.Contains(message, "\x00") {
+		t.Fatalf("expected user-facing native mismatch message without binary bytes, got %q", message)
+	}
+}
+
+func TestWithClickHouseProtocolForcesProtocolSelection(t *testing.T) {
+	httpConfig := withClickHouseProtocol(connection.ConnectionConfig{
+		Type: "clickhouse",
+		Host: "clickhouse.example.com",
+		Port: 8125,
+	}, clickhouse.HTTP)
+	if protocol := detectClickHouseProtocol(httpConfig); protocol != clickhouse.HTTP {
+		t.Fatalf("expected forced HTTP protocol, got %s", protocol.String())
+	}
+
+	nativeConfig := withClickHouseProtocol(connection.ConnectionConfig{
+		Type: "clickhouse",
+		Host: "http://clickhouse.example.com",
+		Port: 8125,
+	}, clickhouse.Native)
+	if protocol := detectClickHouseProtocol(nativeConfig); protocol != clickhouse.Native {
+		t.Fatalf("expected forced Native protocol, got %s", protocol.String())
+	}
+}
+
+func TestClickHouseProtocolsForAttemptOnlyFallsBackInAutoMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		config   connection.ConnectionConfig
+		expected []clickhouse.Protocol
+	}{
+		{
+			name: "auto native falls back to http",
+			config: connection.ConnectionConfig{
+				Type: "clickhouse",
+				Port: 9000,
+			},
+			expected: []clickhouse.Protocol{clickhouse.Native, clickhouse.HTTP},
+		},
+		{
+			name: "auto http falls back to native",
+			config: connection.ConnectionConfig{
+				Type: "clickhouse",
+				Port: 8125,
+			},
+			expected: []clickhouse.Protocol{clickhouse.HTTP, clickhouse.Native},
+		},
+		{
+			name: "manual http does not try native",
+			config: connection.ConnectionConfig{
+				Type:               "clickhouse",
+				Port:               9000,
+				ClickHouseProtocol: "http",
+			},
+			expected: []clickhouse.Protocol{clickhouse.HTTP},
+		},
+		{
+			name: "manual native does not try http",
+			config: connection.ConnectionConfig{
+				Type:               "clickhouse",
+				Port:               8125,
+				ClickHouseProtocol: "native",
+			},
+			expected: []clickhouse.Protocol{clickhouse.Native},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clickHouseProtocolsForAttempt(tt.config)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("expected protocols %v, got %v", protocolNames(tt.expected), protocolNames(got))
+			}
+			for idx := range got {
+				if got[idx] != tt.expected[idx] {
+					t.Fatalf("expected protocols %v, got %v", protocolNames(tt.expected), protocolNames(got))
+				}
+			}
+		})
+	}
+}
+
+func protocolNames(protocols []clickhouse.Protocol) []string {
+	names := make([]string, 0, len(protocols))
+	for _, protocol := range protocols {
+		names = append(names, protocol.String())
+	}
+	return names
 }
 
 type fakeClickHouseDriver struct{}
