@@ -37,6 +37,7 @@ type agentResponse struct {
 const (
 	agentMethodConnect       = "connect"
 	agentMethodClose         = "close"
+	agentMethodMetadata      = "metadata"
 	agentMethodPing          = "ping"
 	agentMethodQuery         = "query"
 	agentMethodExec          = "exec"
@@ -129,6 +130,13 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 				return fail(resp, err.Error())
 			}
 			*inst = nil
+		}
+		return resp
+	case agentMethodMetadata:
+		resp.Data = map[string]string{
+			"driverType":     strings.TrimSpace(agentDriverType),
+			"agentRevision":  db.OptionalDriverAgentRevision(agentDriverType),
+			"protocolSchema": "json-lines-v1",
 		}
 		return resp
 	}

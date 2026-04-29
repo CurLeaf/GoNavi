@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
 )
 
 type duckMapLike map[any]any
@@ -63,6 +64,33 @@ func TestNormalizeAgentResponseData_KeepByteSlice(t *testing.T) {
 	}
 	if !bytes.Equal(out, raw) {
 		t.Fatalf("[]byte 内容被意外改写: %v", out)
+	}
+}
+
+func TestHandleRequestMetadataReportsAgentRevision(t *testing.T) {
+	previousDriverType := agentDriverType
+	previousFactory := agentDatabaseFactory
+	t.Cleanup(func() {
+		agentDriverType = previousDriverType
+		agentDatabaseFactory = previousFactory
+	})
+	agentDriverType = "clickhouse"
+	agentDatabaseFactory = func() db.Database { return nil }
+
+	var inst db.Database
+	resp := handleRequest(&inst, agentRequest{ID: 7, Method: agentMethodMetadata})
+	if !resp.Success {
+		t.Fatalf("metadata request failed: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]string)
+	if !ok {
+		t.Fatalf("metadata response data type = %T", resp.Data)
+	}
+	if data["driverType"] != "clickhouse" {
+		t.Fatalf("unexpected driver type: %q", data["driverType"])
+	}
+	if data["agentRevision"] != db.OptionalDriverAgentRevision("clickhouse") {
+		t.Fatalf("unexpected agent revision: %q", data["agentRevision"])
 	}
 }
 

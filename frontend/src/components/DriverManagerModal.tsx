@@ -39,6 +39,11 @@ type DriverStatusRow = {
   packagePath?: string;
   executablePath?: string;
   downloadedAt?: string;
+  agentRevision?: string;
+  expectedRevision?: string;
+  needsUpdate?: boolean;
+  updateReason?: string;
+  affectedConnections?: number;
   message?: string;
 };
 
@@ -360,6 +365,13 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         packagePath: String(item.packagePath || '').trim() || undefined,
         executablePath: String(item.executablePath || '').trim() || undefined,
         downloadedAt: String(item.downloadedAt || '').trim() || undefined,
+        agentRevision: String(item.agentRevision || '').trim() || undefined,
+        expectedRevision: String(item.expectedRevision || '').trim() || undefined,
+        needsUpdate: !!item.needsUpdate,
+        updateReason: String(item.updateReason || '').trim() || undefined,
+        affectedConnections: Number.isFinite(Number(item.affectedConnections))
+          ? Number(item.affectedConnections)
+          : undefined,
         message: String(item.message || '').trim() || undefined,
       }));
       setRows(nextRows);
@@ -1005,7 +1017,17 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         title: '数据源',
         dataIndex: 'name',
         key: 'name',
-        width: 150,
+        width: 220,
+        render: (_: string, row: DriverStatusRow) => (
+          <div style={{ display: 'grid', gap: 4 }}>
+            <Text strong>{row.name}</Text>
+            {row.message ? (
+              <Text type={row.needsUpdate ? 'warning' : 'secondary'} style={{ fontSize: 12 }}>
+                {row.message}
+              </Text>
+            ) : null}
+          </div>
+        ),
       },
       {
         title: '安装包大小',
@@ -1041,6 +1063,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const progress = progressMap[row.type];
           if (progress && (progress.status === 'start' || progress.status === 'downloading')) {
             return <Tag color="processing">安装中 {Math.round(progress.percent)}%</Tag>;
+          }
+          if (row.needsUpdate) {
+            return <Tag color="warning">强烈建议重装</Tag>;
           }
           if (row.connectable) {
             return <Tag color="success">已启用</Tag>;
@@ -1089,10 +1114,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const versionLocked = row.packageInstalled || row.connectable;
           if (versionLocked) {
             const installedVersion = String(row.installedVersion || '').trim();
+            const revisionHint = row.needsUpdate ? '，需重装' : '';
             if (installedVersion) {
-              return <Text type="secondary">{installedVersion}（已安装，移除后可更换）</Text>;
+              return <Text type="secondary">{installedVersion}（已安装{revisionHint}，移除后可更换）</Text>;
             }
-            return <Text type="secondary">已安装（移除后可更换）</Text>;
+            return <Text type="secondary">已安装（{row.needsUpdate ? '需重装，' : ''}移除后可更换）</Text>;
           }
           const options = versionMap[row.type] || [];
           const selectedKey = selectedVersionMap[row.type];
@@ -1148,7 +1174,16 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           const logs = operationLogMap[row.type] || [];
           const hasLogs = logs.length > 0;
 
-          const mainAction = row.connectable ? (
+          const mainAction = row.needsUpdate ? (
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              loading={loadingInstallOrRemove}
+              onClick={() => installDriver(row)}
+            >
+              重装驱动
+            </Button>
+          ) : row.connectable ? (
             <Button
               danger
               icon={<DeleteOutlined />}
@@ -1209,9 +1244,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         row.type,
         row.pinnedVersion,
         row.installedVersion,
+        row.updateReason,
         row.message,
         row.builtIn ? '内置' : '外置',
-        row.connectable ? '已启用' : row.packageInstalled ? '已安装' : '未启用',
+        row.needsUpdate ? '强烈建议重装' : row.connectable ? '已启用' : row.packageInstalled ? '已安装' : '未启用',
       ];
       const searchableText = normalizeDriverSearchText(searchableParts.filter(Boolean).join(' '));
       return searchableText.includes(normalizedSearchKeyword);

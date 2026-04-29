@@ -23,6 +23,7 @@ import (
 const (
 	optionalAgentMethodConnect          = "connect"
 	optionalAgentMethodClose            = "close"
+	optionalAgentMethodMetadata         = "metadata"
 	optionalAgentMethodPing             = "ping"
 	optionalAgentMethodQuery            = "query"
 	optionalAgentMethodExec             = "exec"
@@ -58,6 +59,12 @@ type optionalAgentResponse struct {
 	RowsAffected int64           `json:"rowsAffected,omitempty"`
 }
 
+type OptionalDriverAgentMetadata struct {
+	DriverType     string `json:"driverType,omitempty"`
+	AgentRevision  string `json:"agentRevision,omitempty"`
+	ProtocolSchema string `json:"protocolSchema,omitempty"`
+}
+
 type optionalDriverAgentClient struct {
 	cmd      *exec.Cmd
 	stdin    io.WriteCloser
@@ -67,6 +74,25 @@ type optionalDriverAgentClient struct {
 	stderrMu sync.Mutex
 	stderr   strings.Builder
 	driver   string
+}
+
+func ProbeOptionalDriverAgentMetadata(driverType string, executablePath string) (OptionalDriverAgentMetadata, error) {
+	client, err := newOptionalDriverAgentClient(driverType, executablePath)
+	if err != nil {
+		return OptionalDriverAgentMetadata{}, err
+	}
+	defer func() {
+		_ = client.close()
+	}()
+
+	var metadata OptionalDriverAgentMetadata
+	if err := client.call(optionalAgentRequest{Method: optionalAgentMethodMetadata}, &metadata, nil, nil); err != nil {
+		return OptionalDriverAgentMetadata{}, err
+	}
+	metadata.DriverType = normalizeRuntimeDriverType(metadata.DriverType)
+	metadata.AgentRevision = strings.TrimSpace(metadata.AgentRevision)
+	metadata.ProtocolSchema = strings.TrimSpace(metadata.ProtocolSchema)
+	return metadata, nil
 }
 
 func newOptionalDriverAgentClient(driverType string, executablePath string) (*optionalDriverAgentClient, error) {

@@ -236,6 +236,10 @@ type DriverStatusSnapshot = {
   type: string;
   name: string;
   connectable: boolean;
+  expectedRevision?: string;
+  needsUpdate?: boolean;
+  updateReason?: string;
+  affectedConnections?: number;
   message?: string;
 };
 
@@ -246,6 +250,14 @@ const normalizeDriverType = (value: string): string => {
   if (normalized === "postgresql") return "postgres";
   if (normalized === "doris") return "diros";
   return normalized;
+};
+
+const resolveConnectionDriverType = (type: string, driver?: string): string => {
+  const normalizedType = normalizeDriverType(type);
+  if (normalizedType !== "custom") {
+    return normalizedType;
+  }
+  return normalizeDriverType(driver || "");
 };
 
 const ConnectionModal: React.FC<{
@@ -320,6 +332,7 @@ const ConnectionModal: React.FC<{
   const redisTopology = Form.useWatch("redisTopology", form) || "single";
   const sslMode = Form.useWatch("sslMode", form) || "preferred";
   const proxyType = Form.useWatch("proxyType", form) || "socks5";
+  const customDriver = Form.useWatch("driver", form) || "";
   const mongoReadPreference =
     Form.useWatch("mongoReadPreference", form) || "primary";
   const mongoAuthMechanism = Form.useWatch("mongoAuthMechanism", form) || "";
@@ -851,6 +864,12 @@ const ConnectionModal: React.FC<{
         type,
         name: String(item.name || item.type || type).trim(),
         connectable: !!item.connectable,
+        expectedRevision: String(item.expectedRevision || "").trim() || undefined,
+        needsUpdate: !!item.needsUpdate,
+        updateReason: String(item.updateReason || "").trim() || undefined,
+        affectedConnections: Number.isFinite(Number(item.affectedConnections))
+          ? Number(item.affectedConnections)
+          : undefined,
         message: String(item.message || "").trim() || undefined,
       };
     });
@@ -868,8 +887,11 @@ const ConnectionModal: React.FC<{
     }
   };
 
-  const resolveDriverUnavailableReason = async (type: string): Promise<string> => {
-    const normalized = normalizeDriverType(type);
+  const resolveDriverUnavailableReason = async (
+    type: string,
+    driver?: string,
+  ): Promise<string> => {
+    const normalized = resolveConnectionDriverType(type, driver);
     if (!normalized || normalized === "custom") {
       return "";
     }
@@ -2382,10 +2404,16 @@ const ConnectionModal: React.FC<{
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true);
-      const unavailableReason = await resolveDriverUnavailableReason(values.type);
+      const unavailableReason = await resolveDriverUnavailableReason(
+        values.type,
+        values.driver,
+      );
       if (unavailableReason) {
         message.warning(unavailableReason);
-        promptInstallDriver(values.type, unavailableReason);
+        promptInstallDriver(
+          resolveConnectionDriverType(values.type, values.driver) || values.type,
+          unavailableReason,
+        );
         return;
       }
       setLoading(true);
@@ -2538,7 +2566,10 @@ const ConnectionModal: React.FC<{
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true);
-      const unavailableReason = await resolveDriverUnavailableReason(values.type);
+      const unavailableReason = await resolveDriverUnavailableReason(
+        values.type,
+        values.driver,
+      );
       if (unavailableReason) {
         applyTestFailureFeedback(
           resolveConnectionTestFailureFeedback({
@@ -2547,7 +2578,10 @@ const ConnectionModal: React.FC<{
             fallback: "驱动未安装启用",
           }),
         );
-        promptInstallDriver(values.type, unavailableReason);
+        promptInstallDriver(
+          resolveConnectionDriverType(values.type, values.driver) || values.type,
+          unavailableReason,
+        );
         return;
       }
       const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
@@ -3326,17 +3360,27 @@ const ConnectionModal: React.FC<{
     isJVM && hasUnsupportedJvmModeSelection
       ? "当前连接包含未支持的 JVM 模式。此版本只支持 JMX / Endpoint / Agent，请先调整允许模式和首选模式后再继续。"
       : "";
-  const currentDriverType = normalizeDriverType(dbType);
+  const currentDriverType = resolveConnectionDriverType(dbType, customDriver);
+  const hasCurrentDriverType =
+    currentDriverType !== "" && currentDriverType !== "custom";
   const currentDriverSnapshot = driverStatusMap[currentDriverType];
   const currentDriverUnavailableReason =
-    currentDriverType !== "custom" &&
+    hasCurrentDriverType &&
     currentDriverSnapshot &&
     !currentDriverSnapshot.connectable
       ? currentDriverSnapshot.message ||
         `${currentDriverSnapshot.name || dbType} 驱动未安装启用`
       : "";
+  const currentDriverUpdateReason =
+    hasCurrentDriverType &&
+    currentDriverSnapshot?.connectable &&
+    currentDriverSnapshot.needsUpdate
+      ? currentDriverSnapshot.message ||
+        currentDriverSnapshot.updateReason ||
+        `${currentDriverSnapshot.name || dbType} 驱动代理需要重装后才能应用当前版本的驱动侧更新`
+      : "";
   const driverStatusChecking =
-    currentDriverType !== "custom" && !driverStatusLoaded && step === 2;
+    hasCurrentDriverType && !driverStatusLoaded && step === 2;
 
   const dbTypeGroups = [
     {
@@ -6050,6 +6094,26 @@ const ConnectionModal: React.FC<{
                   onClick={() => onOpenDriverManager?.()}
                 >
                   去驱动管理安装
+                </Button>
+              </Space>
+            }
+          />
+        )}
+        {currentDriverUpdateReason && (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 12 }}
+            message="当前数据源驱动代理建议重装"
+            description={
+              <Space size={8}>
+                <span>{currentDriverUpdateReason}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => onOpenDriverManager?.()}
+                >
+                  去驱动管理重装
                 </Button>
               </Space>
             }
