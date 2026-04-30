@@ -1,6 +1,6 @@
 import type { ConnectionConfig } from '../types';
 
-type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver'> | null | undefined;
+type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver' | 'oceanBaseProtocol'> | null | undefined;
 
 const normalizeDataSourceToken = (raw: string): string => {
   const normalized = String(raw || '').trim().toLowerCase();
@@ -26,6 +26,9 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
   if (type === 'custom') {
     const driver = normalizeDataSourceToken(String(config.driver || ''));
     return driver || 'custom';
+  }
+  if (type === 'oceanbase' && String(config.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') {
+    return 'oracle';
   }
   return type;
 };

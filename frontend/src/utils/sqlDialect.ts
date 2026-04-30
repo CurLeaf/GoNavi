@@ -34,12 +34,23 @@ const optionValues = (values: string[]): ColumnTypeOption[] => values.map((value
 
 const normalizeRawDialect = (value: string): string => String(value || '').trim().toLowerCase();
 
-export const resolveSqlDialect = (rawType: string, rawDriver = ''): SqlDialect => {
+export const normalizeOceanBaseSqlProtocol = (value: unknown): 'mysql' | 'oracle' => (
+  String(value || '').trim().toLowerCase() === 'oracle' ? 'oracle' : 'mysql'
+);
+
+export const resolveSqlDialect = (
+  rawType: string,
+  rawDriver = '',
+  options?: { oceanBaseProtocol?: unknown },
+): SqlDialect => {
   const normalized = normalizeRawDialect(rawType);
   const driver = normalizeRawDialect(rawDriver);
   const source = normalized === 'custom' ? driver : normalized;
 
   if (!source) return 'unknown';
+  if (source === 'oceanbase' && normalizeOceanBaseSqlProtocol(options?.oceanBaseProtocol) === 'oracle') {
+    return 'oracle';
+  }
 
   switch (source) {
     case 'postgresql':

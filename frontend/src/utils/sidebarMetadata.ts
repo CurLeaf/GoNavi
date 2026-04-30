@@ -11,7 +11,7 @@ const splitQualifiedName = (qualifiedName: string): { schemaName: string; object
   };
 };
 
-const normalizeSidebarConnectionDialect = (type: string, driver: string): string => {
+const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBaseProtocol?: string): string => {
   const normalizedType = String(type || '').trim().toLowerCase();
   if (normalizedType === 'custom') {
     const normalizedDriver = String(driver || '').trim().toLowerCase();
@@ -22,7 +22,9 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string): string
     if (normalizedDriver.includes('oracle')) return 'oracle';
     return normalizedDriver;
   }
-  if (normalizedType === 'oceanbase') return 'mysql';
+  if (normalizedType === 'oceanbase') {
+    return String(oceanBaseProtocol || '').trim().toLowerCase() === 'oracle' ? 'oracle' : 'mysql';
+  }
   if (normalizedType === 'open_gauss' || normalizedType === 'open-gauss') return 'opengauss';
   if (normalizedType === 'dameng') return 'dm';
   return normalizedType;
@@ -59,6 +61,7 @@ export const resolveSidebarRuntimeDatabase = (
   savedDatabase: string,
   overrideDatabase?: string,
   clearDatabase: boolean = false,
+  oceanBaseProtocol?: string,
 ): string => {
   if (clearDatabase) return '';
 
@@ -68,7 +71,7 @@ export const resolveSidebarRuntimeDatabase = (
     return normalizedSavedDatabase;
   }
 
-  const dialect = normalizeSidebarConnectionDialect(type, driver);
+  const dialect = normalizeSidebarConnectionDialect(type, driver, oceanBaseProtocol);
   if (dialect === 'oracle' || dialect === 'dm') {
     return normalizedSavedDatabase || normalizedOverrideDatabase;
   }

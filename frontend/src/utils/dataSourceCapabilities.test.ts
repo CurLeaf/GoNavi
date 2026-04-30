@@ -29,4 +29,15 @@ describe('dataSourceCapabilities', () => {
       supportsApproximateTotalPages: false,
     });
   });
+
+  it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
+    expect(getDataSourceCapabilities({
+      type: 'oceanbase',
+      oceanBaseProtocol: 'oracle',
+    })).toMatchObject({
+      type: 'oracle',
+      preferManualTotalCount: true,
+      supportsApproximateTableCount: true,
+    });
+  });
 });

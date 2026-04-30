@@ -73,6 +73,69 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   password: "",
   hasPassword: false,
 };
+const OCEANBASE_PROTOCOL_PARAM_KEYS = [
+  "protocol",
+  "oceanBaseProtocol",
+  "oceanbaseProtocol",
+  "tenantMode",
+  "compatMode",
+  "mode",
+];
+const normalizeOceanBaseProtocol = (
+  value: unknown,
+): "mysql" | "oracle" | undefined => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized === "oracle" ||
+    normalized === "oracle-mode" ||
+    normalized === "oracle_mode" ||
+    normalized === "oboracle"
+    ? "oracle"
+    : "mysql";
+};
+const resolveOceanBaseProtocolFromQueryText = (
+  value: unknown,
+): "mysql" | "oracle" | undefined => {
+  let text = String(value ?? "").trim();
+  if (!text) {
+    return undefined;
+  }
+  const queryIndex = text.indexOf("?");
+  if (queryIndex >= 0) {
+    text = text.slice(queryIndex + 1);
+  }
+  const hashIndex = text.indexOf("#");
+  if (hashIndex >= 0) {
+    text = text.slice(0, hashIndex);
+  }
+  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    const protocol = normalizeOceanBaseProtocol(params.get(key));
+    if (protocol) {
+      return protocol;
+    }
+  }
+  return undefined;
+};
+const resolveOceanBaseProtocol = (
+  raw: Record<string, unknown>,
+  normalizedConnectionParams: string,
+  normalizedUri: string,
+): "mysql" | "oracle" => {
+  if (Object.prototype.hasOwnProperty.call(raw, "oceanBaseProtocol")) {
+    const explicitProtocol = normalizeOceanBaseProtocol(raw.oceanBaseProtocol);
+    if (explicitProtocol) {
+      return explicitProtocol;
+    }
+  }
+  return (
+    resolveOceanBaseProtocolFromQueryText(normalizedConnectionParams) ||
+    resolveOceanBaseProtocolFromQueryText(normalizedUri) ||
+    "mysql"
+  );
+};
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
   "mariadb",
@@ -543,6 +606,14 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   if (type === "clickhouse") {
     safeConfig.clickHouseProtocol = normalizeClickHouseProtocol(
       raw.clickHouseProtocol,
+    );
+  }
+
+  if (type === "oceanbase") {
+    safeConfig.oceanBaseProtocol = resolveOceanBaseProtocol(
+      raw,
+      safeConfig.connectionParams || "",
+      safeConfig.uri || "",
     );
   }
 

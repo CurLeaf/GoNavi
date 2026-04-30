@@ -47,6 +47,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
             return driver;
         }
+        if (type === 'oceanbase' && String(conn?.config?.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
         if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;

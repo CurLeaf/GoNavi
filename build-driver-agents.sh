@@ -139,6 +139,11 @@ PY
   fi
 }
 
+join_by_comma() {
+  local IFS=,
+  echo "$*"
+}
+
 driver_csv=""
 target_platform=""
 out_root="dist/driver-agents"
@@ -197,6 +202,7 @@ if [[ -n "$driver_csv" ]]; then
 else
   drivers=("${DEFAULT_DRIVERS[@]}")
 fi
+revision_driver_csv="$(join_by_comma "${drivers[@]}")"
 
 declare -a platforms=()
 platform_seen="|"
@@ -265,7 +271,7 @@ for platform in "${platforms[@]}"; do
 
   echo ""
   echo "🧭 生成 driver-agent revision 指纹：$platform"
-  "$SCRIPT_DIR/tools/generate-driver-agent-revisions.sh" --platform "$platform"
+  "$SCRIPT_DIR/tools/generate-driver-agent-revisions.sh" --platform "$platform" --drivers "$revision_driver_csv"
 
   for driver in "${drivers[@]}"; do
     if [[ "$driver" == "duckdb" && "$goos" == "windows" && "$goarch" != "amd64" ]]; then

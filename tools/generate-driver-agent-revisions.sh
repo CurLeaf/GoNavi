@@ -15,7 +15,7 @@ usage() {
 
 选项：
   --platform <GOOS/GOARCH>  按目标平台解析 Go build tags，默认使用当前 Go 环境
-  --drivers <列表>          指定驱动列表（逗号分隔），默认生成所有 optional driver
+  --drivers <列表>          只更新指定驱动（逗号分隔），并保留其他已生成 revision
   -h, --help                显示帮助
 EOF
 }
@@ -174,6 +174,33 @@ else
   drivers=("${DEFAULT_DRIVERS[@]}")
 fi
 
+selected_driver_set="|"
+for driver in "${drivers[@]}"; do
+  selected_driver_set="${selected_driver_set}${driver}|"
+done
+
+existing_revision_for() {
+  local target="$1"
+  local line
+  [[ -n "$driver_csv" && -f "$OUTPUT_FILE" ]] || return 1
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"([^\"]+)\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      if [[ "${BASH_REMATCH[1]}" == "$target" ]]; then
+        printf '%s\n' "${BASH_REMATCH[2]}"
+        return 0
+      fi
+    fi
+  done <"$OUTPUT_FILE"
+  return 1
+}
+
+declare -a output_drivers=()
+if [[ -n "$driver_csv" ]]; then
+  output_drivers=("${DEFAULT_DRIVERS[@]}")
+else
+  output_drivers=("${drivers[@]}")
+fi
+
 fingerprint_driver() {
   local driver="$1"
   local build_driver tag cgo_enabled tmp file identity file_hash revision
@@ -236,8 +263,12 @@ package db
 func init() {
 	optionalDriverAgentRevisions = map[string]string{
 EOF
-  for driver in "${drivers[@]}"; do
-    revision="$(fingerprint_driver "$driver")"
+  for driver in "${output_drivers[@]}"; do
+    if [[ -n "$driver_csv" && "$selected_driver_set" != *"|$driver|"* ]] && revision="$(existing_revision_for "$driver")"; then
+      :
+    else
+      revision="$(fingerprint_driver "$driver")"
+    fi
     printf '\t\t"%s": "%s",\n' "$driver" "$revision"
   done
   cat <<'EOF'

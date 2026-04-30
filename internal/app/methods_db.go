@@ -116,7 +116,7 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 
 	escapedDbName := strings.ReplaceAll(dbName, "`", "``")
 	query := fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", escapedDbName)
-	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
+	dbType := resolveDDLDBType(runConfig)
 	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
 		escapedDbName = strings.ReplaceAll(dbName, `"`, `""`)
 		query = fmt.Sprintf("CREATE DATABASE \"%s\"", escapedDbName)
@@ -142,6 +142,9 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 
 func resolveDDLDBType(config connection.ConnectionConfig) string {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType == "oceanbase" && isOceanBaseOracleProtocol(config) {
+		return "oracle"
+	}
 	if dbType != "custom" {
 		return dbType
 	}

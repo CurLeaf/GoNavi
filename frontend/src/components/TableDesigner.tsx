@@ -862,7 +862,9 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     const conn = connections.find(c => c.id === tab.connectionId);
     const rawType = String(conn?.config?.type || '').trim();
     if (!rawType) return '';
-    return resolveSqlDialect(rawType, String(conn?.config?.driver || ''));
+    return resolveSqlDialect(rawType, String(conn?.config?.driver || ''), {
+      oceanBaseProtocol: conn?.config?.oceanBaseProtocol,
+    });
   };
 
   const generateTriggerTemplate = (): string => {

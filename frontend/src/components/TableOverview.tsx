@@ -52,7 +52,7 @@ const formatRows = (count: number): string => {
     return String(count);
 };
 
-const getMetadataDialect = (connType: string, driver?: string): string => {
+const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol?: string): string => {
     const type = (connType || '').trim().toLowerCase();
     if (type === 'custom') {
         const d = (driver || '').trim().toLowerCase();
@@ -61,6 +61,7 @@ const getMetadataDialect = (connType: string, driver?: string): string => {
         if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
         return d;
     }
+    if (type === 'oceanbase' && String(oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
     if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
@@ -183,8 +184,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     const connection = useMemo(() => connections.find(c => c.id === tab.connectionId), [connections, tab.connectionId]);
     const metadataDialect = useMemo(
-        () => getMetadataDialect(connection?.config?.type || '', connection?.config?.driver),
-        [connection?.config?.driver, connection?.config?.type]
+        () => getMetadataDialect(connection?.config?.type || '', connection?.config?.driver, connection?.config?.oceanBaseProtocol),
+        [connection?.config?.driver, connection?.config?.oceanBaseProtocol, connection?.config?.type]
     );
     const autoFetchVisible = useAutoFetchVisibility();
 

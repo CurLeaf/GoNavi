@@ -179,6 +179,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	normalized := config
 	normalized.ID = ""
 	normalized.Type = strings.ToLower(strings.TrimSpace(normalized.Type))
+	if normalized.Type == "oceanbase" {
+		normalized.ConnectionParams = normalizeOceanBaseConnectionParamsForCache(normalized.ConnectionParams)
+	}
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0
 	normalized.SavePassword = false
@@ -477,6 +480,13 @@ func formatConnSummary(config connection.ConnectionConfig) string {
 			protocol = "auto"
 		}
 		b.WriteString(fmt.Sprintf(" ClickHouse协议=%s", protocol))
+	}
+	if strings.EqualFold(strings.TrimSpace(config.Type), "oceanbase") {
+		protocol := "mysql"
+		if isOceanBaseOracleProtocol(config) {
+			protocol = "oracle"
+		}
+		b.WriteString(fmt.Sprintf(" OceanBase协议=%s", protocol))
 	}
 
 	if config.UseSSH {

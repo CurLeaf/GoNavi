@@ -403,6 +403,9 @@ var driverGoModulePathMap = map[string]string{
 }
 
 var driverGoModuleAliasPathMap = map[string][]string{
+	"oceanbase": {
+		"github.com/sijms/go-ora/v2",
+	},
 	"mongodb": {
 		"go.mongodb.org/mongo-driver",
 	},

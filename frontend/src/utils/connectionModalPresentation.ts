@@ -21,6 +21,7 @@ export type ConnectionConfigSectionKey =
   | 'target'
   | 'fileTarget'
   | 'connectionMode'
+  | 'oceanBaseProtocol'
   | 'mongoDiscovery'
   | 'replica'
   | 'service'
@@ -92,6 +93,10 @@ const CONNECTION_CONFIG_SECTION_COPY: Record<
   connectionMode: {
     title: '连接模式',
     description: '选择单机、主从、副本集或集群等拓扑模式。',
+  },
+  oceanBaseProtocol: {
+    title: 'OceanBase 协议',
+    description: '明确选择 MySQL 租户协议或 Oracle 租户协议。',
   },
   mongoDiscovery: {
     title: 'MongoDB 寻址',
