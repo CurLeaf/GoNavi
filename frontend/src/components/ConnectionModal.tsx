@@ -61,6 +61,8 @@ import {
 } from "../utils/connectionModalPresentation";
 import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
+import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
+import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   applyNoAutoCapAttributes,
@@ -96,7 +98,9 @@ type ChoiceCardOption = {
   description?: string;
 };
 type ClickHouseProtocolChoice = "auto" | "http" | "native";
+type OceanBaseProtocolChoice = "mysql" | "oracle";
 const MAX_URI_LENGTH = 4096;
+const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
 const CONNECTION_MODAL_WIDTH = 960;
@@ -111,6 +115,21 @@ const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
   { value: "http", label: "HTTP" },
   { value: "native", label: "Native" },
 ];
+const OCEANBASE_PROTOCOL_OPTIONS: Array<{
+  value: OceanBaseProtocolChoice;
+  label: string;
+}> = [
+  { value: "mysql", label: "MySQL" },
+  { value: "oracle", label: "Oracle" },
+];
+const OCEANBASE_PROTOCOL_PARAM_KEYS = [
+  "protocol",
+  "oceanBaseProtocol",
+  "oceanbaseProtocol",
+  "tenantMode",
+  "compatMode",
+  "mode",
+];
 
 const normalizeClickHouseProtocolValue = (
   value: unknown,
@@ -121,6 +140,55 @@ const normalizeClickHouseProtocolValue = (
   if (text === "http" || text === "https") return "http";
   if (text === "native" || text === "tcp") return "native";
   return "auto";
+};
+const normalizeOceanBaseProtocolValue = (
+  value: unknown,
+): OceanBaseProtocolChoice => {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  return text === "oracle" ? "oracle" : "mysql";
+};
+const resolveOceanBaseProtocolValue = (
+  value: unknown,
+): OceanBaseProtocolChoice | undefined => {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!text) return undefined;
+  return ["oracle", "oracle-mode", "oracle_mode", "oboracle"].includes(text)
+    ? "oracle"
+    : "mysql";
+};
+const resolveOceanBaseProtocolFromQueryText = (
+  value: unknown,
+): OceanBaseProtocolChoice | undefined => {
+  let text = String(value || "").trim();
+  if (!text) return undefined;
+  const queryIndex = text.indexOf("?");
+  if (queryIndex >= 0) {
+    text = text.slice(queryIndex + 1);
+  }
+  const hashIndex = text.indexOf("#");
+  if (hashIndex >= 0) {
+    text = text.slice(0, hashIndex);
+  }
+  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    const protocol = resolveOceanBaseProtocolValue(params.get(key));
+    if (protocol) return protocol;
+  }
+  return undefined;
+};
+const resolveOceanBaseProtocolForConfig = (
+  config: Partial<ConnectionConfig>,
+): OceanBaseProtocolChoice => {
+  return (
+    resolveOceanBaseProtocolValue(config.oceanBaseProtocol) ||
+    resolveOceanBaseProtocolFromQueryText(config.connectionParams) ||
+    resolveOceanBaseProtocolFromQueryText(config.uri) ||
+    "mysql"
+  );
 };
 type ConnectionSecretKey =
   | "primaryPassword"
@@ -152,6 +220,8 @@ const getDefaultPortByType = (type: string) => {
       return 9010;
     case "mysql":
       return 3306;
+    case "oceanbase":
+      return 2881;
     case "doris":
     case "diros":
       return 9030;
@@ -160,6 +230,7 @@ const getDefaultPortByType = (type: string) => {
     case "clickhouse":
       return 9000;
     case "postgres":
+    case "opengauss":
       return 5432;
     case "redis":
       return 6379;
@@ -192,6 +263,7 @@ const getDefaultPortByType = (type: string) => {
 
 const singleHostUriSchemesByType: Record<string, string[]> = {
   postgres: ["postgresql", "postgres"],
+  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
   clickhouse: ["clickhouse"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
@@ -206,6 +278,7 @@ const singleHostUriSchemesByType: Record<string, string[]> = {
 const sslSupportedTypes = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "doris",
   "diros",
   "sphinx",
@@ -217,6 +290,7 @@ const sslSupportedTypes = new Set([
   "kingbase",
   "highgo",
   "vastbase",
+  "opengauss",
   "mongodb",
   "redis",
   "tdengine",
@@ -231,6 +305,28 @@ const supportsSSLForType = (type: string) =>
 
 const isFileDatabaseType = (type: string) =>
   type === "sqlite" || type === "duckdb";
+
+const isMySQLCompatibleType = (type: string) =>
+  type === "mysql" ||
+  type === "mariadb" ||
+  type === "oceanbase" ||
+  type === "doris" ||
+  type === "diros" ||
+  type === "sphinx";
+
+const supportsConnectionParamsForType = (type: string) =>
+  isMySQLCompatibleType(type) ||
+  type === "postgres" ||
+  type === "kingbase" ||
+  type === "highgo" ||
+  type === "vastbase" ||
+  type === "opengauss" ||
+  type === "oracle" ||
+  type === "sqlserver" ||
+  type === "clickhouse" ||
+  type === "mongodb" ||
+  type === "dameng" ||
+  type === "tdengine";
 
 type DriverStatusSnapshot = {
   type: string;
@@ -249,6 +345,12 @@ const normalizeDriverType = (value: string): string => {
     .toLowerCase();
   if (normalized === "postgresql") return "postgres";
   if (normalized === "doris") return "diros";
+  if (
+    normalized === "open_gauss" ||
+    normalized === "open-gauss" ||
+    normalized === "opengauss"
+  )
+    return "opengauss";
   return normalized;
 };
 
@@ -330,6 +432,9 @@ const ConnectionModal: React.FC<{
   const mongoTopology = Form.useWatch("mongoTopology", form) || "single";
   const mongoSrv = Form.useWatch("mongoSrv", form) || false;
   const redisTopology = Form.useWatch("redisTopology", form) || "single";
+  const oceanBaseProtocol = normalizeOceanBaseProtocolValue(
+    Form.useWatch("oceanBaseProtocol", form),
+  );
   const sslMode = Form.useWatch("sslMode", form) || "preferred";
   const proxyType = Form.useWatch("proxyType", form) || "socks5";
   const customDriver = Form.useWatch("driver", form) || "";
@@ -355,16 +460,15 @@ const ConnectionModal: React.FC<{
       }),
     [jvmAllowedModes, jvmPreferredMode],
   );
-  const isMySQLLike =
-    dbType === "mysql" ||
-    dbType === "mariadb" ||
-    dbType === "doris" ||
-    dbType === "diros" ||
-    dbType === "sphinx";
+  const isOceanBaseOracle = dbType === "oceanbase" && oceanBaseProtocol === "oracle";
+  const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
+  const supportsConnectionParams = supportsConnectionParamsForType(dbType);
   const isSSLType = supportsSSLForType(dbType);
   const sslHintText = isMySQLLike
     ? "当 MySQL/MariaDB/Doris/Sphinx 开启安全传输策略时，请启用 SSL；本地自签证书场景可先用 Preferred 或 Skip Verify。"
-    : dbType === "dameng"
+    : isOceanBaseOracle
+      ? "OceanBase Oracle 租户使用 Oracle 协议连接，SSL 参数按 Oracle 驱动规则传递。"
+      : dbType === "dameng"
       ? "达梦驱动启用 SSL 需要客户端证书与私钥路径（sslCertPath / sslKeyPath）。"
       : dbType === "sqlserver"
         ? "SQL Server 推荐在生产环境使用 Required，并关闭 TrustServerCertificate。"
@@ -1047,6 +1151,56 @@ const ConnectionModal: React.FC<{
     return text === "1" || text === "true" || text === "yes" || text === "on";
   };
 
+  const normalizeConnectionParamsText = (raw: unknown) => {
+    let text = String(raw || "").trim();
+    if (!text) return "";
+    const queryIndex = text.indexOf("?");
+    if (queryIndex >= 0) {
+      text = text.slice(queryIndex + 1);
+    }
+    const hashIndex = text.indexOf("#");
+    if (hashIndex >= 0) {
+      text = text.slice(0, hashIndex);
+    }
+    return text.replace(/^[?&]+/, "").trim().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const serializeConnectionParams = (params: URLSearchParams) => {
+    const cloned = new URLSearchParams();
+    params.forEach((value, key) => {
+      if (String(key || "").trim()) {
+        cloned.append(key, value);
+      }
+    });
+    return cloned.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const normalizeOceanBaseConnectionParamsText = (
+    rawParams: unknown,
+    selectedProtocol: OceanBaseProtocolChoice,
+  ) => {
+    const params = new URLSearchParams(normalizeConnectionParamsText(rawParams));
+    for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+      params.delete(key);
+    }
+    params.set("protocol", selectedProtocol);
+    return params.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const mergeConnectionParams = (
+    params: URLSearchParams,
+    rawParams: unknown,
+  ) => {
+    const text = normalizeConnectionParamsText(rawParams);
+    if (!text) return;
+    const extra = new URLSearchParams(text);
+    extra.forEach((value, key) => {
+      if (String(key || "").trim()) {
+        params.set(key, value);
+      }
+    });
+  };
+
   const normalizeFileDbPath = (rawPath: string): string => {
     let pathText = String(rawPath || "").trim();
     if (!pathText) {
@@ -1199,6 +1353,7 @@ const ConnectionModal: React.FC<{
       clickHouseProtocol: "http",
       useSSL: isHttps,
       sslMode: isHttps ? (skipVerify ? "skip-verify" : "required") : "disable",
+      connectionParams: serializeConnectionParams(parsed.params),
     };
   };
 
@@ -1214,15 +1369,13 @@ const ConnectionModal: React.FC<{
       return null;
     }
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type)) {
       const mysqlDefaultPort = getDefaultPortByType(type);
       const parsed =
         parseMultiHostUri(trimmedUri, "mysql") ||
+        parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
+        parseMultiHostUri(trimmedUri, "oceanbase") ||
+        parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
         parseMultiHostUri(trimmedUri, "diros") ||
         parseMultiHostUri(trimmedUri, "doris");
       if (!parsed) {
@@ -1246,9 +1399,22 @@ const ConnectionModal: React.FC<{
       const topology = String(
         parsed.params.get("topology") || "",
       ).toLowerCase();
-      const tlsValue = String(parsed.params.get("tls") || "")
+      const tlsValue = String(
+        parsed.params.get("tls") || parsed.params.get("useSSL") || "",
+      )
         .trim()
         .toLowerCase();
+      const parsedOceanBaseProtocol =
+        type === "oceanbase"
+          ? normalizeOceanBaseProtocolValue(
+              parsed.params.get("protocol") ||
+                parsed.params.get("oceanBaseProtocol") ||
+                parsed.params.get("oceanbaseProtocol") ||
+                parsed.params.get("tenantMode") ||
+                parsed.params.get("compatMode") ||
+                parsed.params.get("mode"),
+            )
+          : undefined;
       const sslMode =
         tlsValue === "true"
           ? "required"
@@ -1265,9 +1431,15 @@ const ConnectionModal: React.FC<{
         database: parsed.database || "",
         useSSL: sslMode !== "disable",
         sslMode,
+        oceanBaseProtocol: parsedOceanBaseProtocol,
         mysqlTopology:
-          hostList.length > 1 || topology === "replica" ? "replica" : "single",
+          parsedOceanBaseProtocol === "oracle"
+            ? "single"
+            : hostList.length > 1 || topology === "replica"
+              ? "replica"
+              : "single",
         mysqlReplicaHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
         timeout:
           Number.isFinite(timeoutValue) && timeoutValue > 0
             ? Math.min(3600, Math.trunc(timeoutValue))
@@ -1414,6 +1586,7 @@ const ConnectionModal: React.FC<{
         mongoAuthSource: parsed.params.get("authSource") || "",
         mongoReadPreference: parsed.params.get("readPreference") || "primary",
         mongoAuthMechanism: parsed.params.get("authMechanism") || "",
+        connectionParams: serializeConnectionParams(parsed.params),
         timeout:
           Number.isFinite(timeoutMs) && timeoutMs > 0
             ? Math.min(MAX_TIMEOUT_SECONDS, Math.ceil(timeoutMs / 1000))
@@ -1450,6 +1623,9 @@ const ConnectionModal: React.FC<{
         password: parsed.password,
         database: parsed.database,
       };
+      if (supportsConnectionParamsForType(type)) {
+        parsedValues.connectionParams = serializeConnectionParams(parsed.params);
+      }
 
       if (supportsSSLForType(type)) {
         const normalizeBool = (raw: unknown) => {
@@ -1464,7 +1640,8 @@ const ConnectionModal: React.FC<{
           type === "postgres" ||
           type === "kingbase" ||
           type === "highgo" ||
-          type === "vastbase"
+          type === "vastbase" ||
+          type === "opengauss"
         ) {
           const sslMode = String(parsed.params.get("sslmode") || "")
             .trim()
@@ -1619,14 +1796,13 @@ const ConnectionModal: React.FC<{
   });
 
   const getUriPlaceholder = () => {
-    if (
-      dbType === "mysql" ||
-      dbType === "mariadb" ||
-      dbType === "diros" ||
-      dbType === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
-      const scheme = dbType === "diros" ? "doris" : "mysql";
+      const scheme =
+        dbType === "diros" ? "doris" : dbType === "oceanbase" ? "oceanbase" : "mysql";
+      if (dbType === "oceanbase") {
+        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
+      }
       return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
     }
     if (isFileDatabaseType(dbType)) {
@@ -1646,7 +1822,43 @@ const ConnectionModal: React.FC<{
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
     }
+    if (dbType === "opengauss") {
+      return "opengauss://user:pass@127.0.0.1:5432/db_name";
+    }
     return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
+  };
+
+  const getConnectionParamsPlaceholder = () => {
+    if (dbType === "oceanbase") {
+      return oceanBaseProtocol === "oracle"
+        ? "PREFETCH_ROWS=5000"
+        : "useUnicode=true&characterEncoding=utf8&autoReconnect=true&useSSL=false";
+    }
+    if (isMySQLCompatibleType(dbType)) {
+      return "useUnicode=true&characterEncoding=utf8&autoReconnect=true&useSSL=false";
+    }
+    switch (dbType) {
+      case "postgres":
+      case "kingbase":
+      case "highgo":
+      case "vastbase":
+      case "opengauss":
+        return "application_name=GoNavi&statement_timeout=30000";
+      case "oracle":
+        return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
+      case "sqlserver":
+        return "app name=GoNavi&packet size=32767";
+      case "clickhouse":
+        return "max_execution_time=60&compress=lz4";
+      case "mongodb":
+        return "retryWrites=true&readPreference=secondaryPreferred";
+      case "dameng":
+        return "schema=SYSDBA&escapeProcess=true";
+      case "tdengine":
+        return "timezone=Asia%2FShanghai";
+      default:
+        return "key=value&another=value";
+    }
   };
 
   const buildUriFromValues = (values: any) => {
@@ -1664,15 +1876,14 @@ const ConnectionModal: React.FC<{
       ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ""}@`
       : "";
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type)) {
+      const selectedOceanBaseProtocol =
+        type === "oceanbase"
+          ? normalizeOceanBaseProtocolValue(values.oceanBaseProtocol)
+          : "mysql";
       const primary = toAddress(host, port, defaultPort);
       const replicas =
-        values.mysqlTopology === "replica"
+        selectedOceanBaseProtocol !== "oracle" && values.mysqlTopology === "replica"
           ? normalizeAddressList(values.mysqlReplicaHosts, defaultPort)
           : [];
       const hosts = normalizeAddressList([primary, ...replicas], defaultPort);
@@ -1695,9 +1906,14 @@ const ConnectionModal: React.FC<{
       if (Number.isFinite(timeout) && timeout > 0) {
         params.set("timeout", String(timeout));
       }
+      mergeConnectionParams(params, values.connectionParams);
+      if (type === "oceanbase") {
+        params.set("protocol", selectedOceanBaseProtocol);
+      }
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
-      const scheme = type === "diros" ? "doris" : "mysql";
+      const scheme =
+        type === "diros" ? "doris" : type === "oceanbase" ? "oceanbase" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
@@ -1797,6 +2013,7 @@ const ConnectionModal: React.FC<{
         params.set("connectTimeoutMS", String(timeout * 1000));
         params.set("serverSelectionTimeoutMS", String(timeout * 1000));
       }
+      mergeConnectionParams(params, values.connectionParams);
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
@@ -1824,7 +2041,8 @@ const ConnectionModal: React.FC<{
         type === "postgres" ||
         type === "kingbase" ||
         type === "highgo" ||
-        type === "vastbase"
+        type === "vastbase" ||
+        type === "opengauss"
       ) {
         params.set("sslmode", "require");
       } else if (type === "sqlserver") {
@@ -1863,7 +2081,8 @@ const ConnectionModal: React.FC<{
         type === "postgres" ||
         type === "kingbase" ||
         type === "highgo" ||
-        type === "vastbase"
+        type === "vastbase" ||
+        type === "opengauss"
       ) {
         params.set("sslmode", "disable");
       } else if (type === "sqlserver") {
@@ -1875,6 +2094,9 @@ const ConnectionModal: React.FC<{
     }
     if (type === "clickhouse" && clickHouseProtocol !== "auto") {
       params.set("protocol", clickHouseProtocol);
+    }
+    if (supportsConnectionParamsForType(type)) {
+      mergeConnectionParams(params, values.connectionParams);
     }
     const query = params.toString();
     return `${scheme}://${encodedAuth}${toAddress(host, port, defaultPort)}${dbPath}${query ? `?${query}` : ""}`;
@@ -1909,7 +2131,13 @@ const ConnectionModal: React.FC<{
         });
         return;
       }
-      form.setFieldsValue({ ...parsedValues, uri: uriText });
+      form.setFieldsValue(
+        mergeParsedUriValuesForForm(
+          form.getFieldsValue(true),
+          parsedValues,
+          uriText,
+        ),
+      );
       if (testResult) {
         setTestResult(null);
       }
@@ -2043,6 +2271,7 @@ const ConnectionModal: React.FC<{
         const mysqlReplicaHosts =
           configType === "mysql" ||
           configType === "mariadb" ||
+          configType === "oceanbase" ||
           configType === "diros" ||
           configType === "sphinx"
             ? normalizedHosts.slice(1)
@@ -2082,10 +2311,19 @@ const ConnectionModal: React.FC<{
           password: config.password,
           database: config.database,
           uri: config.uri || "",
+          connectionParams:
+            config.connectionParams ||
+            (config.uri
+              ? parseUriToValues(config.uri, configType)?.connectionParams || ""
+              : ""),
           clickHouseProtocol:
             configType === "clickhouse"
               ? normalizeClickHouseProtocolValue(config.clickHouseProtocol)
               : "auto",
+          oceanBaseProtocol:
+            configType === "oceanbase"
+              ? resolveOceanBaseProtocolForConfig(config)
+              : "mysql",
           includeDatabases: initialValues.includeDatabases,
           includeRedisDatabases: initialValues.includeRedisDatabases,
           useSSL: !!config.useSSL,
@@ -2294,11 +2532,7 @@ const ConnectionModal: React.FC<{
       forceClear: !config.useHttpTunnel,
     });
     const mysqlReplicaEnabled =
-      (config.type === "mysql" ||
-        config.type === "mariadb" ||
-        config.type === "diros" ||
-        config.type === "sphinx") &&
-      config.topology === "replica";
+      isMySQLCompatibleType(config.type) && config.topology === "replica";
     const mysqlReplicaDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasMySQLReplicaPassword,
       valueInput: config.mysqlReplicaPassword,
@@ -2528,10 +2762,7 @@ const ConnectionModal: React.FC<{
     }
     if (
       clearSecrets.mysqlReplicaPassword &&
-      (values.type === "mysql" ||
-        values.type === "mariadb" ||
-        values.type === "diros" ||
-        values.type === "sphinx") &&
+      isMySQLCompatibleType(values.type) &&
       values.mysqlTopology === "replica" &&
       String(values.mysqlReplicaPassword ?? "") === ""
     ) {
@@ -2611,12 +2842,14 @@ const ConnectionModal: React.FC<{
       // Use different API for Redis / JVM
       const isRedisType = values.type === "redis";
       const isJVMType = values.type === "jvm";
+      const dbTestConfig =
+        !isRedisType && !isJVMType ? buildRpcConnectionConfig(config as any) : config;
       const res = await withClientTimeout(
         isJVMType
           ? TestJVMConnection(config as any)
           : isRedisType
             ? RedisConnect(config as any)
-            : TestConnection(config as any),
+            : TestConnection(dbTestConfig as any),
         rpcTimeoutMs,
         `连接测试超时（>${timeoutSeconds} 秒），请检查网络/代理/SSH配置后重试`,
       );
@@ -2629,7 +2862,7 @@ const ConnectionModal: React.FC<{
         } else if (!isJVMType) {
           // Other databases: fetch database list
           const dbRes = await withClientTimeout(
-            DBGetDatabases(config as any),
+            DBGetDatabases(dbTestConfig as any),
             rpcTimeoutMs,
             `连接成功但拉取数据库列表超时（>${timeoutSeconds} 秒）`,
           );
@@ -2884,6 +3117,10 @@ const ConnectionModal: React.FC<{
 
     const type = String(mergedValues.type || "").toLowerCase();
     const defaultPort = getDefaultPortByType(type);
+    const selectedOceanBaseProtocol =
+      type === "oceanbase"
+        ? normalizeOceanBaseProtocolValue(mergedValues.oceanBaseProtocol)
+        : "mysql";
     if (type === "clickhouse") {
       const requestedProtocol = normalizeClickHouseProtocolValue(
         mergedValues.clickHouseProtocol,
@@ -2983,12 +3220,7 @@ const ConnectionModal: React.FC<{
     const savePassword =
       type === "mongodb" ? mergedValues.savePassword !== false : true;
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type) && selectedOceanBaseProtocol !== "oracle") {
       const replicas =
         mergedValues.mysqlTopology === "replica"
           ? normalizeAddressList(mergedValues.mysqlReplicaHosts, defaultPort)
@@ -3129,6 +3361,14 @@ const ConnectionModal: React.FC<{
     }
 
     const keepPassword = !forPersist || savePassword;
+    const normalizedConnectionParams = supportsConnectionParamsForType(type)
+      ? type === "oceanbase"
+        ? normalizeOceanBaseConnectionParamsText(
+            mergedValues.connectionParams,
+            selectedOceanBaseProtocol,
+          )
+        : normalizeConnectionParamsText(mergedValues.connectionParams)
+      : "";
 
     return {
       type: mergedValues.type,
@@ -3150,6 +3390,7 @@ const ConnectionModal: React.FC<{
       httpTunnel: httpTunnelConfig,
       driver: mergedValues.driver,
       dsn: mergedValues.dsn,
+      connectionParams: normalizedConnectionParams,
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
         ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
@@ -3159,6 +3400,8 @@ const ConnectionModal: React.FC<{
         type === "clickhouse"
           ? normalizeClickHouseProtocolValue(mergedValues.clickHouseProtocol)
           : undefined,
+      oceanBaseProtocol:
+        type === "oceanbase" ? selectedOceanBaseProtocol : undefined,
       hosts: hosts,
       topology: topology,
       mysqlReplicaUser: mysqlReplicaUser,
@@ -3189,6 +3432,7 @@ const ConnectionModal: React.FC<{
     form.setFieldsValue({
       type: type,
       clickHouseProtocol: type === "clickhouse" ? "auto" : undefined,
+      oceanBaseProtocol: type === "oceanbase" ? "mysql" : undefined,
     });
 
     const defaultPort = getDefaultPortByType(type);
@@ -3226,6 +3470,7 @@ const ConnectionModal: React.FC<{
         httpTunnelPassword: "",
         timeout: 30,
         uri: "",
+        connectionParams: "",
         includeDatabases: undefined,
         includeRedisDatabases: undefined,
         mysqlTopology: "single",
@@ -3303,6 +3548,7 @@ const ConnectionModal: React.FC<{
         mongoReplicaUser: "",
         mongoReplicaPassword: "",
         redisDB: 0,
+        connectionParams: "",
       });
     } else if (type !== "custom") {
       const defaultUser =
@@ -3340,6 +3586,7 @@ const ConnectionModal: React.FC<{
         mongoReplicaUser: "",
         mongoReplicaPassword: "",
         redisDB: 0,
+        connectionParams: "",
       });
     }
 
@@ -3442,6 +3689,11 @@ const ConnectionModal: React.FC<{
       label: "国产数据库",
       items: [
         {
+          key: "oceanbase",
+          name: "OceanBase",
+          icon: getDbIcon("oceanbase", undefined, 36),
+        },
+        {
           key: "dameng",
           name: "Dameng (达梦)",
           icon: getDbIcon("dameng", undefined, 36),
@@ -3460,6 +3712,11 @@ const ConnectionModal: React.FC<{
           key: "vastbase",
           name: "Vastbase (海量)",
           icon: getDbIcon("vastbase", undefined, 36),
+        },
+        {
+          key: "opengauss",
+          name: "OpenGauss",
+          icon: getDbIcon("opengauss", undefined, 36),
         },
       ],
     },
@@ -3516,6 +3773,8 @@ const ConnectionModal: React.FC<{
         return "单机 / 集群";
       case "mongodb":
         return "单机 / 副本集";
+      case "oceanbase":
+        return "MySQL / Oracle 租户";
       case "sqlite":
       case "duckdb":
         return "本地文件连接";
@@ -3749,6 +4008,19 @@ const ConnectionModal: React.FC<{
                       placeholder={getUriPlaceholder()}
                     />
                   </Form.Item>
+                  {supportsConnectionParams && (
+                    <Form.Item
+                      name="connectionParams"
+                      label="额外连接参数"
+                      help="按当前数据源驱动支持的 URI/DSN query 格式填写；认证密码请使用上方密码字段。"
+                    >
+                      <Input.TextArea
+                        {...noAutoCapInputProps}
+                        rows={2}
+                        placeholder={getConnectionParamsPlaceholder()}
+                      />
+                    </Form.Item>
+                  )}
                   <Space
                     size={8}
                     style={{ marginBottom: uriFeedback ? 12 : 16 }}
@@ -4495,10 +4767,33 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
+              {dbType === "oceanbase" &&
+                renderConfigSectionCard({
+                  sectionKey: "oceanBaseProtocol",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="oceanBaseProtocol"
+                      label="OceanBase 协议"
+                      help="MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。该选择会同时影响连接测试、浏览表结构和 SQL 方言。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        options={OCEANBASE_PROTOCOL_OPTIONS}
+                        onChange={() => {
+                          form.setFieldsValue({ mysqlTopology: "single" });
+                          clearConnectionTestResultForChoice();
+                        }}
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
               {(dbType === "postgres" ||
                 dbType === "kingbase" ||
                 dbType === "highgo" ||
-                dbType === "vastbase") &&
+                dbType === "vastbase" ||
+                dbType === "opengauss") &&
                 renderConfigSectionCard({
                   sectionKey: "service",
                   icon: <DatabaseOutlined />,
@@ -4514,20 +4809,26 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
-              {dbType === "oracle" &&
+              {(dbType === "oracle" || isOceanBaseOracle) &&
                 renderConfigSectionCard({
                   sectionKey: "service",
                   icon: <DatabaseOutlined />,
                   children: (
                     <Form.Item
                       name="database"
-                      label="服务名 (Service Name)"
+                      label={isOceanBaseOracle ? "OceanBase Oracle 服务名 (Service Name)" : "服务名 (Service Name)"}
                       rules={[
                         createUriAwareRequiredRule(
-                          "请输入 Oracle 服务名（例如 ORCLPDB1）",
+                          isOceanBaseOracle
+                            ? "请输入 OceanBase Oracle 服务名"
+                            : "请输入 Oracle 服务名（例如 ORCLPDB1）",
                         ),
                       ]}
-                      help="请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+                      help={
+                        isOceanBaseOracle
+                          ? "Oracle 租户必须填写监听器注册的 SERVICE_NAME；用户名仍按 OceanBase 租户格式填写。"
+                          : "请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+                      }
                       style={{ marginBottom: 0 }}
                     >
                       <Input
@@ -5926,6 +6227,8 @@ const ConnectionModal: React.FC<{
           httpTunnelPort: 8080,
           timeout: 30,
           uri: "",
+          connectionParams: "",
+          oceanBaseProtocol: "mysql",
           mysqlTopology: "single",
           redisTopology: "single",
           mongoTopology: "single",
@@ -5971,7 +6274,12 @@ const ConnectionModal: React.FC<{
             setTestResult(null);
             setTestErrorLogOpen(false);
           }
-          if (changed.uri !== undefined || changed.type !== undefined) {
+          if (
+            changed.uri !== undefined ||
+            changed.connectionParams !== undefined ||
+            changed.type !== undefined ||
+            changed.oceanBaseProtocol !== undefined
+          ) {
             setUriFeedback(null);
           }
           if (changed.useSSL !== undefined) {

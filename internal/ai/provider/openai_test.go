@@ -2,6 +2,8 @@ package provider
 
 import (
 	"GoNavi-Wails/internal/ai"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -164,4 +166,81 @@ func TestOpenAIProvider_DefaultMaxTokens(t *testing.T) {
 	if op.config.MaxTokens != 4096 {
 		t.Fatalf("expected default max tokens 4096, got %d", op.config.MaxTokens)
 	}
+}
+
+func TestBuildOpenAIMessages_ReplaysDeepSeekReasoningContentForToolCalls(t *testing.T) {
+	toolCall := testOpenAIToolCall()
+	got := buildOpenAIMessages([]ai.Message{
+		{
+			Role:             "assistant",
+			Content:          "",
+			ToolCalls:        []ai.ToolCall{toolCall},
+			ReasoningContent: "需要先检查表结构",
+		},
+		{
+			Role:       "tool",
+			Content:    `{"ok":true}`,
+			ToolCallID: toolCall.ID,
+		},
+	}, "deepseek-v4", "https://api.deepseek.com/v1")
+
+	if got[0].ReasoningContent != "需要先检查表结构" {
+		t.Fatalf("expected reasoning_content to be replayed for DeepSeek tool call, got %q", got[0].ReasoningContent)
+	}
+	if got[1].ReasoningContent != "" {
+		t.Fatalf("expected tool result message not to carry reasoning_content, got %q", got[1].ReasoningContent)
+	}
+
+	body, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+	if !strings.Contains(string(body), `"reasoning_content":"需要先检查表结构"`) {
+		t.Fatalf("expected JSON payload to include reasoning_content, got %s", body)
+	}
+}
+
+func TestBuildOpenAIMessages_OmitsReasoningContentForNonDeepSeekProviders(t *testing.T) {
+	got := buildOpenAIMessages([]ai.Message{
+		{
+			Role:             "assistant",
+			Content:          "",
+			ToolCalls:        []ai.ToolCall{testOpenAIToolCall()},
+			ReasoningContent: "reasoning should stay local",
+		},
+	}, "gpt-4o", "https://api.openai.com/v1")
+
+	if got[0].ReasoningContent != "" {
+		t.Fatalf("expected non-DeepSeek provider to omit reasoning_content, got %q", got[0].ReasoningContent)
+	}
+	body, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+	if strings.Contains(string(body), "reasoning_content") {
+		t.Fatalf("expected JSON payload to omit reasoning_content for non-DeepSeek provider, got %s", body)
+	}
+}
+
+func TestBuildOpenAIMessages_ReplaysDeepSeekAssistantReasoningContentWithoutToolCalls(t *testing.T) {
+	got := buildOpenAIMessages([]ai.Message{
+		{
+			Role:             "assistant",
+			Content:          "最终分析",
+			ReasoningContent: "工具调用轮次的最终思考也需要保留",
+		},
+	}, "deepseek-v4", "https://api.deepseek.com/v1")
+
+	if got[0].ReasoningContent != "工具调用轮次的最终思考也需要保留" {
+		t.Fatalf("expected DeepSeek assistant reasoning_content to be replayed, got %q", got[0].ReasoningContent)
+	}
+}
+
+func testOpenAIToolCall() ai.ToolCall {
+	var toolCall ai.ToolCall
+	toolCall.ID = "call_schema"
+	toolCall.Type = "function"
+	toolCall.Function.Name = "inspect_table_schema"
+	toolCall.Function.Arguments = `{"table":"orders"}`
+	return toolCall
 }

@@ -1219,7 +1219,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -1353,7 +1353,7 @@ func quoteIdentByType(dbType string, ident string) string {
 	}
 
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "kingbase":
 		cleaned := db.NormalizeKingbaseIdentifier(ident)
@@ -1578,7 +1578,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 	dbType := resolveDDLDBType(config)
 	escapedDbName := escapeSQLLiteral(dbName)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
 		queries := []string{
 			fmt.Sprintf(`SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE TABLE_TYPE='VIEW' AND TABLE_SCHEMA='%s' ORDER BY TABLE_NAME`, escapedDbName),
 		}
@@ -1586,7 +1586,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 			queries = append(queries, fmt.Sprintf("SHOW FULL TABLES FROM %s WHERE Table_type = 'VIEW'", quoteIdentByType("mysql", dbName)))
 		}
 		return queries
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		return []string{
 			`SELECT table_schema AS schema_name, table_name AS object_name FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name`,
 		}
@@ -1681,7 +1681,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 	escapedDB := escapeSQLLiteral(dbName)
 
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
 		if safeSchema == "" {
 			safeSchema = strings.TrimSpace(dbName)
 		}
@@ -1693,7 +1693,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 		return []string{
 			fmt.Sprintf("SHOW CREATE VIEW %s", quoteIdentByType("mysql", safeView)),
 		}
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		if safeSchema == "" {
 			safeSchema = "public"
 		}
@@ -1960,7 +1960,8 @@ func formatSQLValue(dbType string, v interface{}) string {
 	case time.Time:
 		return "'" + val.Format("2006-01-02 15:04:05") + "'"
 	case string:
-		if (strings.ToLower(strings.TrimSpace(dbType)) == "mysql" || strings.ToLower(strings.TrimSpace(dbType)) == "diros") && isMySQLHexLiteral(val) {
+		normalizedType := strings.ToLower(strings.TrimSpace(dbType))
+		if (normalizedType == "mysql" || normalizedType == "oceanbase" || normalizedType == "diros") && isMySQLHexLiteral(val) {
 			return val
 		}
 		escaped := strings.ReplaceAll(val, "'", "''")

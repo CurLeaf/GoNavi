@@ -5,7 +5,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
@@ -40,15 +39,8 @@ func applyDirosURI(config connection.ConnectionConfig) connection.ConnectionConf
 		return config
 	}
 
-	lowerURI := strings.ToLower(uriText)
-	if !strings.HasPrefix(lowerURI, "diros://") &&
-		!strings.HasPrefix(lowerURI, "doris://") &&
-		!strings.HasPrefix(lowerURI, "mysql://") {
-		return config
-	}
-
-	parsed, err := url.Parse(uriText)
-	if err != nil {
+	parsed, ok := parseMySQLCompatibleURI(uriText, "diros", "doris", "mysql")
+	if !ok {
 		return config
 	}
 
@@ -147,13 +139,7 @@ func (d *DirosDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	timeout := getConnectTimeoutSeconds(config)
-	tlsMode := resolveMySQLTLSMode(config)
-
-	return fmt.Sprintf(
-		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s&multiStatements=true",
-		config.User, config.Password, protocol, address, database, timeout, url.QueryEscape(tlsMode),
-	), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
 }
 
 func resolveDirosCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {

@@ -44,6 +44,7 @@ func (h *HighGoDB) getDSN(config connection.ConnectionConfig) string {
 	q := url.Values{}
 	q.Set("sslmode", resolvePostgresSSLMode(config))
 	q.Set("connect_timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
+	mergeConnectionParamsFromConfig(q, config, "postgres", "postgresql", "highgo")
 	u.RawQuery = q.Encode()
 
 	return u.String()

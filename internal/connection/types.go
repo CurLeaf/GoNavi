@@ -99,10 +99,12 @@ type ConnectionConfig struct {
 	HTTPTunnel           HTTPTunnelConfig `json:"httpTunnel,omitempty"`
 	Driver               string           `json:"driver,omitempty"`               // For custom connection
 	DSN                  string           `json:"dsn,omitempty"`                  // For custom connection
+	ConnectionParams     string           `json:"connectionParams,omitempty"`     // Extra URI query parameters for built-in drivers
 	Timeout              int              `json:"timeout,omitempty"`              // Connection timeout in seconds (default: 30)
 	RedisDB              int              `json:"redisDB,omitempty"`              // Redis database index (0-15)
 	URI                  string           `json:"uri,omitempty"`                  // Connection URI for copy/paste
 	ClickHouseProtocol   string           `json:"clickHouseProtocol,omitempty"`   // auto | http | native
+	OceanBaseProtocol    string           `json:"oceanBaseProtocol,omitempty"`    // mysql | oracle
 	Hosts                []string         `json:"hosts,omitempty"`                // Multi-host addresses: host:port
 	Topology             string           `json:"topology,omitempty"`             // single | replica | cluster
 	MySQLReplicaUser     string           `json:"mysqlReplicaUser,omitempty"`     // MySQL replica auth user

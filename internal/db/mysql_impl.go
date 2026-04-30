@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,183 @@ type MySQLDB struct {
 }
 
 const defaultMySQLPort = 3306
+
+func parseMySQLCompatibleURI(raw string, allowedSchemes ...string) (*url.URL, bool) {
+	return parseConnectionURI(raw, allowedSchemes...)
+}
+
+func mysqlConnectionParamsFromText(raw string) url.Values {
+	return connectionParamsFromText(raw)
+}
+
+func parseMySQLBoolParam(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func normalizeMySQLDurationParam(raw string, unit time.Duration) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return text
+	}
+	if n, err := strconv.Atoi(text); err == nil && n >= 0 {
+		return (time.Duration(n) * unit).String()
+	}
+	return text
+}
+
+func normalizeMySQLCharsetParam(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	switch lower {
+	case "utf-8", "utf_8", "unicode":
+		return "utf8mb4"
+	case "utf8", "utf8mb4", "latin1", "gbk", "gb2312", "gb18030", "big5", "sjis", "cp932":
+		return lower
+	case "iso-8859-1", "iso8859-1", "iso88591":
+		return "latin1"
+	default:
+		return text
+	}
+}
+
+func normalizeMySQLServerTimezoneParam(raw string) (string, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", false
+	}
+	compact := strings.ToUpper(strings.ReplaceAll(text, " ", ""))
+	switch compact {
+	case "LOCAL":
+		return "Local", true
+	case "UTC", "Z", "GMT", "GMT+0", "GMT-0", "GMT+00", "GMT-00", "GMT+00:00", "GMT-00:00",
+		"UTC+0", "UTC-0", "UTC+00", "UTC-00", "UTC+00:00", "UTC-00:00":
+		return "UTC", true
+	case "GMT+8", "GMT+08", "GMT+08:00", "UTC+8", "UTC+08", "UTC+08:00",
+		"ASIA/SHANGHAI", "PRC", "CTT":
+		return "Asia/Shanghai", true
+	}
+	if strings.Contains(text, "/") {
+		if _, err := time.LoadLocation(text); err == nil {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+func mergeMySQLConnectionParam(params url.Values, key string, value string) {
+	name := strings.TrimSpace(key)
+	if name == "" {
+		return
+	}
+	lowerName := strings.ToLower(name)
+	switch lowerName {
+	case "topology":
+		return
+	case "useunicode", "autoreconnect", "useoldaliasmetadatabehavior":
+		return
+	case "charset":
+		if charset := normalizeMySQLCharsetParam(value); charset != "" {
+			params.Set("charset", charset)
+		}
+		return
+	case "characterencoding":
+		if charset := normalizeMySQLCharsetParam(value); charset != "" {
+			params.Set("charset", charset)
+		}
+		return
+	case "servertimezone":
+		if loc, ok := normalizeMySQLServerTimezoneParam(value); ok {
+			params.Set("loc", loc)
+		}
+		return
+	case "usessl":
+		if enabled, ok := parseMySQLBoolParam(value); ok {
+			if enabled {
+				params.Set("tls", "true")
+			} else {
+				params.Set("tls", "false")
+			}
+		}
+		return
+	case "verifyservercertificate":
+		if verified, ok := parseMySQLBoolParam(value); ok && !verified && params.Get("tls") != "false" {
+			params.Set("tls", "skip-verify")
+		}
+		return
+	case "trustservercertificate":
+		if trusted, ok := parseMySQLBoolParam(value); ok && trusted && params.Get("tls") != "false" {
+			params.Set("tls", "skip-verify")
+		}
+		return
+	case "connecttimeout":
+		params.Set("timeout", normalizeMySQLDurationParam(value, time.Millisecond))
+		return
+	case "sockettimeout":
+		params.Set("readTimeout", normalizeMySQLDurationParam(value, time.Millisecond))
+		return
+	case "timeout", "readtimeout", "writetimeout":
+		params.Set(name, normalizeMySQLDurationParam(value, time.Second))
+		return
+	default:
+		params.Set(name, value)
+	}
+}
+
+func mergeMySQLConnectionParams(params url.Values, values url.Values) {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		lowerName := strings.ToLower(strings.TrimSpace(key))
+		if lowerName == "verifyservercertificate" || lowerName == "trustservercertificate" {
+			continue
+		}
+		for _, value := range values[key] {
+			mergeMySQLConnectionParam(params, key, value)
+		}
+	}
+	for _, key := range keys {
+		lowerName := strings.ToLower(strings.TrimSpace(key))
+		if lowerName != "verifyservercertificate" && lowerName != "trustservercertificate" {
+			continue
+		}
+		for _, value := range values[key] {
+			mergeMySQLConnectionParam(params, key, value)
+		}
+	}
+}
+
+func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) string {
+	timeout := getConnectTimeoutSeconds(config)
+	tlsMode := resolveMySQLTLSMode(config)
+	params := url.Values{}
+	params.Set("charset", "utf8mb4")
+	params.Set("parseTime", "True")
+	params.Set("loc", "Local")
+	params.Set("timeout", fmt.Sprintf("%ds", timeout))
+	params.Set("tls", tlsMode)
+	params.Set("multiStatements", "true")
+	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros", "oceanbase"); ok {
+		mergeMySQLConnectionParams(params, parsed.Query())
+	}
+	mergeMySQLConnectionParams(params, mysqlConnectionParamsFromText(config.ConnectionParams))
+	return fmt.Sprintf(
+		"%s:%s@%s(%s)/%s?%s",
+		config.User, config.Password, protocol, address, database, params.Encode(),
+	)
+}
 
 func parseHostPortWithDefault(raw string, defaultPort int) (string, int, bool) {
 	text := strings.TrimSpace(raw)
@@ -135,13 +313,8 @@ func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConf
 	if uriText == "" {
 		return config
 	}
-	lowerURI := strings.ToLower(uriText)
-	if !strings.HasPrefix(lowerURI, "mysql://") {
-		return config
-	}
-
-	parsed, err := url.Parse(uriText)
-	if err != nil {
+	parsed, ok := parseMySQLCompatibleURI(uriText, "mysql")
+	if !ok {
 		return config
 	}
 
@@ -239,13 +412,7 @@ func (m *MySQLDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	timeout := getConnectTimeoutSeconds(config)
-	tlsMode := resolveMySQLTLSMode(config)
-
-	return fmt.Sprintf(
-		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s&multiStatements=true",
-		config.User, config.Password, protocol, address, database, timeout, url.QueryEscape(tlsMode),
-	), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
 }
 
 func resolveMySQLCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {

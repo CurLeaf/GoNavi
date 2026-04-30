@@ -277,16 +277,16 @@ func (s *SyncEngine) previewSourceQuery(config SyncConfig, limit int) (TableDiff
 
 	inserts, updates, deletes, _ := diffRowsByPK(ctx.PKColumn, ctx.SourceRows, ctx.TargetRows)
 	out := TableDiffPreview{
-		Table:        ctx.TableName,
-		PKColumn:     ctx.PKColumn,
-		ColumnTypes:  make(map[string]string, len(ctx.TargetCols)),
+		Table:         ctx.TableName,
+		PKColumn:      ctx.PKColumn,
+		ColumnTypes:   make(map[string]string, len(ctx.TargetCols)),
 		SchemaSummary: "SQL 结果集同步预览",
-		TotalInserts: len(inserts),
-		TotalUpdates: len(updates),
-		TotalDeletes: len(deletes),
-		Inserts:      make([]PreviewRow, 0, minInt(limit, len(inserts))),
-		Updates:      make([]PreviewUpdateRow, 0, minInt(limit, len(updates))),
-		Deletes:      make([]PreviewRow, 0, minInt(limit, len(deletes))),
+		TotalInserts:  len(inserts),
+		TotalUpdates:  len(updates),
+		TotalDeletes:  len(deletes),
+		Inserts:       make([]PreviewRow, 0, minInt(limit, len(inserts))),
+		Updates:       make([]PreviewUpdateRow, 0, minInt(limit, len(updates))),
+		Deletes:       make([]PreviewRow, 0, minInt(limit, len(deletes))),
 	}
 	for _, col := range ctx.TargetCols {
 		name := strings.ToLower(strings.TrimSpace(col.Name))
@@ -433,7 +433,7 @@ func (s *SyncEngine) runSourceQuerySync(config SyncConfig) SyncResult {
 
 	applyTableName := ctx.TargetTable
 	switch ctx.TargetType {
-	case "postgres", "kingbase", "highgo", "vastbase", "sqlserver":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver":
 		applyTableName = ctx.TargetQueryTable
 	}
 	applier, ok := targetDB.(db.BatchApplier)

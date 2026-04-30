@@ -252,7 +252,7 @@ jobs:
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          DRIVERS=(mariadb doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase mongodb tdengine clickhouse)
+          DRIVERS=(mariadb oceanbase doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
 

@@ -15,7 +15,11 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	}
 
 	switch strings.ToLower(strings.TrimSpace(config.Type)) {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "mongodb", "tdengine", "clickhouse":
+	case "oceanbase":
+		if !isOceanBaseOracleProtocol(config) {
+			runConfig.Database = name
+		}
+	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "mongodb", "tdengine", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -42,7 +46,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 		return rawDB, rawTable
 	}
 
-	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	dbType := resolveDDLDBType(config)
 	if dbType == "sqlserver" {
 		// SQL Server 的 DB 接口约定：第一个参数是数据库名，schema 由 tableName(如 dbo.users) 自行解析。
 		// 不能把 schema(dbo) 传到第一个参数，否则会拼出 dbo.sys.columns 等无效对象名。
@@ -62,7 +66,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 	}
 
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		// PG/金仓/瀚高/海量：dbName 在 UI 里是"数据库"，schema 需从 tableName 或使用默认 public。
 		return "public", rawTable
 	default:

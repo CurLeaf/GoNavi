@@ -107,7 +107,7 @@ func isMySQLLikeType(dbType string) bool {
 
 func classifyMigrationDataModel(dbType string) MigrationDataModel {
 	switch normalizeMigrationDBType(dbType) {
-	case "mysql", "mariadb", "postgres", "kingbase", "highgo", "vastbase", "oracle", "sqlserver", "dameng", "sqlite", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "oracle", "sqlserver", "dameng", "sqlite", "duckdb":
 		return MigrationDataModelRelational
 	case "mongodb":
 		return MigrationDataModelDocument

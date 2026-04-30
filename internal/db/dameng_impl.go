@@ -48,6 +48,7 @@ func (d *DamengDB) getDSN(config connection.ConnectionConfig) string {
 		// 达梦驱动要求：密码包含特殊字符时，password 需 PathEscape，并添加 escapeProcess=true 让驱动解码。
 		q.Set("escapeProcess", "true")
 	}
+	mergeConnectionParamsFromConfig(q, config, "dm", "dameng")
 
 	dsn := fmt.Sprintf("dm://%s:%s@%s", config.User, escapedPassword, address)
 	encoded := q.Encode()

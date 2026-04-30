@@ -4,18 +4,20 @@ package db
 
 func init() {
 	optionalDriverAgentRevisions = map[string]string{
-		"mariadb":    "src-d6c5c6717338834c",
-		"diros":      "src-ed4f0f64ed28d3fa",
-		"sphinx":     "src-f52324f0a812d7c8",
-		"sqlserver":  "src-ec165f18de9cd8b3",
-		"sqlite":     "src-9dea6c76bc931114",
-		"duckdb":     "src-14027ac1de3c50c7",
-		"dameng":     "src-1a08880ff5bbcf31",
-		"kingbase":   "src-28eed0e4d942b724",
-		"highgo":     "src-76146bf97f07f25c",
-		"vastbase":   "src-555b60c4863542b6",
-		"mongodb":    "src-2540a7350c4243aa",
-		"tdengine":   "src-ce3e4a9c46f6b92d",
-		"clickhouse": "src-78e5ada4da56704d",
+		"mariadb":    "src-ac4e31956af63048",
+		"oceanbase":  "src-f0c94a098a955e89",
+		"diros":      "src-4565a49afb9b942b",
+		"sphinx":     "src-4f9ec83df79bc8f7",
+		"sqlserver":  "src-172613975f6f18d2",
+		"sqlite":     "src-2ff8c7eb368b324b",
+		"duckdb":     "src-6d20adc5b77a9ed6",
+		"dameng":     "src-659f5656149e216c",
+		"kingbase":   "src-82ff6ff9440233cd",
+		"highgo":     "src-a3915194d9a50d5d",
+		"vastbase":   "src-20413d5fc104e9fc",
+		"opengauss":  "src-a4d1946fea5c229c",
+		"mongodb":    "src-93d3f3ba9a564a1d",
+		"tdengine":   "src-11ff132d18cb7d9a",
+		"clickhouse": "src-8e9642cd16e7e147",
 	}
 }

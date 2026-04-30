@@ -50,6 +50,34 @@ func TestNormalizeSchemaAndTable_PostgresStillSplitsQualifiedName(t *testing.T) 
 	}
 }
 
+func TestNormalizeRunConfig_OceanBaseOracleKeepsServiceName(t *testing.T) {
+	t.Parallel()
+
+	config := connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Database:          "OBORCL",
+		OceanBaseProtocol: "oracle",
+	}
+	runConfig := normalizeRunConfig(config, "SYS")
+
+	if runConfig.Database != "OBORCL" {
+		t.Fatalf("expected OceanBase Oracle service name to stay OBORCL, got %q", runConfig.Database)
+	}
+}
+
+func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		OceanBaseProtocol: "oracle",
+	}, "SYS", "ORDERS")
+
+	if schema != "SYS" || table != "ORDERS" {
+		t.Fatalf("expected OceanBase Oracle schema/table SYS.ORDERS, got %q.%q", schema, table)
+	}
+}
+
 func TestQuoteTableIdentByType_KingbaseNormalizesQuotedQualifiedTable(t *testing.T) {
 	t.Parallel()
 

@@ -37,6 +37,7 @@ const (
 	optionalAgentMethodGetTriggers      = "getTriggers"
 	optionalAgentMethodApplyChanges     = "applyChanges"
 	optionalAgentDefaultScannerMaxBytes = 8 << 20
+	optionalAgentMetadataProbeTimeout   = 5 * time.Second
 )
 
 type optionalAgentRequest struct {
@@ -86,7 +87,7 @@ func ProbeOptionalDriverAgentMetadata(driverType string, executablePath string) 
 	}()
 
 	var metadata OptionalDriverAgentMetadata
-	if err := client.call(optionalAgentRequest{Method: optionalAgentMethodMetadata}, &metadata, nil, nil); err != nil {
+	if err := client.callWithTimeout(optionalAgentRequest{Method: optionalAgentMethodMetadata}, &metadata, nil, nil, optionalAgentMetadataProbeTimeout); err != nil {
 		return OptionalDriverAgentMetadata{}, err
 	}
 	metadata.DriverType = normalizeRuntimeDriverType(metadata.DriverType)
@@ -241,6 +242,37 @@ func (c *optionalDriverAgentClient) call(req optionalAgentRequest, out interface
 		}
 	}
 	return nil
+}
+
+func (c *optionalDriverAgentClient) callWithTimeout(req optionalAgentRequest, out interface{}, fields *[]string, rowsAffected *int64, timeout time.Duration) error {
+	if timeout <= 0 {
+		return c.call(req, out, fields, rowsAffected)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.call(req, out, fields, rowsAffected)
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-timer.C:
+		c.forceTerminate()
+		return fmt.Errorf("%s 驱动代理 metadata 探测超时（%s），请确认导入的是正确的 driver-agent 可执行文件", driverDisplayName(c.driver), timeout)
+	}
+}
+
+func (c *optionalDriverAgentClient) forceTerminate() {
+	if c.stdin != nil {
+		_ = c.stdin.Close()
+	}
+	if c.cmd != nil && c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+	}
 }
 
 func (c *optionalDriverAgentClient) close() error {

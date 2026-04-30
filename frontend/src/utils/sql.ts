@@ -37,12 +37,12 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   if (!raw) return raw;
   const dbTypeLower = (dbType || '').toLowerCase();
 
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'diros' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'clickhouse') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'clickhouse') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
 
   // 对于 KingBase/PostgreSQL，只在必要时加引号
-  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres') {
+  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss') {
     if (needsQuote(raw)) {
       return `"${raw.replace(/"/g, '""')}"`;
     }
@@ -153,7 +153,7 @@ export const buildOrderBySQL = (
   // MySQL/MariaDB 大表在无显式排序需求时强制 ORDER BY（即使按主键）可能触发 filesort，
   // 导致 `Error 1038 (HY001): Out of sort memory`。
   // 因此仅在用户主动点击排序时下发 ORDER BY，默认分页查询不加兜底排序。
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'diros') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros') {
     return '';
   }
 

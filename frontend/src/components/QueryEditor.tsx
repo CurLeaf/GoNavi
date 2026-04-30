@@ -826,6 +826,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const activeDialect = resolveSqlDialect(
                   String(activeConnection?.config?.type || ''),
                   String(activeConnection?.config?.driver || ''),
+                  { oceanBaseProtocol: activeConnection?.config?.oceanBaseProtocol },
               );
               const dialectKeywords = resolveSqlKeywords(activeDialect);
               const dialectFunctions = resolveSqlFunctions(activeDialect);
@@ -1612,7 +1613,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         const rpcConfig = buildRpcConnectionConfig(config) as any;
         const dbType = String(rpcConfig.type || 'mysql');
         const driver = String((config as any).driver || '');
-        const normalizedDbType = String(resolveSqlDialect(dbType, driver)).trim().toLowerCase();
+        const normalizedDbType = String(resolveSqlDialect(dbType, driver, {
+            oceanBaseProtocol: (config as any).oceanBaseProtocol,
+        })).trim().toLowerCase();
         const normalizedRawSQL = String(rawSQL || '').replace(/；/g, ';');
 
         // MongoDB 仍走逐条执行的旧路径

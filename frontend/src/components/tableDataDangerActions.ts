@@ -9,6 +9,10 @@ const resolveCustomDriverDialect = (driver: string): string => {
     case 'pq':
     case 'pgx':
       return 'postgres';
+    case 'opengauss':
+    case 'open_gauss':
+    case 'open-gauss':
+      return 'opengauss';
     case 'dm':
     case 'dameng':
     case 'dm8':
@@ -21,6 +25,8 @@ const resolveCustomDriverDialect = (driver: string): string => {
     case 'diros':
     case 'doris':
       return 'diros';
+    case 'oceanbase':
+      return 'oceanbase';
     case 'kingbase':
     case 'kingbase8':
     case 'kingbasees':
@@ -34,7 +40,9 @@ const resolveCustomDriverDialect = (driver: string): string => {
       break;
   }
 
+  if (normalized.includes('opengauss') || normalized.includes('open_gauss') || normalized.includes('open-gauss')) return 'opengauss';
   if (normalized.includes('postgres')) return 'postgres';
+  if (normalized.includes('oceanbase')) return 'oceanbase';
   if (normalized.includes('kingbase')) return 'kingbase';
   if (normalized.includes('highgo')) return 'highgo';
   if (normalized.includes('vastbase')) return 'vastbase';
@@ -56,10 +64,12 @@ export const supportsTableTruncateAction = (type: string, driver?: string): bool
   switch (resolveTableDataActionDBType(type, driver)) {
     case 'mysql':
     case 'mariadb':
+    case 'oceanbase':
     case 'postgres':
     case 'kingbase':
     case 'highgo':
     case 'vastbase':
+    case 'opengauss':
     case 'sqlserver':
     case 'oracle':
     case 'dameng':

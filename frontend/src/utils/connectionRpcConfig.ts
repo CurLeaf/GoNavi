@@ -11,6 +11,15 @@ type ConnectionConfigInput = {
 type SSHConfigInput = Record<string, any>;
 type ProxyConfigInput = Record<string, any>;
 type HttpTunnelConfigInput = Record<string, any>;
+type OceanBaseProtocol = 'mysql' | 'oracle';
+const OCEANBASE_PROTOCOL_PARAM_KEYS = [
+  'protocol',
+  'oceanBaseProtocol',
+  'oceanbaseProtocol',
+  'tenantMode',
+  'compatMode',
+  'mode',
+];
 
 const toStringValue = (value: unknown, fallback = ''): string => {
   if (typeof value === 'string') {
@@ -70,6 +79,70 @@ const normalizeHttpTunnelConfig = (value: unknown): connection.HTTPTunnelConfig 
   });
 };
 
+const normalizeOceanBaseProtocol = (value: unknown): OceanBaseProtocol | undefined => {
+  const normalized = toStringValue(value).trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized === 'oracle' || normalized === 'oracle-mode' || normalized === 'oracle_mode' || normalized === 'oboracle'
+    ? 'oracle'
+    : 'mysql';
+};
+
+const resolveOceanBaseProtocolFromQueryText = (raw: unknown): OceanBaseProtocol | undefined => {
+  let text = toStringValue(raw).trim();
+  if (!text) {
+    return undefined;
+  }
+  const queryStart = text.indexOf('?');
+  if (queryStart >= 0) {
+    text = text.slice(queryStart + 1);
+  }
+  const hashStart = text.indexOf('#');
+  if (hashStart >= 0) {
+    text = text.slice(0, hashStart);
+  }
+  const params = new URLSearchParams(text.replace(/^[?&]+/, ''));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    const protocol = normalizeOceanBaseProtocol(params.get(key));
+    if (protocol) {
+      return protocol;
+    }
+  }
+  return undefined;
+};
+
+const resolveOceanBaseProtocol = (config: ConnectionConfigInput): OceanBaseProtocol => {
+  if (Object.prototype.hasOwnProperty.call(config, 'oceanBaseProtocol')) {
+    const explicitProtocol = normalizeOceanBaseProtocol(config.oceanBaseProtocol);
+    if (explicitProtocol) {
+      return explicitProtocol;
+    }
+  }
+  return (
+    resolveOceanBaseProtocolFromQueryText(config.connectionParams) ||
+    resolveOceanBaseProtocolFromQueryText(config.uri) ||
+    'mysql'
+  );
+};
+
+const withOceanBaseProtocolParam = (config: ConnectionConfigInput): ConnectionConfigInput => {
+  const type = toStringValue(config.type).trim().toLowerCase();
+  if (type !== 'oceanbase') {
+    return config;
+  }
+  const selectedProtocol = resolveOceanBaseProtocol(config);
+  const params = new URLSearchParams(toStringValue(config.connectionParams));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    params.delete(key);
+  }
+  params.set('protocol', selectedProtocol);
+  return {
+    ...config,
+    connectionParams: params.toString(),
+  };
+};
+
 export function buildRpcConnectionConfig(
   config: ConnectionConfigInput,
   overrides: ConnectionConfigInput = {},
@@ -93,25 +166,27 @@ export function buildRpcConnectionConfig(
     proxy: mergedProxy,
     httpTunnel: mergedHttpTunnel,
   };
+  const rpcMerged = withOceanBaseProtocolParam(merged);
+  const { oceanBaseProtocol: _oceanBaseProtocol, ...rpcPayload } = rpcMerged;
 
   const baseId = toStringValue(config.id).trim() || toStringValue(overrides.id).trim() || undefined;
-  const timeout = toOptionalInteger(merged.timeout, toOptionalInteger(config.timeout));
-  const redisDB = toOptionalInteger(merged.redisDB, toOptionalInteger(config.redisDB));
+  const timeout = toOptionalInteger(rpcMerged.timeout, toOptionalInteger(config.timeout));
+  const redisDB = toOptionalInteger(rpcMerged.redisDB, toOptionalInteger(config.redisDB));
 
   const rpcConfig = new connection.ConnectionConfig({
-    ...merged,
-    type: toStringValue(merged.type),
-    host: toStringValue(merged.host),
-    port: toOptionalInteger(merged.port, toOptionalInteger(config.port, 0)) ?? 0,
-    user: toStringValue(merged.user),
-    password: toStringValue(merged.password),
-    database: toStringValue(merged.database),
-    useSSH: merged.useSSH === true,
-    ssh: normalizeSSHConfig(merged.ssh),
-    useProxy: merged.useProxy === true,
-    proxy: normalizeProxyConfig(merged.proxy),
-    useHttpTunnel: merged.useHttpTunnel === true,
-    httpTunnel: normalizeHttpTunnelConfig(merged.httpTunnel),
+    ...rpcPayload,
+    type: toStringValue(rpcMerged.type),
+    host: toStringValue(rpcMerged.host),
+    port: toOptionalInteger(rpcMerged.port, toOptionalInteger(config.port, 0)) ?? 0,
+    user: toStringValue(rpcMerged.user),
+    password: toStringValue(rpcMerged.password),
+    database: toStringValue(rpcMerged.database),
+    useSSH: rpcMerged.useSSH === true,
+    ssh: normalizeSSHConfig(rpcMerged.ssh),
+    useProxy: rpcMerged.useProxy === true,
+    proxy: normalizeProxyConfig(rpcMerged.proxy),
+    useHttpTunnel: rpcMerged.useHttpTunnel === true,
+    httpTunnel: normalizeHttpTunnelConfig(rpcMerged.httpTunnel),
     timeout,
     redisDB,
   }) as RpcConnectionConfig;
@@ -119,4 +194,3 @@ export function buildRpcConnectionConfig(
   rpcConfig.id = baseId;
   return rpcConfig;
 }
-

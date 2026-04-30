@@ -192,7 +192,7 @@ func applyMongoURI(config connection.ConnectionConfig) connection.ConnectionConf
 
 func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	if strings.TrimSpace(config.URI) != "" {
-		return strings.TrimSpace(config.URI)
+		return mergeConnectionParamsIntoRawURI(config.URI, config.ConnectionParams, "mongodb", "mongodb+srv")
 	}
 
 	seeds := collectMongoSeeds(config)
@@ -257,6 +257,7 @@ func (m *MongoDB) getURI(config connection.ConnectionConfig) string {
 	if authMechanism := strings.TrimSpace(config.MongoAuthMechanism); authMechanism != "" && !noAuth {
 		params.Set("authMechanism", authMechanism)
 	}
+	mergeConnectionParamValues(params, connectionParamsFromText(config.ConnectionParams))
 
 	// 单机模式且未指定副本集名称时，启用 directConnection 避免驱动自动跟随副本集成员发现
 	if strings.TrimSpace(config.Topology) != "replica" && strings.TrimSpace(config.ReplicaSet) == "" && !config.MongoSRV {

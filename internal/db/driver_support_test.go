@@ -100,6 +100,24 @@ func TestManagedDriverRequiresInstallMarker(t *testing.T) {
 	}
 }
 
+func TestNewCompatibleDriversAreOptionalAgentDrivers(t *testing.T) {
+	tmpDir := t.TempDir()
+	SetExternalDriverDownloadDirectory(tmpDir)
+
+	for _, driverType := range []string{"oceanbase", "opengauss", "open_gauss"} {
+		if IsBuiltinDriver(driverType) {
+			t.Fatalf("%s 不应是免安装内置驱动", driverType)
+		}
+		if !IsOptionalGoDriver(driverType) {
+			t.Fatalf("%s 应走可选 driver-agent 链路", driverType)
+		}
+		supported, _ := DriverRuntimeSupportStatus(driverType)
+		if supported {
+			t.Fatalf("%s 未安装 agent 时不应可用", driverType)
+		}
+	}
+}
+
 func TestMySQLBuiltinRuntimeSupportAvailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	SetExternalDriverDownloadDirectory(tmpDir)

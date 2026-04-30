@@ -50,6 +50,7 @@ func (s *SqlServerDB) getDSN(config connection.ConnectionConfig) string {
 	encrypt, trustServerCertificate := resolveSQLServerTLSSettings(config)
 	q.Set("encrypt", encrypt)
 	q.Set("TrustServerCertificate", trustServerCertificate)
+	mergeConnectionParamsFromConfig(q, config, "sqlserver")
 	u.RawQuery = q.Encode()
 
 	return u.String()

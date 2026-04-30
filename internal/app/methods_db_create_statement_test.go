@@ -86,6 +86,18 @@ func TestResolveDDLDBType_CustomDriverAlias(t *testing.T) {
 	}
 }
 
+func TestResolveDDLDBType_OceanBaseOracleProtocol(t *testing.T) {
+	t.Parallel()
+
+	cfg := connection.ConnectionConfig{
+		Type:              "oceanbase",
+		OceanBaseProtocol: "oracle",
+	}
+	if got := resolveDDLDBType(cfg); got != "oracle" {
+		t.Fatalf("expected OceanBase Oracle protocol to use oracle DDL dialect, got %q", got)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 	t.Parallel()
 

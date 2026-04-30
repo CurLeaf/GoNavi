@@ -210,6 +210,126 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('normalizes OceanBase protocol override when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-oracle',
+        name: 'OceanBase Oracle',
+        config: {
+          id: 'oceanbase-oracle',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'sys@oracle001',
+          oceanBaseProtocol: 'oracle',
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'oracle',
+    );
+  });
+
+  it('restores OceanBase protocol from saved URI or connection params', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-uri-oracle',
+        name: 'OceanBase URI Oracle',
+        config: {
+          id: 'oceanbase-uri-oracle',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'sys@oracle001',
+          uri: 'oceanbase://sys%40oracle001:pass@ob.local:2881/OBORCL?protocol=oracle',
+        },
+      },
+      {
+        id: 'oceanbase-param-oracle',
+        name: 'OceanBase Param Oracle',
+        config: {
+          id: 'oceanbase-param-oracle',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'sys@oracle001',
+          connectionParams: 'tenantMode=oracle&PREFETCH_ROWS=5000',
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'oracle',
+    );
+    expect(useStore.getState().connections[1]?.config.oceanBaseProtocol).toBe(
+      'oracle',
+    );
+  });
+
+  it('prefers OceanBase protocol query key over legacy aliases when restoring saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-conflict',
+        name: 'OceanBase Conflict',
+        config: {
+          id: 'oceanbase-conflict',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'root@test',
+          connectionParams: 'protocol=mysql&tenantMode=oracle',
+        },
+      },
+    ]);
+
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'mysql',
+    );
+  });
+
+  it('normalizes OceanBase protocol when updating a saved connection', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-existing',
+        name: 'OceanBase Existing',
+        config: {
+          id: 'oceanbase-existing',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'root@test',
+          connectionParams: 'protocol=mysql',
+        },
+      },
+    ]);
+
+    useStore.getState().updateConnection({
+      id: 'oceanbase-existing',
+      name: 'OceanBase Existing',
+      config: {
+        id: 'oceanbase-existing',
+        type: 'oceanbase',
+        host: 'ob.local',
+        port: 2881,
+        user: 'sys@oracle001',
+        connectionParams: 'protocol=oracle',
+      },
+    });
+
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'oracle',
+    );
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

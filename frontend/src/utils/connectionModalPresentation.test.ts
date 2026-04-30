@@ -68,6 +68,7 @@ describe('connectionModalPresentation', () => {
     const allTypes = [
       'mysql',
       'mariadb',
+      'oceanbase',
       'doris',
       'diros',
       'sphinx',
@@ -81,6 +82,7 @@ describe('connectionModalPresentation', () => {
       'kingbase',
       'highgo',
       'vastbase',
+      'opengauss',
       'mongodb',
       'redis',
       'tdengine',

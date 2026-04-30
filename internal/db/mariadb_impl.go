@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -37,17 +36,12 @@ func (m *MariaDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	timeout := getConnectTimeoutSeconds(config)
-	tlsMode := resolveMySQLTLSMode(config)
-
-	return fmt.Sprintf(
-		"%s:%s@%s(%s)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=%ds&tls=%s&multiStatements=true",
-		config.User, config.Password, protocol, address, database, timeout, url.QueryEscape(tlsMode),
-	), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
 }
 
 func (m *MariaDB) Connect(config connection.ConnectionConfig) error {
-	dsn, err := m.getDSN(config)
+	runConfig := applyMySQLURI(config)
+	dsn, err := m.getDSN(runConfig)
 	if err != nil {
 		return err
 	}

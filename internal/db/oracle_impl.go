@@ -48,6 +48,7 @@ func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	q.Set("PREFETCH_ROWS", "10000")
 	// LOB 数据延迟加载，避免大 LOB 列影响普通查询性能
 	q.Set("LOB FETCH", "POST")
+	mergeConnectionParamsFromConfig(q, config, "oracle")
 	if encoded := q.Encode(); encoded != "" {
 		u.RawQuery = encoded
 	}

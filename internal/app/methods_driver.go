@@ -310,6 +310,7 @@ const builtinDriverManifestJSON = `{
   "drivers": {
     "mysql":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off" },
     "mariadb":   { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mariadb" },
+    "oceanbase": { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/oceanbase" },
     "doris":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/doris" },
     "sphinx":    { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/sphinx" },
     "sqlserver": { "engine": "go", "version": "1.9.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/sqlserver" },
@@ -319,6 +320,7 @@ const builtinDriverManifestJSON = `{
     "kingbase":  { "engine": "go", "version": "0.0.0-20201021123113-29bd62a876c3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/kingbase" },
     "highgo":    { "engine": "go", "version": "0.0.0-local", "checksumPolicy": "off", "downloadUrl": "builtin://activate/highgo" },
     "vastbase":  { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/vastbase" },
+    "opengauss": { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/opengauss" },
     "mongodb":   { "engine": "go", "version": "2.5.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
     "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" }
@@ -363,6 +365,7 @@ var pinnedDriverPackageMap = map[string]pinnedDriverPackage{
 var latestDriverVersionMap = map[string]string{
 	"mysql":      "1.9.3",
 	"mariadb":    "1.9.3",
+	"oceanbase":  "1.9.3",
 	"diros":      "1.9.3",
 	"sphinx":     "1.9.3",
 	"sqlserver":  "1.9.6",
@@ -372,6 +375,7 @@ var latestDriverVersionMap = map[string]string{
 	"kingbase":   "0.0.0-20201021123113-29bd62a876c3",
 	"highgo":     "0.0.0-local",
 	"vastbase":   "1.11.2",
+	"opengauss":  "1.11.1",
 	"mongodb":    "2.5.0",
 	"tdengine":   "3.7.8",
 	"clickhouse": "2.43.1",
@@ -382,6 +386,7 @@ var latestDriverVersionMap = map[string]string{
 
 var driverGoModulePathMap = map[string]string{
 	"mariadb":    "github.com/go-sql-driver/mysql",
+	"oceanbase":  "github.com/go-sql-driver/mysql",
 	"diros":      "github.com/go-sql-driver/mysql",
 	"sphinx":     "github.com/go-sql-driver/mysql",
 	"sqlserver":  "github.com/microsoft/go-mssqldb",
@@ -391,12 +396,16 @@ var driverGoModulePathMap = map[string]string{
 	"kingbase":   "gitea.com/kingbase/gokb",
 	"highgo":     "github.com/highgo/pq-sm3",
 	"vastbase":   "github.com/lib/pq",
+	"opengauss":  "github.com/lib/pq",
 	"mongodb":    "go.mongodb.org/mongo-driver/v2",
 	"tdengine":   "github.com/taosdata/driver-go/v3",
 	"clickhouse": "github.com/ClickHouse/clickhouse-go/v2",
 }
 
 var driverGoModuleAliasPathMap = map[string][]string{
+	"oceanbase": {
+		"github.com/sijms/go-ora/v2",
+	},
 	"mongodb": {
 		"go.mongodb.org/mongo-driver",
 	},
@@ -1366,6 +1375,8 @@ func normalizeDriverType(driverType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	default:
 		return normalized
 	}
@@ -1435,6 +1446,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 
 		// 其他数据源需要先在驱动管理中“安装启用”。
 		buildOptionalGoDriverDefinition("mariadb", "MariaDB", packages),
+		buildOptionalGoDriverDefinition("oceanbase", "OceanBase", packages),
 		buildOptionalGoDriverDefinition("diros", "Doris", packages),
 		buildOptionalGoDriverDefinition("sphinx", "Sphinx", packages),
 		buildOptionalGoDriverDefinition("sqlserver", "SQL Server", packages),
@@ -1444,6 +1456,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("kingbase", "Kingbase", packages),
 		buildOptionalGoDriverDefinition("highgo", "HighGo", packages),
 		buildOptionalGoDriverDefinition("vastbase", "Vastbase", packages),
+		buildOptionalGoDriverDefinition("opengauss", "OpenGauss", packages),
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
 		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
@@ -3589,6 +3602,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_mysql_driver", nil
 	case "mariadb":
 		return "gonavi_mariadb_driver", nil
+	case "oceanbase":
+		return "gonavi_oceanbase_driver", nil
 	case "diros":
 		return "gonavi_diros_driver", nil
 	case "sphinx":
@@ -3607,6 +3622,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_highgo_driver", nil
 	case "vastbase":
 		return "gonavi_vastbase_driver", nil
+	case "opengauss":
+		return "gonavi_opengauss_driver", nil
 	case "mongodb":
 		if resolveMongoDriverMajorFromVersion(selectedVersion) == 1 {
 			return "gonavi_mongodb_driver_v1", nil

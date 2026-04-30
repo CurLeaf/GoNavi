@@ -29,9 +29,12 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             const driver = String(conn?.config?.driver || '').trim().toLowerCase();
             if (driver === 'diros' || driver === 'doris') return 'mysql';
+            if (driver === 'oceanbase') return 'mysql';
+            if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
             return driver;
         }
-        if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
+        if (type === 'oceanbase' && String(conn?.config?.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
+        if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
     };
@@ -62,6 +65,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
+            case 'opengauss':
                 return [`SELECT pg_get_triggerdef(t.oid, true) AS trigger_definition
 FROM pg_trigger t
 JOIN pg_class c ON t.tgrelid = c.oid
@@ -179,7 +183,8 @@ LIMIT 1`];
             case 'postgres':
             case 'kingbase':
             case 'highgo':
-            case 'vastbase': {
+            case 'vastbase':
+            case 'opengauss': {
                 return row.trigger_definition || row.TRIGGER_DEFINITION || Object.values(row)[0] || '';
             }
             case 'sqlserver': {

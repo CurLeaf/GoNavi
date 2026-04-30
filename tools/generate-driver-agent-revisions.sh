@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-DEFAULT_DRIVERS=(mariadb diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase mongodb tdengine clickhouse)
+DEFAULT_DRIVERS=(mariadb oceanbase diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
 
 usage() {
@@ -15,7 +15,7 @@ usage() {
 
 选项：
   --platform <GOOS/GOARCH>  按目标平台解析 Go build tags，默认使用当前 Go 环境
-  --drivers <列表>          指定驱动列表（逗号分隔），默认生成所有 optional driver
+  --drivers <列表>          只更新指定驱动（逗号分隔），并保留其他已生成 revision
   -h, --help                显示帮助
 EOF
 }
@@ -25,6 +25,8 @@ normalize_driver() {
   value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case "$value" in
     doris|diros) echo "diros" ;;
+    oceanbase) echo "oceanbase" ;;
+    opengauss|open_gauss|open-gauss) echo "opengauss" ;;
     mariadb|diros|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
@@ -79,6 +81,8 @@ internal/db/timeout.go)
 
   case "$driver:$identity" in
     mariadb:internal/db/mariadb_impl.go|\
+oceanbase:internal/db/oceanbase_impl.go|\
+oceanbase:internal/db/mysql_impl.go|\
 diros:internal/db/diros_impl.go|\
 diros:internal/db/mysql_impl.go|\
 sphinx:internal/db/sphinx_impl.go|\
@@ -95,6 +99,8 @@ kingbase:internal/db/kingbase_impl.go|\
 kingbase:internal/db/kingbase_identifier_utils.go|\
 highgo:internal/db/highgo_impl.go|\
 vastbase:internal/db/vastbase_impl.go|\
+opengauss:internal/db/opengauss_impl.go|\
+opengauss:internal/db/postgres_impl.go|\
 mongodb:internal/db/mongodb_impl.go|\
 mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\
@@ -168,6 +174,33 @@ else
   drivers=("${DEFAULT_DRIVERS[@]}")
 fi
 
+selected_driver_set="|"
+for driver in "${drivers[@]}"; do
+  selected_driver_set="${selected_driver_set}${driver}|"
+done
+
+existing_revision_for() {
+  local target="$1"
+  local line
+  [[ -n "$driver_csv" && -f "$OUTPUT_FILE" ]] || return 1
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"([^\"]+)\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      if [[ "${BASH_REMATCH[1]}" == "$target" ]]; then
+        printf '%s\n' "${BASH_REMATCH[2]}"
+        return 0
+      fi
+    fi
+  done <"$OUTPUT_FILE"
+  return 1
+}
+
+declare -a output_drivers=()
+if [[ -n "$driver_csv" ]]; then
+  output_drivers=("${DEFAULT_DRIVERS[@]}")
+else
+  output_drivers=("${drivers[@]}")
+fi
+
 fingerprint_driver() {
   local driver="$1"
   local build_driver tag cgo_enabled tmp file identity file_hash revision
@@ -230,8 +263,12 @@ package db
 func init() {
 	optionalDriverAgentRevisions = map[string]string{
 EOF
-  for driver in "${drivers[@]}"; do
-    revision="$(fingerprint_driver "$driver")"
+  for driver in "${output_drivers[@]}"; do
+    if [[ -n "$driver_csv" && "$selected_driver_set" != *"|$driver|"* ]] && revision="$(existing_revision_for "$driver")"; then
+      :
+    else
+      revision="$(fingerprint_driver "$driver")"
+    fi
     printf '\t\t"%s": "%s",\n' "$driver" "$revision"
   done
   cat <<'EOF'

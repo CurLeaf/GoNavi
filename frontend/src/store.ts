@@ -73,9 +73,73 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   password: "",
   hasPassword: false,
 };
+const OCEANBASE_PROTOCOL_PARAM_KEYS = [
+  "protocol",
+  "oceanBaseProtocol",
+  "oceanbaseProtocol",
+  "tenantMode",
+  "compatMode",
+  "mode",
+];
+const normalizeOceanBaseProtocol = (
+  value: unknown,
+): "mysql" | "oracle" | undefined => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized === "oracle" ||
+    normalized === "oracle-mode" ||
+    normalized === "oracle_mode" ||
+    normalized === "oboracle"
+    ? "oracle"
+    : "mysql";
+};
+const resolveOceanBaseProtocolFromQueryText = (
+  value: unknown,
+): "mysql" | "oracle" | undefined => {
+  let text = String(value ?? "").trim();
+  if (!text) {
+    return undefined;
+  }
+  const queryIndex = text.indexOf("?");
+  if (queryIndex >= 0) {
+    text = text.slice(queryIndex + 1);
+  }
+  const hashIndex = text.indexOf("#");
+  if (hashIndex >= 0) {
+    text = text.slice(0, hashIndex);
+  }
+  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    const protocol = normalizeOceanBaseProtocol(params.get(key));
+    if (protocol) {
+      return protocol;
+    }
+  }
+  return undefined;
+};
+const resolveOceanBaseProtocol = (
+  raw: Record<string, unknown>,
+  normalizedConnectionParams: string,
+  normalizedUri: string,
+): "mysql" | "oracle" => {
+  if (Object.prototype.hasOwnProperty.call(raw, "oceanBaseProtocol")) {
+    const explicitProtocol = normalizeOceanBaseProtocol(raw.oceanBaseProtocol);
+    if (explicitProtocol) {
+      return explicitProtocol;
+    }
+  }
+  return (
+    resolveOceanBaseProtocolFromQueryText(normalizedConnectionParams) ||
+    resolveOceanBaseProtocolFromQueryText(normalizedUri) ||
+    "mysql"
+  );
+};
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "doris",
   "diros",
   "sphinx",
@@ -90,6 +154,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "mongodb",
   "highgo",
   "vastbase",
+  "opengauss",
   "jvm",
   "sqlite",
   "duckdb",
@@ -98,6 +163,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
 const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "diros",
   "sphinx",
   "dameng",
@@ -108,6 +174,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "kingbase",
   "highgo",
   "vastbase",
+  "opengauss",
   "mongodb",
   "redis",
   "tdengine",
@@ -120,6 +187,8 @@ const getDefaultPortByType = (type: string): number => {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "oceanbase":
+      return 2881;
     case "doris":
     case "diros":
       return 9030;
@@ -131,6 +200,7 @@ const getDefaultPortByType = (type: string): number => {
       return 9000;
     case "postgres":
     case "vastbase":
+    case "opengauss":
       return 5432;
     case "redis":
       return 6379;
@@ -269,6 +339,13 @@ const normalizeConnectionType = (value: unknown): string => {
   const type = toTrimmedString(value).toLowerCase();
   if (type === "doris") {
     return "diros";
+  }
+  if (
+    type === "open_gauss" ||
+    type === "open-gauss" ||
+    type === "opengauss"
+  ) {
+    return "opengauss";
   }
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };
@@ -490,6 +567,10 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     useHttpTunnel,
     httpTunnel,
     uri: toTrimmedString(raw.uri).slice(0, MAX_URI_LENGTH),
+    connectionParams: toTrimmedString(raw.connectionParams).slice(
+      0,
+      MAX_URI_LENGTH,
+    ),
     hosts: sanitizeAddressList(raw.hosts),
     topology:
       raw.topology === "replica"
@@ -525,6 +606,14 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   if (type === "clickhouse") {
     safeConfig.clickHouseProtocol = normalizeClickHouseProtocol(
       raw.clickHouseProtocol,
+    );
+  }
+
+  if (type === "oceanbase") {
+    safeConfig.oceanBaseProtocol = resolveOceanBaseProtocol(
+      raw,
+      safeConfig.connectionParams || "",
+      safeConfig.uri || "",
     );
   }
 
@@ -1334,13 +1423,31 @@ export const useStore = create<AppState>()(
       jvmDiagnosticOutputs: {},
 
       addConnection: (conn) =>
-        set((state) => ({ connections: [...state.connections, conn] })),
+        set((state) => {
+          const sanitized = sanitizeSavedConnection(
+            conn,
+            state.connections.length,
+          );
+          if (!sanitized) {
+            return { connections: state.connections };
+          }
+          return { connections: [...state.connections, sanitized] };
+        }),
       updateConnection: (conn) =>
-        set((state) => ({
-          connections: state.connections.map((c) =>
-            c.id === conn.id ? conn : c,
-          ),
-        })),
+        set((state) => {
+          const sanitized = sanitizeSavedConnection(
+            conn,
+            state.connections.length,
+          );
+          if (!sanitized) {
+            return { connections: state.connections };
+          }
+          return {
+            connections: state.connections.map((c) =>
+              c.id === conn.id ? sanitized : c,
+            ),
+          };
+        }),
       removeConnection: (id) =>
         set((state) => ({
           connections: state.connections.filter((c) => c.id !== id),

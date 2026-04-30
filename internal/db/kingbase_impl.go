@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -62,21 +64,42 @@ func (k *KingbaseDB) getDSN(config connection.ConnectionConfig) string {
 	// Kingbase DSN usually similar to Postgres:
 	// host=localhost port=54321 user=system password=... dbname=TEST sslmode=disable
 
-	address := config.Host
-	port := config.Port
+	params := url.Values{}
+	params.Set("host", config.Host)
+	params.Set("port", strconv.Itoa(config.Port))
+	params.Set("user", config.User)
+	params.Set("password", config.Password)
+	params.Set("dbname", config.Database)
+	params.Set("sslmode", resolvePostgresSSLMode(config))
+	params.Set("connect_timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
+	mergeConnectionParamsFromConfig(params, config, "kingbase")
 
-	// Construct DSN
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s connect_timeout=%d",
-		quoteConnValue(address),
-		port,
-		quoteConnValue(config.User),
-		quoteConnValue(config.Password),
-		quoteConnValue(config.Database),
-		quoteConnValue(resolvePostgresSSLMode(config)),
-		getConnectTimeoutSeconds(config),
-	)
+	preferred := []string{"host", "port", "user", "password", "dbname", "sslmode", "connect_timeout"}
+	seen := make(map[string]struct{}, len(params))
+	parts := make([]string, 0, len(params))
+	for _, key := range preferred {
+		if values, ok := params[key]; ok && len(values) > 0 {
+			parts = append(parts, fmt.Sprintf("%s=%s", key, quoteConnValue(values[len(values)-1])))
+			seen[key] = struct{}{}
+		}
+	}
+	extraKeys := make([]string, 0, len(params))
+	for key := range params {
+		if _, ok := seen[key]; ok || !isSafeConnectionParamKey(key) {
+			continue
+		}
+		extraKeys = append(extraKeys, key)
+	}
+	sort.Strings(extraKeys)
+	for _, key := range extraKeys {
+		values := params[key]
+		if len(values) == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", key, quoteConnValue(values[len(values)-1])))
+	}
 
-	return dsn
+	return strings.Join(parts, " ")
 }
 
 func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {

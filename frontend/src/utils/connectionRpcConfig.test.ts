@@ -52,6 +52,77 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.clickHouseProtocol).toBe('http');
   });
 
+  it('injects OceanBase protocol override into RPC connection params', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-oceanbase-oracle',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'sys@oracle001',
+      database: 'ORCL',
+      oceanBaseProtocol: 'oracle',
+    } as any);
+
+    expect(result.connectionParams).toBe('protocol=oracle');
+    expect((result as any).oceanBaseProtocol).toBeUndefined();
+  });
+
+  it('keeps OceanBase URI protocol when no form override exists', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-oceanbase-uri',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'sys@oracle001',
+      database: 'ORCL',
+      uri: 'oceanbase://sys%40oracle001:pass@ob.local:2881/ORCL?protocol=oracle',
+    } as any);
+
+    expect(result.connectionParams).toBe('protocol=oracle');
+  });
+
+  it('lets OceanBase form protocol override legacy connection param aliases', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-oceanbase-mysql',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'root@test',
+      database: 'app',
+      oceanBaseProtocol: 'mysql',
+      connectionParams: 'tenantMode=oracle&connectTimeout=10',
+    } as any);
+
+    expect(result.connectionParams).toBe('connectTimeout=10&protocol=mysql');
+  });
+
+  it('keeps OceanBase protocol query key ahead of compatibility aliases', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-oceanbase-conflict',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'root@test',
+      database: 'app',
+      connectionParams: 'protocol=mysql&tenantMode=oracle',
+    } as any);
+
+    expect(result.connectionParams).toBe('protocol=mysql');
+  });
+
+  it('preserves extra connection params for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-mysql',
+      type: 'mysql',
+      host: 'db.local',
+      port: 3306,
+      user: 'root',
+      connectionParams: 'characterEncoding=utf8&useSSL=false',
+    } as any);
+
+    expect(result.connectionParams).toBe('characterEncoding=utf8&useSSL=false');
+  });
+
   it('fills default nested config blocks needed by RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-redis',

@@ -41,6 +41,7 @@ export namespace ai {
 	    images?: string[];
 	    tool_call_id?: string;
 	    tool_calls?: ToolCall[];
+	    reasoning_content?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Message(source);
@@ -53,6 +54,7 @@ export namespace ai {
 	        this.images = source["images"];
 	        this.tool_call_id = source["tool_call_id"];
 	        this.tool_calls = this.convertValues(source["tool_calls"], ToolCall);
+	        this.reasoning_content = source["reasoning_content"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -667,10 +669,12 @@ export namespace connection {
 	    httpTunnel?: HTTPTunnelConfig;
 	    driver?: string;
 	    dsn?: string;
+	    connectionParams?: string;
 	    timeout?: number;
 	    redisDB?: number;
 	    uri?: string;
 	    clickHouseProtocol?: string;
+	    oceanBaseProtocol?: string;
 	    hosts?: string[];
 	    topology?: string;
 	    mysqlReplicaUser?: string;
@@ -710,10 +714,12 @@ export namespace connection {
 	        this.httpTunnel = this.convertValues(source["httpTunnel"], HTTPTunnelConfig);
 	        this.driver = source["driver"];
 	        this.dsn = source["dsn"];
+	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
 	        this.uri = source["uri"];
 	        this.clickHouseProtocol = source["clickHouseProtocol"];
+	        this.oceanBaseProtocol = source["oceanBaseProtocol"];
 	        this.hosts = source["hosts"];
 	        this.topology = source["topology"];
 	        this.mysqlReplicaUser = source["mysqlReplicaUser"];

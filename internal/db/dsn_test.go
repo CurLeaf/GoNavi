@@ -3,11 +3,14 @@
 package db
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"GoNavi-Wails/internal/connection"
+
+	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 )
 
 func TestPostgresDSN_EscapesPassword(t *testing.T) {
@@ -52,6 +55,32 @@ func TestPostgresDSN_SSLModeRequireWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestPostgresDSN_MergesConnectionParams(t *testing.T) {
+	p := &PostgresDB{}
+	cfg := connection.ConnectionConfig{
+		Type:             "postgres",
+		Host:             "127.0.0.1",
+		Port:             5432,
+		User:             "user",
+		Password:         "pass",
+		Database:         "db",
+		ConnectionParams: "application_name=GoNavi&connect_timeout=9",
+	}
+
+	dsn := p.getDSN(cfg)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse postgres dsn: %v", err)
+	}
+	query := parsed.Query()
+	if got := query.Get("application_name"); got != "GoNavi" {
+		t.Fatalf("application_name = %q, want GoNavi", got)
+	}
+	if got := query.Get("connect_timeout"); got != "9" {
+		t.Fatalf("connect_timeout = %q, want 9", got)
+	}
+}
+
 func TestMySQLDSN_UsesTLSParamWhenSSLEnabled(t *testing.T) {
 	m := &MySQLDB{}
 	cfg := connection.ConnectionConfig{
@@ -65,7 +94,10 @@ func TestMySQLDSN_UsesTLSParamWhenSSLEnabled(t *testing.T) {
 		SSLMode:  "required",
 	}
 
-	dsn := m.getDSN(cfg)
+	dsn, err := m.getDSN(cfg)
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
 	if !strings.Contains(dsn, "tls=true") {
 		t.Fatalf("dsn 缺少 tls=true 参数：%s", dsn)
 	}
@@ -161,6 +193,27 @@ func TestKingbaseDSN_QuotesPasswordWithSpaces(t *testing.T) {
 	}
 }
 
+func TestKingbaseDSN_MergesConnectionParams(t *testing.T) {
+	k := &KingbaseDB{}
+	cfg := connection.ConnectionConfig{
+		Type:             "kingbase",
+		Host:             "127.0.0.1",
+		Port:             54321,
+		User:             "system",
+		Password:         "pass",
+		Database:         "TEST",
+		ConnectionParams: "application_name=GoNavi&connect_timeout=12",
+	}
+
+	dsn := k.getDSN(cfg)
+	if !strings.Contains(dsn, "application_name=GoNavi") {
+		t.Fatalf("dsn 缺少 application_name：%s", dsn)
+	}
+	if !strings.Contains(dsn, "connect_timeout=12") {
+		t.Fatalf("dsn 缺少自定义 connect_timeout：%s", dsn)
+	}
+}
+
 func TestTDengineDSN_UsesWebSocketFormat(t *testing.T) {
 	td := &TDengineDB{}
 	cfg := connection.ConnectionConfig{
@@ -197,6 +250,24 @@ func TestTDengineDSN_UsesSecureWebSocketWhenSSLEnabled(t *testing.T) {
 	}
 }
 
+func TestTDengineDSN_MergesConnectionParams(t *testing.T) {
+	td := &TDengineDB{}
+	cfg := connection.ConnectionConfig{
+		Type:             "tdengine",
+		Host:             "127.0.0.1",
+		Port:             6041,
+		User:             "root",
+		Password:         "taosdata",
+		Database:         "power",
+		ConnectionParams: "timezone=Asia%2FShanghai&protocol=wss",
+	}
+
+	dsn := td.getDSN(cfg)
+	if !strings.Contains(dsn, "?timezone=Asia%2FShanghai") {
+		t.Fatalf("tdengine dsn 缺少自定义参数或错误透传 protocol：%s", dsn)
+	}
+}
+
 func TestSQLServerDSN_EncryptMapping(t *testing.T) {
 	s := &SqlServerDB{}
 	cfg := connection.ConnectionConfig{
@@ -216,6 +287,32 @@ func TestSQLServerDSN_EncryptMapping(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(dsn), "trustservercertificate=false") {
 		t.Fatalf("sqlserver dsn 缺少 TrustServerCertificate=false：%s", dsn)
+	}
+}
+
+func TestSQLServerDSN_MergesConnectionParams(t *testing.T) {
+	s := &SqlServerDB{}
+	cfg := connection.ConnectionConfig{
+		Type:             "sqlserver",
+		Host:             "127.0.0.1",
+		Port:             1433,
+		User:             "sa",
+		Password:         "pass",
+		Database:         "master",
+		ConnectionParams: "app name=GoNavi&packet size=32767",
+	}
+
+	dsn := s.getDSN(cfg)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse sqlserver dsn: %v", err)
+	}
+	query := parsed.Query()
+	if got := query.Get("app name"); got != "GoNavi" {
+		t.Fatalf("app name = %q, want GoNavi", got)
+	}
+	if got := query.Get("packet size"); got != "32767" {
+		t.Fatalf("packet size = %q, want 32767", got)
 	}
 }
 
@@ -261,6 +358,34 @@ func TestClickHouseOptions_UsesStructuredTimeoutAndAuth(t *testing.T) {
 	}
 	if _, ok := opts.Settings["dial_timeout"]; ok {
 		t.Fatalf("options 不应通过 settings 传递 dial_timeout：%v", opts.Settings)
+	}
+}
+
+func TestClickHouseOptions_MergesConnectionParamsIntoOptionsAndSettings(t *testing.T) {
+	c := &ClickHouseDB{}
+	cfg := normalizeClickHouseConfig(connection.ConnectionConfig{
+		Type:             "clickhouse",
+		Host:             "127.0.0.1",
+		Port:             9000,
+		User:             "default",
+		Password:         "secret",
+		Database:         "analytics",
+		Timeout:          15,
+		ConnectionParams: "max_execution_time=60&compress=lz4&read_timeout=10s",
+	})
+
+	opts := c.buildClickHouseOptions(cfg)
+	if opts == nil {
+		t.Fatal("options 为空")
+	}
+	if opts.ReadTimeout != 10*time.Second {
+		t.Fatalf("read timeout 不符合预期：%s", opts.ReadTimeout)
+	}
+	if opts.Compression == nil || opts.Compression.Method != clickhouse.CompressionLZ4 {
+		t.Fatalf("compression 不符合预期：%v", opts.Compression)
+	}
+	if got := opts.Settings["max_execution_time"]; got != 60 {
+		t.Fatalf("max_execution_time = %#v, want 60", got)
 	}
 }
 

@@ -179,6 +179,11 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	normalized := config
 	normalized.ID = ""
 	normalized.Type = strings.ToLower(strings.TrimSpace(normalized.Type))
+	if normalized.Type == "oceanbase" {
+		protocol := resolveOceanBaseProtocolForApp(normalized)
+		normalized.ConnectionParams = normalizeOceanBaseConnectionParamsForCacheWithProtocol(normalized.ConnectionParams, protocol)
+		normalized.OceanBaseProtocol = ""
+	}
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0
 	normalized.SavePassword = false
@@ -209,6 +214,7 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 		normalized.User = ""
 		normalized.Password = ""
 		normalized.URI = ""
+		normalized.ConnectionParams = ""
 		normalized.Hosts = nil
 		normalized.Topology = ""
 		normalized.MySQLReplicaUser = ""
@@ -450,6 +456,9 @@ func formatConnSummary(config connection.ConnectionConfig) string {
 	if strings.TrimSpace(config.URI) != "" {
 		b.WriteString(fmt.Sprintf(" URI=已配置(长度=%d)", len(config.URI)))
 	}
+	if strings.TrimSpace(config.ConnectionParams) != "" {
+		b.WriteString(fmt.Sprintf(" 连接参数=已配置(长度=%d)", len(config.ConnectionParams)))
+	}
 	if strings.TrimSpace(config.MySQLReplicaUser) != "" {
 		b.WriteString(" MySQL从库凭据=已配置")
 	}
@@ -473,6 +482,13 @@ func formatConnSummary(config connection.ConnectionConfig) string {
 			protocol = "auto"
 		}
 		b.WriteString(fmt.Sprintf(" ClickHouse协议=%s", protocol))
+	}
+	if strings.EqualFold(strings.TrimSpace(config.Type), "oceanbase") {
+		protocol := "mysql"
+		if isOceanBaseOracleProtocol(config) {
+			protocol = "oracle"
+		}
+		b.WriteString(fmt.Sprintf(" OceanBase协议=%s", protocol))
 	}
 
 	if config.UseSSH {

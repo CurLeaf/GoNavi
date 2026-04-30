@@ -294,10 +294,12 @@ export interface ConnectionConfig {
   httpTunnel?: HTTPTunnelConfig;
   driver?: string;
   dsn?: string;
+  connectionParams?: string;
   timeout?: number;
   redisDB?: number; // Redis database index (0-15)
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
+  oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant protocol
   hosts?: string[]; // Multi-host addresses: host:port
   topology?: "single" | "replica" | "cluster";
   mysqlReplicaUser?: string;
@@ -552,6 +554,7 @@ export interface AIChatMessage {
   phase?: ChatPhase;
   content: string;
   thinking?: string;
+  reasoning_content?: string;
   timestamp: number;
   loading?: boolean;
   images?: string[]; // base64 encoded images with data URI prefix
