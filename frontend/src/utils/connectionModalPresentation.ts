@@ -55,6 +55,7 @@ type ConnectionConfigSectionCopy = {
 const mysqlCompatibleTypes = new Set([
   'mysql',
   'mariadb',
+  'oceanbase',
   'doris',
   'diros',
   'sphinx',
@@ -64,6 +65,7 @@ const postgresCompatibleTypes = new Set([
   'kingbase',
   'highgo',
   'vastbase',
+  'opengauss',
 ]);
 const fileDatabaseTypes = new Set(['sqlite', 'duckdb']);
 

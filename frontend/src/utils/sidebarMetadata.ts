@@ -16,10 +16,14 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string): string
   if (normalizedType === 'custom') {
     const normalizedDriver = String(driver || '').trim().toLowerCase();
     if (normalizedDriver === 'postgresql' || normalizedDriver === 'postgres' || normalizedDriver === 'pg') return 'postgres';
+    if (normalizedDriver === 'opengauss' || normalizedDriver === 'open_gauss' || normalizedDriver === 'open-gauss') return 'opengauss';
     if (normalizedDriver === 'dameng' || normalizedDriver === 'dm' || normalizedDriver === 'dm8') return 'dm';
+    if (normalizedDriver === 'oceanbase') return 'mysql';
     if (normalizedDriver.includes('oracle')) return 'oracle';
     return normalizedDriver;
   }
+  if (normalizedType === 'oceanbase') return 'mysql';
+  if (normalizedType === 'open_gauss' || normalizedType === 'open-gauss') return 'opengauss';
   if (normalizedType === 'dameng') return 'dm';
   return normalizedType;
 };

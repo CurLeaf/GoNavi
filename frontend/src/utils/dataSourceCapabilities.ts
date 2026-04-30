@@ -9,6 +9,10 @@ const normalizeDataSourceToken = (raw: string): string => {
       return 'diros';
     case 'postgresql':
       return 'postgres';
+    case 'opengauss':
+    case 'open_gauss':
+    case 'open-gauss':
+      return 'opengauss';
     case 'dm':
       return 'dameng';
     default:
@@ -29,12 +33,14 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
 const SQL_QUERY_EXPORT_TYPES = new Set([
   'mysql',
   'mariadb',
+  'oceanbase',
   'diros',
   'sphinx',
   'postgres',
   'kingbase',
   'highgo',
   'vastbase',
+  'opengauss',
   'sqlserver',
   'sqlite',
   'duckdb',
@@ -47,12 +53,14 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
 const COPY_INSERT_TYPES = new Set([
   'mysql',
   'mariadb',
+  'oceanbase',
   'diros',
   'sphinx',
   'postgres',
   'kingbase',
   'highgo',
   'vastbase',
+  'opengauss',
   'sqlserver',
   'sqlite',
   'duckdb',

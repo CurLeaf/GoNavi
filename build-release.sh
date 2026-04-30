@@ -46,6 +46,13 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+BUILD_FAILURES=()
+
+record_build_failure() {
+    local target="$1"
+    BUILD_FAILURES+=("$target")
+}
+
 get_file_size_bytes() {
     local target="$1"
     if [ ! -f "$target" ]; then
@@ -159,6 +166,7 @@ package_macos_release() {
     wails build -platform "darwin/${platform}" -clean -ldflags "$LDFLAGS"
     if [ $? -ne 0 ]; then
         echo -e "${RED}   ❌ macOS ${platform} 构建失败。${NC}"
+        record_build_failure "macOS ${platform}"
         return
     fi
 
@@ -213,6 +221,7 @@ if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-amd64.exe"
     else
         echo -e "${RED}   ❌ Windows amd64 构建失败。${NC}"
+        record_build_failure "Windows amd64"
     fi
 else
     echo -e "${YELLOW}   ⚠️  未找到 MinGW 工具 (x86_64-w64-mingw32-gcc)，跳过 Windows amd64 构建。${NC}"
@@ -230,6 +239,7 @@ if command -v aarch64-w64-mingw32-gcc &> /dev/null; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-windows-arm64.exe"
     else
         echo -e "${RED}   ❌ Windows arm64 构建失败。${NC}"
+        record_build_failure "Windows arm64"
     fi
 else
     echo -e "${YELLOW}   ⚠️  未找到 MinGW ARM64 工具 (aarch64-w64-mingw32-gcc)，跳过 Windows arm64 构建。${NC}"
@@ -259,6 +269,7 @@ if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "x86_64" ]; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-amd64.tar.gz"
     else
         echo -e "${RED}   ❌ Linux amd64 构建失败。${NC}"
+        record_build_failure "Linux amd64"
     fi
 elif command -v x86_64-linux-gnu-gcc &> /dev/null; then
     # macOS 或其他系统，尝试交叉编译
@@ -279,6 +290,7 @@ elif command -v x86_64-linux-gnu-gcc &> /dev/null; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-amd64.tar.gz"
     else
         echo -e "${RED}   ❌ Linux amd64 交叉编译失败。${NC}"
+        record_build_failure "Linux amd64"
     fi
     unset CC CXX CGO_ENABLED
 else
@@ -304,6 +316,7 @@ if [ "$CURRENT_OS" = "Linux" ] && [ "$CURRENT_ARCH" = "aarch64" ]; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-arm64.tar.gz"
     else
         echo -e "${RED}   ❌ Linux arm64 构建失败。${NC}"
+        record_build_failure "Linux arm64"
     fi
 elif command -v aarch64-linux-gnu-gcc &> /dev/null; then
     # 交叉编译
@@ -324,6 +337,7 @@ elif command -v aarch64-linux-gnu-gcc &> /dev/null; then
         echo "   ✅ 已生成 ${APP_NAME}-${VERSION}-linux-arm64.tar.gz"
     else
         echo -e "${RED}   ❌ Linux arm64 交叉编译失败。${NC}"
+        record_build_failure "Linux arm64"
     fi
     unset CC CXX CGO_ENABLED
 else
@@ -357,12 +371,21 @@ else
 fi
 
 echo ""
-echo -e "${GREEN}🎉 所有任务完成！构建产物在 'dist/' 目录下：${NC}"
+if [ "${#BUILD_FAILURES[@]}" -gt 0 ]; then
+    echo -e "${RED}❌ 构建未完全成功，失败平台：${BUILD_FAILURES[*]}${NC}"
+    echo -e "${YELLOW}📦 已成功生成的产物在 'dist/' 目录下：${NC}"
+else
+    echo -e "${GREEN}🎉 所有任务完成！构建产物在 'dist/' 目录下：${NC}"
+fi
 ls -lh "$DIST_DIR"
 echo ""
 echo -e "${GREEN}📋 支持的平台：${NC}"
-echo "   • macOS (Intel/Apple Silicon): .dmg"
+echo "   • macOS (Intel/Apple Silicon): .zip"
 echo "   • Windows (x64/ARM64): .exe"
 echo "   • Linux (x64/ARM64): .tar.gz"
 echo ""
 echo -e "${YELLOW}💡 提示：Linux AppImage 包请使用 GitHub Actions CI/CD 构建。${NC}"
+
+if [ "${#BUILD_FAILURES[@]}" -gt 0 ]; then
+    exit 1
+fi

@@ -12,6 +12,8 @@ func normalizeMigrationDBType(dbType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	case "dm", "dm8":
 		return "dameng"
 	case "sqlite3":
@@ -31,6 +33,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 	switch driver {
 	case "postgresql", "postgres", "pg", "pq", "pgx":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":
@@ -45,6 +49,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 		return "highgo"
 	case "vastbase":
 		return "vastbase"
+	case "oceanbase":
+		return "oceanbase"
 	case "mysql", "mysql2":
 		return "mysql"
 	case "mariadb":
@@ -52,6 +58,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 	}
 
 	switch {
+	case strings.Contains(driver, "opengauss"), strings.Contains(driver, "open_gauss"), strings.Contains(driver, "open-gauss"):
+		return "opengauss"
 	case strings.Contains(driver, "postgres"):
 		return "postgres"
 	case strings.Contains(driver, "kingbase"):
@@ -68,6 +76,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 		return "diros"
 	case strings.Contains(driver, "maria"):
 		return "mariadb"
+	case strings.Contains(driver, "oceanbase"):
+		return "oceanbase"
 	case strings.Contains(driver, "mysql"):
 		return "mysql"
 	case strings.Contains(driver, "dameng"), strings.Contains(driver, "dm"):
@@ -79,7 +89,7 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 
 func isMySQLCoreType(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "mysql", "mariadb", "diros":
+	case "mysql", "mariadb", "oceanbase", "diros":
 		return true
 	default:
 		return false

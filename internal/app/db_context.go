@@ -15,7 +15,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	}
 
 	switch strings.ToLower(strings.TrimSpace(config.Type)) {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "mongodb", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "mongodb", "tdengine", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -62,7 +62,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 	}
 
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		// PG/金仓/瀚高/海量：dbName 在 UI 里是"数据库"，schema 需从 tableName 或使用默认 public。
 		return "public", rawTable
 	default:

@@ -6,6 +6,7 @@ describe('applyQueryAutoLimit', () => {
   const limitDialects = [
     'mysql',
     'mariadb',
+    'oceanbase',
     'diros',
     'doris',
     'sphinx',
@@ -15,6 +16,7 @@ describe('applyQueryAutoLimit', () => {
     'kingbase8',
     'highgo',
     'vastbase',
+    'opengauss',
     'sqlite',
     'sqlite3',
     'duckdb',

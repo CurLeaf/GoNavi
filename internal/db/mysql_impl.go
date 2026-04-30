@@ -194,7 +194,7 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 	params.Set("timeout", fmt.Sprintf("%ds", timeout))
 	params.Set("tls", tlsMode)
 	params.Set("multiStatements", "true")
-	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros"); ok {
+	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros", "oceanbase"); ok {
 		mergeMySQLConnectionParams(params, parsed.Query())
 	}
 	mergeMySQLConnectionParams(params, mysqlConnectionParamsFromText(config.ConnectionParams))

@@ -22,6 +22,7 @@ var coreBuiltinDrivers = map[string]struct{}{
 // 注意：这是一种运行时门控（installed.json 标记），并不减少主二进制体积。
 var optionalGoDrivers = map[string]struct{}{
 	"mariadb":    {},
+	"oceanbase":  {},
 	"diros":      {},
 	"sphinx":     {},
 	"sqlserver":  {},
@@ -31,6 +32,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"kingbase":   {},
 	"highgo":     {},
 	"vastbase":   {},
+	"opengauss":  {},
 	"mongodb":    {},
 	"tdengine":   {},
 	"clickhouse": {},
@@ -53,6 +55,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	default:
 		return normalized
 	}
@@ -68,6 +72,8 @@ func driverDisplayName(driverType string) string {
 		return "Redis"
 	case "mariadb":
 		return "MariaDB"
+	case "oceanbase":
+		return "OceanBase"
 	case "diros":
 		return "Doris"
 	case "sphinx":
@@ -88,6 +94,8 @@ func driverDisplayName(driverType string) string {
 		return "HighGo"
 	case "vastbase":
 		return "Vastbase"
+	case "opengauss":
+		return "OpenGauss"
 	case "mongodb":
 		return "MongoDB"
 	case "tdengine":

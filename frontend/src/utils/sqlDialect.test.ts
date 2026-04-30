@@ -14,12 +14,16 @@ const names = (items: Array<{ name: string }>) => items.map((item) => item.name)
 describe('sqlDialect', () => {
   it('normalizes datasource aliases without collapsing all dialects to mysql', () => {
     expect(resolveSqlDialect('postgresql')).toBe('postgres');
+    expect(resolveSqlDialect('OpenGauss')).toBe('opengauss');
+    expect(resolveSqlDialect('OceanBase')).toBe('oceanbase');
     expect(resolveSqlDialect('doris')).toBe('diros');
     expect(resolveSqlDialect('dameng')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'kingbase8')).toBe('kingbase');
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'mariadb')).toBe('mariadb');
+    expect(resolveSqlDialect('custom', 'open_gauss')).toBe('opengauss');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
+    expect(isMysqlFamilyDialect('oceanbase')).toBe(true);
     expect(isMysqlFamilyDialect('oracle')).toBe(false);
   });
 
@@ -28,6 +32,8 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('oracle'))).not.toContain('tinyint(1)');
     expect(values(resolveColumnTypeOptions('dameng'))).toContain('VARCHAR2(255)');
     expect(values(resolveColumnTypeOptions('kingbase'))).toContain('integer');
+    expect(values(resolveColumnTypeOptions('opengauss'))).toContain('integer');
+    expect(values(resolveColumnTypeOptions('oceanbase'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('kingbase'))).not.toContain('tinyint(1)');
     expect(values(resolveColumnTypeOptions('diros'))).toContain('LARGEINT');
     expect(values(resolveColumnTypeOptions('sphinx'))).toContain('text');

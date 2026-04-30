@@ -57,9 +57,11 @@ const getMetadataDialect = (connType: string, driver?: string): string => {
     if (type === 'custom') {
         const d = (driver || '').trim().toLowerCase();
         if (d === 'diros' || d === 'doris') return 'mysql';
+        if (d === 'oceanbase') return 'mysql';
+        if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
         return d;
     }
-    if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
+    if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
 };
@@ -85,7 +87,8 @@ ORDER BY table_name`;
         case 'postgres':
         case 'kingbase':
         case 'vastbase':
-        case 'highgo': {
+        case 'highgo':
+        case 'opengauss': {
             const schema = schemaName || 'public';
             return `
 SELECT

@@ -8,12 +8,14 @@ export type SqlFunctionCompletion = {
 export type SqlDialect =
   | 'mysql'
   | 'mariadb'
+  | 'oceanbase'
   | 'diros'
   | 'sphinx'
   | 'postgres'
   | 'kingbase'
   | 'highgo'
   | 'vastbase'
+  | 'opengauss'
   | 'oracle'
   | 'dameng'
   | 'sqlserver'
@@ -46,6 +48,10 @@ export const resolveSqlDialect = (rawType: string, rawDriver = ''): SqlDialect =
     case 'pq':
     case 'pgx':
       return 'postgres';
+    case 'opengauss':
+    case 'open_gauss':
+    case 'open-gauss':
+      return 'opengauss';
     case 'mssql':
     case 'sql_server':
     case 'sql-server':
@@ -67,6 +73,7 @@ export const resolveSqlDialect = (rawType: string, rawDriver = ''): SqlDialect =
     case 'kingbasev8':
       return 'kingbase';
     case 'mariadb':
+    case 'oceanbase':
     case 'mysql':
     case 'sphinx':
     case 'kingbase':
@@ -83,7 +90,9 @@ export const resolveSqlDialect = (rawType: string, rawDriver = ''): SqlDialect =
       break;
   }
 
+  if (source.includes('opengauss') || source.includes('open_gauss') || source.includes('open-gauss')) return 'opengauss';
   if (source.includes('postgres')) return 'postgres';
+  if (source.includes('oceanbase')) return 'oceanbase';
   if (source.includes('mariadb')) return 'mariadb';
   if (source.includes('mysql')) return 'mysql';
   if (source.includes('doris') || source.includes('diros')) return 'diros';
@@ -103,11 +112,11 @@ export const resolveSqlDialect = (rawType: string, rawDriver = ''): SqlDialect =
 };
 
 export const isMysqlFamilyDialect = (dbType: string): boolean => (
-  ['mysql', 'mariadb', 'diros', 'sphinx', 'tidb', 'oceanbase', 'starrocks'].includes(resolveSqlDialect(dbType))
+  ['mysql', 'mariadb', 'oceanbase', 'diros', 'sphinx', 'tidb', 'starrocks'].includes(resolveSqlDialect(dbType))
 );
 
 export const isPgLikeDialect = (dbType: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase'].includes(resolveSqlDialect(dbType))
+  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(resolveSqlDialect(dbType))
 );
 
 export const isOracleLikeDialect = (dbType: string): boolean => (
@@ -423,9 +432,9 @@ const COMMON_TYPES = optionValues(['int', 'varchar(255)', 'text', 'datetime', 'd
 
 export const resolveColumnTypeOptions = (dbType: string): ColumnTypeOption[] => {
   const dialect = resolveSqlDialect(dbType);
-  if (dialect === 'mariadb' || dialect === 'mysql') return MYSQL_TYPES;
   if (dialect === 'diros') return DORIS_TYPES;
   if (dialect === 'sphinx') return SPHINX_TYPES;
+  if (isMysqlFamilyDialect(dialect)) return MYSQL_TYPES;
   if (isPgLikeDialect(dialect)) return PG_TYPES;
   if (dialect === 'oracle') return ORACLE_TYPES;
   if (dialect === 'dameng') return DAMENG_TYPES;

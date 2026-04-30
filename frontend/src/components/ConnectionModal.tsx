@@ -154,6 +154,8 @@ const getDefaultPortByType = (type: string) => {
       return 9010;
     case "mysql":
       return 3306;
+    case "oceanbase":
+      return 2881;
     case "doris":
     case "diros":
       return 9030;
@@ -162,6 +164,7 @@ const getDefaultPortByType = (type: string) => {
     case "clickhouse":
       return 9000;
     case "postgres":
+    case "opengauss":
       return 5432;
     case "redis":
       return 6379;
@@ -194,6 +197,7 @@ const getDefaultPortByType = (type: string) => {
 
 const singleHostUriSchemesByType: Record<string, string[]> = {
   postgres: ["postgresql", "postgres"],
+  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
   clickhouse: ["clickhouse"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
@@ -208,6 +212,7 @@ const singleHostUriSchemesByType: Record<string, string[]> = {
 const sslSupportedTypes = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "doris",
   "diros",
   "sphinx",
@@ -219,6 +224,7 @@ const sslSupportedTypes = new Set([
   "kingbase",
   "highgo",
   "vastbase",
+  "opengauss",
   "mongodb",
   "redis",
   "tdengine",
@@ -237,6 +243,7 @@ const isFileDatabaseType = (type: string) =>
 const isMySQLCompatibleType = (type: string) =>
   type === "mysql" ||
   type === "mariadb" ||
+  type === "oceanbase" ||
   type === "doris" ||
   type === "diros" ||
   type === "sphinx";
@@ -247,6 +254,7 @@ const supportsConnectionParamsForType = (type: string) =>
   type === "kingbase" ||
   type === "highgo" ||
   type === "vastbase" ||
+  type === "opengauss" ||
   type === "oracle" ||
   type === "sqlserver" ||
   type === "clickhouse" ||
@@ -271,6 +279,12 @@ const normalizeDriverType = (value: string): string => {
     .toLowerCase();
   if (normalized === "postgresql") return "postgres";
   if (normalized === "doris") return "diros";
+  if (
+    normalized === "open_gauss" ||
+    normalized === "open-gauss" ||
+    normalized === "opengauss"
+  )
+    return "opengauss";
   return normalized;
 };
 
@@ -1276,6 +1290,8 @@ const ConnectionModal: React.FC<{
       const parsed =
         parseMultiHostUri(trimmedUri, "mysql") ||
         parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
+        parseMultiHostUri(trimmedUri, "oceanbase") ||
+        parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
         parseMultiHostUri(trimmedUri, "diros") ||
         parseMultiHostUri(trimmedUri, "doris");
       if (!parsed) {
@@ -1524,7 +1540,8 @@ const ConnectionModal: React.FC<{
           type === "postgres" ||
           type === "kingbase" ||
           type === "highgo" ||
-          type === "vastbase"
+          type === "vastbase" ||
+          type === "opengauss"
         ) {
           const sslMode = String(parsed.params.get("sslmode") || "")
             .trim()
@@ -1681,7 +1698,8 @@ const ConnectionModal: React.FC<{
   const getUriPlaceholder = () => {
     if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
-      const scheme = dbType === "diros" ? "doris" : "mysql";
+      const scheme =
+        dbType === "diros" ? "doris" : dbType === "oceanbase" ? "oceanbase" : "mysql";
       return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
     }
     if (isFileDatabaseType(dbType)) {
@@ -1701,6 +1719,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
     }
+    if (dbType === "opengauss") {
+      return "opengauss://user:pass@127.0.0.1:5432/db_name";
+    }
     return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
   };
 
@@ -1713,6 +1734,7 @@ const ConnectionModal: React.FC<{
       case "kingbase":
       case "highgo":
       case "vastbase":
+      case "opengauss":
         return "application_name=GoNavi&statement_timeout=30000";
       case "oracle":
         return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
@@ -1775,7 +1797,8 @@ const ConnectionModal: React.FC<{
       mergeConnectionParams(params, values.connectionParams);
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
-      const scheme = type === "diros" ? "doris" : "mysql";
+      const scheme =
+        type === "diros" ? "doris" : type === "oceanbase" ? "oceanbase" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
@@ -1903,7 +1926,8 @@ const ConnectionModal: React.FC<{
         type === "postgres" ||
         type === "kingbase" ||
         type === "highgo" ||
-        type === "vastbase"
+        type === "vastbase" ||
+        type === "opengauss"
       ) {
         params.set("sslmode", "require");
       } else if (type === "sqlserver") {
@@ -1942,7 +1966,8 @@ const ConnectionModal: React.FC<{
         type === "postgres" ||
         type === "kingbase" ||
         type === "highgo" ||
-        type === "vastbase"
+        type === "vastbase" ||
+        type === "opengauss"
       ) {
         params.set("sslmode", "disable");
       } else if (type === "sqlserver") {
@@ -2131,6 +2156,7 @@ const ConnectionModal: React.FC<{
         const mysqlReplicaHosts =
           configType === "mysql" ||
           configType === "mariadb" ||
+          configType === "oceanbase" ||
           configType === "diros" ||
           configType === "sphinx"
             ? normalizedHosts.slice(1)
@@ -3529,6 +3555,11 @@ const ConnectionModal: React.FC<{
       label: "国产数据库",
       items: [
         {
+          key: "oceanbase",
+          name: "OceanBase",
+          icon: getDbIcon("oceanbase", undefined, 36),
+        },
+        {
           key: "dameng",
           name: "Dameng (达梦)",
           icon: getDbIcon("dameng", undefined, 36),
@@ -3547,6 +3578,11 @@ const ConnectionModal: React.FC<{
           key: "vastbase",
           name: "Vastbase (海量)",
           icon: getDbIcon("vastbase", undefined, 36),
+        },
+        {
+          key: "opengauss",
+          name: "OpenGauss",
+          icon: getDbIcon("opengauss", undefined, 36),
         },
       ],
     },
@@ -4598,7 +4634,8 @@ const ConnectionModal: React.FC<{
               {(dbType === "postgres" ||
                 dbType === "kingbase" ||
                 dbType === "highgo" ||
-                dbType === "vastbase") &&
+                dbType === "vastbase" ||
+                dbType === "opengauss") &&
                 renderConfigSectionCard({
                   sectionKey: "service",
                   icon: <DatabaseOutlined />,

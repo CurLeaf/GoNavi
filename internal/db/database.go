@@ -120,6 +120,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	default:
 		return normalized
 	}

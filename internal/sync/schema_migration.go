@@ -561,7 +561,7 @@ func intFromAny(v interface{}) int {
 
 func isPGLikeSource(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "duckdb":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "duckdb":
 		return true
 	default:
 		return false
@@ -852,7 +852,7 @@ func mapPGLikeDefaultToMySQL(col connection.ColumnDefinition, targetType string)
 
 func isPGLikeTarget(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "duckdb":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "duckdb":
 		return true
 	default:
 		return false

@@ -76,6 +76,7 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "doris",
   "diros",
   "sphinx",
@@ -90,6 +91,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "mongodb",
   "highgo",
   "vastbase",
+  "opengauss",
   "jvm",
   "sqlite",
   "duckdb",
@@ -98,6 +100,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
 const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
   "mariadb",
+  "oceanbase",
   "diros",
   "sphinx",
   "dameng",
@@ -108,6 +111,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "kingbase",
   "highgo",
   "vastbase",
+  "opengauss",
   "mongodb",
   "redis",
   "tdengine",
@@ -120,6 +124,8 @@ const getDefaultPortByType = (type: string): number => {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "oceanbase":
+      return 2881;
     case "doris":
     case "diros":
       return 9030;
@@ -131,6 +137,7 @@ const getDefaultPortByType = (type: string): number => {
       return 9000;
     case "postgres":
     case "vastbase":
+    case "opengauss":
       return 5432;
     case "redis":
       return 6379;
@@ -269,6 +276,13 @@ const normalizeConnectionType = (value: unknown): string => {
   const type = toTrimmedString(value).toLowerCase();
   if (type === "doris") {
     return "diros";
+  }
+  if (
+    type === "open_gauss" ||
+    type === "open-gauss" ||
+    type === "opengauss"
+  ) {
+    return "opengauss";
   }
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };

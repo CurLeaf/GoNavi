@@ -836,6 +836,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       if (normalized === 'postgresql' || normalized === 'pg') return 'postgres';
       if (normalized === 'mssql' || normalized === 'sql_server' || normalized === 'sql-server') return 'sqlserver';
       if (normalized === 'doris') return 'diros';
+      if (normalized === 'open_gauss' || normalized === 'open-gauss') return 'opengauss';
       return normalized;
   };
 
@@ -871,6 +872,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     switch (dbType) {
       case 'mysql':
       case 'mariadb':
+      case 'oceanbase':
       case 'diros':
         return `CREATE TRIGGER trigger_name
 BEFORE INSERT ON \`${tblName}\`
@@ -882,6 +884,7 @@ END;`;
       case 'kingbase':
       case 'highgo':
       case 'vastbase':
+      case 'opengauss':
         return `CREATE OR REPLACE FUNCTION trigger_function_name()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -931,12 +934,14 @@ END;`;
     switch (dbType) {
       case 'mysql':
       case 'mariadb':
+      case 'oceanbase':
       case 'diros':
         return `DROP TRIGGER IF EXISTS \`${triggerName}\``;
       case 'postgres':
       case 'kingbase':
       case 'highgo':
       case 'vastbase':
+      case 'opengauss':
         return `DROP TRIGGER IF EXISTS "${triggerName}" ON "${tblName}"`;
       case 'sqlserver':
         return `DROP TRIGGER IF EXISTS [${triggerName}]`;

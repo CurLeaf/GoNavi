@@ -17,6 +17,8 @@ describe('driver import guidance', () => {
   it('documents custom driver aliases for kingbase and related fallbacks', () => {
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('kingbase8');
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('pgx');
+    expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('open_gauss');
+    expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('oceanbase');
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('JDBC Jar');
   });
 });

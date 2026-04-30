@@ -7,6 +7,12 @@
       "checksumPolicy": "off",
       "downloadUrl": "builtin://activate/mariadb"
     },
+    "oceanbase": {
+      "engine": "go",
+      "version": "1.9.3",
+      "checksumPolicy": "off",
+      "downloadUrl": "builtin://activate/oceanbase"
+    },
     "doris": {
       "engine": "go",
       "version": "1.9.3",
@@ -60,6 +66,12 @@
       "version": "1.11.1",
       "checksumPolicy": "off",
       "downloadUrl": "builtin://activate/vastbase"
+    },
+    "opengauss": {
+      "engine": "go",
+      "version": "1.11.1",
+      "checksumPolicy": "off",
+      "downloadUrl": "builtin://activate/opengauss"
     },
     "mongodb": {
       "engine": "go",

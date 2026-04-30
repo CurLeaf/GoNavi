@@ -97,6 +97,11 @@ const normalizeDriverType = (value: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'postgresql') return 'postgres';
   if (normalized === 'doris') return 'diros';
+  if (
+    normalized === 'open_gauss' ||
+    normalized === 'open-gauss' ||
+    normalized === 'opengauss'
+  ) return 'opengauss';
   return normalized;
 };
 
@@ -525,6 +530,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       'kingbase',
       'highgo',
       'vastbase',
+      'opengauss',
+      'open_gauss',
+      'open-gauss',
       'sqlserver',
       'oracle',
       'dameng',
@@ -535,6 +543,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       'kingbase',
       'highgo',
       'vastbase',
+      'opengauss',
+      'open_gauss',
+      'open-gauss',
       'sqlserver',
       'oracle',
       'dm',
@@ -563,9 +574,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'custom') {
           const driver = String(conn?.config?.driver || '').trim().toLowerCase();
           if (driver === 'diros' || driver === 'doris') return 'mysql';
+          if (driver === 'oceanbase') return 'mysql';
+          if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
           return driver;
       }
-      if (type === 'mariadb' || type === 'diros' || type === 'sphinx') return 'mysql';
+      if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
       if (type === 'dameng') return 'dm';
       return type;
   };
@@ -730,6 +743,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           case 'kingbase':
           case 'highgo':
           case 'vastbase':
+          case 'opengauss':
               return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg_%' ORDER BY schemaname, viewname` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -774,6 +788,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           case 'kingbase':
           case 'highgo':
           case 'vastbase':
+          case 'opengauss':
               return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg_%' ORDER BY event_object_schema, event_object_table, trigger_name` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -821,6 +836,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           case 'kingbase':
           case 'highgo':
           case 'vastbase':
+          case 'opengauss':
               return normalizeMetadataQuerySpecs([
                   {
                       // PostgreSQL 11+ / 部分 PG-like：通过 prokind 区分 FUNCTION/PROCEDURE
@@ -2921,7 +2937,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               case 'mysql':
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
                   const parts = viewName.split('.');
                   const schema = parts.length > 1 ? parts[0] : 'public';
                   const name = parts.length > 1 ? parts[1] : viewName;
@@ -2977,7 +2993,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           case 'mysql':
               template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
               template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
           case 'sqlserver':
@@ -3088,7 +3104,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               case 'mysql':
                   query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
                   const schemaRef = schema || 'public';
                   query = `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${escapeSQLLiteral(name)}' LIMIT 1`;
                   break;
@@ -3158,7 +3174,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
                   : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
               template = isProc
                   ? `CREATE OR REPLACE PROCEDURE proc_name(param1 integer)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- procedure body\nEND;\n$$;`
                   : `CREATE OR REPLACE FUNCTION func_name(param1 integer)\nRETURNS integer\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    RETURN param1 * 2;\nEND;\n$$;`;

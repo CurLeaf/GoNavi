@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-DEFAULT_DRIVERS=(mariadb diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase mongodb tdengine clickhouse)
+DEFAULT_DRIVERS=(mariadb oceanbase diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
 
 usage() {
@@ -25,6 +25,8 @@ normalize_driver() {
   value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   case "$value" in
     doris|diros) echo "diros" ;;
+    oceanbase) echo "oceanbase" ;;
+    opengauss|open_gauss|open-gauss) echo "opengauss" ;;
     mariadb|diros|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
@@ -79,6 +81,8 @@ internal/db/timeout.go)
 
   case "$driver:$identity" in
     mariadb:internal/db/mariadb_impl.go|\
+oceanbase:internal/db/oceanbase_impl.go|\
+oceanbase:internal/db/mysql_impl.go|\
 diros:internal/db/diros_impl.go|\
 diros:internal/db/mysql_impl.go|\
 sphinx:internal/db/sphinx_impl.go|\
@@ -95,6 +99,8 @@ kingbase:internal/db/kingbase_impl.go|\
 kingbase:internal/db/kingbase_identifier_utils.go|\
 highgo:internal/db/highgo_impl.go|\
 vastbase:internal/db/vastbase_impl.go|\
+opengauss:internal/db/opengauss_impl.go|\
+opengauss:internal/db/postgres_impl.go|\
 mongodb:internal/db/mongodb_impl.go|\
 mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\

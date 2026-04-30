@@ -50,7 +50,7 @@ const quoteSqlIdent = (dbType: string, ident: string): string => {
   const raw = String(ident || '').trim();
   if (!raw) return raw;
   const t = String(dbType || '').toLowerCase();
-  if (t === 'mysql' || t === 'mariadb' || t === 'diros' || t === 'sphinx' || t === 'clickhouse' || t === 'tdengine') {
+  if (t === 'mysql' || t === 'mariadb' || t === 'oceanbase' || t === 'diros' || t === 'sphinx' || t === 'clickhouse' || t === 'tdengine') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
   if (t === 'sqlserver') {

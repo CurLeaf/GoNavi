@@ -117,14 +117,14 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	escapedDbName := strings.ReplaceAll(dbName, "`", "``")
 	query := fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", escapedDbName)
 	dbType := strings.ToLower(strings.TrimSpace(runConfig.Type))
-	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" {
+	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
 		escapedDbName = strings.ReplaceAll(dbName, `"`, `""`)
 		query = fmt.Sprintf("CREATE DATABASE \"%s\"", escapedDbName)
 	} else if dbType == "tdengine" {
 		query = fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdentByType(dbType, dbName))
 	} else if dbType == "clickhouse" {
 		query = fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdentByType(dbType, dbName))
-	} else if dbType == "mariadb" || dbType == "diros" {
+	} else if dbType == "mariadb" || dbType == "diros" || dbType == "oceanbase" {
 		// MariaDB uses same syntax as MySQL
 	} else if dbType == "sphinx" {
 		return connection.QueryResult{Success: false, Message: "Sphinx 暂不支持创建数据库"}
@@ -150,6 +150,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	switch driver {
 	case "postgresql", "postgres", "pg", "pq", "pgx":
 		return "postgres"
+	case "opengauss", "open_gauss", "open-gauss":
+		return "opengauss"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":
@@ -164,9 +166,13 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "highgo"
 	case "vastbase":
 		return "vastbase"
+	case "oceanbase":
+		return "oceanbase"
 	}
 
 	switch {
+	case strings.Contains(driver, "opengauss"), strings.Contains(driver, "open_gauss"), strings.Contains(driver, "open-gauss"):
+		return "opengauss"
 	case strings.Contains(driver, "postgres"):
 		return "postgres"
 	case strings.Contains(driver, "kingbase"):
@@ -181,6 +187,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "sphinx"
 	case strings.Contains(driver, "diros"), strings.Contains(driver, "doris"):
 		return "diros"
+	case strings.Contains(driver, "oceanbase"):
+		return "oceanbase"
 	default:
 		return driver
 	}
@@ -203,7 +211,7 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 	}
 
-	if dbType == "postgres" || dbType == "highgo" || dbType == "vastbase" {
+	if dbType == "postgres" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
 		schema, table := db.SplitSQLQualifiedName(rawTable)
 		if schema != "" && table != "" {
 			return schema, table
@@ -222,7 +230,7 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 	}
 
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		return "public", rawTable
 	default:
 		return rawDB, rawTable
@@ -243,7 +251,7 @@ func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbN
 	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
 		// custom 连接的 dbName 语义依赖 driver，尽量在常见驱动上对齐内置类型行为。
 		switch dbType {
-		case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "dameng", "clickhouse":
+		case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "dameng", "clickhouse":
 			if strings.TrimSpace(dbName) != "" {
 				runConfig.Database = strings.TrimSpace(dbName)
 			}
@@ -264,9 +272,9 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx":
-		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/Doris/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
+		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/Doris/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
 			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}
 		}
@@ -297,11 +305,11 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 		sql       string
 	)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "tdengine", "clickhouse":
 		runConfig = config
 		runConfig.Database = ""
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		if strings.EqualFold(strings.TrimSpace(config.Database), dbName) {
 			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再删除"}
 		}
@@ -336,7 +344,7 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "sqlserver", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名表", dbType)}
 	}
@@ -350,7 +358,7 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 
 	var sql string
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "clickhouse":
 		newQualifiedTable := quoteTableIdentByType(dbType, schemaName, newTableName)
 		sql = fmt.Sprintf("RENAME TABLE %s TO %s", oldQualifiedTable, newQualifiedTable)
 	case "sqlserver":
@@ -382,7 +390,7 @@ func (a *App) DropTable(config connection.ConnectionConfig, dbName string, table
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "sqlserver", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "tdengine", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除表", dbType)}
 	}
@@ -990,7 +998,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 
 func supportsCreateStatementFallback(dbType string) bool {
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		return true
 	default:
 		return false
@@ -999,7 +1007,7 @@ func supportsCreateStatementFallback(dbType string) bool {
 
 func supportsViewCreateStatementLookup(dbType string) bool {
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "sqlserver", "oracle", "dameng", "sqlite", "duckdb", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "sqlite", "duckdb", "clickhouse":
 		return true
 	default:
 		return false
@@ -1180,7 +1188,7 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "sqlserver", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除视图", dbType)}
 	}
@@ -1215,7 +1223,7 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "sqlserver", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "duckdb":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除函数/存储过程", dbType)}
 	}
@@ -1269,10 +1277,10 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 
 	var sql string
 	switch dbType {
-	case "mysql", "mariadb", "diros", "sphinx", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "clickhouse":
 		newQualified := quoteTableIdentByType(dbType, schemaName, newName)
 		sql = fmt.Sprintf("RENAME TABLE %s TO %s", oldQualified, newQualified)
-	case "postgres", "kingbase", "highgo", "vastbase":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		sql = fmt.Sprintf("ALTER VIEW %s RENAME TO %s", oldQualified, newQuoted)
 	case "sqlserver":
 		oldFullName := schemaName + "." + pureOldName
