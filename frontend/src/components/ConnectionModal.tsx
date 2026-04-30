@@ -61,6 +61,7 @@ import {
 } from "../utils/connectionModalPresentation";
 import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
+import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   applyNoAutoCapAttributes,
@@ -97,6 +98,7 @@ type ChoiceCardOption = {
 };
 type ClickHouseProtocolChoice = "auto" | "http" | "native";
 const MAX_URI_LENGTH = 4096;
+const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
 const CONNECTION_MODAL_WIDTH = 960;
@@ -232,6 +234,26 @@ const supportsSSLForType = (type: string) =>
 const isFileDatabaseType = (type: string) =>
   type === "sqlite" || type === "duckdb";
 
+const isMySQLCompatibleType = (type: string) =>
+  type === "mysql" ||
+  type === "mariadb" ||
+  type === "doris" ||
+  type === "diros" ||
+  type === "sphinx";
+
+const supportsConnectionParamsForType = (type: string) =>
+  isMySQLCompatibleType(type) ||
+  type === "postgres" ||
+  type === "kingbase" ||
+  type === "highgo" ||
+  type === "vastbase" ||
+  type === "oracle" ||
+  type === "sqlserver" ||
+  type === "clickhouse" ||
+  type === "mongodb" ||
+  type === "dameng" ||
+  type === "tdengine";
+
 type DriverStatusSnapshot = {
   type: string;
   name: string;
@@ -355,12 +377,8 @@ const ConnectionModal: React.FC<{
       }),
     [jvmAllowedModes, jvmPreferredMode],
   );
-  const isMySQLLike =
-    dbType === "mysql" ||
-    dbType === "mariadb" ||
-    dbType === "doris" ||
-    dbType === "diros" ||
-    dbType === "sphinx";
+  const isMySQLLike = isMySQLCompatibleType(dbType);
+  const supportsConnectionParams = supportsConnectionParamsForType(dbType);
   const isSSLType = supportsSSLForType(dbType);
   const sslHintText = isMySQLLike
     ? "当 MySQL/MariaDB/Doris/Sphinx 开启安全传输策略时，请启用 SSL；本地自签证书场景可先用 Preferred 或 Skip Verify。"
@@ -1047,6 +1065,44 @@ const ConnectionModal: React.FC<{
     return text === "1" || text === "true" || text === "yes" || text === "on";
   };
 
+  const normalizeConnectionParamsText = (raw: unknown) => {
+    let text = String(raw || "").trim();
+    if (!text) return "";
+    const queryIndex = text.indexOf("?");
+    if (queryIndex >= 0) {
+      text = text.slice(queryIndex + 1);
+    }
+    const hashIndex = text.indexOf("#");
+    if (hashIndex >= 0) {
+      text = text.slice(0, hashIndex);
+    }
+    return text.replace(/^[?&]+/, "").trim().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const serializeConnectionParams = (params: URLSearchParams) => {
+    const cloned = new URLSearchParams();
+    params.forEach((value, key) => {
+      if (String(key || "").trim()) {
+        cloned.append(key, value);
+      }
+    });
+    return cloned.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const mergeConnectionParams = (
+    params: URLSearchParams,
+    rawParams: unknown,
+  ) => {
+    const text = normalizeConnectionParamsText(rawParams);
+    if (!text) return;
+    const extra = new URLSearchParams(text);
+    extra.forEach((value, key) => {
+      if (String(key || "").trim()) {
+        params.set(key, value);
+      }
+    });
+  };
+
   const normalizeFileDbPath = (rawPath: string): string => {
     let pathText = String(rawPath || "").trim();
     if (!pathText) {
@@ -1199,6 +1255,7 @@ const ConnectionModal: React.FC<{
       clickHouseProtocol: "http",
       useSSL: isHttps,
       sslMode: isHttps ? (skipVerify ? "skip-verify" : "required") : "disable",
+      connectionParams: serializeConnectionParams(parsed.params),
     };
   };
 
@@ -1214,15 +1271,11 @@ const ConnectionModal: React.FC<{
       return null;
     }
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type)) {
       const mysqlDefaultPort = getDefaultPortByType(type);
       const parsed =
         parseMultiHostUri(trimmedUri, "mysql") ||
+        parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
         parseMultiHostUri(trimmedUri, "diros") ||
         parseMultiHostUri(trimmedUri, "doris");
       if (!parsed) {
@@ -1246,7 +1299,9 @@ const ConnectionModal: React.FC<{
       const topology = String(
         parsed.params.get("topology") || "",
       ).toLowerCase();
-      const tlsValue = String(parsed.params.get("tls") || "")
+      const tlsValue = String(
+        parsed.params.get("tls") || parsed.params.get("useSSL") || "",
+      )
         .trim()
         .toLowerCase();
       const sslMode =
@@ -1268,6 +1323,7 @@ const ConnectionModal: React.FC<{
         mysqlTopology:
           hostList.length > 1 || topology === "replica" ? "replica" : "single",
         mysqlReplicaHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
         timeout:
           Number.isFinite(timeoutValue) && timeoutValue > 0
             ? Math.min(3600, Math.trunc(timeoutValue))
@@ -1414,6 +1470,7 @@ const ConnectionModal: React.FC<{
         mongoAuthSource: parsed.params.get("authSource") || "",
         mongoReadPreference: parsed.params.get("readPreference") || "primary",
         mongoAuthMechanism: parsed.params.get("authMechanism") || "",
+        connectionParams: serializeConnectionParams(parsed.params),
         timeout:
           Number.isFinite(timeoutMs) && timeoutMs > 0
             ? Math.min(MAX_TIMEOUT_SECONDS, Math.ceil(timeoutMs / 1000))
@@ -1450,6 +1507,9 @@ const ConnectionModal: React.FC<{
         password: parsed.password,
         database: parsed.database,
       };
+      if (supportsConnectionParamsForType(type)) {
+        parsedValues.connectionParams = serializeConnectionParams(parsed.params);
+      }
 
       if (supportsSSLForType(type)) {
         const normalizeBool = (raw: unknown) => {
@@ -1619,12 +1679,7 @@ const ConnectionModal: React.FC<{
   });
 
   const getUriPlaceholder = () => {
-    if (
-      dbType === "mysql" ||
-      dbType === "mariadb" ||
-      dbType === "diros" ||
-      dbType === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
       const scheme = dbType === "diros" ? "doris" : "mysql";
       return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
@@ -1649,6 +1704,33 @@ const ConnectionModal: React.FC<{
     return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
   };
 
+  const getConnectionParamsPlaceholder = () => {
+    if (isMySQLCompatibleType(dbType)) {
+      return "useUnicode=true&characterEncoding=utf8&autoReconnect=true&useSSL=false";
+    }
+    switch (dbType) {
+      case "postgres":
+      case "kingbase":
+      case "highgo":
+      case "vastbase":
+        return "application_name=GoNavi&statement_timeout=30000";
+      case "oracle":
+        return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
+      case "sqlserver":
+        return "app name=GoNavi&packet size=32767";
+      case "clickhouse":
+        return "max_execution_time=60&compress=lz4";
+      case "mongodb":
+        return "retryWrites=true&readPreference=secondaryPreferred";
+      case "dameng":
+        return "schema=SYSDBA&escapeProcess=true";
+      case "tdengine":
+        return "timezone=Asia%2FShanghai";
+      default:
+        return "key=value&another=value";
+    }
+  };
+
   const buildUriFromValues = (values: any) => {
     const type = String(values.type || "")
       .trim()
@@ -1664,12 +1746,7 @@ const ConnectionModal: React.FC<{
       ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ""}@`
       : "";
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type)) {
       const primary = toAddress(host, port, defaultPort);
       const replicas =
         values.mysqlTopology === "replica"
@@ -1695,6 +1772,7 @@ const ConnectionModal: React.FC<{
       if (Number.isFinite(timeout) && timeout > 0) {
         params.set("timeout", String(timeout));
       }
+      mergeConnectionParams(params, values.connectionParams);
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       const scheme = type === "diros" ? "doris" : "mysql";
@@ -1797,6 +1875,7 @@ const ConnectionModal: React.FC<{
         params.set("connectTimeoutMS", String(timeout * 1000));
         params.set("serverSelectionTimeoutMS", String(timeout * 1000));
       }
+      mergeConnectionParams(params, values.connectionParams);
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
@@ -1876,6 +1955,9 @@ const ConnectionModal: React.FC<{
     if (type === "clickhouse" && clickHouseProtocol !== "auto") {
       params.set("protocol", clickHouseProtocol);
     }
+    if (supportsConnectionParamsForType(type)) {
+      mergeConnectionParams(params, values.connectionParams);
+    }
     const query = params.toString();
     return `${scheme}://${encodedAuth}${toAddress(host, port, defaultPort)}${dbPath}${query ? `?${query}` : ""}`;
   };
@@ -1909,7 +1991,13 @@ const ConnectionModal: React.FC<{
         });
         return;
       }
-      form.setFieldsValue({ ...parsedValues, uri: uriText });
+      form.setFieldsValue(
+        mergeParsedUriValuesForForm(
+          form.getFieldsValue(true),
+          parsedValues,
+          uriText,
+        ),
+      );
       if (testResult) {
         setTestResult(null);
       }
@@ -2082,6 +2170,11 @@ const ConnectionModal: React.FC<{
           password: config.password,
           database: config.database,
           uri: config.uri || "",
+          connectionParams:
+            config.connectionParams ||
+            (config.uri
+              ? parseUriToValues(config.uri, configType)?.connectionParams || ""
+              : ""),
           clickHouseProtocol:
             configType === "clickhouse"
               ? normalizeClickHouseProtocolValue(config.clickHouseProtocol)
@@ -2294,11 +2387,7 @@ const ConnectionModal: React.FC<{
       forceClear: !config.useHttpTunnel,
     });
     const mysqlReplicaEnabled =
-      (config.type === "mysql" ||
-        config.type === "mariadb" ||
-        config.type === "diros" ||
-        config.type === "sphinx") &&
-      config.topology === "replica";
+      isMySQLCompatibleType(config.type) && config.topology === "replica";
     const mysqlReplicaDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasMySQLReplicaPassword,
       valueInput: config.mysqlReplicaPassword,
@@ -2528,10 +2617,7 @@ const ConnectionModal: React.FC<{
     }
     if (
       clearSecrets.mysqlReplicaPassword &&
-      (values.type === "mysql" ||
-        values.type === "mariadb" ||
-        values.type === "diros" ||
-        values.type === "sphinx") &&
+      isMySQLCompatibleType(values.type) &&
       values.mysqlTopology === "replica" &&
       String(values.mysqlReplicaPassword ?? "") === ""
     ) {
@@ -2983,12 +3069,7 @@ const ConnectionModal: React.FC<{
     const savePassword =
       type === "mongodb" ? mergedValues.savePassword !== false : true;
 
-    if (
-      type === "mysql" ||
-      type === "mariadb" ||
-      type === "diros" ||
-      type === "sphinx"
-    ) {
+    if (isMySQLCompatibleType(type)) {
       const replicas =
         mergedValues.mysqlTopology === "replica"
           ? normalizeAddressList(mergedValues.mysqlReplicaHosts, defaultPort)
@@ -3150,6 +3231,9 @@ const ConnectionModal: React.FC<{
       httpTunnel: httpTunnelConfig,
       driver: mergedValues.driver,
       dsn: mergedValues.dsn,
+      connectionParams: supportsConnectionParamsForType(type)
+        ? normalizeConnectionParamsText(mergedValues.connectionParams)
+        : "",
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
         ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
@@ -3226,6 +3310,7 @@ const ConnectionModal: React.FC<{
         httpTunnelPassword: "",
         timeout: 30,
         uri: "",
+        connectionParams: "",
         includeDatabases: undefined,
         includeRedisDatabases: undefined,
         mysqlTopology: "single",
@@ -3303,6 +3388,7 @@ const ConnectionModal: React.FC<{
         mongoReplicaUser: "",
         mongoReplicaPassword: "",
         redisDB: 0,
+        connectionParams: "",
       });
     } else if (type !== "custom") {
       const defaultUser =
@@ -3340,6 +3426,7 @@ const ConnectionModal: React.FC<{
         mongoReplicaUser: "",
         mongoReplicaPassword: "",
         redisDB: 0,
+        connectionParams: "",
       });
     }
 
@@ -3749,6 +3836,19 @@ const ConnectionModal: React.FC<{
                       placeholder={getUriPlaceholder()}
                     />
                   </Form.Item>
+                  {supportsConnectionParams && (
+                    <Form.Item
+                      name="connectionParams"
+                      label="额外连接参数"
+                      help="按当前数据源驱动支持的 URI/DSN query 格式填写；认证密码请使用上方密码字段。"
+                    >
+                      <Input.TextArea
+                        {...noAutoCapInputProps}
+                        rows={2}
+                        placeholder={getConnectionParamsPlaceholder()}
+                      />
+                    </Form.Item>
+                  )}
                   <Space
                     size={8}
                     style={{ marginBottom: uriFeedback ? 12 : 16 }}
@@ -5926,6 +6026,7 @@ const ConnectionModal: React.FC<{
           httpTunnelPort: 8080,
           timeout: 30,
           uri: "",
+          connectionParams: "",
           mysqlTopology: "single",
           redisTopology: "single",
           mongoTopology: "single",
@@ -5971,7 +6072,11 @@ const ConnectionModal: React.FC<{
             setTestResult(null);
             setTestErrorLogOpen(false);
           }
-          if (changed.uri !== undefined || changed.type !== undefined) {
+          if (
+            changed.uri !== undefined ||
+            changed.connectionParams !== undefined ||
+            changed.type !== undefined
+          ) {
             setUriFeedback(null);
           }
           if (changed.useSSL !== undefined) {

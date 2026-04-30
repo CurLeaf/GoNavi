@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,7 +43,16 @@ func (t *TDengineDB) getDSN(config connection.ConnectionConfig) string {
 	}
 
 	netType := resolveTDengineNet(config)
-	return fmt.Sprintf("%s:%s@%s(%s)%s", user, pass, netType, net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), path)
+	params := url.Values{}
+	mergeConnectionParamsFromConfig(params, config, "taos", "taosws", "tdengine")
+	params.Del("protocol")
+	params.Del("skip_verify")
+	query := params.Encode()
+	dsn := fmt.Sprintf("%s:%s@%s(%s)%s", user, pass, netType, net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), path)
+	if query == "" {
+		return dsn
+	}
+	return dsn + "?" + query
 }
 
 func (t *TDengineDB) Connect(config connection.ConnectionConfig) error {

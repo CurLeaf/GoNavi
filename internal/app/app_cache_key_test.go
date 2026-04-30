@@ -81,6 +81,26 @@ func TestGetCacheKey_KeepDatabaseIsolation(t *testing.T) {
 	}
 }
 
+func TestGetCacheKey_KeepConnectionParamsIsolation(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:             "mysql",
+		Host:             "127.0.0.1",
+		Port:             3306,
+		User:             "root",
+		Password:         "root",
+		Database:         "app",
+		ConnectionParams: "charset=utf8",
+	}
+	modified := base
+	modified.ConnectionParams = "charset=utf8mb4"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left == right {
+		t.Fatalf("expected different cache key for different connection params")
+	}
+}
+
 func TestGetCacheKey_KeepClickHouseProtocolIsolation(t *testing.T) {
 	base := connection.ConnectionConfig{
 		Type:               "clickhouse",

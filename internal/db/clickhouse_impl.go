@@ -106,6 +106,12 @@ func applyClickHouseEndpointURI(config connection.ConnectionConfig, uriText stri
 	if queryProtocol := normalizeClickHouseProtocol(parsed.Query().Get("protocol")); queryProtocol != clickHouseProtocolAuto {
 		config.ClickHouseProtocol = queryProtocol
 	}
+	if parsed.RawQuery != "" {
+		params := url.Values{}
+		mergeConnectionParamValues(params, parsed.Query())
+		mergeConnectionParamValues(params, connectionParamsFromText(config.ConnectionParams))
+		config.ConnectionParams = params.Encode()
+	}
 	endpointProtocol := normalizeClickHouseProtocol(config.ClickHouseProtocol)
 	if isClickHouseHTTPURLScheme(scheme) && endpointProtocol != clickHouseProtocolNative {
 		config.ClickHouseProtocol = clickHouseProtocolHTTP
@@ -184,7 +190,146 @@ func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig
 	if tlsConfig := resolveGenericTLSConfig(config); tlsConfig != nil {
 		opts.TLS = tlsConfig
 	}
+	applyClickHouseConnectionParams(opts, config)
 	return opts
+}
+
+func parseClickHouseDurationParam(raw string) (time.Duration, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return 0, false
+	}
+	if n, err := strconv.Atoi(text); err == nil && n >= 0 {
+		return time.Duration(n) * time.Second, true
+	}
+	duration, err := time.ParseDuration(text)
+	return duration, err == nil
+}
+
+func parseClickHouseIntParam(raw string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	return n, err == nil
+}
+
+func clickHouseSettingValue(raw string) any {
+	text := strings.TrimSpace(raw)
+	switch strings.ToLower(text) {
+	case "true", "yes", "on":
+		return int(1)
+	case "false", "no", "off":
+		return int(0)
+	}
+	if n, err := strconv.Atoi(text); err == nil {
+		return n
+	}
+	return text
+}
+
+func applyClickHouseCompressionParam(opts *clickhouse.Options, raw string) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" || value == "false" || value == "0" || value == "none" {
+		opts.Compression = &clickhouse.Compression{Method: clickhouse.CompressionNone}
+		return
+	}
+	if opts.Compression == nil {
+		opts.Compression = &clickhouse.Compression{Level: 3}
+	}
+	switch value {
+	case "true", "1", "lz4":
+		opts.Compression.Method = clickhouse.CompressionLZ4
+	case "zstd":
+		opts.Compression.Method = clickhouse.CompressionZSTD
+	case "lz4hc":
+		opts.Compression.Method = clickhouse.CompressionLZ4HC
+	case "gzip":
+		opts.Compression.Method = clickhouse.CompressionGZIP
+	case "deflate":
+		opts.Compression.Method = clickhouse.CompressionDeflate
+	case "br", "brotli":
+		opts.Compression.Method = clickhouse.CompressionBrotli
+	}
+}
+
+func applyClickHouseConnectionParams(opts *clickhouse.Options, config connection.ConnectionConfig) {
+	params := url.Values{}
+	mergeConnectionParamsFromConfig(params, config, "clickhouse", "http", "https")
+	if len(params) == 0 {
+		return
+	}
+	if opts.Settings == nil {
+		opts.Settings = clickhouse.Settings{}
+	}
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		values := params[key]
+		if len(values) == 0 {
+			continue
+		}
+		value := values[len(values)-1]
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "protocol", "secure", "skip_verify", "username", "password", "database":
+			continue
+		case "dial_timeout":
+			if duration, ok := parseClickHouseDurationParam(value); ok {
+				opts.DialTimeout = duration
+			}
+		case "read_timeout":
+			if duration, ok := parseClickHouseDurationParam(value); ok {
+				opts.ReadTimeout = duration
+			}
+		case "compress":
+			applyClickHouseCompressionParam(opts, value)
+		case "compress_level":
+			if level, ok := parseClickHouseIntParam(value); ok {
+				if opts.Compression == nil {
+					opts.Compression = &clickhouse.Compression{Method: clickhouse.CompressionNone}
+				}
+				opts.Compression.Level = level
+			}
+		case "max_open_conns":
+			if n, ok := parseClickHouseIntParam(value); ok {
+				opts.MaxOpenConns = n
+			}
+		case "max_idle_conns":
+			if n, ok := parseClickHouseIntParam(value); ok {
+				opts.MaxIdleConns = n
+			}
+		case "max_compression_buffer":
+			if n, ok := parseClickHouseIntParam(value); ok {
+				opts.MaxCompressionBuffer = n
+			}
+		case "block_buffer_size":
+			if n, ok := parseClickHouseIntParam(value); ok && n > 0 && n <= 255 {
+				opts.BlockBufferSize = uint8(n)
+			}
+		case "http_path":
+			path := strings.TrimSpace(value)
+			if path != "" && !strings.HasPrefix(path, "/") {
+				path = "/" + path
+			}
+			opts.HttpUrlPath = path
+		case "connection_open_strategy":
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "in_order":
+				opts.ConnOpenStrategy = clickhouse.ConnOpenInOrder
+			case "round_robin":
+				opts.ConnOpenStrategy = clickhouse.ConnOpenRoundRobin
+			case "random":
+				opts.ConnOpenStrategy = clickhouse.ConnOpenRandom
+			}
+		default:
+			opts.Settings[key] = clickHouseSettingValue(value)
+		}
+	}
+	if len(opts.Settings) == 0 {
+		opts.Settings = nil
+	}
 }
 
 func detectClickHouseProtocol(config connection.ConnectionConfig) clickhouse.Protocol {

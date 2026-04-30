@@ -490,6 +490,10 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     useHttpTunnel,
     httpTunnel,
     uri: toTrimmedString(raw.uri).slice(0, MAX_URI_LENGTH),
+    connectionParams: toTrimmedString(raw.connectionParams).slice(
+      0,
+      MAX_URI_LENGTH,
+    ),
     hosts: sanitizeAddressList(raw.hosts),
     topology:
       raw.topology === "replica"

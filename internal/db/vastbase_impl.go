@@ -43,6 +43,7 @@ func (v *VastbaseDB) getDSN(config connection.ConnectionConfig) string {
 	q := url.Values{}
 	q.Set("sslmode", resolvePostgresSSLMode(config))
 	q.Set("connect_timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
+	mergeConnectionParamsFromConfig(q, config, "postgres", "postgresql", "vastbase")
 	u.RawQuery = q.Encode()
 
 	return u.String()

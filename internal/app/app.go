@@ -209,6 +209,7 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 		normalized.User = ""
 		normalized.Password = ""
 		normalized.URI = ""
+		normalized.ConnectionParams = ""
 		normalized.Hosts = nil
 		normalized.Topology = ""
 		normalized.MySQLReplicaUser = ""
@@ -449,6 +450,9 @@ func formatConnSummary(config connection.ConnectionConfig) string {
 	}
 	if strings.TrimSpace(config.URI) != "" {
 		b.WriteString(fmt.Sprintf(" URI=已配置(长度=%d)", len(config.URI)))
+	}
+	if strings.TrimSpace(config.ConnectionParams) != "" {
+		b.WriteString(fmt.Sprintf(" 连接参数=已配置(长度=%d)", len(config.ConnectionParams)))
 	}
 	if strings.TrimSpace(config.MySQLReplicaUser) != "" {
 		b.WriteString(" MySQL从库凭据=已配置")

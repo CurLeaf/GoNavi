@@ -52,6 +52,19 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.clickHouseProtocol).toBe('http');
   });
 
+  it('preserves extra connection params for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-mysql',
+      type: 'mysql',
+      host: 'db.local',
+      port: 3306,
+      user: 'root',
+      connectionParams: 'characterEncoding=utf8&useSSL=false',
+    } as any);
+
+    expect(result.connectionParams).toBe('characterEncoding=utf8&useSSL=false');
+  });
+
   it('fills default nested config blocks needed by RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-redis',

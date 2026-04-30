@@ -294,6 +294,7 @@ export interface ConnectionConfig {
   httpTunnel?: HTTPTunnelConfig;
   driver?: string;
   dsn?: string;
+  connectionParams?: string;
   timeout?: number;
   redisDB?: number; // Redis database index (0-15)
   uri?: string; // Connection URI for copy/paste

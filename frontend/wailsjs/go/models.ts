@@ -667,6 +667,7 @@ export namespace connection {
 	    httpTunnel?: HTTPTunnelConfig;
 	    driver?: string;
 	    dsn?: string;
+	    connectionParams?: string;
 	    timeout?: number;
 	    redisDB?: number;
 	    uri?: string;
@@ -710,6 +711,7 @@ export namespace connection {
 	        this.httpTunnel = this.convertValues(source["httpTunnel"], HTTPTunnelConfig);
 	        this.driver = source["driver"];
 	        this.dsn = source["dsn"];
+	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
 	        this.uri = source["uri"];
