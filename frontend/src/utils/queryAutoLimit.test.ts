@@ -32,9 +32,9 @@ describe('applyQueryAutoLimit', () => {
     ['dameng'],
     ['dm'],
     ['dm8'],
-  ])('adds FETCH FIRST limit for %s connections', (dbType) => {
+  ])('adds ROWNUM limit for %s connections', (dbType) => {
     expect(applyQueryAutoLimit('SELECT * FROM MYCIMLED.EDC_LOG', dbType, 500).sql)
-      .toBe('SELECT * FROM MYCIMLED.EDC_LOG FETCH FIRST 500 ROWS ONLY');
+      .toBe('SELECT * FROM (SELECT * FROM MYCIMLED.EDC_LOG) WHERE ROWNUM <= 500');
   });
 
   it.each([
@@ -53,8 +53,8 @@ describe('applyQueryAutoLimit', () => {
   });
 
   it.each([
-    ['oracle', 'SELECT * FROM users FETCH FIRST 500 ROWS ONLY'],
-    ['dm8', 'SELECT * FROM users FETCH FIRST 500 ROWS ONLY'],
+    ['oracle', 'SELECT * FROM (SELECT * FROM users) WHERE ROWNUM <= 500'],
+    ['dm8', 'SELECT * FROM (SELECT * FROM users) WHERE ROWNUM <= 500'],
     ['mssql', 'SELECT TOP 500 * FROM users'],
     ['postgresql', 'SELECT * FROM users LIMIT 500'],
     ['doris', 'SELECT * FROM users LIMIT 500'],
@@ -66,7 +66,12 @@ describe('applyQueryAutoLimit', () => {
 
   it('keeps trailing semicolon and comments after injected Oracle limit', () => {
     expect(applyQueryAutoLimit('SELECT * FROM MYCIMLED.EDC_LOG; -- preview', 'oracle', 500).sql)
-      .toBe('SELECT * FROM MYCIMLED.EDC_LOG FETCH FIRST 500 ROWS ONLY; -- preview');
+      .toBe('SELECT * FROM (SELECT * FROM MYCIMLED.EDC_LOG) WHERE ROWNUM <= 500; -- preview');
+  });
+
+  it('uses Oracle 11g compatible ROWNUM limit for simple table queries', () => {
+    expect(applyQueryAutoLimit('select 1 from xxx', 'oracle', 500).sql)
+      .toBe('SELECT * FROM (select 1 from xxx) WHERE ROWNUM <= 500');
   });
 
   it('does not add another generic limit when SQL already limits rows', () => {
@@ -85,6 +90,11 @@ describe('applyQueryAutoLimit', () => {
     expect(applyQueryAutoLimit('SELECT * FROM users WHERE ROWNUM <= 10', 'oracle', 500).applied)
       .toBe(false);
     expect(applyQueryAutoLimit('SELECT * FROM users FETCH FIRST 10 ROWS ONLY', 'oracle', 500).applied)
+      .toBe(false);
+  });
+
+  it('does not wrap Oracle FOR UPDATE queries', () => {
+    expect(applyQueryAutoLimit('SELECT * FROM users FOR UPDATE', 'oracle', 500).applied)
       .toBe(false);
   });
 
