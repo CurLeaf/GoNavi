@@ -25,11 +25,12 @@ type Tool struct {
 
 // Message 表示一条对话消息
 type Message struct {
-	Role       string     `json:"role"` // "system" | "user" | "assistant" | "tool"
-	Content    string     `json:"content"`
-	Images     []string   `json:"images,omitempty"`       // base64 encoded images with data:image/png;base64,... prefix
-	ToolCallID string     `json:"tool_call_id,omitempty"` // 当 role 为 "tool" 时必须传递
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // 当 role 为 "assistant" 并试图调工具时传递
+	Role             string     `json:"role"` // "system" | "user" | "assistant" | "tool"
+	Content          string     `json:"content"`
+	Images           []string   `json:"images,omitempty"`            // base64 encoded images with data:image/png;base64,... prefix
+	ToolCallID       string     `json:"tool_call_id,omitempty"`      // 当 role 为 "tool" 时必须传递
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`        // 当 role 为 "assistant" 并试图调工具时传递
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // DeepSeek thinking mode 工具调用链路要求原样回传
 }
 
 // ChatRequest AI 对话请求
@@ -42,9 +43,10 @@ type ChatRequest struct {
 
 // ChatResponse AI 对话响应
 type ChatResponse struct {
-	Content    string     `json:"content"`
-	TokensUsed TokenUsage `json:"tokensUsed"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	TokensUsed       TokenUsage `json:"tokensUsed"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // TokenUsage token 用量统计
@@ -56,11 +58,12 @@ type TokenUsage struct {
 
 // StreamChunk 流式响应片段
 type StreamChunk struct {
-	Content   string     `json:"content"`
-	Thinking  string     `json:"thinking,omitempty"`
-	Done      bool       `json:"done"`
-	Error     string     `json:"error,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	Content          string     `json:"content"`
+	Thinking         string     `json:"thinking,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	Done             bool       `json:"done"`
+	Error            string     `json:"error,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 // ProviderConfig AI Provider 配置

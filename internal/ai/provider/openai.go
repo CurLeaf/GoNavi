@@ -84,21 +84,25 @@ type openAIChatRequest struct {
 }
 
 type openAIChatMessage struct {
-	Role       string        `json:"role"`
-	Content    interface{}   `json:"content,omitempty"`
-	ToolCalls  []ai.ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Role             string        `json:"role"`
+	Content          interface{}   `json:"content,omitempty"`
+	ToolCalls        []ai.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
 }
 
 func buildOpenAIMessages(reqMessages []ai.Message, modelName string, baseURL string) []openAIChatMessage {
 	messages := make([]openAIChatMessage, len(reqMessages))
+	replayReasoningContent := shouldReplayReasoningContent(modelName, baseURL)
 	for i, m := range reqMessages {
 		if m.Role == "tool" {
 			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
 			continue
 		}
 		if len(m.ToolCalls) > 0 {
-			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls}
+			msg := openAIChatMessage{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls}
+			attachReasoningContent(&msg, m, replayReasoningContent)
+			messages[i] = msg
 			continue
 		}
 
@@ -127,20 +131,37 @@ func buildOpenAIMessages(reqMessages []ai.Message, modelName string, baseURL str
 					},
 				})
 			}
-			messages[i] = openAIChatMessage{Role: m.Role, Content: contentParts}
+			msg := openAIChatMessage{Role: m.Role, Content: contentParts}
+			attachReasoningContent(&msg, m, replayReasoningContent)
+			messages[i] = msg
 		} else {
-			messages[i] = openAIChatMessage{Role: m.Role, Content: m.Content}
+			msg := openAIChatMessage{Role: m.Role, Content: m.Content}
+			attachReasoningContent(&msg, m, replayReasoningContent)
+			messages[i] = msg
 		}
 	}
 	return messages
+}
+
+func attachReasoningContent(msg *openAIChatMessage, source ai.Message, enabled bool) {
+	if enabled && source.Role == "assistant" && source.ReasoningContent != "" {
+		msg.ReasoningContent = source.ReasoningContent
+	}
+}
+
+func shouldReplayReasoningContent(modelName string, baseURL string) bool {
+	model := strings.ToLower(strings.TrimSpace(modelName))
+	base := strings.ToLower(strings.TrimSpace(baseURL))
+	return strings.Contains(model, "deepseek") || strings.Contains(base, "deepseek")
 }
 
 // openAIChatResponse OpenAI API 响应体
 type openAIChatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content   string        `json:"content"`
-			ToolCalls []ai.ToolCall `json:"tool_calls,omitempty"`
+			Content          string        `json:"content"`
+			ReasoningContent string        `json:"reasoning_content,omitempty"`
+			ToolCalls        []ai.ToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -227,7 +248,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 	}
 
 	return &ai.ChatResponse{
-		Content: result.Choices[0].Message.Content,
+		Content:          result.Choices[0].Message.Content,
+		ReasoningContent: result.Choices[0].Message.ReasoningContent,
 		TokensUsed: ai.TokenUsage{
 			PromptTokens:     result.Usage.PromptTokens,
 			CompletionTokens: result.Usage.CompletionTokens,
@@ -342,7 +364,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 			// 支持 DeepSeek/千问等模型的 reasoning_content 字段
 			if choice.Delta.ReasoningContent != "" {
 				receivedContent = true
-				callback(ai.StreamChunk{Thinking: choice.Delta.ReasoningContent})
+				callback(ai.StreamChunk{
+					Thinking:         choice.Delta.ReasoningContent,
+					ReasoningContent: choice.Delta.ReasoningContent,
+				})
 			}
 
 			if choice.FinishReason != nil {

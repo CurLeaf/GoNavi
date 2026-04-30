@@ -41,6 +41,7 @@ export namespace ai {
 	    images?: string[];
 	    tool_call_id?: string;
 	    tool_calls?: ToolCall[];
+	    reasoning_content?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Message(source);
@@ -53,6 +54,7 @@ export namespace ai {
 	        this.images = source["images"];
 	        this.tool_call_id = source["tool_call_id"];
 	        this.tool_calls = this.convertValues(source["tool_calls"], ToolCall);
+	        this.reasoning_content = source["reasoning_content"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

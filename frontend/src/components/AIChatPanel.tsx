@@ -28,6 +28,7 @@ import {
 import { buildAIReadonlyPreviewSQL } from '../utils/aiSqlLimit';
 import { resolveAITableSchemaToolResult } from '../utils/aiTableSchemaTool';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
+import { toAIRequestMessage } from '../utils/aiMessagePayload';
 
 interface AIChatPanelProps {
     width?: number;
@@ -74,7 +75,7 @@ export const getDynamicMaxContextChars = (modelName?: string) => {
 // 当超出指定字符上限时触发上下文自建压缩
 const compressContextIfNeeded = async (sid: string, messagesPayload: any[], maxLimit: number) => {
     try {
-        const chars = messagesPayload.reduce((sum, m) => sum + (m.content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0);
+        const chars = messagesPayload.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning_content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0);
         if (chars < maxLimit) return null;
 
         const Service = (window as any).go?.aiservice?.Service;
@@ -508,7 +509,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         let isFirstCompletion = false;
 
         // 新增：利用 requestAnimationFrame 缓冲高频事件，避免 React 重绘阻塞导致感官吞吐变慢
-        const streamBuffer = { thinking: '', content: '' };
+        const streamBuffer = { thinking: '', reasoningContent: '', content: '' };
         let flushPending = false;
 
         const flushStreamBuffer = () => {
@@ -523,6 +524,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 updates.phase = 'thinking';
                 streamBuffer.thinking = '';
             }
+            if (streamBuffer.reasoningContent) {
+                updates.reasoning_content = (existing.reasoning_content || '') + streamBuffer.reasoningContent;
+                streamBuffer.reasoningContent = '';
+            }
             if (streamBuffer.content) {
                 updates.content = (existing.content || '') + streamBuffer.content;
                 updates.phase = 'generating';
@@ -535,7 +540,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             flushPending = false;
         };
 
-        const handler = (data: { content?: string; thinking?: string; tool_calls?: AIToolCall[]; done?: boolean; error?: string }) => {
+        const handler = (data: { content?: string; thinking?: string; reasoning_content?: string; tool_calls?: AIToolCall[]; done?: boolean; error?: string }) => {
             // Find connecting message if there's no active assistant string
             if (!assistantMsgId) {
                 const history = useStore.getState().aiChatHistory[sid] || [];
@@ -589,7 +594,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             }
 
             // 处理 thinking（模型思考过程）
-            if (data.thinking) {
+            const displayThinking = data.thinking || data.reasoning_content || '';
+            if (displayThinking || data.reasoning_content) {
                 if (!assistantMsgId) {
                     assistantMsgId = genId();
                     addAIChatMessage(sid, {
@@ -597,7 +603,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                         role: 'assistant',
                         phase: 'thinking',
                         content: '',
-                        thinking: data.thinking,
+                        thinking: displayThinking || undefined,
+                        reasoning_content: data.reasoning_content || undefined,
                         timestamp: Date.now(),
                         loading: true,
                         jvmPlanContext: pendingJVMPlanContextRef.current,
@@ -605,7 +612,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     });
                     if (sending) setSending(false);
                 } else {
-                    streamBuffer.thinking += data.thinking;
+                    streamBuffer.thinking += displayThinking;
+                    if (data.reasoning_content) {
+                        streamBuffer.reasoningContent += data.reasoning_content;
+                    }
                     if (sending) setSending(false);
                 }
             }
@@ -632,7 +642,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 }
             }
 
-            if (streamBuffer.thinking || streamBuffer.content) {
+            if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
                 if (!flushPending) {
                     flushPending = true;
                     requestAnimationFrame(flushStreamBuffer);
@@ -641,7 +651,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
             if (data.done) {
                 // 如果有残留未 flush 的 buffer，立刻推入状态树
-                if (streamBuffer.thinking || streamBuffer.content) {
+                if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
                     flushStreamBuffer();
                 }
                 const doneAssistantId = assistantMsgId;
@@ -676,12 +686,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                             (async () => {
                                 try {
                                     const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-                                    const messagesPayload = currentHistory.map(m => {
-                                        const mapped: any = { role: m.role, content: m.content, images: m.images };
-                                        if (m.tool_calls) mapped.tool_calls = m.tool_calls;
-                                        if (m.tool_call_id) mapped.tool_call_id = m.tool_call_id;
-                                        return mapped;
-                                    });
+                                    const messagesPayload = currentHistory.map(toAIRequestMessage);
                                     const sysMessages = await buildSystemContextMessages(
                                         existing.jvmPlanContext,
                                         existing.jvmDiagnosticPlanContext,
@@ -804,7 +809,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             addAIChatMessage(sid, connectingMsg);
 
             const truncatedHistory = historyLocal.slice(0, lastUserMsgIndex + 1);
-            const messagesPayload = truncatedHistory.map(m => ({ role: m.role, content: m.content, images: m.images }));
+            const messagesPayload = truncatedHistory.map(toAIRequestMessage);
             
             try {
                 const sysMessages = await buildSystemContextMessages(
@@ -823,6 +828,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                      addAIChatMessage(sid, {
                          id: genId(), role: 'assistant', 
                          content: result?.success ? result.content : `❌ ${errClean}`,
+                         thinking: result?.success ? result.reasoning_content : undefined,
+                         reasoning_content: result?.success ? result.reasoning_content : undefined,
                          rawError: (!result?.success && errClean !== errRaw) ? errRaw : undefined,
                          timestamp: Date.now(),
                          jvmPlanContext: retryJVMPlanContext,
@@ -1268,12 +1275,7 @@ SELECT * FROM users WHERE status = 1;
             setSending(true);
             const currentHistory = useStore.getState().aiChatHistory[sid] || [];
             // 过滤掉 connecting 占位消息，不发给模型
-            const messagesPayload = currentHistory.filter(m => m.phase !== 'connecting').map(m => {
-                const mapped: any = { role: m.role, content: m.content, images: m.images };
-                if (m.tool_calls) mapped.tool_calls = m.tool_calls;
-                if (m.tool_call_id) mapped.tool_call_id = m.tool_call_id;
-                return mapped;
-            });
+            const messagesPayload = currentHistory.filter(m => m.phase !== 'connecting').map(toAIRequestMessage);
             const sysMessages = await buildSystemContextMessages(
                 inheritedJVMPlanContext,
                 inheritedJVMDiagnosticPlanContext,
@@ -1313,6 +1315,8 @@ SELECT * FROM users WHERE status = 1;
                 useStore.getState().addAIChatMessage(sid, {
                     id: genId(), role: 'assistant',
                     content: result?.success ? result.content : `❌ ${errC}`,
+                    thinking: result?.success ? result.reasoning_content : undefined,
+                    reasoning_content: result?.success ? result.reasoning_content : undefined,
                     rawError: (!result?.success && errC !== errR) ? errR : undefined,
                     timestamp: Date.now(),
                     jvmPlanContext: inheritedJVMPlanContext,
@@ -1380,12 +1384,7 @@ SELECT * FROM users WHERE status = 1;
         // 【过渡状态 2】上下文已组装完成，即将接入模型
         updateAIChatMessage(sid, connectingMsg.id, { content: '模型接入中' });
 
-        const chatMessages = [...messages, userMsg].map(m => {
-            const mapped: any = { role: m.role, content: m.content, images: m.images };
-            if (m.tool_calls) mapped.tool_calls = m.tool_calls;
-            if (m.tool_call_id) mapped.tool_call_id = m.tool_call_id;
-            return mapped;
-        });
+        const chatMessages = [...messages, userMsg].map(toAIRequestMessage);
 
         let finalMessagesPayload = chatMessages;
         const dynamicMaxLimit = getDynamicMaxContextChars(activeProvider?.model);
@@ -1421,6 +1420,8 @@ SELECT * FROM users WHERE status = 1;
                 const assistantMsg: AIChatMessage = {
                     id: genId(), role: 'assistant',
                     content: result?.success ? result.content : `❌ ${errC2}`,
+                    thinking: result?.success ? result.reasoning_content : undefined,
+                    reasoning_content: result?.success ? result.reasoning_content : undefined,
                     rawError: (!result?.success && errC2 !== errR2) ? errR2 : undefined,
                     timestamp: Date.now(),
                     jvmPlanContext: currentJVMPlanContext,
@@ -1588,7 +1589,7 @@ SELECT * FROM users WHERE status = 1;
         return connection ? buildRpcConnectionConfig(connection.config) : undefined;
     }, [inferredConnectionId, connections]);
     const contextUsageChars = useMemo(() =>
-        messages.reduce((sum, m) => sum + (m.content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0),
+        messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning_content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0),
     [messages]);
     const contextTableNames = useMemo(() => {
         const ck = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';

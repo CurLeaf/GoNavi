@@ -866,9 +866,10 @@ func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]
 	}
 
 	return map[string]interface{}{
-		"success":    true,
-		"content":    resp.Content,
-		"tool_calls": resp.ToolCalls,
+		"success":           true,
+		"content":           resp.Content,
+		"reasoning_content": resp.ReasoningContent,
+		"tool_calls":        resp.ToolCalls,
 		"tokensUsed": map[string]int{
 			"promptTokens":     resp.TokensUsed.PromptTokens,
 			"completionTokens": resp.TokensUsed.CompletionTokens,
@@ -903,11 +904,12 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
-				"content":    chunk.Content,
-				"thinking":   chunk.Thinking,
-				"tool_calls": chunk.ToolCalls,
-				"done":       chunk.Done,
-				"error":      chunk.Error,
+				"content":           chunk.Content,
+				"thinking":          chunk.Thinking,
+				"reasoning_content": chunk.ReasoningContent,
+				"tool_calls":        chunk.ToolCalls,
+				"done":              chunk.Done,
+				"error":             chunk.Error,
 			})
 		})
 

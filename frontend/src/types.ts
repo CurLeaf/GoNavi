@@ -554,6 +554,7 @@ export interface AIChatMessage {
   phase?: ChatPhase;
   content: string;
   thinking?: string;
+  reasoning_content?: string;
   timestamp: number;
   loading?: boolean;
   images?: string[]; // base64 encoded images with data URI prefix
