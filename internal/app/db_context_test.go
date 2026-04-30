@@ -54,9 +54,9 @@ func TestNormalizeRunConfig_OceanBaseOracleKeepsServiceName(t *testing.T) {
 	t.Parallel()
 
 	config := connection.ConnectionConfig{
-		Type:             "oceanbase",
-		Database:         "OBORCL",
-		ConnectionParams: "protocol=oracle",
+		Type:              "oceanbase",
+		Database:          "OBORCL",
+		OceanBaseProtocol: "oracle",
 	}
 	runConfig := normalizeRunConfig(config, "SYS")
 
@@ -69,8 +69,8 @@ func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *te
 	t.Parallel()
 
 	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
-		Type:             "oceanbase",
-		ConnectionParams: "protocol=oracle",
+		Type:              "oceanbase",
+		OceanBaseProtocol: "oracle",
 	}, "SYS", "ORDERS")
 
 	if schema != "SYS" || table != "ORDERS" {

@@ -139,6 +139,24 @@ func TestGetCacheKey_KeepOceanBaseProtocolIsolation(t *testing.T) {
 	}
 }
 
+func TestGetCacheKey_KeepOceanBaseExplicitProtocolIsolation(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:     "oceanbase",
+		Host:     "ob.local",
+		Port:     2881,
+		User:     "sys@oracle001",
+		Database: "ORCL",
+	}
+	modified := base
+	modified.OceanBaseProtocol = "oracle"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left == right {
+		t.Fatalf("expected different cache key for explicit OceanBase Oracle protocol")
+	}
+}
+
 func TestGetCacheKey_KeepOceanBaseDefaultProtocolEquivalentToMySQL(t *testing.T) {
 	base := connection.ConnectionConfig{
 		Type:     "oceanbase",
@@ -154,6 +172,24 @@ func TestGetCacheKey_KeepOceanBaseDefaultProtocolEquivalentToMySQL(t *testing.T)
 	right := getCacheKey(modified)
 	if left != right {
 		t.Fatalf("expected default OceanBase protocol to equal mysql, got %s vs %s", left, right)
+	}
+}
+
+func TestGetCacheKey_KeepOceanBaseDefaultProtocolEquivalentToExplicitMySQL(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:     "oceanbase",
+		Host:     "ob.local",
+		Port:     2881,
+		User:     "root@test",
+		Database: "app",
+	}
+	modified := base
+	modified.OceanBaseProtocol = "mysql"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left != right {
+		t.Fatalf("expected default OceanBase protocol to equal explicit mysql, got %s vs %s", left, right)
 	}
 }
 

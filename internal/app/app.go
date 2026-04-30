@@ -180,7 +180,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	normalized.ID = ""
 	normalized.Type = strings.ToLower(strings.TrimSpace(normalized.Type))
 	if normalized.Type == "oceanbase" {
-		normalized.ConnectionParams = normalizeOceanBaseConnectionParamsForCache(normalized.ConnectionParams)
+		protocol := resolveOceanBaseProtocolForApp(normalized)
+		normalized.ConnectionParams = normalizeOceanBaseConnectionParamsForCacheWithProtocol(normalized.ConnectionParams, protocol)
+		normalized.OceanBaseProtocol = ""
 	}
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0

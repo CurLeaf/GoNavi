@@ -674,6 +674,7 @@ export namespace connection {
 	    redisDB?: number;
 	    uri?: string;
 	    clickHouseProtocol?: string;
+	    oceanBaseProtocol?: string;
 	    hosts?: string[];
 	    topology?: string;
 	    mysqlReplicaUser?: string;
@@ -718,6 +719,7 @@ export namespace connection {
 	        this.redisDB = source["redisDB"];
 	        this.uri = source["uri"];
 	        this.clickHouseProtocol = source["clickHouseProtocol"];
+	        this.oceanBaseProtocol = source["oceanBaseProtocol"];
 	        this.hosts = source["hosts"];
 	        this.topology = source["topology"];
 	        this.mysqlReplicaUser = source["mysqlReplicaUser"];

@@ -294,6 +294,42 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('normalizes OceanBase protocol when updating a saved connection', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-existing',
+        name: 'OceanBase Existing',
+        config: {
+          id: 'oceanbase-existing',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'root@test',
+          connectionParams: 'protocol=mysql',
+        },
+      },
+    ]);
+
+    useStore.getState().updateConnection({
+      id: 'oceanbase-existing',
+      name: 'OceanBase Existing',
+      config: {
+        id: 'oceanbase-existing',
+        type: 'oceanbase',
+        host: 'ob.local',
+        port: 2881,
+        user: 'sys@oracle001',
+        connectionParams: 'protocol=oracle',
+      },
+    });
+
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'oracle',
+    );
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

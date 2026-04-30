@@ -11,9 +11,27 @@ func normalizeOceanBaseProtocolForApp(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "oracle", "oracle-mode", "oracle_mode", "oboracle":
 		return "oracle"
+	case "mysql", "mysql-compatible", "mysql_compatible", "mysql-mode", "mysql_mode":
+		return "mysql"
 	default:
 		return "mysql"
 	}
+}
+
+func resolveOceanBaseProtocolForApp(config connection.ConnectionConfig) string {
+	if !strings.EqualFold(strings.TrimSpace(config.Type), "oceanbase") {
+		return ""
+	}
+	if explicit := strings.TrimSpace(config.OceanBaseProtocol); explicit != "" {
+		return normalizeOceanBaseProtocolForApp(explicit)
+	}
+	if protocol := resolveOceanBaseProtocolParam(config.ConnectionParams); protocol != "" {
+		return protocol
+	}
+	if protocol := resolveOceanBaseProtocolParam(config.URI); protocol != "" {
+		return protocol
+	}
+	return "mysql"
 }
 
 func resolveOceanBaseProtocolParam(raw string) string {
@@ -61,15 +79,19 @@ func normalizeOceanBaseConnectionParamsForCache(raw string) string {
 	return values.Encode()
 }
 
+func normalizeOceanBaseConnectionParamsForCacheWithProtocol(raw string, protocol string) string {
+	normalized := normalizeOceanBaseConnectionParamsForCache(raw)
+	if !strings.EqualFold(protocol, "oracle") {
+		return normalized
+	}
+	values, err := url.ParseQuery(strings.TrimLeft(strings.TrimSpace(normalized), "?&"))
+	if err != nil {
+		values = url.Values{}
+	}
+	values.Set("protocol", "oracle")
+	return values.Encode()
+}
+
 func isOceanBaseOracleProtocol(config connection.ConnectionConfig) bool {
-	if !strings.EqualFold(strings.TrimSpace(config.Type), "oceanbase") {
-		return false
-	}
-	if protocol := resolveOceanBaseProtocolParam(config.ConnectionParams); protocol != "" {
-		return protocol == "oracle"
-	}
-	if protocol := resolveOceanBaseProtocolParam(config.URI); protocol != "" {
-		return protocol == "oracle"
-	}
-	return false
+	return resolveOceanBaseProtocolForApp(config) == "oracle"
 }

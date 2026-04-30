@@ -91,6 +91,20 @@ type DriverStatusSnapshot = {
   message?: string;
 };
 
+const buildConnectionReloadSignature = (conn?: SavedConnection | null): string => {
+  if (!conn) return '';
+  return JSON.stringify({
+    config: conn.config || {},
+    includeDatabases: conn.includeDatabases || [],
+    includeRedisDatabases: conn.includeRedisDatabases || [],
+  });
+};
+
+const isConnectionTreeKey = (key: React.Key, connectionId: string): boolean => {
+  const text = String(key);
+  return text === connectionId || text.startsWith(`${connectionId}-`);
+};
+
 const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
 
 const normalizeDriverType = (value: string): string => {
@@ -248,6 +262,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	  const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
 	  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
+	  const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
 	  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
   
   // Virtual Scroll State
@@ -375,6 +390,47 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   }, [autoFetchVisible, externalSQLDirectories, savedQueries]);
 
   useEffect(() => {
+    const previousSignatures = connectionReloadSignaturesRef.current;
+    const nextSignatures: Record<string, string> = {};
+    const staleConnectionIds = new Set<string>();
+
+    connections.forEach((conn) => {
+      const signature = buildConnectionReloadSignature(conn);
+      nextSignatures[conn.id] = signature;
+      if (previousSignatures[conn.id] && previousSignatures[conn.id] !== signature) {
+        staleConnectionIds.add(conn.id);
+      }
+    });
+    connectionReloadSignaturesRef.current = nextSignatures;
+
+    if (staleConnectionIds.size > 0) {
+      const staleIds = Array.from(staleConnectionIds);
+      setLoadedKeys((prev) =>
+        prev.filter((key) => !staleIds.some((id) => isConnectionTreeKey(key, id))),
+      );
+      setExpandedKeys((prev) =>
+        prev.filter((key) => !staleIds.some((id) => isConnectionTreeKey(key, id))),
+      );
+      setConnectionStates((prev) => {
+        const next = { ...prev };
+        staleIds.forEach((id) => {
+          Object.keys(next).forEach((key) => {
+            if (isConnectionTreeKey(key, id)) {
+              delete next[key];
+            }
+          });
+        });
+        return next;
+      });
+      staleIds.forEach((id) => {
+        Array.from(loadingNodesRef.current).forEach((key) => {
+          if (key === `dbs-${id}` || key.startsWith(`tables-${id}-`)) {
+            loadingNodesRef.current.delete(key);
+          }
+        });
+      });
+    }
+
     setTreeData((prev) => {
       const prevMap = new Map<string, TreeNode>();
 
@@ -395,6 +451,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         const existing = prevMap.get(conn.id);
         const iconType = resolveConnectionIconType(conn);
         const iconColor = resolveConnectionAccentColor(conn);
+        const preserveChildren = existing && !staleConnectionIds.has(conn.id);
         return {
           title: conn.name,
           key: conn.id,
@@ -402,7 +459,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           type: 'connection',
           dataRef: conn,
           isLeaf: false,
-          children: existing?.children,
+          children: preserveChildren ? existing.children : undefined,
         } as TreeNode;
       };
 

@@ -167,13 +167,14 @@ export function buildRpcConnectionConfig(
     httpTunnel: mergedHttpTunnel,
   };
   const rpcMerged = withOceanBaseProtocolParam(merged);
+  const { oceanBaseProtocol: _oceanBaseProtocol, ...rpcPayload } = rpcMerged;
 
   const baseId = toStringValue(config.id).trim() || toStringValue(overrides.id).trim() || undefined;
   const timeout = toOptionalInteger(rpcMerged.timeout, toOptionalInteger(config.timeout));
   const redisDB = toOptionalInteger(rpcMerged.redisDB, toOptionalInteger(config.redisDB));
 
   const rpcConfig = new connection.ConnectionConfig({
-    ...rpcMerged,
+    ...rpcPayload,
     type: toStringValue(rpcMerged.type),
     host: toStringValue(rpcMerged.host),
     port: toOptionalInteger(rpcMerged.port, toOptionalInteger(config.port, 0)) ?? 0,

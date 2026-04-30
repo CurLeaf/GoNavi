@@ -90,8 +90,8 @@ func TestResolveDDLDBType_OceanBaseOracleProtocol(t *testing.T) {
 	t.Parallel()
 
 	cfg := connection.ConnectionConfig{
-		Type:             "oceanbase",
-		ConnectionParams: "protocol=oracle",
+		Type:              "oceanbase",
+		OceanBaseProtocol: "oracle",
 	}
 	if got := resolveDDLDBType(cfg); got != "oracle" {
 		t.Fatalf("expected OceanBase Oracle protocol to use oracle DDL dialect, got %q", got)

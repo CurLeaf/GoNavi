@@ -57,6 +57,15 @@ func TestResolveOceanBaseProtocol(t *testing.T) {
 			want: oceanBaseProtocolMySQL,
 		},
 		{
+			name: "explicit config protocol wins over params",
+			config: connection.ConnectionConfig{
+				Type:              "oceanbase",
+				OceanBaseProtocol: "oracle",
+				ConnectionParams:  "protocol=mysql",
+			},
+			want: oceanBaseProtocolOracle,
+		},
+		{
 			name: "protocol key wins over compatibility aliases",
 			config: connection.ConnectionConfig{
 				Type:             "oceanbase",

@@ -1423,13 +1423,31 @@ export const useStore = create<AppState>()(
       jvmDiagnosticOutputs: {},
 
       addConnection: (conn) =>
-        set((state) => ({ connections: [...state.connections, conn] })),
+        set((state) => {
+          const sanitized = sanitizeSavedConnection(
+            conn,
+            state.connections.length,
+          );
+          if (!sanitized) {
+            return { connections: state.connections };
+          }
+          return { connections: [...state.connections, sanitized] };
+        }),
       updateConnection: (conn) =>
-        set((state) => ({
-          connections: state.connections.map((c) =>
-            c.id === conn.id ? conn : c,
-          ),
-        })),
+        set((state) => {
+          const sanitized = sanitizeSavedConnection(
+            conn,
+            state.connections.length,
+          );
+          if (!sanitized) {
+            return { connections: state.connections };
+          }
+          return {
+            connections: state.connections.map((c) =>
+              c.id === conn.id ? sanitized : c,
+            ),
+          };
+        }),
       removeConnection: (id) =>
         set((state) => ({
           connections: state.connections.filter((c) => c.id !== id),

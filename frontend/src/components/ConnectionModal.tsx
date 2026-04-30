@@ -62,6 +62,7 @@ import {
 import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
+import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   applyNoAutoCapAttributes,
@@ -121,6 +122,14 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
+const OCEANBASE_PROTOCOL_PARAM_KEYS = [
+  "protocol",
+  "oceanBaseProtocol",
+  "oceanbaseProtocol",
+  "tenantMode",
+  "compatMode",
+  "mode",
+];
 
 const normalizeClickHouseProtocolValue = (
   value: unknown,
@@ -139,6 +148,47 @@ const normalizeOceanBaseProtocolValue = (
     .trim()
     .toLowerCase();
   return text === "oracle" ? "oracle" : "mysql";
+};
+const resolveOceanBaseProtocolValue = (
+  value: unknown,
+): OceanBaseProtocolChoice | undefined => {
+  const text = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (!text) return undefined;
+  return ["oracle", "oracle-mode", "oracle_mode", "oboracle"].includes(text)
+    ? "oracle"
+    : "mysql";
+};
+const resolveOceanBaseProtocolFromQueryText = (
+  value: unknown,
+): OceanBaseProtocolChoice | undefined => {
+  let text = String(value || "").trim();
+  if (!text) return undefined;
+  const queryIndex = text.indexOf("?");
+  if (queryIndex >= 0) {
+    text = text.slice(queryIndex + 1);
+  }
+  const hashIndex = text.indexOf("#");
+  if (hashIndex >= 0) {
+    text = text.slice(0, hashIndex);
+  }
+  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
+  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+    const protocol = resolveOceanBaseProtocolValue(params.get(key));
+    if (protocol) return protocol;
+  }
+  return undefined;
+};
+const resolveOceanBaseProtocolForConfig = (
+  config: Partial<ConnectionConfig>,
+): OceanBaseProtocolChoice => {
+  return (
+    resolveOceanBaseProtocolValue(config.oceanBaseProtocol) ||
+    resolveOceanBaseProtocolFromQueryText(config.connectionParams) ||
+    resolveOceanBaseProtocolFromQueryText(config.uri) ||
+    "mysql"
+  );
 };
 type ConnectionSecretKey =
   | "primaryPassword"
@@ -1123,6 +1173,18 @@ const ConnectionModal: React.FC<{
       }
     });
     return cloned.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
+  };
+
+  const normalizeOceanBaseConnectionParamsText = (
+    rawParams: unknown,
+    selectedProtocol: OceanBaseProtocolChoice,
+  ) => {
+    const params = new URLSearchParams(normalizeConnectionParamsText(rawParams));
+    for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
+      params.delete(key);
+    }
+    params.set("protocol", selectedProtocol);
+    return params.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
   };
 
   const mergeConnectionParams = (
@@ -2260,7 +2322,7 @@ const ConnectionModal: React.FC<{
               : "auto",
           oceanBaseProtocol:
             configType === "oceanbase"
-              ? normalizeOceanBaseProtocolValue(config.oceanBaseProtocol)
+              ? resolveOceanBaseProtocolForConfig(config)
               : "mysql",
           includeDatabases: initialValues.includeDatabases,
           includeRedisDatabases: initialValues.includeRedisDatabases,
@@ -2780,12 +2842,14 @@ const ConnectionModal: React.FC<{
       // Use different API for Redis / JVM
       const isRedisType = values.type === "redis";
       const isJVMType = values.type === "jvm";
+      const dbTestConfig =
+        !isRedisType && !isJVMType ? buildRpcConnectionConfig(config as any) : config;
       const res = await withClientTimeout(
         isJVMType
           ? TestJVMConnection(config as any)
           : isRedisType
             ? RedisConnect(config as any)
-            : TestConnection(config as any),
+            : TestConnection(dbTestConfig as any),
         rpcTimeoutMs,
         `连接测试超时（>${timeoutSeconds} 秒），请检查网络/代理/SSH配置后重试`,
       );
@@ -2798,7 +2862,7 @@ const ConnectionModal: React.FC<{
         } else if (!isJVMType) {
           // Other databases: fetch database list
           const dbRes = await withClientTimeout(
-            DBGetDatabases(config as any),
+            DBGetDatabases(dbTestConfig as any),
             rpcTimeoutMs,
             `连接成功但拉取数据库列表超时（>${timeoutSeconds} 秒）`,
           );
@@ -3297,6 +3361,14 @@ const ConnectionModal: React.FC<{
     }
 
     const keepPassword = !forPersist || savePassword;
+    const normalizedConnectionParams = supportsConnectionParamsForType(type)
+      ? type === "oceanbase"
+        ? normalizeOceanBaseConnectionParamsText(
+            mergedValues.connectionParams,
+            selectedOceanBaseProtocol,
+          )
+        : normalizeConnectionParamsText(mergedValues.connectionParams)
+      : "";
 
     return {
       type: mergedValues.type,
@@ -3318,9 +3390,7 @@ const ConnectionModal: React.FC<{
       httpTunnel: httpTunnelConfig,
       driver: mergedValues.driver,
       dsn: mergedValues.dsn,
-      connectionParams: supportsConnectionParamsForType(type)
-        ? normalizeConnectionParamsText(mergedValues.connectionParams)
-        : "",
+      connectionParams: normalizedConnectionParams,
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
         ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))

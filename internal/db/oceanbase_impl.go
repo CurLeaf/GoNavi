@@ -171,6 +171,9 @@ func resolveOceanBaseProtocolFromValues(values url.Values) string {
 }
 
 func resolveOceanBaseProtocol(config connection.ConnectionConfig) string {
+	if explicit := strings.TrimSpace(config.OceanBaseProtocol); explicit != "" {
+		return normalizeOceanBaseProtocol(explicit)
+	}
 	if protocol := resolveOceanBaseProtocolFromValues(connectionParamsFromText(config.ConnectionParams)); protocol != "" {
 		return protocol
 	}
@@ -213,6 +216,7 @@ func stripOceanBaseProtocolURI(raw string) string {
 
 func withoutOceanBaseProtocolParams(config connection.ConnectionConfig) connection.ConnectionConfig {
 	next := config
+	next.OceanBaseProtocol = ""
 	next.ConnectionParams = stripOceanBaseProtocolParams(config.ConnectionParams)
 	next.URI = stripOceanBaseProtocolURI(config.URI)
 	return next
