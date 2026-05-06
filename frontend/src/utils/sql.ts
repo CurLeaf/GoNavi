@@ -150,10 +150,10 @@ export const buildOrderBySQL = (
     return ` ORDER BY ${sortParts.join(', ')}`;
   }
 
-  // MySQL/MariaDB 大表在无显式排序需求时强制 ORDER BY（即使按主键）可能触发 filesort，
-  // 导致 `Error 1038 (HY001): Out of sort memory`。
+  // 部分数据源在无显式排序需求时强制 ORDER BY（即使按主键）会显著放大大表预览成本：
+  // MySQL/MariaDB 可能触发 filesort 和 sort memory 错误，DuckDB 大文件可能被排序拖到连接超时。
   // 因此仅在用户主动点击排序时下发 ORDER BY，默认分页查询不加兜底排序。
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'duckdb') {
     return '';
   }
 

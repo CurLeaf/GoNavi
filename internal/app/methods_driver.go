@@ -39,7 +39,10 @@ var (
 	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
 		return cmd.Output()
 	}
+	optionalDriverAgentMetadataProbe = db.ProbeOptionalDriverAgentMetadata
 )
+
+var errOptionalDriverAgentMetadataUnavailable = errors.New("driver-agent metadata unavailable")
 
 // resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
 func resolveGoBinaryPath() (string, error) {
@@ -2752,6 +2755,55 @@ func optionalDriverAgentRevisionStatus(driverType string, pkg installedDriverPac
 	return true, fmt.Sprintf("原因：%s。影响：%s（已安装标记：%s，当前需要：%s）", updateReason, impact, actual, expected), expected
 }
 
+func optionalDriverAgentRevisionCurrent(driverType string, executablePath string) (string, bool, error) {
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	if expected == "" {
+		return "", true, nil
+	}
+	metadata, err := optionalDriverAgentMetadataProbe(driverType, executablePath)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: %v", errOptionalDriverAgentMetadataUnavailable, err)
+	}
+	actual := strings.TrimSpace(metadata.AgentRevision)
+	return actual, actual == expected, nil
+}
+
+func verifyInstalledOptionalDriverAgentRevision(driverType string, executablePath string, selectedVersion ...string) (string, error) {
+	version := ""
+	if len(selectedVersion) > 0 {
+		version = selectedVersion[0]
+	}
+	if !shouldVerifyOptionalDriverAgentRevision(driverType, version) {
+		return "", nil
+	}
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	actual, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
+	if expected == "" {
+		return actual, nil
+	}
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	if err != nil {
+		return "", fmt.Errorf("%s 驱动代理版本元数据不可用，请安装当前版本对应的 driver-agent：%w", displayName, err)
+	}
+	if !current {
+		actualLabel := strings.TrimSpace(actual)
+		if actualLabel == "" {
+			actualLabel = "空"
+		}
+		return "", fmt.Errorf("%s 驱动代理 revision 不匹配（已安装：%s，当前需要：%s），请安装当前版本对应的 driver-agent", displayName, actualLabel, expected)
+	}
+	return actual, nil
+}
+
+func shouldVerifyOptionalDriverAgentRevision(driverType string, selectedVersion string) bool {
+	switch normalizeDriverType(driverType) {
+	case "mongodb":
+		return resolveMongoDriverMajorFromVersion(selectedVersion) != 1
+	default:
+		return true
+	}
+}
+
 func (a *App) savedConnectionDriverUsageCounts() map[string]int {
 	counts := map[string]int{}
 	if a == nil || strings.TrimSpace(a.configDir) == "" {
@@ -2838,7 +2890,10 @@ func installOptionalDriverAgentPackage(a *App, definition driverDefinition, sele
 	if strings.TrimSpace(downloadSource) == "" {
 		downloadSource = strings.TrimSpace(downloadURL)
 	}
-	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, runtimePath)
+	agentRevision, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, runtimePath, selectedVersion)
+	if revisionErr != nil {
+		return installedDriverPackage{}, revisionErr
+	}
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
@@ -2908,11 +2963,14 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 		return installedDriverPackage{}, validateErr
 	}
 
+	agentRevision, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
+	if revisionErr != nil {
+		return installedDriverPackage{}, revisionErr
+	}
 	hash, hashErr := hashFileSHA256(executablePath)
 	if hashErr != nil {
 		return installedDriverPackage{}, fmt.Errorf("计算 %s 驱动代理摘要失败：%w", displayName, hashErr)
 	}
-	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, executablePath)
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
@@ -2931,12 +2989,12 @@ func probeInstalledOptionalDriverAgentRevision(driverType string, executablePath
 	if strings.TrimSpace(expectedRevision) == "" {
 		return ""
 	}
-	metadata, err := db.ProbeOptionalDriverAgentMetadata(driverType, executablePath)
+	actualRevision, _, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
 	if err != nil {
 		logger.Warnf("%s 驱动代理未返回版本元数据：%v", resolveDriverDisplayName(driverDefinition{Type: driverType}), err)
 		return ""
 	}
-	return strings.TrimSpace(metadata.AgentRevision)
+	return strings.TrimSpace(actualRevision)
 }
 
 type localDriverCandidate struct {
@@ -3967,9 +4025,30 @@ func findExistingOptionalDriverAgentCandidate(definition driverDefinition, targe
 		if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, absPath); validateErr != nil {
 			continue
 		}
+		if !isReusableOptionalDriverAgentRevisionCurrent(driverType, absPath) {
+			continue
+		}
 		return absPath, true
 	}
 	return "", false
+}
+
+func isReusableOptionalDriverAgentRevisionCurrent(driverType string, executablePath string) bool {
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	if expected == "" {
+		return true
+	}
+	actual, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	if err != nil {
+		logger.Warnf("跳过可复用 %s 驱动代理候选：版本元数据不可用 path=%s err=%v", displayName, executablePath, err)
+		return false
+	}
+	if !current {
+		logger.Warnf("跳过可复用 %s 驱动代理候选：revision 不匹配 path=%s actual=%s expected=%s", displayName, executablePath, strings.TrimSpace(actual), expected)
+		return false
+	}
+	return true
 }
 
 func resolveOptionalDriverAgentCandidatePaths(definition driverDefinition) []string {

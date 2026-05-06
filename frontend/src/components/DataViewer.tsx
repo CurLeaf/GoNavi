@@ -165,6 +165,20 @@ const isDuckDBComplexColumnType = (columnType?: string): boolean => {
   return raw.includes('map') || raw.includes('struct') || raw.includes('union') || raw.includes('array') || raw.includes('list');
 };
 
+const formatDataViewerQueryError = (dbType: string, messageText: unknown): string => {
+  const rawMessage = String(messageText || '查询失败').trim() || '查询失败';
+  const lower = rawMessage.toLowerCase();
+  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('超时');
+  const isDuckDBInterrupted = String(dbType || '').trim().toLowerCase() === 'duckdb' && (lower.includes('interrupt error') || lower.includes('interrupted'));
+  if (isTimeout || isDuckDBInterrupted) {
+    if (String(dbType || '').trim().toLowerCase() === 'duckdb') {
+      return 'DuckDB 查询超过连接超时时间，已中断。请调大连接超时时间，或减少排序/筛选范围后重试。';
+    }
+    return '查询超过连接超时时间，已中断。请调大连接超时时间，或减少查询范围后重试。';
+  }
+  return rawMessage;
+};
+
 const reverseOrderBySQL = (orderBySQL: string): string => {
   const raw = String(orderBySQL || '').trim();
   if (!raw) return '';
@@ -929,11 +943,11 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
                 }
             }
         } else {
-            message.error(String(resData.message || '查询失败'));
+            message.error(formatDataViewerQueryError(dbTypeLower, resData.message));
         }
     } catch (e: any) {
         if (fetchSeqRef.current !== seq) return;
-        message.error("Error fetching data: " + e.message);
+        message.error(formatDataViewerQueryError(dbTypeLower, e?.message || e));
         addSqlLog({
             id: `log-${Date.now()}-error`,
             timestamp: Date.now(),

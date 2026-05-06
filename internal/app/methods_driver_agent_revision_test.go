@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
 )
 
 func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing.T) {
@@ -30,6 +31,79 @@ func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing
 	if needsUpdate {
 		t.Fatalf("expected current ClickHouse agent revision to be accepted, reason=%q", reason)
 	}
+}
+
+func TestOptionalDriverAgentRevisionCurrentRejectsStaleMetadata(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: "src-stale-agent",
+		}, nil
+	}
+
+	for _, driverType := range optionalDriverAgentRevisionTestDrivers(t) {
+		t.Run(driverType, func(t *testing.T) {
+			actual, current, err := optionalDriverAgentRevisionCurrent(driverType, "fake-driver-agent")
+			if err != nil {
+				t.Fatalf("expected stale metadata to be comparable, got error: %v", err)
+			}
+			if current {
+				t.Fatalf("expected stale %s agent revision to be rejected", driverType)
+			}
+			if actual != "src-stale-agent" {
+				t.Fatalf("unexpected actual revision: %q", actual)
+			}
+		})
+	}
+}
+
+func TestVerifyInstalledOptionalDriverAgentRevisionRejectsProbeFailure(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{}, errOptionalDriverAgentMetadataUnavailable
+	}
+
+	for _, driverType := range optionalDriverAgentRevisionTestDrivers(t) {
+		t.Run(driverType, func(t *testing.T) {
+			if _, err := verifyInstalledOptionalDriverAgentRevision(driverType, "fake-driver-agent"); err == nil {
+				t.Fatalf("expected %s install verification to fail when metadata probe fails", driverType)
+			}
+		})
+	}
+}
+
+func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
+	t.Helper()
+	drivers := []string{
+		"mariadb",
+		"oceanbase",
+		"diros",
+		"sphinx",
+		"sqlserver",
+		"sqlite",
+		"duckdb",
+		"dameng",
+		"kingbase",
+		"highgo",
+		"vastbase",
+		"opengauss",
+		"mongodb",
+		"tdengine",
+		"clickhouse",
+	}
+	for _, driverType := range drivers {
+		if db.OptionalDriverAgentRevision(driverType) == "" {
+			t.Fatalf("expected %s to define an agent revision", driverType)
+		}
+	}
+	return drivers
 }
 
 func TestSavedConnectionDriverUsageCountsIncludesOptionalAndCustomDrivers(t *testing.T) {
