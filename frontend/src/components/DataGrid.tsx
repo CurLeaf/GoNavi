@@ -51,6 +51,12 @@ import {
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
 import { buildCopiedRowsForPaste, buildPastedRowsFromCopiedRows } from './dataGridRowClipboard';
+import {
+    buildClipboardCsv,
+    buildClipboardJson,
+    buildClipboardMarkdown,
+    pickRowsForClipboard,
+} from './dataGridClipboardExport';
 import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
     TEMPORAL_FORMATS,
@@ -4040,6 +4046,53 @@ const DataGrid: React.FC<DataGridProps> = ({
       void message.success("Copied to clipboard");
   }, []);
 
+  const getClipboardRows = useCallback(() => (
+      pickRowsForClipboard({
+          rows: mergedDisplayData as Array<Record<string, unknown>>,
+          selectedRowKeys,
+          columnNames: visibleColumnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+          rowKeyToString: rowKeyStr,
+      })
+  ), [mergedDisplayData, selectedRowKeys, visibleColumnNames, rowKeyStr]);
+
+  const getClipboardColumnNames = useCallback((rows: Array<Record<string, unknown>>) => {
+      if (rows.length === 0) return [];
+      return visibleColumnNames.filter((columnName) => columnName !== GONAVI_ROW_KEY);
+  }, [visibleColumnNames]);
+
+  const handleCopyQueryResultCsv = useCallback(() => {
+      const rows = getClipboardRows();
+      const columns = getClipboardColumnNames(rows);
+      const text = buildClipboardCsv(rows, columns);
+      if (!text) {
+          void message.info('当前结果集没有可复制内容');
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows]);
+
+  const handleCopyQueryResultJson = useCallback(() => {
+      const rows = getClipboardRows();
+      const text = buildClipboardJson(rows);
+      if (!text) {
+          void message.info('当前结果集没有可复制内容');
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardRows]);
+
+  const handleCopyQueryResultMarkdown = useCallback(() => {
+      const rows = getClipboardRows();
+      const columns = getClipboardColumnNames(rows);
+      const text = buildClipboardMarkdown(rows, columns);
+      if (!text) {
+          void message.info('当前结果集没有可复制内容');
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows]);
+
   const handleOpenTableDdl = useCallback(async () => {
       if (!canViewDdl || !currentConnConfig || !tableName) {
           void message.error('当前表缺少连接或表名，无法查看 DDL');
@@ -4596,6 +4649,13 @@ const DataGrid: React.FC<DataGridProps> = ({
       { key: 'md', label: 'Markdown', onClick: () => handleExport('md') },
       { key: 'html', label: 'HTML', onClick: () => handleExport('html') },
   ];
+
+  const queryResultCopyMenu: MenuProps['items'] = [
+      { key: 'csv', label: 'CSV', onClick: handleCopyQueryResultCsv },
+      { key: 'json', label: 'JSON', onClick: handleCopyQueryResultJson },
+      { key: 'markdown', label: 'Markdown', onClick: handleCopyQueryResultMarkdown },
+  ];
+  const canCopyQueryResult = isQueryResultExport && mergedDisplayData.length > 0 && visibleColumnNames.length > 0;
 
   const columnInfoSettingContent = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200, maxWidth: 300 }}>
@@ -5431,6 +5491,23 @@ const DataGrid: React.FC<DataGridProps> = ({
                    <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
                    {canImport && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
                    {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
+               </>
+           )}
+
+           {isQueryResultExport && (
+               <>
+                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
+                   <Button
+                       data-grid-query-copy-action="true"
+                       icon={<CopyOutlined />}
+                       disabled={!canCopyQueryResult}
+                       onClick={handleCopyQueryResultCsv}
+                   >
+                       复制
+                   </Button>
+                   <Dropdown menu={{ items: queryResultCopyMenu }} disabled={!canCopyQueryResult}>
+                       <Button icon={<DownOutlined />} disabled={!canCopyQueryResult} />
+                   </Dropdown>
                </>
            )}
 

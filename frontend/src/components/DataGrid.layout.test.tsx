@@ -169,6 +169,26 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('粘贴行');
   });
 
+  it('renders a clickable copy action for aggregate query results', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            'COUNT(*)': 12,
+          },
+        ]}
+        columnNames={['COUNT(*)']}
+        loading={false}
+        exportScope="queryResult"
+      />,
+    );
+
+    expect(markup).toContain('data-grid-query-copy-action="true"');
+    expect(markup).not.toMatch(/data-grid-query-copy-action="true"[^>]*disabled/);
+    expect(markup).toContain('复制');
+  });
+
   it('renders a quick WHERE condition editor when table filters are visible', () => {
     const markup = renderToStaticMarkup(
       <DataGrid
