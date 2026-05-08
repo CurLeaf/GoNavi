@@ -125,6 +125,37 @@ const buildMySqlColumnDefinition = (column: EditableColumnSnapshot, dbType: stri
   ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 };
 
+const DORIS_AGG_TYPES = new Set([
+  'SUM',
+  'MIN',
+  'MAX',
+  'REPLACE',
+  'REPLACE_IF_NOT_NULL',
+  'HLL_UNION',
+  'BITMAP_UNION',
+  'QUANTILE_UNION',
+  'GENERIC',
+]);
+
+const buildDorisColumnDefinition = (column: EditableColumnSnapshot, dbType: string): string => {
+  const defaultSql = buildDefaultSql(column.default, dbType);
+  const autoIncrementSql = column.isAutoIncrement ? 'AUTO_INCREMENT' : '';
+  const keyText = String(column.key || '').trim().toUpperCase();
+  const extraText = String(column.extra || '').trim().toUpperCase();
+  const keyOrAggSql = ['PRI', 'KEY', 'TRUE'].includes(keyText)
+    ? 'KEY'
+    : (DORIS_AGG_TYPES.has(extraText) ? extraText : '');
+  return [
+    quoteIdentifierPart(column.name, dbType),
+    String(column.type || '').trim(),
+    keyOrAggSql,
+    column.nullable === 'NO' ? 'NOT NULL' : 'NULL',
+    defaultSql,
+    autoIncrementSql,
+    `COMMENT '${escapeSqlString(column.comment || '')}'`,
+  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+};
+
 const buildStandardColumnDefinition = (
   column: EditableColumnSnapshot,
   dbType: string,
@@ -224,6 +255,44 @@ const buildMySqlAlterPreviewSql = (input: BuildAlterTablePreviewInput, dbType: s
   }
 
   return alters.length === 0 ? '' : `ALTER TABLE ${tableName}\n${alters.join(',\n')};`;
+};
+
+const buildDorisAlterPreviewSql = (input: BuildAlterTablePreviewInput, dbType: string): string => {
+  const tableName = quoteIdentifierPath(input.tableName, dbType);
+  const statements: string[] = [];
+
+  input.originalColumns.forEach((orig) => {
+    if (!input.columns.find((col) => col._key === orig._key)) {
+      statements.push(`ALTER TABLE ${tableName}\nDROP COLUMN ${quoteIdentifierPart(orig.name, dbType)};`);
+    }
+  });
+
+  input.columns.forEach((curr) => {
+    const orig = input.originalColumns.find((col) => col._key === curr._key);
+    if (!orig) {
+      statements.push(`ALTER TABLE ${tableName}\nADD COLUMN ${buildDorisColumnDefinition(curr, dbType)};`);
+      return;
+    }
+
+    let currentName = orig.name;
+    if (curr.name !== orig.name) {
+      statements.push(`ALTER TABLE ${tableName}\nRENAME COLUMN ${quoteIdentifierPart(orig.name, dbType)} ${quoteIdentifierPart(curr.name, dbType)};`);
+      currentName = curr.name;
+    }
+
+    if (definitionChanged(curr, orig)) {
+      statements.push(`ALTER TABLE ${tableName}\nMODIFY COLUMN ${buildDorisColumnDefinition({ ...curr, name: currentName }, dbType)};`);
+    }
+  });
+
+  const origPKKeys = input.originalColumns.filter((col) => col.key === 'PRI').map((col) => col._key);
+  const newPKKeys = input.columns.filter((col) => col.key === 'PRI').map((col) => col._key);
+  const keysChanged = origPKKeys.length !== newPKKeys.length || !origPKKeys.every((key) => newPKKeys.includes(key));
+  if (keysChanged) {
+    statements.push('-- Doris 修改主键/Key 模型需要按表模型手工迁移，已避免生成 MySQL 专属的 DROP/ADD PRIMARY KEY。');
+  }
+
+  return statements.join('\n');
 };
 
 const buildPgLikeAlterPreviewSql = (input: BuildAlterTablePreviewInput, dbType: string): string => {
@@ -537,6 +606,7 @@ export const buildAlterTablePreviewSql = (input: BuildAlterTablePreviewInput): s
   if (isSqlServerDialect(dbType)) return buildSqlServerAlterPreviewSql({ ...input, dbType });
   if (dbType === 'sqlite') return buildSqliteAlterPreviewSql({ ...input, dbType });
   if (dbType === 'duckdb') return buildDuckDbAlterPreviewSql({ ...input, dbType });
+  if (dbType === 'diros') return buildDorisAlterPreviewSql({ ...input, dbType }, dbType);
   if (dbType === 'clickhouse') return buildLimitedBacktickAlterPreviewSql({ ...input, dbType }, dbType, 'ClickHouse');
   if (dbType === 'tdengine') return buildLimitedBacktickAlterPreviewSql({ ...input, dbType }, dbType, 'TDengine');
   if (isMysqlFamilyDialect(dbType)) return buildMySqlAlterPreviewSql({ ...input, dbType }, dbType);

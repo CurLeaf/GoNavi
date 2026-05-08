@@ -142,6 +142,9 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 
 func resolveDDLDBType(config connection.ConnectionConfig) string {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType == "doris" {
+		return "diros"
+	}
 	if dbType == "oceanbase" && isOceanBaseOracleProtocol(config) {
 		return "oracle"
 	}
@@ -275,8 +278,22 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
-		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/Doris/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
+	case "diros":
+		runConfig := config
+		if strings.TrimSpace(runConfig.Database) == "" {
+			runConfig.Database = oldName
+		}
+		dbInst, err := a.getDatabase(runConfig)
+		if err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		sql := fmt.Sprintf("ALTER DATABASE %s RENAME %s", quoteIdentByType(dbType, oldName), quoteIdentByType(dbType, newName))
+		if _, err := dbInst.Exec(sql); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		return connection.QueryResult{Success: true, Message: "数据库重命名成功"}
+	case "mysql", "mariadb", "oceanbase", "sphinx":
+		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
 		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
 			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}

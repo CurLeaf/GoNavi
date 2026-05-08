@@ -162,6 +162,40 @@ describe('tableDesignerSchemaSql', () => {
     expect(sql).not.toContain('MODIFY COLUMN');
   });
 
+  it('builds doris alter preview without mysql-only syntax or metadata extra', () => {
+    const sql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'doris',
+      tableName: 'sales.orders',
+      originalColumns: [
+        baseColumn({
+          _key: 'carrier',
+          name: 'carrier_id',
+          type: 'bigint',
+          nullable: 'YES',
+          extra: 'NONE',
+          comment: '承运商id',
+        }),
+      ],
+      columns: [
+        baseColumn({
+          _key: 'carrier',
+          name: 'carrier_code',
+          type: 'bigint',
+          nullable: 'YES',
+          extra: 'NONE',
+          comment: '承运商id1',
+        }),
+      ],
+    }));
+
+    expect(sql).toContain('ALTER TABLE `sales`.`orders`\nRENAME COLUMN `carrier_id` `carrier_code`;');
+    expect(sql).toContain("ALTER TABLE `sales`.`orders`\nMODIFY COLUMN `carrier_code` bigint NULL COMMENT '承运商id1';");
+    expect(sql).not.toContain('CHANGE COLUMN');
+    expect(sql).not.toContain('AFTER');
+    expect(sql).not.toContain(' FIRST');
+    expect(sql).not.toContain('NONE');
+  });
+
   it('uses native limited alter syntax for clickhouse and tdengine instead of mysql syntax', () => {
     const clickhouseSql = buildAlterTablePreviewSql(buildInput({
       dbType: 'clickhouse',
@@ -184,8 +218,8 @@ describe('tableDesignerSchemaSql', () => {
     expect(tdengineSql).not.toContain('AFTER');
   });
 
-  it('treats mariadb doris and sphinx as mysql-family only where mysql syntax is intended', () => {
-    for (const dbType of ['mariadb', 'diros', 'sphinx']) {
+  it('treats mariadb and sphinx as mysql-family only where mysql syntax is intended', () => {
+    for (const dbType of ['mariadb', 'sphinx']) {
       const sql = buildAlterTablePreviewSql(buildInput({ dbType }));
       expect(sql).toContain('ALTER TABLE `users`');
       expect(sql).toContain('ADD COLUMN `age` int NULL');
