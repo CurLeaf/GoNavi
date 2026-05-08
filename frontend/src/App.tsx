@@ -2371,7 +2371,13 @@ function App() {
       }
 
       const handleMacNativeEscapeCapture = (event: KeyboardEvent) => {
-          if (!shouldSuppressMacNativeEscapeExit(isMacRuntime, useNativeMacWindowControls, useStore.getState().windowState === 'fullscreen', event)) {
+          if (!shouldSuppressMacNativeEscapeExit(
+              isMacRuntime,
+              useNativeMacWindowControls,
+              useStore.getState().windowState === 'fullscreen',
+              event,
+              { isEditableTarget: isEditableElement(event.target) },
+          )) {
               return;
           }
           event.preventDefault();

@@ -31,8 +31,12 @@ export const shouldSuppressMacNativeEscapeExit = (
   useNativeMacWindowControls: boolean,
   isFullscreen: boolean,
   event: Pick<KeyboardEvent, 'key' | 'defaultPrevented'>,
+  options?: { isEditableTarget?: boolean },
 ): boolean => {
   if (!isMacRuntime || !useNativeMacWindowControls || !isFullscreen) {
+    return false;
+  }
+  if (options?.isEditableTarget) {
     return false;
   }
   if (event.defaultPrevented) {
