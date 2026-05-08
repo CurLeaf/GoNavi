@@ -1,0 +1,115 @@
+package app
+
+import (
+	"testing"
+
+	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
+	"GoNavi-Wails/internal/secretstore"
+)
+
+type fakeCreateDatabaseDB struct {
+	connectConfig connection.ConnectionConfig
+	execQueries   []string
+}
+
+func (f *fakeCreateDatabaseDB) Connect(config connection.ConnectionConfig) error {
+	f.connectConfig = config
+	return nil
+}
+func (f *fakeCreateDatabaseDB) Close() error { return nil }
+func (f *fakeCreateDatabaseDB) Ping() error  { return nil }
+func (f *fakeCreateDatabaseDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	return nil, nil, nil
+}
+func (f *fakeCreateDatabaseDB) Exec(query string) (int64, error) {
+	f.execQueries = append(f.execQueries, query)
+	return 0, nil
+}
+func (f *fakeCreateDatabaseDB) GetDatabases() ([]string, error) { return nil, nil }
+func (f *fakeCreateDatabaseDB) GetTables(dbName string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeCreateDatabaseDB) GetCreateStatement(dbName, tableName string) (string, error) {
+	return "", nil
+}
+func (f *fakeCreateDatabaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+	return nil, nil
+}
+func (f *fakeCreateDatabaseDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
+	return nil, nil
+}
+func (f *fakeCreateDatabaseDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
+	return nil, nil
+}
+func (f *fakeCreateDatabaseDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
+	return nil, nil
+}
+func (f *fakeCreateDatabaseDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
+	return nil, nil
+}
+
+var _ db.Database = (*fakeCreateDatabaseDB)(nil)
+
+func TestResolveDDLDBType_SQLServerAliases(t *testing.T) {
+	tests := []connection.ConnectionConfig{
+		{Type: "mssql"},
+		{Type: "sql_server"},
+		{Type: "custom", Driver: "mssql"},
+		{Type: "custom", Driver: "sql-server"},
+	}
+
+	for _, cfg := range tests {
+		if got := resolveDDLDBType(cfg); got != "sqlserver" {
+			t.Fatalf("resolveDDLDBType(%+v) = %q, want sqlserver", cfg, got)
+		}
+	}
+}
+
+func TestBuildRunConfigForDDL_CustomSQLServerUsesDatabase(t *testing.T) {
+	got := buildRunConfigForDDL(connection.ConnectionConfig{
+		Type:     "custom",
+		Driver:   "mssql",
+		Database: "master",
+	}, "sqlserver", "target_db")
+	if got.Database != "target_db" {
+		t.Fatalf("expected custom SQL Server DDL database target_db, got %q", got.Database)
+	}
+}
+
+func TestCreateDatabase_SQLServerUsesBracketIdentifiers(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	fakeDB := &fakeCreateDatabaseDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.CreateDatabase(connection.ConnectionConfig{
+		Type:     "sqlserver",
+		Database: "master",
+	}, "lg")
+
+	if !result.Success {
+		t.Fatalf("expected SQL Server create database success, got failure: %s", result.Message)
+	}
+	if fakeDB.connectConfig.Database != "" {
+		t.Fatalf("expected create database connection to clear database and use default master, got %q", fakeDB.connectConfig.Database)
+	}
+	if len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one create database statement, got %d: %#v", len(fakeDB.execQueries), fakeDB.execQueries)
+	}
+	const want = "CREATE DATABASE [lg]"
+	if fakeDB.execQueries[0] != want {
+		t.Fatalf("unexpected SQL Server create database SQL, want %q got %q", want, fakeDB.execQueries[0])
+	}
+}

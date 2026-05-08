@@ -106,6 +106,11 @@ func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connectio
 }
 
 func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	dbName = strings.TrimSpace(dbName)
+	if dbName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+
 	runConfig := config
 	runConfig.Database = ""
 
@@ -120,6 +125,8 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
 		escapedDbName = strings.ReplaceAll(dbName, `"`, `""`)
 		query = fmt.Sprintf("CREATE DATABASE \"%s\"", escapedDbName)
+	} else if dbType == "sqlserver" {
+		query = fmt.Sprintf("CREATE DATABASE %s", quoteIdentByType(dbType, dbName))
 	} else if dbType == "tdengine" {
 		query = fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", quoteIdentByType(dbType, dbName))
 	} else if dbType == "clickhouse" {
@@ -145,6 +152,9 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "doris" {
 		return "diros"
 	}
+	if dbType == "mssql" || dbType == "sql_server" || dbType == "sql-server" {
+		return "sqlserver"
+	}
 	if dbType == "oceanbase" && isOceanBaseOracleProtocol(config) {
 		return "oracle"
 	}
@@ -164,6 +174,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "sqlite"
 	case "sphinxql":
 		return "sphinx"
+	case "mssql", "sqlserver", "sql_server", "sql-server":
+		return "sqlserver"
 	case "diros", "doris":
 		return "diros"
 	case "kingbase", "kingbase8", "kingbasees", "kingbasev8":
@@ -191,6 +203,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "sqlite"
 	case strings.Contains(driver, "sphinx"):
 		return "sphinx"
+	case strings.Contains(driver, "sqlserver"), strings.Contains(driver, "sql_server"), strings.Contains(driver, "sql-server"), strings.Contains(driver, "mssql"):
+		return "sqlserver"
 	case strings.Contains(driver, "diros"), strings.Contains(driver, "doris"):
 		return "diros"
 	case strings.Contains(driver, "oceanbase"):
@@ -257,7 +271,7 @@ func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbN
 	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
 		// custom 连接的 dbName 语义依赖 driver，尽量在常见驱动上对齐内置类型行为。
 		switch dbType {
-		case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "dameng", "clickhouse":
+		case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "dameng", "sqlserver", "clickhouse":
 			if strings.TrimSpace(dbName) != "" {
 				runConfig.Database = strings.TrimSpace(dbName)
 			}
