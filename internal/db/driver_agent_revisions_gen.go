@@ -10,7 +10,7 @@ func init() {
 		"sphinx":     "src-4f9ec83df79bc8f7",
 		"sqlserver":  "src-172613975f6f18d2",
 		"sqlite":     "src-2ff8c7eb368b324b",
-		"duckdb":     "src-6d20adc5b77a9ed6",
+		"duckdb":     "src-8af9c516b81fd5ee",
 		"dameng":     "src-659f5656149e216c",
 		"kingbase":   "src-82ff6ff9440233cd",
 		"highgo":     "src-a3915194d9a50d5d",

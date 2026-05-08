@@ -198,6 +198,81 @@ func TestBuildOptionalDriverFallbackProgressMessageReportsBundleFallback(t *test
 	}
 }
 
+func TestDuckDBWindowsBuildUsesDynamicLibraryTag(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("DuckDB Windows dynamic library flow only applies on windows/amd64")
+	}
+
+	tags, err := optionalDriverBuildTags("duckdb", "")
+	if err != nil {
+		t.Fatalf("resolve DuckDB build tags failed: %v", err)
+	}
+	if !strings.Contains(tags, "gonavi_duckdb_driver") || !strings.Contains(tags, "duckdb_use_lib") {
+		t.Fatalf("expected DuckDB Windows build tags to include dynamic library tag, got %q", tags)
+	}
+	if !shouldPreferSourceBuildBeforeDownload("duckdb", "") {
+		t.Fatal("expected DuckDB Windows install to try local dynamic-library build before downloads")
+	}
+	if !shouldSkipReusableAgentCandidate("duckdb", "") {
+		t.Fatal("expected DuckDB Windows install to skip reusable static agent candidates")
+	}
+	urls := resolveOptionalDriverAgentDownloadURLs(driverDefinition{Type: "duckdb"}, "https://example.com/duckdb-driver-agent-windows-amd64.exe", "")
+	if len(urls) != 0 {
+		t.Fatalf("expected DuckDB Windows install to skip single-file direct downloads, got %v", urls)
+	}
+}
+
+func TestInstallOptionalDriverAgentFromLocalZipExtractsDuckDBDLL(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("DuckDB DLL support file is only required on windows/amd64")
+	}
+
+	tmpDir := t.TempDir()
+	zipPath := filepath.Join(tmpDir, "duckdb-driver.zip")
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip failed: %v", err)
+	}
+	zw := zip.NewWriter(zipFile)
+	for name, content := range map[string]string{
+		"Windows/duckdb-driver-agent-windows-amd64.exe": "agent",
+		"Windows/duckdb.dll":                            "dll",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s failed: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %s failed: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer failed: %v", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		t.Fatalf("close zip file failed: %v", err)
+	}
+
+	target := filepath.Join(tmpDir, "install", "duckdb-driver-agent.exe")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create install dir failed: %v", err)
+	}
+	entryName, err := installOptionalDriverAgentFromLocalZip(zipPath, driverDefinition{Type: "duckdb", Name: "DuckDB"}, target, "")
+	if err != nil {
+		t.Fatalf("install local DuckDB zip failed: %v", err)
+	}
+	if entryName != "Windows/duckdb-driver-agent-windows-amd64.exe" {
+		t.Fatalf("unexpected extracted agent entry: %q", entryName)
+	}
+	dllBytes, err := os.ReadFile(filepath.Join(filepath.Dir(target), "duckdb.dll"))
+	if err != nil {
+		t.Fatalf("expected duckdb.dll to be extracted: %v", err)
+	}
+	if string(dllBytes) != "dll" {
+		t.Fatalf("unexpected duckdb.dll content: %q", string(dllBytes))
+	}
+}
+
 func TestDownloadDriverPackageRejectsUnsupportedMongoVersion(t *testing.T) {
 	app := &App{}
 

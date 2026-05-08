@@ -7,6 +7,9 @@ cd "$SCRIPT_DIR"
 
 DEFAULT_DRIVERS=(mariadb oceanbase doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
 DEFAULT_PLATFORMS=(darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64 linux/arm64)
+DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
+DUCKDB_WINDOWS_LIBRARY_URL="https://github.com/duckdb/duckdb/releases/download/${DUCKDB_WINDOWS_LIBRARY_VERSION}/libduckdb-windows-amd64.zip"
+DUCKDB_WINDOWS_SUPPORT_DLL="duckdb.dll"
 
 usage() {
   cat <<'EOF'
@@ -137,6 +140,54 @@ PY
     echo "❌ 未找到 zip 或 python3，无法生成驱动总包 zip。"
     exit 1
   fi
+}
+
+prepare_duckdb_windows_library() {
+  local cache_root="$1"
+  local lib_dir="$cache_root/duckdb-windows-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
+  local zip_path="$cache_root/libduckdb-windows-amd64.zip"
+
+  if [[ -f "$lib_dir/duckdb.dll" && -f "$lib_dir/duckdb.lib" ]]; then
+    printf '%s\n' "$lib_dir"
+    return 0
+  fi
+
+  mkdir -p "$lib_dir"
+  echo "⬇️  下载 DuckDB Windows 官方动态库：$DUCKDB_WINDOWS_LIBRARY_URL" >&2
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$DUCKDB_WINDOWS_LIBRARY_URL" -O "$zip_path"
+  else
+    echo "❌ 未找到 curl 或 wget，无法下载 DuckDB Windows 动态库。" >&2
+    return 1
+  fi
+
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -qo "$zip_path" -d "$lib_dir"
+  elif command -v python3 >/dev/null 2>&1; then
+    DUCKDB_LIB_ZIP="$zip_path" DUCKDB_LIB_DIR="$lib_dir" python3 - <<'PY'
+import os
+import zipfile
+
+zip_path = os.environ["DUCKDB_LIB_ZIP"]
+target = os.environ["DUCKDB_LIB_DIR"]
+with zipfile.ZipFile(zip_path) as zf:
+    zf.extractall(target)
+PY
+  else
+    echo "❌ 未找到 unzip 或 python3，无法解压 DuckDB Windows 动态库。" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$lib_dir/duckdb.dll" || ! -f "$lib_dir/duckdb.lib" ]]; then
+    echo "❌ DuckDB Windows 动态库包缺少 duckdb.dll 或 duckdb.lib。" >&2
+    return 1
+  fi
+
+  cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
+  cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
+  printf '%s\n' "$lib_dir"
 }
 
 join_by_comma() {
@@ -282,6 +333,7 @@ for platform in "${platforms[@]}"; do
 
     build_driver="$(build_driver_name "$driver")"
     tag="gonavi_${build_driver}_driver"
+    build_tags="$tag"
     asset_name="${driver}-driver-agent-${goos}-${goarch}"
     if [[ "$goos" == "windows" ]]; then
       asset_name="${asset_name}.exe"
@@ -292,11 +344,22 @@ for platform in "${platforms[@]}"; do
     if [[ "$driver" == "duckdb" ]]; then
       cgo_enabled=1
     fi
+    duckdb_lib_dir=""
+    if [[ "$driver" == "duckdb" && "$goos" == "windows" && "$goarch" == "amd64" ]]; then
+      duckdb_lib_dir="$(prepare_duckdb_windows_library "$bundle_stage_dir")"
+      build_tags="$build_tags duckdb_use_lib"
+    fi
 
-    echo "🔧 构建 $driver -> $asset_name (platform=$platform, tag=$tag, CGO_ENABLED=$cgo_enabled)"
+    echo "🔧 构建 $driver -> $asset_name (platform=$platform, tags=$build_tags, CGO_ENABLED=$cgo_enabled)"
     set +e
-    CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" GOTOOLCHAIN=auto \
-      go build -tags "$tag" -trimpath -ldflags "-s -w" -o "$output_path" ./cmd/optional-driver-agent
+    if [[ -n "$duckdb_lib_dir" ]]; then
+      CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" GOTOOLCHAIN=auto \
+        CGO_LDFLAGS="-L${duckdb_lib_dir} -lduckdb" PATH="${duckdb_lib_dir}:$PATH" \
+        go build -tags "$build_tags" -trimpath -ldflags "-s -w" -o "$output_path" ./cmd/optional-driver-agent
+    else
+      CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" GOTOOLCHAIN=auto \
+        go build -tags "$build_tags" -trimpath -ldflags "-s -w" -o "$output_path" ./cmd/optional-driver-agent
+    fi
     build_exit=$?
     set -e
 
@@ -310,6 +373,11 @@ for platform in "${platforms[@]}"; do
     fi
 
     cp "$output_path" "$bundle_platform_dir/$asset_name"
+    if [[ -n "$duckdb_lib_dir" ]]; then
+      cp "$duckdb_lib_dir/$DUCKDB_WINDOWS_SUPPORT_DLL" "$output_dir_abs/$DUCKDB_WINDOWS_SUPPORT_DLL"
+      cp "$duckdb_lib_dir/$DUCKDB_WINDOWS_SUPPORT_DLL" "$bundle_platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL"
+      built_assets+=("$platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL")
+    fi
     built_assets+=("$platform_dir/$asset_name")
   done
 done
