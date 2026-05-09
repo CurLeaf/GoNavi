@@ -2,7 +2,7 @@
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -69,7 +69,7 @@ import {
   isShortcutMatch,
   normalizeShortcutCombo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, shouldToggleMaximisedWindowForScaleFix } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -630,6 +630,7 @@ function App() {
       let lastRatio = Number(window.devicePixelRatio) || 1;
       let lastFixAt = 0;
       let activationTimer: number | null = null;
+      let resizeTimer: number | null = null;
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
@@ -669,12 +670,12 @@ function App() {
                   }
 
                   try {
-                      WindowToggleMaximise();
-                      await wait(48);
-                      WindowToggleMaximise();
-                      await wait(64);
+                      WindowUnmaximise();
+                      await wait(96);
+                      WindowMaximise();
+                      await wait(96);
                   } catch (e) {
-                      console.warn("Wails Window maximise toggle unavailable in fixWindowScaleIfNeeded", e);
+                      console.warn("Wails Window maximise restore unavailable in fixWindowScaleIfNeeded", e);
                   }
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
@@ -687,7 +688,7 @@ function App() {
                   return;
               }
 
-              if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+              if (!shouldApplyWindowsScaleFix(reason, hasViewportScaleDrift)) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
@@ -718,6 +719,24 @@ function App() {
           void fixWindowScaleIfNeeded('ratio-change');
       };
 
+      const scheduleDevicePixelRatioCheck = (trigger: WindowsScaleCheckTrigger) => {
+          if (cancelled) return;
+          const delayMs = resolveWindowsScaleCheckDelayMs(trigger);
+          if (delayMs <= 0) {
+              checkDevicePixelRatio();
+              return;
+          }
+
+          if (resizeTimer !== null) {
+              window.clearTimeout(resizeTimer);
+          }
+          resizeTimer = window.setTimeout(() => {
+              resizeTimer = null;
+              if (cancelled) return;
+              checkDevicePixelRatio();
+          }, delayMs);
+      };
+
       const scheduleActivationFix = () => {
           if (cancelled) return;
           if (activationTimer !== null) {
@@ -732,7 +751,7 @@ function App() {
 
       const handleWindowFocus = () => {
           if (cancelled) return;
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('focus');
           scheduleActivationFix();
       };
 
@@ -741,18 +760,22 @@ function App() {
           if (document.visibilityState !== 'visible') {
               return;
           }
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('visibilitychange');
           scheduleActivationFix();
       };
 
       const handlePageShow = () => {
           if (cancelled) return;
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('pageshow');
           scheduleActivationFix();
       };
 
+      const handleWindowResize = () => {
+          scheduleDevicePixelRatioCheck('resize');
+      };
+
       const pollTimer = window.setInterval(checkDevicePixelRatio, 900);
-      window.addEventListener('resize', checkDevicePixelRatio);
+      window.addEventListener('resize', handleWindowResize);
       window.addEventListener('focus', handleWindowFocus);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -762,8 +785,11 @@ function App() {
           if (activationTimer !== null) {
               window.clearTimeout(activationTimer);
           }
+          if (resizeTimer !== null) {
+              window.clearTimeout(resizeTimer);
+          }
           window.clearInterval(pollTimer);
-          window.removeEventListener('resize', checkDevicePixelRatio);
+          window.removeEventListener('resize', handleWindowResize);
           window.removeEventListener('focus', handleWindowFocus);
           window.removeEventListener('pageshow', handlePageShow);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -2202,9 +2228,15 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
-          await WindowToggleMaximise();
+          const isMaximised = await WindowIsMaximised().catch(() => false);
+          if (isMaximised) {
+              WindowUnmaximise();
+          } else {
+              WindowMaximise();
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 96));
           await syncWindowStateFromRuntime();
-          void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
+          void emitWindowDiagnostic('action:titlebar-toggle:after-set-maximise-state');
       } catch (_) {
           // ignore
       }
