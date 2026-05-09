@@ -103,6 +103,7 @@ describe('DataGrid layout', () => {
 
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
+    expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
     const schemaTableMarkup = renderToStaticMarkup(
       <DataGrid

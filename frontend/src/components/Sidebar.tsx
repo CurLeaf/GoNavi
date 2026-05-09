@@ -32,7 +32,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   CheckOutlined,
   FilterOutlined,
   DashboardOutlined,
-  WarningOutlined
+  WarningOutlined,
+  AimOutlined
 	} from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -48,6 +49,14 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { resolveConnectionHostTokens } from '../utils/tabDisplay';
+import {
+    findSidebarNodePathByKey,
+    findSidebarNodePathForLocate,
+    normalizeSidebarLocateObjectRequest,
+    normalizeSidebarLocateObjectRequestFromTab,
+    resolveSidebarLocateTarget,
+    type SidebarLocateTreeNodeLike,
+} from '../utils/sidebarLocate';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../utils/connectionVisual';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
@@ -175,6 +184,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
+  const tabs = useStore(state => state.tabs);
+  const activeTabId = useStore(state => state.activeTabId);
   const setActiveContext = useStore(state => state.setActiveContext);
   const removeConnection = useStore(state => state.removeConnection);
   const connectionTags = useStore(state => state.connectionTags);
@@ -198,6 +209,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
+  const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
+  const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
+  const canLocateActiveTab = !!activeTabLocateRequest;
 
   // Background Helper (Duplicate logic for now, ideally shared)
   const getBg = (darkHex: string) => {
@@ -257,17 +271,22 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const [autoExpandParent, setAutoExpandParent] = useState(true);
   const [loadedKeys, setLoadedKeys] = useState<React.Key[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-	  const selectedNodesRef = useRef<any[]>([]);
-	  const loadingNodesRef = useRef<Set<string>>(new Set());
-	  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	  const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
-	  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
-	  const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
-	  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
+  const selectedNodesRef = useRef<any[]>([]);
+  const loadingNodesRef = useRef<Set<string>>(new Set());
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
+  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
+  const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, items: MenuProps['items'] } | null>(null);
   
   // Virtual Scroll State
   const [treeHeight, setTreeHeight] = useState(500);
   const treeContainerRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<any>(null);
+  const treeDataRef = useRef<TreeNode[]>([]);
+  useEffect(() => {
+      treeDataRef.current = treeData;
+  }, [treeData]);
 
   useEffect(() => {
       if (!treeContainerRef.current) return;
@@ -533,6 +552,38 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       }
     }
     return null;
+  };
+
+  const replaceTreeNodeChildren = (key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
+      const nextTreeData = updateTreeData(treeDataRef.current, key, children);
+      treeDataRef.current = nextTreeData;
+      setTreeData(nextTreeData);
+      return nextTreeData;
+  };
+
+  const mergeExpandedTreeKeys = (requiredKeys: React.Key[]) => {
+      setExpandedKeys(prev => {
+          const merged = [...prev];
+          requiredKeys.forEach(key => {
+              if (!merged.includes(key)) merged.push(key);
+          });
+          return merged;
+      });
+      setAutoExpandParent(true);
+  };
+
+  const scrollSidebarTreeToKey = (key: React.Key) => {
+      const runAfterFrame = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+          ? window.requestAnimationFrame.bind(window)
+          : (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 0);
+
+      runAfterFrame(() => {
+          treeRef.current?.scrollTo?.({ key, align: 'auto' });
+          runAfterFrame(() => {
+              const selectedNode = treeContainerRef.current?.querySelector('.ant-tree-treenode-selected') as HTMLElement | null;
+              selectedNode?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+          });
+      });
   };
 
   const decorateExternalSQLTreeNode = (node: ExternalSQLTreeNode): TreeNode => {
@@ -1169,12 +1220,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                           isLeaf: true,
                       }));
                       const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
-                      setTreeData(origin => updateTreeData(origin, node.key, [...monitoringNodes, ...modeNodes, ...diagnosticNode]));
+                      replaceTreeNodeChildren(node.key, [...monitoringNodes, ...modeNodes, ...diagnosticNode]);
                   } else {
                       const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                       if (diagnosticNode.length > 0) {
-                          setTreeData(origin => updateTreeData(origin, node.key, diagnosticNode));
+                          replaceTreeNodeChildren(node.key, diagnosticNode);
                           message.warning({ content: `JVM Provider 探测失败：${res.message || '未知错误'}；已保留诊断增强入口`, key: `conn-${conn.id}-jvm-caps` });
                       } else {
                           setLoadedKeys(prev => prev.filter(k => k !== node.key));
@@ -1185,7 +1236,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
                   setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                   if (diagnosticNode.length > 0) {
-                      setTreeData(origin => updateTreeData(origin, node.key, diagnosticNode));
+                      replaceTreeNodeChildren(node.key, diagnosticNode);
                       message.warning({ content: `JVM Provider 探测异常：${e?.message || String(e)}；已保留诊断增强入口`, key: `conn-${conn.id}-jvm-caps` });
                   } else {
                       setLoadedKeys(prev => prev.filter(k => k !== node.key));
@@ -1217,7 +1268,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                       if (conn.includeRedisDatabases && conn.includeRedisDatabases.length > 0) {
                           dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));
                       }
-                      setTreeData(origin => updateTreeData(origin, node.key, dbs));
+                      replaceTreeNodeChildren(node.key, dbs);
                   } else {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                       message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
@@ -1251,7 +1302,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
 
             if (dbs.length > 0) {
-                setTreeData(origin => updateTreeData(origin, node.key, dbs));
+                replaceTreeNodeChildren(node.key, dbs);
             } else {
                 // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
                 setLoadedKeys(prev => prev.filter(k => k !== node.key));
@@ -1305,7 +1356,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                   },
                   isLeaf: item.hasChildren !== true,
               }));
-              setTreeData(origin => updateTreeData(origin, node.key, resourceNodes));
+              replaceTreeNodeChildren(node.key, resourceNodes);
           } else {
               setLoadedKeys(prev => prev.filter(k => k !== node.key));
               message.error({ content: res.message, key: `jvm-resource-${node.key}` });
@@ -1616,7 +1667,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                        };
 	                    });
 
-	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, externalSQLRootNode, ...schemaNodes]));
+	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...schemaNodes]);
 	            } else {
 	                const groupedNodes: TreeNode[] = [
 	                    buildObjectGroup(key as string, 'tables', '表', <TableOutlined />, tableEntries.map(buildTableNode)),
@@ -1625,7 +1676,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                    buildObjectGroup(key as string, 'triggers', '触发器', <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
 	                ];
 
-	                setTreeData(origin => updateTreeData(origin, key, [queriesNode, externalSQLRootNode, ...groupedNodes]));
+	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...groupedNodes]);
 	            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
@@ -1638,6 +1689,102 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	          loadingNodesRef.current.delete(loadKey);
 	      }
   };
+
+  const locateObjectInSidebarRef = useRef<(detail: unknown) => Promise<void>>(async () => {});
+
+  const waitForSidebarLoadKey = async (loadKey: string) => {
+      for (let attempt = 0; attempt < 30 && loadingNodesRef.current.has(loadKey); attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, 50));
+      }
+  };
+
+  const locateObjectInSidebar = async (detail: unknown) => {
+      const request = normalizeSidebarLocateObjectRequest(detail);
+      if (!request) {
+          message.warning('当前标签页没有可定位的表上下文');
+          return;
+      }
+
+      const conn = connections.find(item => item.id === request.connectionId);
+      if (!conn) {
+          message.warning('未找到当前表对应的连接');
+          return;
+      }
+
+      const target = resolveSidebarLocateTarget(request, {
+          groupBySchema: shouldHideSchemaPrefix(conn),
+      });
+      const objectLabel = request.objectGroup === 'views' ? '视图' : '表';
+
+      let path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
+      const dbLoadKey = `dbs-${request.connectionId}`;
+      const tableLoadKey = `tables-${request.connectionId}-${request.dbName}`;
+
+      if (!path && !findSidebarNodePathByKey(treeDataRef.current as SidebarLocateTreeNodeLike[], target.databaseKey)) {
+          const connectionNode = findTreeNodeByKey(treeDataRef.current, target.connectionKey);
+          if (!connectionNode) {
+              message.warning('未在左侧树找到当前连接');
+              return;
+          }
+          if (loadingNodesRef.current.has(dbLoadKey)) {
+              await waitForSidebarLoadKey(dbLoadKey);
+          } else {
+              await loadDatabases(connectionNode);
+          }
+      }
+
+      const dbNode = findTreeNodeByKey(treeDataRef.current, target.databaseKey);
+      if (!dbNode) {
+          message.warning(`未在左侧树找到数据库：${request.dbName}`);
+          return;
+      }
+
+      path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
+      if (!path) {
+          if (loadingNodesRef.current.has(tableLoadKey)) {
+              await waitForSidebarLoadKey(tableLoadKey);
+          } else {
+              await loadTables(dbNode);
+          }
+          path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
+      }
+
+      if (!path) {
+          message.warning(`${objectLabel}未在左侧树中找到：${request.tableName}，请刷新数据库节点后重试`);
+          return;
+      }
+
+      const targetKey = path[path.length - 1];
+      const targetNode = findTreeNodeByKey(treeDataRef.current, targetKey);
+      setSearchValue('');
+      mergeExpandedTreeKeys(path.slice(0, -1));
+      setSelectedKeys([targetKey]);
+      selectedNodesRef.current = targetNode ? [targetNode] : [];
+      setActiveContext({ connectionId: request.connectionId, dbName: request.dbName });
+      scrollSidebarTreeToKey(targetKey);
+  };
+
+  const handleLocateActiveTabInSidebar = () => {
+      if (!activeTabLocateRequest) {
+          message.warning('当前标签页没有可定位的表上下文');
+          return;
+      }
+      void locateObjectInSidebar(activeTabLocateRequest);
+  };
+
+  useEffect(() => {
+      locateObjectInSidebarRef.current = locateObjectInSidebar;
+  });
+
+  useEffect(() => {
+      const handleLocateSidebarObject = (event: Event) => {
+          void locateObjectInSidebarRef.current((event as CustomEvent).detail);
+      };
+      window.addEventListener('gonavi:locate-sidebar-object', handleLocateSidebarObject as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:locate-sidebar-object', handleLocateSidebarObject as EventListener);
+      };
+  }, []);
 
   const onLoadData = async ({ key, children, dataRef, type }: any) => {
     if (type === 'tag') return;
@@ -1688,7 +1835,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
         ];
         
-        setTreeData(origin => updateTreeData(origin, key, folders));
+        replaceTreeNodeChildren(key, folders);
     }
   };
 
@@ -3708,7 +3855,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         });
                         setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
                         setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        setTreeData(origin => updateTreeData(origin, node.key, undefined));
+                        replaceTreeNodeChildren(node.key, undefined);
                         closeTabsByConnection(String(node.key));
                         message.success("已断开连接");
                     }
@@ -3858,7 +4005,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                      // Reset loaded state recursively
                      setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
                      // Clear children (undefined to trigger reload)
-                     setTreeData(origin => updateTreeData(origin, node.key, undefined));
+                     replaceTreeNodeChildren(node.key, undefined);
                      closeTabsByConnection(String(node.key));
                      message.success("已断开连接");
                  }
@@ -4006,7 +4153,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                    });
                    setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
                    setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                   setTreeData(origin => updateTreeData(origin, node.key, undefined));
+                   replaceTreeNodeChildren(node.key, undefined);
                    if (dbConnId && dbName) {
                        closeTabsByDatabase(dbConnId, dbName);
                    }
@@ -4255,13 +4402,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                         onOk: () => {
                             deleteQuery(q.id);
                             // 从树中移除节点
-                            setTreeData(origin => {
-                                const removeNode = (list: TreeNode[]): TreeNode[] =>
-                                    list
-                                        .filter(n => n.key !== node.key)
-                                        .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
-                                return removeNode(origin);
-                            });
+                            const removeNode = (list: TreeNode[]): TreeNode[] =>
+                                list
+                                    .filter(n => n.key !== node.key)
+                                    .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
+                            const nextTreeData = removeNode(treeDataRef.current);
+                            treeDataRef.current = nextTreeData;
+                            setTreeData(nextTreeData);
                             message.success('查询已删除');
                         }
                     });
@@ -4552,13 +4699,35 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 <Button size="small" type="text" icon={<DatabaseOutlined />} onClick={() => openBatchDatabaseModal()} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
             </Tooltip>
             <Tooltip title="运行外部SQL文件">
-                <Button size="small" type="text" icon={<FileAddOutlined />} onClick={handleOpenSQLFileFromToolbar} style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }} />
+                <Button
+                    size="small"
+                    type="text"
+                    icon={<FileAddOutlined />}
+                    data-sidebar-open-external-sql-file-action="true"
+                    onClick={handleOpenSQLFileFromToolbar}
+                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
+                />
+            </Tooltip>
+            <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
+                <span>
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<AimOutlined />}
+                        aria-label="定位当前打开表"
+                        data-sidebar-locate-current-tab-action="true"
+                        disabled={!canLocateActiveTab}
+                        onClick={handleLocateActiveTabInSidebar}
+                        style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
+                    />
+                </span>
             </Tooltip>
         </div>
 
         <div ref={treeContainerRef} className="sidebar-tree-scroll-shell" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
             <div className="sidebar-tree-scroll-content">
                 <Tree
+                    ref={treeRef}
                     showIcon
                     draggable={{
                         icon: false,
