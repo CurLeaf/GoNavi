@@ -2222,10 +2222,37 @@ function App() {
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
+  const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
   const latestMouseX = React.useRef<number>(0); // Store latest mouse position
+  const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
+
+  const restoreSidebarDragBodyStyles = () => {
+      if (!sidebarDragBodyStyleRef.current || typeof document === 'undefined') {
+          sidebarDragBodyStyleRef.current = null;
+          return;
+      }
+
+      const previous = sidebarDragBodyStyleRef.current;
+      document.body.style.cursor = previous.cursor;
+      document.body.style.userSelect = previous.userSelect;
+      (document.body.style as any).WebkitUserSelect = previous.webkitUserSelect;
+      sidebarDragBodyStyleRef.current = null;
+  };
 
   const handleSidebarMouseDown = (e: React.MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+
+      if (typeof document !== 'undefined') {
+          sidebarDragBodyStyleRef.current = {
+              cursor: document.body.style.cursor,
+              userSelect: document.body.style.userSelect,
+              webkitUserSelect: (document.body.style as any).WebkitUserSelect || '',
+          };
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          (document.body.style as any).WebkitUserSelect = 'none';
+      }
       
       if (ghostRef.current) {
           ghostRef.current.style.left = `${sidebarWidth}px`;
@@ -2271,6 +2298,7 @@ function App() {
       if (ghostRef.current) {
           ghostRef.current.style.display = 'none';
       }
+      restoreSidebarDragBodyStyles();
       
       sidebarDragRef.current = null;
       document.removeEventListener('mousemove', handleSidebarMouseMove);
@@ -2666,7 +2694,7 @@ function App() {
                     </div>
                 </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, position: 'relative' }}>
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
                     <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
                         <Sidebar onEditConnection={handleEditConnection} />
                     </div>
@@ -2704,6 +2732,25 @@ function App() {
                             </div>
                         </div>
                     )}
+                    <div
+                        onMouseDown={handleSidebarMouseDown}
+                        role="separator"
+                        aria-orientation="vertical"
+                        title="拖动调整宽度"
+                        style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: sidebarResizeHandleWidth,
+                            cursor: 'col-resize',
+                            zIndex: 3,
+                            touchAction: 'none',
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            background: 'transparent',
+                        }}
+                    />
                 </div>
 
                 {/* Floating SQL Log Toggle */}
@@ -2743,22 +2790,6 @@ function App() {
                     </Button>
                 </div>
             </div>
-            
-            {/* Sidebar Resize Handle */}
-            <div 
-                onMouseDown={handleSidebarMouseDown}
-                style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: '5px',
-                    cursor: 'col-resize',
-                    zIndex: 100,
-                    // background: 'transparent' // transparent usually, visible on hover if desired
-                }}
-                title="拖动调整宽度"
-            />
           </Sider>
            <Content style={{ background: bgContent, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
              {securityUpdateEntryVisibility.showBanner && !isSecurityUpdateBannerDismissed && (
