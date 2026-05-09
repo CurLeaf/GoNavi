@@ -203,6 +203,7 @@ const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
 
 type SimpleSelectInfo = {
     selectsAll: boolean;
+    selectsBareAll: boolean;
     writableColumns: Record<string, string>;
 };
 
@@ -282,6 +283,7 @@ const splitTopLevelComma = (text: string): string[] => {
 const SIMPLE_IDENTIFIER_PATH_RE = /^(?:[`"\[]?[A-Za-z_][\w$]*[`"\]]?\s*\.\s*){0,2}[`"\[]?[A-Za-z_][\w$]*[`"\]]?$/;
 const QUERY_ALIAS_RESERVED = new Set([
     'where', 'group', 'order', 'having', 'limit', 'fetch', 'offset', 'join', 'left', 'right', 'inner', 'outer', 'on', 'union',
+    'for', 'connect', 'start', 'window', 'sample', 'pivot', 'unpivot', 'qualify', 'model',
 ]);
 
 const getLastIdentifierPart = (path: string): string => {
@@ -325,16 +327,21 @@ const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
 
     const writableColumns: Record<string, string> = {};
     let selectsAll = false;
+    let selectsBareAll = false;
     for (const item of splitTopLevelComma(selectList)) {
+        const trimmedItem = String(item || '').trim();
         const resolved = resolveSimpleSelectItemColumn(item);
         if (!resolved) continue;
         if (resolved === 'all') {
             selectsAll = true;
+            if (trimmedItem === '*') {
+                selectsBareAll = true;
+            }
             continue;
         }
         writableColumns[resolved.resultName] = resolved.sourceName;
     }
-    return { selectsAll, writableColumns };
+    return { selectsAll, selectsBareAll, writableColumns };
 };
 
 const appendQuerySelectExpressions = (sql: string, expressions: string[]): string => {
@@ -343,6 +350,89 @@ const appendQuerySelectExpressions = (sql: string, expressions: string[]): strin
         /^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+[\s\S]*)$/i,
         (_match, prefix, selectList, rest) => `${prefix}${String(selectList).trimEnd()}, ${expressions.join(', ')}${rest}`,
     );
+};
+
+const QUERY_LOCATOR_SOURCE_ALIAS = 'gonavi_query_source';
+
+const rewriteOracleSelectAllWithExpressions = (sql: string, expressions: string[]): string | undefined => {
+    if (expressions.length === 0) return undefined;
+
+    const match = String(sql || '').match(/^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+)([\s\S]*)$/i);
+    if (!match) return undefined;
+
+    const prefix = match[1];
+    const selectList = match[2].trim();
+    const fromKeyword = match[3];
+    const fromTail = match[4];
+    const selectItems = splitTopLevelComma(selectList);
+    if (selectItems.length === 0) return undefined;
+
+    let selectAllFound = false;
+    for (const item of selectItems) {
+        if (String(item || '').trim() === '*') {
+            selectAllFound = true;
+            break;
+        }
+    }
+    if (!selectAllFound) return undefined;
+
+    const fromTrimmed = fromTail.trimStart();
+    const tableMatch = fromTrimmed.match(/^((?:[`"\[]?\w+[`"\]]?)(?:\s*\.\s*(?:[`"\[]?\w+[`"\]]?)){0,2})([\s\S]*)$/);
+    if (!tableMatch) return undefined;
+
+    const tableText = tableMatch[1];
+    const afterTable = tableMatch[2] || '';
+
+    const parseAlias = (tail: string): { alias: string; remainder: string } => {
+        const trimmedTail = String(tail || '').trimStart();
+        if (!trimmedTail) {
+            return { alias: '', remainder: tail };
+        }
+
+        const asMatch = trimmedTail.match(/^AS\s+([`"\[]?[A-Za-z_][\w$]*[`"\]]?)([\s\S]*)$/i);
+        if (asMatch) {
+            const candidate = stripQueryIdentifierQuotes(asMatch[1]);
+            if (candidate && !QUERY_ALIAS_RESERVED.has(candidate.toLowerCase())) {
+                return { alias: candidate, remainder: asMatch[2] || '' };
+            }
+        }
+
+        const bareMatch = trimmedTail.match(/^([`"\[]?[A-Za-z_][\w$]*[`"\]]?)([\s\S]*)$/);
+        if (bareMatch) {
+            const candidate = stripQueryIdentifierQuotes(bareMatch[1]);
+            if (candidate && !QUERY_ALIAS_RESERVED.has(candidate.toLowerCase())) {
+                return { alias: candidate, remainder: bareMatch[2] || '' };
+            }
+        }
+
+        return { alias: '', remainder: tail };
+    };
+
+    const parsedAlias = parseAlias(afterTable);
+    const sourceAlias = parsedAlias.alias || QUERY_LOCATOR_SOURCE_ALIAS;
+    const qualifiedExpressions = expressions
+        .map((expression) => {
+            const trimmed = String(expression || '').trim();
+            if (!trimmed) return '';
+            if (/^ROWID\b/i.test(trimmed)) {
+                return trimmed.replace(/^(\s*)ROWID\b/i, `$1${sourceAlias}.ROWID`);
+            }
+            return trimmed;
+        })
+        .filter(Boolean);
+    if (qualifiedExpressions.length === 0) return undefined;
+
+    const rewrittenSelectItems = selectItems.map((item) => {
+        const trimmed = String(item || '').trim();
+        if (trimmed === '*') {
+            return `${sourceAlias}.*`;
+        }
+        return item.trimEnd();
+    });
+
+    const aliasClause = parsedAlias.alias ? ` ${parsedAlias.alias}` : ` ${sourceAlias}`;
+    const finalSelectItems = [...rewrittenSelectItems, ...qualifiedExpressions];
+    return `${prefix}${finalSelectItems.join(', ')}${fromKeyword}${tableText}${aliasClause}${parsedAlias.remainder}`;
 };
 
 const findWritableResultColumnForSource = (writableColumns: Record<string, string>, target: string): string | undefined => {
@@ -361,8 +451,8 @@ const buildQueryLocatorColumnExpression = (dbType: string, column: string, alias
     `${quoteIdentPart(dbType, column)} AS ${quoteIdentPart(dbType, alias)}`
 );
 
-const buildQueryRowIDExpression = (dbType: string): string => (
-    `ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
+const buildQueryRowIDExpression = (dbType: string, sourceAlias?: string): string => (
+    `${sourceAlias ? `${sourceAlias}.` : ''}ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
 );
 
 const resolveQueryLocatorPlan = async ({
@@ -428,6 +518,7 @@ const resolveQueryLocatorPlan = async ({
         });
         const appendExpressions: string[] = [];
         const hiddenColumns: string[] = [];
+        let needsOracleRowIDExpression = false;
 
         const buildColumnLocator = (strategy: 'primary-key' | 'unique-key', locatorColumns: string[]): EditRowLocator => {
             const valueColumns = locatorColumns.map((column, index) => {
@@ -457,7 +548,7 @@ const resolveQueryLocatorPlan = async ({
             if (uniqueKeyGroup) {
                 plan.editLocator = buildColumnLocator('unique-key', uniqueKeyGroup);
             } else if (isOracleLikeDialect(dbType)) {
-                appendExpressions.push(buildQueryRowIDExpression(dbType));
+                needsOracleRowIDExpression = true;
                 plan.editLocator = {
                     strategy: 'oracle-rowid',
                     columns: ['ROWID'],
@@ -475,7 +566,25 @@ const resolveQueryLocatorPlan = async ({
             }
         }
 
-        plan.executedSql = appendQuerySelectExpressions(statement, appendExpressions);
+        const executableAppendExpressions = [
+            ...(needsOracleRowIDExpression ? [buildQueryRowIDExpression(dbType)] : []),
+            ...appendExpressions,
+        ];
+
+        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {
+            const rewritten = rewriteOracleSelectAllWithExpressions(statement, executableAppendExpressions);
+            if (rewritten) {
+                plan.executedSql = rewritten;
+                return plan;
+            }
+
+            const reason = 'Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。';
+            plan.editLocator = buildQueryReadOnlyLocator(reason);
+            plan.warning = `查询结果保持只读：${reason}`;
+            return plan;
+        }
+
+        plan.executedSql = appendQuerySelectExpressions(statement, executableAppendExpressions);
         return plan;
     } catch {
         const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
