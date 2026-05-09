@@ -608,7 +608,7 @@ func (d *OptionalDriverAgentDB) ensureKingbaseSearchPath(config connection.Conne
 func (d *OptionalDriverAgentDB) listKingbaseSchemas(ctx context.Context) ([]string, error) {
 	query := `SELECT nspname FROM pg_namespace
 		WHERE nspname NOT IN ('pg_catalog', 'information_schema')
-		  AND nspname NOT LIKE 'pg_%'
+		  AND nspname NOT LIKE 'pg|_%' ESCAPE '|'
 		ORDER BY nspname`
 	rows, _, err := d.QueryContext(ctx, query)
 	if err != nil {

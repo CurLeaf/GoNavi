@@ -211,7 +211,7 @@ func (k *KingbaseDB) getSearchPathStr() string {
 
 	query := `SELECT nspname FROM pg_namespace
 		WHERE nspname NOT IN ('pg_catalog', 'information_schema')
-		  AND nspname NOT LIKE 'pg_%'
+		  AND nspname NOT LIKE 'pg|_%' ESCAPE '|'
 		ORDER BY nspname`
 
 	rows, err := k.conn.Query(query)
@@ -400,7 +400,7 @@ func (k *KingbaseDB) GetTables(dbName string) ([]string, error) {
 		FROM information_schema.tables
 		WHERE table_type = 'BASE TABLE'
 		  AND table_schema NOT IN ('pg_catalog', 'information_schema')
-		  AND table_schema NOT LIKE 'pg_%'
+		  AND table_schema NOT LIKE 'pg|_%' ESCAPE '|'
 		ORDER BY table_schema, table_name`
 
 	data, _, err := k.Query(query)
@@ -999,7 +999,7 @@ func (k *KingbaseDB) GetAllColumns(dbName string) ([]connection.ColumnDefinition
 		SELECT table_schema, table_name, column_name, data_type
 		FROM information_schema.columns
 		WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-		  AND table_schema NOT LIKE 'pg_%'
+		  AND table_schema NOT LIKE 'pg|_%' ESCAPE '|'
 		ORDER BY table_schema, table_name, ordinal_position`
 
 	data, _, err := k.Query(query)
