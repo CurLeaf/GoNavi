@@ -18,6 +18,9 @@ describe('sidebar tree horizontal scroll css', () => {
     expect(appCss).toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-node-content-wrapper\s*\{[^}]*width:\s*auto\s*!important;[^}]*min-width:\s*0;/s);
     expect(appCss).not.toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-node-content-wrapper\s*\{[^}]*max-content/s);
 
+    expect(appCss).toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-switcher\s*\{[^}]*width:\s*24px;[^}]*min-width:\s*24px;/s);
+    expect(appCss).toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-iconEle\s*\{[^}]*width:\s*16px;[^}]*min-width:\s*16px;/s);
+
     expect(appCss).toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-title\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*visible;/s);
     expect(appCss).not.toMatch(/\.sidebar-tree-scroll-shell\s+\.ant-tree\s+\.ant-tree-title\s*\{[^}]*max-content/s);
   });
