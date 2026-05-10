@@ -182,6 +182,26 @@ export const resolveWhereConditionSelectedValue = ({
   return applyWhereConditionSuggestion(String(currentInput ?? ''), insertTextValue);
 };
 
+export const shouldApplyQuickWhereOnEnter = ({
+  key,
+  shiftKey = false,
+  isComposing = false,
+  suggestionsOpen = false,
+  suggestionCount = 0,
+  activeSuggestionId = '',
+}: {
+  key: unknown;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+  suggestionsOpen?: boolean;
+  suggestionCount?: number;
+  activeSuggestionId?: unknown;
+}): boolean => {
+  if (String(key || '') !== 'Enter') return false;
+  if (shiftKey || isComposing) return false;
+  return !(suggestionsOpen && suggestionCount > 0 && String(activeSuggestionId ?? '').trim());
+};
+
 export const resolveWhereConditionSuggestions = ({
   input,
   columnNames,

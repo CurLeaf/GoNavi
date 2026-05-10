@@ -77,6 +77,7 @@ import {
     normalizeQuickWhereCondition,
     resolveWhereConditionSelectedValue,
     resolveWhereConditionSuggestions,
+    shouldApplyQuickWhereOnEnter,
     validateQuickWhereCondition,
 } from '../utils/dataGridWhereFilter';
 import {
@@ -2418,6 +2419,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
   const [nextFilterId, setNextFilterId] = useState(1);
   const [quickWhereDraft, setQuickWhereDraft] = useState(() => normalizeQuickWhereCondition(quickWhereCondition));
+  const [quickWhereSuggestionsOpen, setQuickWhereSuggestionsOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -5638,6 +5640,21 @@ const DataGrid: React.FC<DataGridProps> = ({
                        value={quickWhereDraft}
                        options={quickWhereSuggestionOptions}
                        onChange={setQuickWhereDraft}
+                       onOpenChange={setQuickWhereSuggestionsOpen}
+                       onInputKeyDown={(event) => {
+                           if (!shouldApplyQuickWhereOnEnter({
+                               key: event.key,
+                               shiftKey: event.shiftKey,
+                               isComposing: Boolean((event.nativeEvent as any)?.isComposing),
+                               suggestionsOpen: quickWhereSuggestionsOpen,
+                               suggestionCount: quickWhereSuggestionOptions.length,
+                               activeSuggestionId: event.currentTarget.getAttribute('aria-activedescendant'),
+                           })) {
+                               return;
+                           }
+                           event.preventDefault();
+                           applyQuickWhereCondition();
+                       }}
                        onSelect={(value, option) => {
                            setQuickWhereDraft(resolveWhereConditionSelectedValue({
                                selectedValue: value,
@@ -5652,12 +5669,6 @@ const DataGrid: React.FC<DataGridProps> = ({
                            {...noAutoCapInputProps}
                            allowClear
                            placeholder={dbType === 'mongodb' ? '输入 MongoDB JSON 查询对象，例如 {"status":"A"}' : '输入 WHERE 后面的条件，例如 status = 1 AND name LIKE \'A%\''}
-                           onPressEnter={(event) => {
-                               if (!event.shiftKey) {
-                                   event.preventDefault();
-                                   applyQuickWhereCondition();
-                               }
-                           }}
                        />
                    </AutoComplete>
                    <Button size="small" type="primary" onClick={() => applyQuickWhereCondition()}>
