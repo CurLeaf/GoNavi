@@ -23,13 +23,13 @@ import {
     arrayMove 
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, DBGetColumns, DBGetIndexes, DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { ImportData, ExportData, ExportQuery, ApplyChanges, DBGetColumns, DBGetIndexes, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
 import type { ColumnDefinition, IndexDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
-import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -51,6 +51,11 @@ import {
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
 import { buildCopiedRowsForPaste, buildPastedRowsFromCopiedRows } from './dataGridRowClipboard';
+import {
+    buildDataGridSelectBaseSql,
+    pickDataGridOutputRows,
+    resolveDataGridOutputColumnNames,
+} from './dataGridOutput';
 import {
     buildClipboardCsv,
     buildClipboardJson,
@@ -181,7 +186,7 @@ const looksLikeDateTimeText = (val: string): boolean => {
     );
 };
 
-// Normalize common datetime strings to `YYYY-MM-DD HH:mm:ss` for display/editing.
+// Normalize common datetime strings to `YYYY-MM-DD HH:mm:ss[.fraction]` for display/editing.
 // Handles RFC3339 and Go-style datetime text like `2024-05-13 08:32:47 +0800 CST`.
 // Also keep invalid datetime values like `0000-00-00 00:00:00` unchanged.
 const normalizeDateTimeString = (val: string) => {
@@ -200,16 +205,16 @@ const normalizeDateTimeString = (val: string) => {
     }
 
     const match = val.match(
-        /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
+        /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
     );
-    const normalized = match ? `${match[1]} ${match[2]}` : val;
+    const normalized = match ? `${match[1]} ${match[2]}${match[3] || ''}` : val;
     trimSimpleCache(normalizedDateTimeCache, DATE_TIME_CACHE_LIMIT);
     normalizedDateTimeCache.set(val, normalized);
     return normalized;
 };
 
 // --- Helper: Format Value ---
-const formatCellDisplayText = (val: any): string => {
+export const formatCellDisplayText = (val: any): string => {
     try {
         if (val === null) return 'NULL';
         if (typeof val === 'object') {
@@ -1079,7 +1084,7 @@ const CELL_ELLIPSIS_STYLE: React.CSSProperties = { overflow: 'hidden', textOverf
 const VIRTUAL_CELL_WRAPPER_STYLE: React.CSSProperties = { margin: -8, padding: '8px 8px 8px 8px' };
 
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, exportScope = 'table', resultSql, dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    data, columnNames, loading, tableName, exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange
@@ -1205,6 +1210,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       const hiddenSet = new Set(localHiddenColumns);
       setDisplayColumnNames(allOrderedColumnNames.filter(col => !hiddenSet.has(col)));
   }, [allOrderedColumnNames, localHiddenColumns]);
+
+  const displayOutputColumnNames = useMemo(
+      () => resolveDataGridOutputColumnNames(
+          displayColumnNames.length > 0 || allOrderedColumnNames.length > 0 ? displayColumnNames : visibleColumnNames,
+          GONAVI_ROW_KEY,
+      ),
+      [displayColumnNames, allOrderedColumnNames, visibleColumnNames]
+  );
 
   // Handle Dragging
   const sensors = useSensors(
@@ -1510,15 +1523,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   const exportData = async (rows: any[], format: string) => {
       const hide = message.loading(`正在导出 ${rows.length} 条数据...`, 0);
       try {
-          const cleanRows = rows.map((row) => {
-              const next: Record<string, any> = {};
-              displayColumnNames.forEach((columnName) => {
-                  next[columnName] = row?.[columnName];
-              });
-              return next;
-          });
+          const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
           // Pass tableName (or 'export') as default filename
-          const res = await ExportData(cleanRows, displayColumnNames, tableName || 'export', format);
+          const res = await ExportData(cleanRows, displayOutputColumnNames, tableName || 'export', format);
           if (res.success) {
               void message.success("导出成功");
           } else if (res.message !== "已取消") {
@@ -3435,26 +3442,15 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const jsonViewText = useMemo(() => {
       if (viewMode !== 'json') return '';
-      const cleanRows = mergedDisplayData.map((row) => {
-          const next: Record<string, any> = {};
-          visibleColumnNames.forEach((columnName) => {
-              next[columnName] = row?.[columnName];
-          });
-          return normalizeValueForJsonView(next);
-      });
+      const cleanRows = pickDataGridOutputRows(mergedDisplayData, displayOutputColumnNames)
+          .map((row) => normalizeValueForJsonView(row));
       return JSON.stringify(cleanRows, null, 2);
-  }, [viewMode, mergedDisplayData, visibleColumnNames]);
+  }, [viewMode, mergedDisplayData, displayOutputColumnNames]);
 
   const textViewRows = useMemo(() => {
       if (viewMode !== 'text') return [];
-      return mergedDisplayData.map((row) => {
-          const next: Record<string, any> = {};
-          visibleColumnNames.forEach((columnName) => {
-              next[columnName] = row?.[columnName];
-          });
-          return next;
-      });
-  }, [viewMode, mergedDisplayData, visibleColumnNames]);
+      return pickDataGridOutputRows(mergedDisplayData, displayOutputColumnNames);
+  }, [viewMode, mergedDisplayData, displayOutputColumnNames]);
 
   const currentTextRow = useMemo(() => {
       if (viewMode !== 'text') return null;
@@ -3919,7 +3915,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const copiedRows = buildCopiedRowsForPaste({
           rows: mergedDisplayData as Array<Record<string, any>>,
           selectedRowKeys,
-          columnNames: visibleColumnNames,
+          columnNames: displayOutputColumnNames,
           rowKeyField: GONAVI_ROW_KEY,
           rowKeyToString: rowKeyStr,
       });
@@ -3930,7 +3926,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       setCopiedRowsForPaste(copiedRows);
       void message.success(`已复制 ${copiedRows.length} 行，可粘贴为新增行`);
-  }, [selectedRowKeys, mergedDisplayData, visibleColumnNames, rowKeyStr]);
+  }, [selectedRowKeys, mergedDisplayData, displayOutputColumnNames, rowKeyStr]);
 
   const handlePasteCopiedRowsAsNew = useCallback(() => {
       if (copiedRowsForPaste.length === 0) {
@@ -3940,7 +3936,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const nextRows = buildPastedRowsFromCopiedRows({
           rows: copiedRowsForPaste,
-          columnNames: visibleColumnNames,
+          columnNames: displayOutputColumnNames,
           rowKeyField: GONAVI_ROW_KEY,
           createRowKey: (index) => {
               pastedRowSequenceRef.current += 1;
@@ -3956,7 +3952,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setAddedRows(prev => [...prev, ...nextRows]);
       setSelectedRowKeys(nextRows.map(row => row[GONAVI_ROW_KEY]));
       void message.success(`已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务`);
-  }, [copiedRowsForPaste, visibleColumnNames]);
+  }, [copiedRowsForPaste, displayOutputColumnNames]);
 
   const handleDeleteSelected = () => {
       setDeletedRowKeys(prev => {
@@ -4050,16 +4046,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       pickRowsForClipboard({
           rows: mergedDisplayData as Array<Record<string, unknown>>,
           selectedRowKeys,
-          columnNames: visibleColumnNames,
+          columnNames: displayOutputColumnNames,
           rowKeyField: GONAVI_ROW_KEY,
           rowKeyToString: rowKeyStr,
       })
-  ), [mergedDisplayData, selectedRowKeys, visibleColumnNames, rowKeyStr]);
+  ), [mergedDisplayData, selectedRowKeys, displayOutputColumnNames, rowKeyStr]);
 
   const getClipboardColumnNames = useCallback((rows: Array<Record<string, unknown>>) => {
       if (rows.length === 0) return [];
-      return visibleColumnNames.filter((columnName) => columnName !== GONAVI_ROW_KEY);
-  }, [visibleColumnNames]);
+      return displayOutputColumnNames;
+  }, [displayOutputColumnNames]);
 
   const handleCopyQueryResultCsv = useCallback(() => {
       const rows = getClipboardRows();
@@ -4199,7 +4195,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return null;
       }
       const records = getTargets(record);
-      const orderedCols = visibleColumnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const orderedCols = displayOutputColumnNames;
       if (mode === 'insert') {
           return records.map((row: any) => buildCopyInsertSQL({
               dbType,
@@ -4248,7 +4244,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [
       supportsCopyInsert,
       getTargets,
-      visibleColumnNames,
+      displayOutputColumnNames,
       dbType,
       tableName,
       columnTypeMapByLowerName,
@@ -4277,19 +4273,13 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleCopyJson = useCallback((record: any) => {
       const records = getTargets(record);
-      const cleanRecords = records.map((r: any) => {
-          const next: Record<string, any> = {};
-          visibleColumnNames.forEach((columnName) => {
-              next[columnName] = r?.[columnName];
-          });
-          return next;
-      });
+      const cleanRecords = pickDataGridOutputRows(records, displayOutputColumnNames);
       copyToClipboard(JSON.stringify(cleanRecords, null, 2));
-  }, [getTargets, visibleColumnNames, copyToClipboard]);
+  }, [getTargets, displayOutputColumnNames, copyToClipboard]);
 
   const handleCopyCsv = useCallback((record: any) => {
       const records = getTargets(record);
-      const orderedCols = visibleColumnNames.filter(c => c !== GONAVI_ROW_KEY);
+      const orderedCols = displayOutputColumnNames;
       const header = orderedCols.map(c => `"${c}"`).join(',');
       const lines = records.map((r: any) => {
           const values = orderedCols.map(c => {
@@ -4302,7 +4292,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return values.join(',');
       });
       copyToClipboard([header, ...lines].join('\n'));
-  }, [getTargets, visibleColumnNames, copyToClipboard]);
+  }, [getTargets, displayOutputColumnNames, copyToClipboard]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;
@@ -4362,7 +4352,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (!tableName || !pagination) return '';
       const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
       const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
-      const baseSql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
+      const baseSql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: whereSQL,
+      });
       const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
       const normalizedType = String(dbType || '').trim().toLowerCase();
       const hasSortForBuffer = hasExplicitSort(sortInfo);
@@ -4372,7 +4367,36 @@ const DataGrid: React.FC<DataGridProps> = ({
           sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
       }
       return sql;
-  }, [tableName, pagination, filterConditions, quickWhereCondition, sortInfo, pkColumns]);
+  }, [tableName, pagination, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
+
+  const buildAllRowsSql = useCallback((dbType: string) => {
+      if (!tableName) return '';
+      return buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+      });
+  }, [tableName, displayOutputColumnNames]);
+
+  const buildFilteredAllSql = useCallback((dbType: string) => {
+      if (!tableName) return '';
+      const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
+      const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
+      if (!whereSQL) return '';
+      let sql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: whereSQL,
+      });
+      sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
+      const normalizedType = String(dbType || '').trim().toLowerCase();
+      const hasSortForBuffer = hasExplicitSort(sortInfo);
+      if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+          sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
+      }
+      return sql;
+  }, [tableName, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
@@ -4406,9 +4430,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const sql = `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)} WHERE ${pkWhere}`;
+      const sql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: `WHERE ${pkWhere}`,
+      });
       await exportByQuery(sql, format, tableName || 'export');
-  }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery]);
+  }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery, displayOutputColumnNames]);
 
   // Export
   const handleExport = async (format: string) => {
@@ -4423,12 +4452,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       // 查询结果页导出统一按当前结果集（已加载数据）导出，避免再次执行原 SQL 造成大数据导出或长时间阻塞。
       if (isQueryResultExport) {
-          const sql = String(resultSql || '').trim();
-          if (!hasChanges && supportsSqlQueryExport && sql) {
-              await exportByQuery(sql, format, tableName || 'query_result');
-          } else {
-              await exportData(mergedDisplayData, format);
-          }
+          await exportData(mergedDisplayData, format);
           return;
       }
 
@@ -4440,19 +4464,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!tableName) return;
           const config = buildConnConfig();
           if (!config) return;
-          const hide = message.loading(`正在导出全部数据...`, 0);
-          try {
-              const res = await ExportTable(buildRpcConnectionConfig(config) as any, dbName || '', tableName, format);
-              if (res.success) {
-                  void message.success("导出成功");
-              } else if (res.message !== "已取消") {
-                  void message.error("导出失败: " + res.message);
-              }
-          } catch (e: any) {
-              void message.error("导出失败: " + (e?.message || String(e)));
-          } finally {
-              hide();
-          }
+          const sql = buildAllRowsSql(resolveDataSourceType(config));
+          if (!sql) return;
+          await exportByQuery(sql, format, tableName || 'export');
       };
       const handlePage = async () => {
           instance.destroy();
@@ -4505,11 +4519,18 @@ const DataGrid: React.FC<DataGridProps> = ({
           void message.error('当前数据源不支持按筛选结果导出');
           return;
       }
+      const config = buildConnConfig();
+      if (!config) return;
       if (hasChanges) {
           void message.warning("当前存在未提交修改，筛选结果导出基于数据库已提交数据。");
       }
 
-      await exportByQuery(filteredExportSql, format, `${tableName || 'export'}_filtered`);
+      const sql = buildFilteredAllSql(resolveDataSourceType(config));
+      if (!sql) {
+          void message.warning('当前未应用筛选条件');
+          return;
+      }
+      await exportByQuery(sql, format, `${tableName || 'export'}_filtered`);
   };
 
   const handleImport = async () => {
@@ -4655,7 +4676,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       { key: 'json', label: 'JSON', onClick: handleCopyQueryResultJson },
       { key: 'markdown', label: 'Markdown', onClick: handleCopyQueryResultMarkdown },
   ];
-  const canCopyQueryResult = isQueryResultExport && mergedDisplayData.length > 0 && visibleColumnNames.length > 0;
+  const canCopyQueryResult = isQueryResultExport && mergedDisplayData.length > 0 && displayOutputColumnNames.length > 0;
 
   const columnInfoSettingContent = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200, maxWidth: 300 }}>
@@ -6139,7 +6160,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     )}
                 </div>
 	                <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '8px 12px' }}>
-                    {currentTextRow ? displayColumnNames.map((col) => (
+                    {currentTextRow ? displayOutputColumnNames.map((col) => (
                         <div key={col} style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 10, padding: '6px 0', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)', alignItems: 'start' }}>
                             <div style={{ fontWeight: 600, color: darkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.88)', wordBreak: 'break-all' }}>
                                 {col} :

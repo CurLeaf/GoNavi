@@ -37,4 +37,19 @@ describe('dataGridClipboardExport', () => {
 
     expect(rows).toEqual([{ total: 2 }]);
   });
+
+  it('keeps copied row fields in the provided display column order', () => {
+    const rows = pickRowsForClipboard({
+      rows: [
+        { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha', hidden_note: 'A' },
+      ],
+      selectedRowKeys: [],
+      columnNames: ['name', 'id'],
+      rowKeyField: '__gonavi_row_key__',
+    });
+
+    expect(Object.keys(rows[0])).toEqual(['name', 'id']);
+    expect(buildClipboardCsv(rows, ['name', 'id'])).toBe('"name","id"\n"alpha","1"');
+    expect(buildClipboardJson(rows)).toBe('[\n  {\n    "name": "alpha",\n    "id": 1\n  }\n]');
+  });
 });

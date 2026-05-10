@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import DataGrid from './DataGrid';
+import DataGrid, { formatCellDisplayText } from './DataGrid';
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -81,6 +81,10 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('preserves fractional seconds when rendering datetime values', () => {
+    expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
   });
 
   it('renders a DDL action for table data pages only', () => {

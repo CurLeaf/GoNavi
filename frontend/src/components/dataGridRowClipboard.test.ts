@@ -22,6 +22,20 @@ describe('dataGridRowClipboard', () => {
     ]);
   });
 
+  it('copies row fields in display column order', () => {
+    const copiedRows = buildCopiedRowsForPaste({
+      rows: [
+        { [rowKeyField]: 'row-1', id: 1, name: 'alpha', hidden_note: 'A' },
+      ],
+      selectedRowKeys: ['row-1'],
+      columnNames: ['name', 'id'],
+      rowKeyField,
+    });
+
+    expect(Object.keys(copiedRows[0])).toEqual(['name', 'id']);
+    expect(copiedRows[0]).toEqual({ name: 'alpha', id: 1 });
+  });
+
   it('builds pasted rows as new rows with fresh internal keys', () => {
     const pastedRows = buildPastedRowsFromCopiedRows({
       rows: [
