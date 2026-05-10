@@ -65,10 +65,13 @@ import {
   ShortcutAction,
   canRecordShortcutForAction,
   eventToShortcut,
+  findReservedConflicts,
   getShortcutDisplay,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
+  splitConflictsByContext,
+  type ConflictInfo,
 } from './utils/shortcuts';
 import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
@@ -1889,6 +1892,18 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  const shortcutConflictMap = useMemo(() => {
+      const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
+      for (const action of SHORTCUT_ACTION_ORDER) {
+          const binding = shortcutOptions[action];
+          if (!binding?.enabled || !binding.combo) continue;
+          const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo));
+          if (conflicts.length > 0) {
+              map[action] = conflicts;
+          }
+      }
+      return map;
+  }, [shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
@@ -2559,6 +2574,17 @@ function App() {
           if (conflictAction) {
               void message.warning(`与「${SHORTCUT_ACTION_META[conflictAction].label}」冲突，请换一个快捷键`);
               return;
+          }
+
+          const reservedConflicts = findReservedConflicts(normalizedCombo);
+          if (reservedConflicts.length > 0) {
+              const { hasMonaco, hasOther, monacoLabels, otherLabels, otherContexts } = splitConflictsByContext(reservedConflicts);
+              if (hasMonaco) {
+                  void message.info(`已覆盖编辑器「${monacoLabels}」默认快捷键`, 4);
+              }
+              if (hasOther) {
+                  void message.warning(`与${otherContexts}「${otherLabels}」冲突，可能失效`, 4);
+              }
           }
 
           updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true });
@@ -3580,6 +3606,8 @@ function App() {
                       }
                       const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
                       const isCapturing = capturingShortcutAction === action;
+                      const conflicts = shortcutConflictMap[action];
+                      const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
                       return (
                           <div
                               key={action}
@@ -3595,6 +3623,16 @@ function App() {
                               <div>
                                   <div style={{ fontWeight: 500 }}>{meta.label}</div>
                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
+                                  {conflictInfo && (
+                                      <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
+                                          {conflictInfo.hasMonaco && (
+                                              <>⚠ 已覆盖编辑器「{conflictInfo.monacoLabels}」默认快捷键</>
+                                          )}
+                                          {conflictInfo.hasOther && (
+                                              <>⚠ 与{conflictInfo.otherContexts}「{conflictInfo.otherLabels}」冲突，可能失效</>
+                                          )}
+                                      </div>
+                                  )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <Input

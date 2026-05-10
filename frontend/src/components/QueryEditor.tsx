@@ -9,8 +9,8 @@ import { useStore } from '../store';
 import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
-import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from '../utils/mongodb';
-import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
+import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
+import { getShortcutDisplay, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
@@ -178,8 +178,13 @@ const SQL_FUNCTIONS: { name: string; detail: string }[] = [
     { name: 'SLEEP', detail: '工具 - 延时' },
 ];
 
-// 模块级标志：确保 SQL completion provider 全局只注册一次
-let sqlCompletionRegistered = false;
+// HMR 重载时释放旧注册避免补全项重复
+const _g = globalThis as any;
+if (!_g.__gonaviSqlCompletionState) {
+    _g.__gonaviSqlCompletionState = { registered: false, disposables: [] as any[] };
+}
+let sqlCompletionRegistered = _g.__gonaviSqlCompletionState.registered;
+let sqlCompletionDisposables = _g.__gonaviSqlCompletionState.disposables;
 
 // 模块级共享变量：completion provider 从这些变量读取当前活跃 Tab 的状态。
 // 每个 QueryEditor 实例在成为活跃 Tab 时更新这些变量，确保 provider 始终使用正确的上下文。
@@ -631,6 +636,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [editorHeight, setEditorHeight] = useState(300);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+  const runQueryActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(tab.query || '');
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
@@ -918,10 +924,31 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           });
       });
 
-      // 全局只注册一次 SQL completion provider，避免多 tab 重复注册导致补全项重复
+      // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding
+      const runBinding = shortcutOptions.runQuery;
+      if (runBinding?.enabled && runBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              runBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              runQueryActionRef.current = editor.addAction({
+                  id: 'gonavi.runQuery',
+                  label: 'GoNavi: 执行 SQL',
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: () => {
+                      window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+                  },
+              });
+          }
+      }
+
+      // HMR 重载时释放旧注册避免补全项重复
       if (!sqlCompletionRegistered) {
       sqlCompletionRegistered = true;
-      monaco.languages.registerCompletionItemProvider('sql', {
+      _g.__gonaviSqlCompletionState.registered = true;
+      sqlCompletionDisposables.forEach((d: any) => d?.dispose?.());
+      sqlCompletionDisposables.length = 0;
+      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['.'],
           provideCompletionItems: async (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
@@ -1328,7 +1355,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               ];
               return { suggestions };
           }
-      });
+      }));
       // 注册 / 斜杠命令 AI 快捷补全
       const slashCmdDefs = [
           { cmd: '/query',    label: '🔍 自然语言查询',  desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
@@ -1343,7 +1370,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       // 全局变量存储命令定义，供 onDidChangeModelContent 使用
       (window as any).__gonaviSlashCmdDefs = slashCmdDefs;
 
-      monaco.languages.registerCompletionItemProvider('sql', {
+      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['/'],
           provideCompletionItems: (model: any, position: any) => {
               const lineContent = model.getLineContent(position.lineNumber);
@@ -1370,7 +1397,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   })),
               };
           },
-      });
+      }));
+
 
       // SQL snippet completion provider
       monaco.languages.registerCompletionItemProvider('sql', {
@@ -2158,11 +2186,45 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           void handleRun();
       };
 
-      window.addEventListener('keydown', handleRunShortcut);
+      window.addEventListener('keydown', handleRunShortcut, true);
       return () => {
-          window.removeEventListener('keydown', handleRunShortcut);
+          window.removeEventListener('keydown', handleRunShortcut, true);
       };
   }, [activeTabId, tab.id, shortcutOptions.runQuery, handleRun]);
+
+  // Re-register Monaco internal keybinding when runQuery shortcut changes
+  useEffect(() => {
+      if (runQueryActionRef.current) {
+          runQueryActionRef.current.dispose();
+          runQueryActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = shortcutOptions.runQuery;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          runQueryActionRef.current = editor.addAction({
+              id: 'gonavi.runQuery',
+              label: 'GoNavi: 执行 SQL',
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (runQueryActionRef.current) {
+              runQueryActionRef.current.dispose();
+              runQueryActionRef.current = null;
+          }
+      };
+  }, [shortcutOptions.runQuery]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
