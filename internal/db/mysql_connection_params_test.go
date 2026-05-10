@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"net/url"
 	"strings"
 	"testing"
@@ -119,6 +120,28 @@ func TestMySQLDSN_MapsJDBCUTF8EncodingToMySQLCharset(t *testing.T) {
 	if got := query.Get("loc"); got != "Asia%2FShanghai" && got != "Asia/Shanghai" {
 		t.Fatalf("serverTimezone=GMT+8 should map to loc=Asia/Shanghai, got=%q", got)
 	}
+}
+
+func TestMySQLDSN_AsiaShanghaiLocationAcceptedByDriver(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:             "127.0.0.1",
+		Port:             3306,
+		User:             "root",
+		Database:         "app",
+		ConnectionParams: "serverTimezone=GMT%2B8",
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatalf("mysql driver should accept loc=Asia/Shanghai: %v", err)
+	}
+	_ = db.Close()
 }
 
 func TestMySQLDSN_URIParamsAndExplicitParamsPrecedence(t *testing.T) {
