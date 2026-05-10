@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import DataGrid, { formatCellDisplayText } from './DataGrid';
+import DataGrid, { formatCellDisplayText, resolveContextMenuFieldName } from './DataGrid';
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -85,6 +85,11 @@ describe('DataGrid layout', () => {
 
   it('preserves fractional seconds when rendering datetime values', () => {
     expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
+  });
+
+  it('resolves the field name copied from the cell context menu', () => {
+    expect(resolveContextMenuFieldName('created_at', '创建时间')).toBe('created_at');
+    expect(resolveContextMenuFieldName('', 'fallback_name')).toBe('fallback_name');
   });
 
   it('renders a DDL action for table data pages only', () => {

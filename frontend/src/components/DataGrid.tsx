@@ -163,6 +163,10 @@ const splitCellKey = (cellKey: string): { rowKey: string; colName: string } | nu
         colName: cellKey.slice(sepIndex + CELL_KEY_SEP.length),
     };
 };
+export const resolveContextMenuFieldName = (dataIndex: string, title?: string): string => {
+    const name = String(dataIndex || title || '').trim();
+    return name;
+};
 
 const trimSimpleCache = (cache: Map<string, string>, limit: number) => {
     if (cache.size < limit) return;
@@ -4274,8 +4278,18 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const copyToClipboard = useCallback((text: string) => {
       navigator.clipboard.writeText(text).catch(console.error);
-      void message.success("Copied to clipboard");
+      void message.success("已复制到剪贴板");
   }, []);
+
+  const handleCopyContextMenuFieldName = useCallback(() => {
+      const fieldName = resolveContextMenuFieldName(cellContextMenu.dataIndex, cellContextMenu.title);
+      if (!fieldName) {
+          void message.info('未识别到字段名称');
+          return;
+      }
+      copyToClipboard(fieldName);
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+  }, [cellContextMenu.dataIndex, cellContextMenu.title, copyToClipboard]);
 
   const getClipboardRows = useCallback(() => (
       pickRowsForClipboard({
@@ -6534,6 +6548,20 @@ const DataGrid: React.FC<DataGridProps> = ({
                 }}
                 onClick={(e) => e.stopPropagation()}
             >
+                <div
+                    style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    onClick={handleCopyContextMenuFieldName}
+                >
+                    <CopyOutlined style={{ marginRight: 8 }} />
+                    复制字段名称
+                </div>
+                <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
                 {canModifyData && (
                     <>
                 <div
