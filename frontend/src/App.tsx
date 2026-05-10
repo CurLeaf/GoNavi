@@ -20,7 +20,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
+import { DENSITY_OPTIONS, sanitizeDataTableDensity } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
@@ -3477,15 +3477,15 @@ function App() {
                                           />
                                       </div>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>数据表列宽模式</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>表格密度</div>
                                           <Segmented
                                               block
-                                              options={DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS}
-                                              value={appearance.dataTableColumnWidthMode}
-                                              onChange={(value) => setAppearance({ dataTableColumnWidthMode: sanitizeDataTableColumnWidthMode(value) })}
+                                              options={DENSITY_OPTIONS}
+                                              value={appearance.dataTableDensity}
+                                              onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              标准模式默认列宽 200px；紧凑模式默认列宽 140px。已手动拖拽调整的列宽优先保留。
+                                              控制行高、列宽和内边距。舒适适合大屏细看；紧凑适合最大化信息密度。已手动拖拽的列宽优先保留。
                                           </div>
                                       </div>
                                   </div>

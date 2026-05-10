@@ -11,17 +11,18 @@ import {
 describe('dataGridDisplay helpers', () => {
   it('sanitizes missing display settings to safe defaults', () => {
     expect(sanitizeDataGridDisplaySettings(undefined)).toEqual(DEFAULT_DATA_GRID_DISPLAY_SETTINGS);
-    expect(sanitizeDataGridDisplaySettings({ dataTableColumnWidthMode: 'invalid' as never })).toEqual(DEFAULT_DATA_GRID_DISPLAY_SETTINGS);
+    expect(sanitizeDataGridDisplaySettings({ dataTableDensity: 'invalid' as never })).toEqual(DEFAULT_DATA_GRID_DISPLAY_SETTINGS);
   });
 
-  it('resolves standard and compact default column widths', () => {
-    expect(resolveDataTableDefaultColumnWidth('standard')).toBe(200);
-    expect(resolveDataTableDefaultColumnWidth('compact')).toBe(140);
+  it('resolves density-based default column widths', () => {
+    expect(resolveDataTableDefaultColumnWidth('comfortable')).toBe(180);
+    expect(resolveDataTableDefaultColumnWidth('standard')).toBe(140);
+    expect(resolveDataTableDefaultColumnWidth('compact')).toBe(100);
   });
 
-  it('keeps manual column widths ahead of mode defaults', () => {
-    expect(resolveDataTableColumnWidth({ manualWidth: 320, widthMode: 'compact' })).toBe(320);
-    expect(resolveDataTableColumnWidth({ manualWidth: undefined, widthMode: 'compact' })).toBe(140);
+  it('keeps manual column widths ahead of density defaults', () => {
+    expect(resolveDataTableColumnWidth({ manualWidth: 320, density: 'compact' })).toBe(320);
+    expect(resolveDataTableColumnWidth({ manualWidth: undefined, density: 'compact' })).toBe(100);
   });
 
   it('uses subtle themed vertical border colors and transparent when disabled', () => {

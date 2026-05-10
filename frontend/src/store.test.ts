@@ -69,7 +69,7 @@ describe('store appearance persistence', () => {
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
-    expect(appearance.dataTableColumnWidthMode).toBe('standard');
+    expect(appearance.dataTableDensity).toBe('comfortable');
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -77,19 +77,19 @@ describe('store appearance persistence', () => {
 
     useStore.getState().setAppearance({
       showDataTableVerticalBorders: true,
-      dataTableColumnWidthMode: 'compact',
+      dataTableDensity: 'compact',
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
-    expect(persisted.state.appearance.dataTableColumnWidthMode).toBe('compact');
+    expect(persisted.state.appearance.dataTableDensity).toBe('compact');
 
     vi.resetModules();
     const reloaded = await importStore();
     const appearance = reloaded.useStore.getState().appearance;
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
-    expect(appearance.dataTableColumnWidthMode).toBe('compact');
+    expect(appearance.dataTableDensity).toBe('compact');
   });
 
   it('does not clear persisted legacy connections during hydration migration', async () => {

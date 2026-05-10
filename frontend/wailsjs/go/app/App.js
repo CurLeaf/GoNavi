@@ -350,6 +350,10 @@ export function OpenSQLFile() {
   return window['go']['app']['App']['OpenSQLFile']();
 }
 
+export function PreviewChanges(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['PreviewChanges'](arg1, arg2, arg3, arg4);
+}
+
 export function PreviewImportFile(arg1) {
   return window['go']['app']['App']['PreviewImportFile'](arg1);
 }

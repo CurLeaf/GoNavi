@@ -1193,7 +1193,7 @@ const sanitizeAppearance = (
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
-    dataTableColumnWidthMode: dataGridDisplaySettings.dataTableColumnWidthMode,
+    dataTableDensity: dataGridDisplaySettings.dataTableDensity,
   };
   if (version < 2 && isLegacyDefaultAppearance(appearance)) {
     return { ...DEFAULT_APPEARANCE };
