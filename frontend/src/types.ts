@@ -454,6 +454,16 @@ export interface SavedQuery {
   createdAt: number;
 }
 
+export interface SqlSnippet {
+  id: string;
+  prefix: string;
+  name: string;
+  description?: string;
+  body: string;
+  isBuiltin: boolean;
+  createdAt: number;
+}
+
 export interface ExternalSQLDirectory {
   id: string;
   name: string;

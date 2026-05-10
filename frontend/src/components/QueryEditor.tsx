@@ -1372,6 +1372,41 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           },
       });
 
+      // SQL snippet completion provider
+      monaco.languages.registerCompletionItemProvider('sql', {
+          provideCompletionItems: (model: any, position: any) => {
+              const word = model.getWordUntilPosition(position);
+              const prefix = word.word.toLowerCase();
+              if (!prefix) return { suggestions: [] };
+
+              const range = {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: word.startColumn,
+                  endColumn: word.endColumn,
+              };
+
+              const allSnippets = useStore.getState().sqlSnippets;
+              const matched = allSnippets.filter(s =>
+                  s.prefix.toLowerCase().startsWith(prefix) ||
+                  s.name.toLowerCase().includes(prefix)
+              );
+
+              return {
+                  suggestions: matched.map(s => ({
+                      label: s.prefix,
+                      kind: monaco.languages.CompletionItemKind.Snippet,
+                      insertText: s.body,
+                      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                      detail: s.name,
+                      documentation: s.description || s.body,
+                      range,
+                      sortText: '04' + s.prefix,
+                  })),
+              };
+          },
+      });
+
       } // end sqlCompletionRegistered guard
 
       // 每个编辑器实例都注册内容变化监听（检测斜杠命令标记）
@@ -1462,6 +1497,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onClick: () => setSqlFormatOptions({ keywordCase: 'lower' }) 
       },
       { type: 'divider' },
+      {
+          key: 'snippet-settings',
+          label: '代码片段管理...',
+          onClick: () => window.dispatchEvent(new CustomEvent('gonavi:open-snippet-settings')),
+      },
       {
           key: 'shortcut-settings',
           label: '快捷键管理...',

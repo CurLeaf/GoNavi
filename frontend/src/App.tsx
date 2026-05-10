@@ -6,6 +6,7 @@ import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGe
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
+import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
@@ -1886,6 +1887,7 @@ function App() {
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
+  const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
@@ -2422,6 +2424,16 @@ function App() {
       window.addEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-shortcut-settings', handleOpenShortcutSettingsEvent as EventListener);
+      };
+  }, []);
+
+  useEffect(() => {
+      const handleOpenSnippetSettingsEvent = () => {
+          setIsSnippetModalOpen(true);
+      };
+      window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       };
   }, []);
 
@@ -3606,6 +3618,12 @@ function App() {
                   })}
               </div>
           </Modal>
+          <SnippetSettingsModal
+              open={isSnippetModalOpen}
+              onClose={() => setIsSnippetModalOpen(false)}
+              darkMode={darkMode}
+              overlayTheme={overlayTheme}
+          />
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
               open={isProxyModalOpen}
