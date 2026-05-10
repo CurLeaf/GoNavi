@@ -2,12 +2,15 @@ package ai
 
 // ToolCall 表示 AI 发出的工具调用
 type ToolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"` // "function"
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // "function"
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction 表示单次工具调用的函数信息
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ToolFunction 表示可使用的函数定义

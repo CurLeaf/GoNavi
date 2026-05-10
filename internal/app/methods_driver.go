@@ -39,7 +39,10 @@ var (
 	goBinaryCommandOutput = func(cmd *exec.Cmd) ([]byte, error) {
 		return cmd.Output()
 	}
+	optionalDriverAgentMetadataProbe = db.ProbeOptionalDriverAgentMetadata
 )
+
+var errOptionalDriverAgentMetadataUnavailable = errors.New("driver-agent metadata unavailable")
 
 // resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
 func resolveGoBinaryPath() (string, error) {
@@ -303,6 +306,9 @@ const (
 	driverChecksumPolicyOff             = "off"
 	driverEngineGo                      = "go"
 	driverEngineExternal                = "external"
+	duckDBWindowsLibraryVersion         = "v1.4.4"
+	duckDBWindowsLibraryArchiveURL      = "https://github.com/duckdb/duckdb/releases/download/" + duckDBWindowsLibraryVersion + "/libduckdb-windows-amd64.zip"
+	duckDBWindowsSupportDLLName         = "duckdb.dll"
 )
 
 const builtinDriverManifestJSON = `{
@@ -1839,7 +1845,7 @@ func optionalDriverSourceBuildAvailable(definition driverDefinition, selectedVer
 	if driverType == "" || !db.IsOptionalGoDriver(driverType) {
 		return false
 	}
-	if _, err := optionalDriverBuildTag(driverType, selectedVersion); err != nil {
+	if _, err := optionalDriverBuildTags(driverType, selectedVersion); err != nil {
 		return false
 	}
 	if _, err := exec.LookPath("go"); err != nil {
@@ -2752,6 +2758,55 @@ func optionalDriverAgentRevisionStatus(driverType string, pkg installedDriverPac
 	return true, fmt.Sprintf("原因：%s。影响：%s（已安装标记：%s，当前需要：%s）", updateReason, impact, actual, expected), expected
 }
 
+func optionalDriverAgentRevisionCurrent(driverType string, executablePath string) (string, bool, error) {
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	if expected == "" {
+		return "", true, nil
+	}
+	metadata, err := optionalDriverAgentMetadataProbe(driverType, executablePath)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: %v", errOptionalDriverAgentMetadataUnavailable, err)
+	}
+	actual := strings.TrimSpace(metadata.AgentRevision)
+	return actual, actual == expected, nil
+}
+
+func verifyInstalledOptionalDriverAgentRevision(driverType string, executablePath string, selectedVersion ...string) (string, error) {
+	version := ""
+	if len(selectedVersion) > 0 {
+		version = selectedVersion[0]
+	}
+	if !shouldVerifyOptionalDriverAgentRevision(driverType, version) {
+		return "", nil
+	}
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	actual, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
+	if expected == "" {
+		return actual, nil
+	}
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	if err != nil {
+		return "", fmt.Errorf("%s 驱动代理版本元数据不可用，请安装当前版本对应的 driver-agent：%w", displayName, err)
+	}
+	if !current {
+		actualLabel := strings.TrimSpace(actual)
+		if actualLabel == "" {
+			actualLabel = "空"
+		}
+		return "", fmt.Errorf("%s 驱动代理 revision 不匹配（已安装：%s，当前需要：%s），请安装当前版本对应的 driver-agent", displayName, actualLabel, expected)
+	}
+	return actual, nil
+}
+
+func shouldVerifyOptionalDriverAgentRevision(driverType string, selectedVersion string) bool {
+	switch normalizeDriverType(driverType) {
+	case "mongodb":
+		return resolveMongoDriverMajorFromVersion(selectedVersion) != 1
+	default:
+		return true
+	}
+}
+
 func (a *App) savedConnectionDriverUsageCounts() map[string]int {
 	counts := map[string]int{}
 	if a == nil || strings.TrimSpace(a.configDir) == "" {
@@ -2826,7 +2881,7 @@ func installOptionalDriverAgentPackage(a *App, definition driverDefinition, sele
 	if err != nil {
 		return installedDriverPackage{}, err
 	}
-	if activateErr := activateOptionalDriverAgentBinary(installPath, runtimePath); activateErr != nil {
+	if activateErr := activateOptionalDriverAgentBinary(driverType, installPath, runtimePath); activateErr != nil {
 		return installedDriverPackage{}, fmt.Errorf("activate %s driver agent failed: %w", resolveDriverDisplayName(definition), activateErr)
 	}
 	if strings.TrimSpace(hash) == "" {
@@ -2838,7 +2893,10 @@ func installOptionalDriverAgentPackage(a *App, definition driverDefinition, sele
 	if strings.TrimSpace(downloadSource) == "" {
 		downloadSource = strings.TrimSpace(downloadURL)
 	}
-	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, runtimePath)
+	agentRevision, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, runtimePath, selectedVersion)
+	if revisionErr != nil {
+		return installedDriverPackage{}, revisionErr
+	}
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
@@ -2903,16 +2961,22 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 		if copyErr := copyAgentBinary(sourcePath, executablePath); copyErr != nil {
 			return installedDriverPackage{}, fmt.Errorf("导入本地驱动代理失败：%w", copyErr)
 		}
+		if supportErr := copyOptionalDriverSupportFilesFromDirectory(driverType, filepath.Dir(sourcePath), filepath.Dir(executablePath)); supportErr != nil {
+			return installedDriverPackage{}, fmt.Errorf("导入本地驱动代理运行时依赖失败：%w", supportErr)
+		}
 	}
 	if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
 		return installedDriverPackage{}, validateErr
 	}
 
+	agentRevision, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
+	if revisionErr != nil {
+		return installedDriverPackage{}, revisionErr
+	}
 	hash, hashErr := hashFileSHA256(executablePath)
 	if hashErr != nil {
 		return installedDriverPackage{}, fmt.Errorf("计算 %s 驱动代理摘要失败：%w", displayName, hashErr)
 	}
-	agentRevision := probeInstalledOptionalDriverAgentRevision(driverType, executablePath)
 	return installedDriverPackage{
 		DriverType:     driverType,
 		Version:        strings.TrimSpace(selectedVersion),
@@ -2931,12 +2995,12 @@ func probeInstalledOptionalDriverAgentRevision(driverType string, executablePath
 	if strings.TrimSpace(expectedRevision) == "" {
 		return ""
 	}
-	metadata, err := db.ProbeOptionalDriverAgentMetadata(driverType, executablePath)
+	actualRevision, _, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
 	if err != nil {
 		logger.Warnf("%s 驱动代理未返回版本元数据：%v", resolveDriverDisplayName(driverDefinition{Type: driverType}), err)
 		return ""
 	}
-	return strings.TrimSpace(metadata.AgentRevision)
+	return strings.TrimSpace(actualRevision)
 }
 
 type localDriverCandidate struct {
@@ -3168,6 +3232,9 @@ func installOptionalDriverAgentFromLocalZip(zipPath string, definition driverDef
 	if chmodErr := os.Chmod(executablePath, 0o755); chmodErr != nil && stdRuntime.GOOS != "windows" {
 		return "", fmt.Errorf("设置驱动代理权限失败：%w", chmodErr)
 	}
+	if supportErr := extractOptionalDriverSupportFilesFromZip(reader.File, driverType, entry.Name, filepath.Dir(executablePath)); supportErr != nil {
+		return "", supportErr
+	}
 	return filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(entry.Name), "./")), nil
 }
 
@@ -3361,6 +3428,9 @@ func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlT
 	if trimmedURL == "" {
 		return "", fmt.Errorf("下载地址为空")
 	}
+	if len(optionalDriverSupportFileNames(driverType)) > 0 {
+		return "", fmt.Errorf("%s 当前平台需要随包提供运行时依赖（%s），不能安装单文件代理；请使用驱动总包或本地源码构建", displayName, strings.Join(optionalDriverSupportFileNames(driverType), ", "))
+	}
 	tempPath := executablePath + ".tmp"
 	_ = os.Remove(tempPath)
 
@@ -3499,6 +3569,10 @@ func downloadOptionalDriverAgentFromBundle(a *App, definition driverDefinition, 
 	if chmodErr := os.Chmod(executablePath, 0o755); chmodErr != nil && stdRuntime.GOOS != "windows" {
 		return "", "", fmt.Errorf("设置驱动代理权限失败：%w", chmodErr)
 	}
+	if supportErr := extractOptionalDriverSupportFilesFromZip(reader.File, driverType, entry.Name, filepath.Dir(executablePath)); supportErr != nil {
+		_ = os.Remove(executablePath)
+		return "", "", supportErr
+	}
 	if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
 		_ = os.Remove(executablePath)
 		return "", "", validateErr
@@ -3519,7 +3593,7 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 		return "", fmt.Errorf("当前环境未安装 Go，且未找到可用的 %s 预编译代理包", displayName)
 	}
 
-	tagName, tagErr := optionalDriverBuildTag(driverType, selectedVersion)
+	tagName, tagErr := optionalDriverBuildTags(driverType, selectedVersion)
 	if tagErr != nil {
 		return "", tagErr
 	}
@@ -3528,12 +3602,35 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 	if rootErr != nil {
 		return "", rootErr
 	}
+	env := append([]string{}, os.Environ()...)
+	env = withEnvValue(env, "GOTOOLCHAIN", "auto")
+	var duckDBLibDir string
+	var cleanupDuckDBLib func()
+	if normalizeDriverType(driverType) == "duckdb" {
+		env = withEnvValue(env, "CGO_ENABLED", "1")
+	}
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		libDir, cleanup, prepErr := prepareDuckDBWindowsDynamicLibraryForBuild()
+		if prepErr != nil {
+			return "", fmt.Errorf("准备 DuckDB Windows 动态库失败：%w", prepErr)
+		}
+		duckDBLibDir = libDir
+		cleanupDuckDBLib = cleanup
+		defer cleanupDuckDBLib()
+		env = withEnvValue(env, "CGO_LDFLAGS", fmt.Sprintf("-L\"%s\" -lduckdb", filepath.ToSlash(duckDBLibDir)))
+		env = prependPathEnv(env, duckDBLibDir)
+	}
 	cmd := exec.Command(goPath, "build", "-tags", tagName, "-trimpath", "-ldflags", "-s -w", "-o", executablePath, "./cmd/optional-driver-agent")
 	cmd.Dir = projectRoot
-	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
+	cmd.Env = env
 	output, buildErr := cmd.CombinedOutput()
 	if buildErr != nil {
 		return "", fmt.Errorf("构建 %s 驱动代理失败：%v，输出：%s", displayName, buildErr, strings.TrimSpace(string(output)))
+	}
+	if strings.TrimSpace(duckDBLibDir) != "" {
+		if copyErr := copyOptionalDriverSupportFilesFromDirectory(driverType, duckDBLibDir, filepath.Dir(executablePath)); copyErr != nil {
+			return "", fmt.Errorf("复制 %s 运行时依赖失败：%w", displayName, copyErr)
+		}
 	}
 	if chmodErr := os.Chmod(executablePath, 0o755); chmodErr != nil && stdRuntime.GOOS != "windows" {
 		return "", fmt.Errorf("设置 %s 驱动代理权限失败：%w", displayName, chmodErr)
@@ -3580,10 +3677,7 @@ func shouldForceSourceBuildForResolvedDownload(driverType string, selectedVersio
 
 func shouldPreferSourceBuildBeforeDownload(driverType string, selectedVersion string) bool {
 	_ = selectedVersion
-	switch normalizeDriverType(driverType) {
-	default:
-		return false
-	}
+	return shouldUseDuckDBWindowsDynamicLibrary(driverType)
 }
 
 func shouldSkipReusableAgentCandidate(driverType string, selectedVersion string) bool {
@@ -3592,8 +3686,23 @@ func shouldSkipReusableAgentCandidate(driverType string, selectedVersion string)
 	case "mongodb", "kingbase":
 		return true
 	default:
-		return false
+		return shouldUseDuckDBWindowsDynamicLibrary(driverType)
 	}
+}
+
+func shouldUseDuckDBWindowsDynamicLibrary(driverType string) bool {
+	return normalizeDriverType(driverType) == "duckdb" && stdRuntime.GOOS == "windows" && stdRuntime.GOARCH == "amd64"
+}
+
+func shouldSkipDirectOptionalDriverDownloads(driverType string) bool {
+	return shouldUseDuckDBWindowsDynamicLibrary(driverType)
+}
+
+func optionalDriverSupportFileNames(driverType string) []string {
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		return []string{duckDBWindowsSupportDLLName}
+	}
+	return nil
 }
 
 func optionalDriverBuildTag(driverType string, selectedVersion string) (string, error) {
@@ -3638,6 +3747,17 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 	}
 }
 
+func optionalDriverBuildTags(driverType string, selectedVersion string) (string, error) {
+	tagName, err := optionalDriverBuildTag(driverType, selectedVersion)
+	if err != nil {
+		return "", err
+	}
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		return strings.TrimSpace(tagName + " duckdb_use_lib"), nil
+	}
+	return tagName, nil
+}
+
 func locateProjectRootForAgentBuild() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -3660,6 +3780,89 @@ func locateProjectRootForAgentBuild() (string, error) {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func withEnvValue(env []string, key string, value string) []string {
+	normalizedKey := strings.ToUpper(strings.TrimSpace(key))
+	entry := normalizedKey + "=" + value
+	for i, item := range env {
+		name, _, ok := strings.Cut(item, "=")
+		if ok && strings.ToUpper(strings.TrimSpace(name)) == normalizedKey {
+			env[i] = entry
+			return env
+		}
+	}
+	return append(env, entry)
+}
+
+func prependPathEnv(env []string, dir string) []string {
+	trimmedDir := strings.TrimSpace(dir)
+	if trimmedDir == "" {
+		return env
+	}
+	currentPath := os.Getenv("PATH")
+	return withEnvValue(env, "PATH", trimmedDir+string(os.PathListSeparator)+currentPath)
+}
+
+func prepareDuckDBWindowsDynamicLibraryForBuild() (string, func(), error) {
+	workDir, err := os.MkdirTemp("", "gonavi-duckdb-lib-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(workDir)
+	}
+
+	archivePath := filepath.Join(workDir, "libduckdb-windows-amd64.zip")
+	if _, err := downloadFileWithHash(duckDBWindowsLibraryArchiveURL, archivePath, nil); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+
+	reader, err := zip.OpenReader(archivePath)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	defer reader.Close()
+
+	required := map[string]bool{
+		"duckdb.dll": false,
+		"duckdb.lib": false,
+	}
+	for _, file := range reader.File {
+		baseName := strings.ToLower(filepath.Base(filepath.ToSlash(file.Name)))
+		if _, ok := required[baseName]; !ok {
+			continue
+		}
+		if err := extractZipFileToPath(file, filepath.Join(workDir, baseName)); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		required[baseName] = true
+	}
+	var missing []string
+	for name, found := range required {
+		if !found {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		cleanup()
+		return "", nil, fmt.Errorf("DuckDB 官方动态库包缺少文件：%s", strings.Join(missing, ", "))
+	}
+
+	importLibPath := filepath.Join(workDir, "duckdb.lib")
+	for _, alias := range []string{"libduckdb.dll.a", "libduckdb.a"} {
+		aliasPath := filepath.Join(workDir, alias)
+		if err := copyOptionalDriverSupportFile(importLibPath, aliasPath); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+	}
+
+	return workDir, cleanup, nil
 }
 
 func optionalDriverPublicTypeName(driverType string) string {
@@ -3922,6 +4125,10 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 		candidates = append(candidates, trimmed)
 	}
 
+	if shouldSkipDirectOptionalDriverDownloads(definition.Type) {
+		return candidates
+	}
+
 	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
 		switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
 		case "http", "https":
@@ -3967,9 +4174,30 @@ func findExistingOptionalDriverAgentCandidate(definition driverDefinition, targe
 		if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, absPath); validateErr != nil {
 			continue
 		}
+		if !isReusableOptionalDriverAgentRevisionCurrent(driverType, absPath) {
+			continue
+		}
 		return absPath, true
 	}
 	return "", false
+}
+
+func isReusableOptionalDriverAgentRevisionCurrent(driverType string, executablePath string) bool {
+	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	if expected == "" {
+		return true
+	}
+	actual, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	if err != nil {
+		logger.Warnf("跳过可复用 %s 驱动代理候选：版本元数据不可用 path=%s err=%v", displayName, executablePath, err)
+		return false
+	}
+	if !current {
+		logger.Warnf("跳过可复用 %s 驱动代理候选：revision 不匹配 path=%s actual=%s expected=%s", displayName, executablePath, strings.TrimSpace(actual), expected)
+		return false
+	}
+	return true
 }
 
 func resolveOptionalDriverAgentCandidatePaths(definition driverDefinition) []string {
@@ -4059,7 +4287,7 @@ func resolveDriverDisplayName(definition driverDefinition) string {
 	return "未知"
 }
 
-func activateOptionalDriverAgentBinary(installPath string, runtimePath string) error {
+func activateOptionalDriverAgentBinary(driverType string, installPath string, runtimePath string) error {
 	source := strings.TrimSpace(installPath)
 	target := strings.TrimSpace(runtimePath)
 	if source == "" || target == "" {
@@ -4080,7 +4308,10 @@ func activateOptionalDriverAgentBinary(installPath string, runtimePath string) e
 	if strings.EqualFold(absSource, absTarget) {
 		return nil
 	}
-	return copyAgentBinary(source, target)
+	if err := copyAgentBinary(source, target); err != nil {
+		return err
+	}
+	return copyOptionalDriverSupportFilesFromDirectory(driverType, filepath.Dir(source), filepath.Dir(target))
 }
 
 func copyAgentBinary(sourcePath, targetPath string) error {
@@ -4114,12 +4345,179 @@ func copyAgentBinary(sourcePath, targetPath string) error {
 		_ = os.Remove(tempPath)
 		return chmodErr
 	}
-	if err := os.Rename(tempPath, targetPath); err != nil {
+	if err := renameTempFileOverTarget(tempPath, targetPath); err != nil {
 		_ = os.Remove(tempPath)
 		return err
 	}
 	if chmodErr := os.Chmod(targetPath, 0o755); chmodErr != nil && stdRuntime.GOOS != "windows" {
 		return chmodErr
+	}
+	return nil
+}
+
+func extractZipFileToPath(file *zip.File, targetPath string) error {
+	if file == nil {
+		return fmt.Errorf("zip 条目为空")
+	}
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	tempPath := targetPath + ".tmp"
+	_ = os.Remove(tempPath)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	dst, err := os.Create(tempPath)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := dst.Sync(); err != nil {
+		dst.Close()
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := renameTempFileOverTarget(tempPath, targetPath); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return nil
+}
+
+func copyOptionalDriverSupportFile(sourcePath, targetPath string) error {
+	src, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	tempPath := targetPath + ".tmp"
+	_ = os.Remove(tempPath)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	dst, err := os.Create(tempPath)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := dst.Sync(); err != nil {
+		dst.Close()
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	if err := renameTempFileOverTarget(tempPath, targetPath); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return nil
+}
+
+func renameTempFileOverTarget(tempPath, targetPath string) error {
+	if err := os.Rename(tempPath, targetPath); err == nil {
+		return nil
+	} else {
+		firstErr := err
+		if removeErr := os.Remove(targetPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return firstErr
+		}
+		if retryErr := os.Rename(tempPath, targetPath); retryErr != nil {
+			return retryErr
+		}
+		return nil
+	}
+}
+
+func copyOptionalDriverSupportFilesFromDirectory(driverType string, sourceDir string, targetDir string) error {
+	names := optionalDriverSupportFileNames(driverType)
+	if len(names) == 0 {
+		return nil
+	}
+	sourceRoot := strings.TrimSpace(sourceDir)
+	targetRoot := strings.TrimSpace(targetDir)
+	if sourceRoot == "" || targetRoot == "" {
+		return fmt.Errorf("运行时依赖目录为空")
+	}
+	for _, name := range names {
+		sourcePath := filepath.Join(sourceRoot, name)
+		targetPath := filepath.Join(targetRoot, name)
+		if err := copyOptionalDriverSupportFile(sourcePath, targetPath); err != nil {
+			return fmt.Errorf("复制 %s 失败：%w", name, err)
+		}
+	}
+	return nil
+}
+
+func findOptionalDriverSupportFileInZip(files []*zip.File, agentEntryName string, supportName string) *zip.File {
+	normalizedAgent := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(agentEntryName), "./"))
+	agentDir := filepath.ToSlash(filepath.Dir(normalizedAgent))
+	if agentDir == "." {
+		agentDir = ""
+	}
+	candidatePaths := []string{}
+	if agentDir != "" {
+		candidatePaths = append(candidatePaths, filepath.ToSlash(filepath.Join(agentDir, supportName)))
+	}
+	candidatePaths = append(candidatePaths, supportName)
+
+	for _, candidate := range candidatePaths {
+		for _, file := range files {
+			name := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Name), "./"))
+			if name == candidate {
+				return file
+			}
+		}
+		for _, file := range files {
+			name := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Name), "./"))
+			if strings.EqualFold(name, candidate) {
+				return file
+			}
+		}
+	}
+	for _, file := range files {
+		name := filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(file.Name), "./"))
+		if strings.EqualFold(filepath.Base(name), supportName) {
+			return file
+		}
+	}
+	return nil
+}
+
+func extractOptionalDriverSupportFilesFromZip(files []*zip.File, driverType string, agentEntryName string, targetDir string) error {
+	names := optionalDriverSupportFileNames(driverType)
+	if len(names) == 0 {
+		return nil
+	}
+	targetRoot := strings.TrimSpace(targetDir)
+	if targetRoot == "" {
+		return fmt.Errorf("运行时依赖目标目录为空")
+	}
+	for _, name := range names {
+		entry := findOptionalDriverSupportFileInZip(files, agentEntryName, name)
+		if entry == nil {
+			return fmt.Errorf("驱动包缺少运行时依赖：%s", name)
+		}
+		if err := extractZipFileToPath(entry, filepath.Join(targetRoot, name)); err != nil {
+			return fmt.Errorf("解压运行时依赖 %s 失败：%w", name, err)
+		}
 	}
 	return nil
 }

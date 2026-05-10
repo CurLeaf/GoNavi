@@ -1,10 +1,23 @@
 export namespace ai {
 	
+	export class ToolCallFunction {
+	    name: string;
+	    arguments: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolCallFunction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.arguments = source["arguments"];
+	    }
+	}
 	export class ToolCall {
 	    id: string;
 	    type: string;
-	    // Go type: struct { Name string "json:\"name\""; Arguments string "json:\"arguments\"" }
-	    function: any;
+	    function: ToolCallFunction;
 	
 	    static createFrom(source: any = {}) {
 	        return new ToolCall(source);
@@ -14,7 +27,7 @@ export namespace ai {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.type = source["type"];
-	        this.function = this.convertValues(source["function"], Object);
+	        this.function = this.convertValues(source["function"], ToolCallFunction);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -177,6 +190,7 @@ export namespace ai {
 		    return a;
 		}
 	}
+	
 	
 
 }

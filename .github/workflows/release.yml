@@ -255,6 +255,23 @@ jobs:
           DRIVERS=(mariadb oceanbase doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
+          DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
+          DUCKDB_WINDOWS_LIBRARY_URL="https://github.com/duckdb/duckdb/releases/download/${DUCKDB_WINDOWS_LIBRARY_VERSION}/libduckdb-windows-amd64.zip"
+
+          prepare_duckdb_windows_library() {
+            local lib_dir="$RUNNER_TEMP/duckdb-windows-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
+            local zip_path="$RUNNER_TEMP/libduckdb-windows-amd64.zip"
+            if [ -f "$lib_dir/duckdb.dll" ] && [ -f "$lib_dir/duckdb.lib" ]; then
+              echo "$lib_dir"
+              return 0
+            fi
+            mkdir -p "$lib_dir"
+            curl -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"
+            unzip -qo "$zip_path" -d "$lib_dir"
+            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
+            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
+            echo "$lib_dir"
+          }
 
           for DRIVER in "${DRIVERS[@]}"; do
             BUILD_DRIVER="$DRIVER"
@@ -266,22 +283,38 @@ jobs:
               continue
             fi
             TAG="gonavi_${BUILD_DRIVER}_driver"
+            BUILD_TAGS="$TAG"
             OUTPUT="${DRIVER}-driver-agent-${GOOS}-${GOARCH}"
             if [ "$GOOS" = "windows" ]; then
               OUTPUT="${OUTPUT}.exe"
             fi
             OUTPUT_PATH="${OUTDIR}/${OUTPUT}"
-            echo "🔧 构建 ${OUTPUT_PATH} (tag=${TAG})"
+            DUCKDB_LIB_DIR=""
+            if [ "$DRIVER" = "duckdb" ] && [ "$GOOS" = "windows" ] && [ "$GOARCH" = "amd64" ]; then
+              DUCKDB_LIB_DIR="$(prepare_duckdb_windows_library)"
+              BUILD_TAGS="${BUILD_TAGS} duckdb_use_lib"
+            fi
+            echo "🔧 构建 ${OUTPUT_PATH} (tags=${BUILD_TAGS})"
             if [ "$DRIVER" = "duckdb" ]; then
-              CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-                -tags "${TAG}" \
-                -trimpath \
-                -ldflags "-s -w" \
-                -o "${OUTPUT_PATH}" \
-                ./cmd/optional-driver-agent
+              if [ -n "$DUCKDB_LIB_DIR" ]; then
+                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="-L${DUCKDB_LIB_DIR} -lduckdb" PATH="${DUCKDB_LIB_DIR}:$PATH" go build \
+                  -tags "${BUILD_TAGS}" \
+                  -trimpath \
+                  -ldflags "-s -w" \
+                  -o "${OUTPUT_PATH}" \
+                  ./cmd/optional-driver-agent
+                cp "$DUCKDB_LIB_DIR/duckdb.dll" "$OUTDIR/duckdb.dll"
+              else
+                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+                  -tags "${BUILD_TAGS}" \
+                  -trimpath \
+                  -ldflags "-s -w" \
+                  -o "${OUTPUT_PATH}" \
+                  ./cmd/optional-driver-agent
+              fi
             else
               CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-                -tags "${TAG}" \
+                -tags "${BUILD_TAGS}" \
                 -trimpath \
                 -ldflags "-s -w" \
                 -o "${OUTPUT_PATH}" \
@@ -534,6 +567,7 @@ jobs:
 
           REQUIRED_FILES=(
             "drivers/Windows/duckdb-driver-agent-windows-amd64.exe"
+            "drivers/Windows/duckdb.dll"
             "drivers/MacOS/duckdb-driver-agent-darwin-amd64"
             "drivers/MacOS/duckdb-driver-agent-darwin-arm64"
             "drivers/Linux/duckdb-driver-agent-linux-amd64"

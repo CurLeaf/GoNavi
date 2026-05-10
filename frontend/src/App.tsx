@@ -2,10 +2,11 @@
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowToggleMaximise, WindowUnfullscreen } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
+import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
@@ -19,7 +20,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS, sanitizeDataTableColumnWidthMode } from './utils/dataGridDisplay';
+import { DENSITY_OPTIONS, sanitizeDataTableDensity } from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
@@ -64,12 +65,15 @@ import {
   ShortcutAction,
   canRecordShortcutForAction,
   eventToShortcut,
+  findReservedConflicts,
   getShortcutDisplay,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
+  splitConflictsByContext,
+  type ConflictInfo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, shouldToggleMaximisedWindowForScaleFix } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -630,6 +634,7 @@ function App() {
       let lastRatio = Number(window.devicePixelRatio) || 1;
       let lastFixAt = 0;
       let activationTimer: number | null = null;
+      let resizeTimer: number | null = null;
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
@@ -669,12 +674,12 @@ function App() {
                   }
 
                   try {
-                      WindowToggleMaximise();
-                      await wait(48);
-                      WindowToggleMaximise();
-                      await wait(64);
+                      WindowUnmaximise();
+                      await wait(96);
+                      WindowMaximise();
+                      await wait(96);
                   } catch (e) {
-                      console.warn("Wails Window maximise toggle unavailable in fixWindowScaleIfNeeded", e);
+                      console.warn("Wails Window maximise restore unavailable in fixWindowScaleIfNeeded", e);
                   }
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
@@ -687,7 +692,7 @@ function App() {
                   return;
               }
 
-              if (reason !== 'ratio-change' && !hasViewportScaleDrift) {
+              if (!shouldApplyWindowsScaleFix(reason, hasViewportScaleDrift)) {
                   window.dispatchEvent(new Event('resize'));
                   lastFixAt = Date.now();
                   return;
@@ -718,6 +723,24 @@ function App() {
           void fixWindowScaleIfNeeded('ratio-change');
       };
 
+      const scheduleDevicePixelRatioCheck = (trigger: WindowsScaleCheckTrigger) => {
+          if (cancelled) return;
+          const delayMs = resolveWindowsScaleCheckDelayMs(trigger);
+          if (delayMs <= 0) {
+              checkDevicePixelRatio();
+              return;
+          }
+
+          if (resizeTimer !== null) {
+              window.clearTimeout(resizeTimer);
+          }
+          resizeTimer = window.setTimeout(() => {
+              resizeTimer = null;
+              if (cancelled) return;
+              checkDevicePixelRatio();
+          }, delayMs);
+      };
+
       const scheduleActivationFix = () => {
           if (cancelled) return;
           if (activationTimer !== null) {
@@ -732,7 +755,7 @@ function App() {
 
       const handleWindowFocus = () => {
           if (cancelled) return;
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('focus');
           scheduleActivationFix();
       };
 
@@ -741,18 +764,22 @@ function App() {
           if (document.visibilityState !== 'visible') {
               return;
           }
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('visibilitychange');
           scheduleActivationFix();
       };
 
       const handlePageShow = () => {
           if (cancelled) return;
-          checkDevicePixelRatio();
+          scheduleDevicePixelRatioCheck('pageshow');
           scheduleActivationFix();
       };
 
+      const handleWindowResize = () => {
+          scheduleDevicePixelRatioCheck('resize');
+      };
+
       const pollTimer = window.setInterval(checkDevicePixelRatio, 900);
-      window.addEventListener('resize', checkDevicePixelRatio);
+      window.addEventListener('resize', handleWindowResize);
       window.addEventListener('focus', handleWindowFocus);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -762,8 +789,11 @@ function App() {
           if (activationTimer !== null) {
               window.clearTimeout(activationTimer);
           }
+          if (resizeTimer !== null) {
+              window.clearTimeout(resizeTimer);
+          }
           window.clearInterval(pollTimer);
-          window.removeEventListener('resize', checkDevicePixelRatio);
+          window.removeEventListener('resize', handleWindowResize);
           window.removeEventListener('focus', handleWindowFocus);
           window.removeEventListener('pageshow', handlePageShow);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1860,7 +1890,20 @@ function App() {
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
+  const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  const shortcutConflictMap = useMemo(() => {
+      const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
+      for (const action of SHORTCUT_ACTION_ORDER) {
+          const binding = shortcutOptions[action];
+          if (!binding?.enabled || !binding.combo) continue;
+          const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo));
+          if (conflicts.length > 0) {
+              map[action] = conflicts;
+          }
+      }
+      return map;
+  }, [shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
@@ -2202,9 +2245,15 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
-          await WindowToggleMaximise();
+          const isMaximised = await WindowIsMaximised().catch(() => false);
+          if (isMaximised) {
+              WindowUnmaximise();
+          } else {
+              WindowMaximise();
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 96));
           await syncWindowStateFromRuntime();
-          void emitWindowDiagnostic('action:titlebar-toggle:after-toggle-maximise');
+          void emitWindowDiagnostic('action:titlebar-toggle:after-set-maximise-state');
       } catch (_) {
           // ignore
       }
@@ -2222,10 +2271,37 @@ function App() {
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
+  const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
   const latestMouseX = React.useRef<number>(0); // Store latest mouse position
+  const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
+
+  const restoreSidebarDragBodyStyles = () => {
+      if (!sidebarDragBodyStyleRef.current || typeof document === 'undefined') {
+          sidebarDragBodyStyleRef.current = null;
+          return;
+      }
+
+      const previous = sidebarDragBodyStyleRef.current;
+      document.body.style.cursor = previous.cursor;
+      document.body.style.userSelect = previous.userSelect;
+      (document.body.style as any).WebkitUserSelect = previous.webkitUserSelect;
+      sidebarDragBodyStyleRef.current = null;
+  };
 
   const handleSidebarMouseDown = (e: React.MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+
+      if (typeof document !== 'undefined') {
+          sidebarDragBodyStyleRef.current = {
+              cursor: document.body.style.cursor,
+              userSelect: document.body.style.userSelect,
+              webkitUserSelect: (document.body.style as any).WebkitUserSelect || '',
+          };
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          (document.body.style as any).WebkitUserSelect = 'none';
+      }
       
       if (ghostRef.current) {
           ghostRef.current.style.left = `${sidebarWidth}px`;
@@ -2271,6 +2347,7 @@ function App() {
       if (ghostRef.current) {
           ghostRef.current.style.display = 'none';
       }
+      restoreSidebarDragBodyStyles();
       
       sidebarDragRef.current = null;
       document.removeEventListener('mousemove', handleSidebarMouseMove);
@@ -2366,12 +2443,28 @@ function App() {
   }, []);
 
   useEffect(() => {
+      const handleOpenSnippetSettingsEvent = () => {
+          setIsSnippetModalOpen(true);
+      };
+      window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
+      };
+  }, []);
+
+  useEffect(() => {
       if (!isMacRuntime || !useNativeMacWindowControls) {
           return;
       }
 
       const handleMacNativeEscapeCapture = (event: KeyboardEvent) => {
-          if (!shouldSuppressMacNativeEscapeExit(isMacRuntime, useNativeMacWindowControls, useStore.getState().windowState === 'fullscreen', event)) {
+          if (!shouldSuppressMacNativeEscapeExit(
+              isMacRuntime,
+              useNativeMacWindowControls,
+              useStore.getState().windowState === 'fullscreen',
+              event,
+              { isEditableTarget: isEditableElement(event.target) },
+          )) {
               return;
           }
           event.preventDefault();
@@ -2481,6 +2574,17 @@ function App() {
           if (conflictAction) {
               void message.warning(`与「${SHORTCUT_ACTION_META[conflictAction].label}」冲突，请换一个快捷键`);
               return;
+          }
+
+          const reservedConflicts = findReservedConflicts(normalizedCombo);
+          if (reservedConflicts.length > 0) {
+              const { hasMonaco, hasOther, monacoLabels, otherLabels, otherContexts } = splitConflictsByContext(reservedConflicts);
+              if (hasMonaco) {
+                  void message.info(`已覆盖编辑器「${monacoLabels}」默认快捷键`, 4);
+              }
+              if (hasOther) {
+                  void message.warning(`与${otherContexts}「${otherLabels}」冲突，可能失效`, 4);
+              }
           }
 
           updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true });
@@ -2660,7 +2764,7 @@ function App() {
                     </div>
                 </div>
                 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, position: 'relative' }}>
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
                     <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
                         <Sidebar onEditConnection={handleEditConnection} />
                     </div>
@@ -2698,6 +2802,25 @@ function App() {
                             </div>
                         </div>
                     )}
+                    <div
+                        onMouseDown={handleSidebarMouseDown}
+                        role="separator"
+                        aria-orientation="vertical"
+                        title="拖动调整宽度"
+                        style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: sidebarResizeHandleWidth,
+                            cursor: 'col-resize',
+                            zIndex: 3,
+                            touchAction: 'none',
+                            userSelect: 'none',
+                            WebkitUserSelect: 'none',
+                            background: 'transparent',
+                        }}
+                    />
                 </div>
 
                 {/* Floating SQL Log Toggle */}
@@ -2737,22 +2860,6 @@ function App() {
                     </Button>
                 </div>
             </div>
-            
-            {/* Sidebar Resize Handle */}
-            <div 
-                onMouseDown={handleSidebarMouseDown}
-                style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: '5px',
-                    cursor: 'col-resize',
-                    zIndex: 100,
-                    // background: 'transparent' // transparent usually, visible on hover if desired
-                }}
-                title="拖动调整宽度"
-            />
           </Sider>
            <Content style={{ background: bgContent, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
              {securityUpdateEntryVisibility.showBanner && !isSecurityUpdateBannerDismissed && (
@@ -3396,15 +3503,15 @@ function App() {
                                           />
                                       </div>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>数据表列宽模式</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>表格密度</div>
                                           <Segmented
                                               block
-                                              options={DATA_GRID_COLUMN_WIDTH_MODE_OPTIONS}
-                                              value={appearance.dataTableColumnWidthMode}
-                                              onChange={(value) => setAppearance({ dataTableColumnWidthMode: sanitizeDataTableColumnWidthMode(value) })}
+                                              options={DENSITY_OPTIONS}
+                                              value={appearance.dataTableDensity}
+                                              onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              标准模式默认列宽 200px；紧凑模式默认列宽 140px。已手动拖拽调整的列宽优先保留。
+                                              控制行高、列宽和内边距。舒适适合大屏细看；紧凑适合最大化信息密度。已手动拖拽的列宽优先保留。
                                           </div>
                                       </div>
                                   </div>
@@ -3499,6 +3606,8 @@ function App() {
                       }
                       const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
                       const isCapturing = capturingShortcutAction === action;
+                      const conflicts = shortcutConflictMap[action];
+                      const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
                       return (
                           <div
                               key={action}
@@ -3514,6 +3623,16 @@ function App() {
                               <div>
                                   <div style={{ fontWeight: 500 }}>{meta.label}</div>
                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
+                                  {conflictInfo && (
+                                      <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
+                                          {conflictInfo.hasMonaco && (
+                                              <>⚠ 已覆盖编辑器「{conflictInfo.monacoLabels}」默认快捷键</>
+                                          )}
+                                          {conflictInfo.hasOther && (
+                                              <>⚠ 与{conflictInfo.otherContexts}「{conflictInfo.otherLabels}」冲突，可能失效</>
+                                          )}
+                                      </div>
+                                  )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <Input
@@ -3537,6 +3656,12 @@ function App() {
                   })}
               </div>
           </Modal>
+          <SnippetSettingsModal
+              open={isSnippetModalOpen}
+              onClose={() => setIsSnippetModalOpen(false)}
+              darkMode={darkMode}
+              overlayTheme={overlayTheme}
+          />
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
               open={isProxyModalOpen}

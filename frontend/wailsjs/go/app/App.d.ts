@@ -180,6 +180,8 @@ export function OpenDriverDownloadDirectory(arg1:string):Promise<connection.Quer
 
 export function OpenSQLFile():Promise<connection.QueryResult>;
 
+export function PreviewChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
+
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 
 export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;

@@ -46,6 +46,38 @@ describe('buildCopyInsertSQL', () => {
     );
   });
 
+  it('preserves fractional seconds for MySQL datetime precision columns', () => {
+    const sql = buildCopyInsertSQL({
+      dbType: 'mysql',
+      tableName: 'events',
+      orderedCols: ['created_at'],
+      record: {
+        created_at: '2026-05-10T09:12:33.456+08:00',
+      },
+      columnTypesByLowerName: {
+        created_at: 'datetime(3)',
+      },
+    });
+
+    expect(sql).toBe(
+      "INSERT INTO `events` (`created_at`) VALUES ('2026-05-10 09:12:33.456');",
+    );
+  });
+
+  it('uses ordered columns for copy-as-insert output', () => {
+    const sql = buildCopyInsertSQL({
+      dbType: 'mysql',
+      tableName: 'users',
+      orderedCols: ['name', 'id'],
+      record: {
+        id: 7,
+        name: 'Ada',
+      },
+    });
+
+    expect(sql).toBe("INSERT INTO `users` (`name`, `id`) VALUES ('Ada', '7');");
+  });
+
   it('keeps RFC3339-looking text unchanged for non-temporal columns', () => {
     const sql = buildCopyInsertSQL({
       dbType: 'postgres',

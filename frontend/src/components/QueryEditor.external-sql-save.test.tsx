@@ -216,7 +216,7 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('writes external SQL file tabs back to disk without creating saved queries', async () => {
-    let renderer: ReactTestRenderer;
+    let renderer!: ReactTestRenderer;
     const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
 
     await act(async () => {
@@ -240,7 +240,7 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('does not create saved queries when external SQL file writes fail', async () => {
-    let renderer: ReactTestRenderer;
+    let renderer!: ReactTestRenderer;
     const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
     backendApp.WriteSQLFile.mockResolvedValueOnce({ success: false, message: '磁盘只读' });
 
@@ -272,7 +272,7 @@ describe('QueryEditor external SQL save', () => {
       },
     ];
 
-    let renderer: ReactTestRenderer;
+    let renderer!: ReactTestRenderer;
     await act(async () => {
       renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
     });
@@ -410,6 +410,49 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.readOnly).toBe(false);
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`);
     expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
+  it('rewrites Oracle SELECT * queries before injecting hidden ROWID locator columns', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['WAFER_ID', ORACLE_ROWID_LOCATOR_COLUMN], rows: [{ WAFER_ID: 'R015Z10F08', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'WAFER_ID', key: '' }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ANONYMOUS', query: 'SELECT * FROM MYCIMLED.EDC_LOG' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('FROM MYCIMLED.EDC_LOG');
+    expect(executedSql).toContain('FROM MYCIMLED.EDC_LOG gonavi_query_source');
+    expect(executedSql).not.toContain('__gonavi_query_source__');
+    expect(executedSql).not.toContain('SELECT *, ROWID AS');
+    expect(executedSql).toMatch(/SELECT\s+gonavi_query_source\.\*\s*,\s+gonavi_query_source\.ROWID\s+AS\s+"__gonavi_oracle_rowid__"/i);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'oracle-rowid',
+      columns: ['ROWID'],
+      valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer?.unmount();
   });
 
   it('keeps non-Oracle query results read-only when no safe locator exists', async () => {

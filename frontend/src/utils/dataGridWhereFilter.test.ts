@@ -7,6 +7,7 @@ import {
   normalizeQuickWhereCondition,
   resolveWhereConditionSuggestions,
   resolveWhereConditionSelectedValue,
+  shouldApplyQuickWhereOnEnter,
   validateQuickWhereCondition,
 } from './dataGridWhereFilter';
 
@@ -109,5 +110,31 @@ describe('dataGridWhereFilter', () => {
         insertText: '= ',
       }),
     ).toBe('`username` = ');
+  });
+
+  it('lets autocomplete consume enter while quick where suggestions are open', () => {
+    expect(shouldApplyQuickWhereOnEnter({
+      key: 'Enter',
+      suggestionsOpen: true,
+      suggestionCount: 1,
+      activeSuggestionId: 'quick-where-list-0',
+    })).toBe(false);
+    expect(shouldApplyQuickWhereOnEnter({
+      key: 'Enter',
+      suggestionsOpen: true,
+      suggestionCount: 1,
+    })).toBe(true);
+    expect(shouldApplyQuickWhereOnEnter({
+      key: 'Enter',
+      suggestionsOpen: false,
+      suggestionCount: 1,
+      activeSuggestionId: 'quick-where-list-0',
+    })).toBe(true);
+    expect(shouldApplyQuickWhereOnEnter({
+      key: 'Enter',
+      shiftKey: true,
+      suggestionsOpen: false,
+      suggestionCount: 0,
+    })).toBe(false);
   });
 });

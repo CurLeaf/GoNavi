@@ -40,6 +40,17 @@ build_driver_name() {
   echo "$1"
 }
 
+driver_build_tags() {
+  local driver="$1"
+  local build_driver tag
+  build_driver="$(build_driver_name "$driver")"
+  tag="gonavi_${build_driver}_driver"
+  if [[ "$driver" == "duckdb" && "$goos" == "windows" && "$goarch" == "amd64" ]]; then
+    tag="$tag duckdb_use_lib"
+  fi
+  echo "$tag"
+}
+
 hash_file() {
   local target="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -205,7 +216,7 @@ fingerprint_driver() {
   local driver="$1"
   local build_driver tag cgo_enabled tmp file identity file_hash revision
   build_driver="$(build_driver_name "$driver")"
-  tag="gonavi_${build_driver}_driver"
+  tag="$(driver_build_tags "$driver")"
   cgo_enabled=0
   if [[ "$driver" == "duckdb" ]]; then
     cgo_enabled=1

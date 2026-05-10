@@ -44,4 +44,14 @@ describe('macWindow helpers', () => {
     expect(shouldSuppressMacNativeEscapeExit(true, true, true, { key: 'Enter', defaultPrevented: false })).toBe(false);
     expect(shouldSuppressMacNativeEscapeExit(true, true, true, { key: 'Escape', defaultPrevented: true })).toBe(false);
   });
+
+  it('does not suppress Escape for editable targets so editor widgets can close', () => {
+    expect(shouldSuppressMacNativeEscapeExit(
+      true,
+      true,
+      true,
+      { key: 'Escape', defaultPrevented: false },
+      { isEditableTarget: true },
+    )).toBe(false);
+  });
 });

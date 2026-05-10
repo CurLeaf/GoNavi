@@ -31,7 +31,6 @@ func (d *DamengDB) getDSN(config connection.ConnectionConfig) string {
 	// or dm://user:password@host:port
 
 	address := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
-	escapedPassword := url.PathEscape(config.Password)
 	q := url.Values{}
 	if config.Database != "" {
 		q.Set("schema", config.Database)
@@ -44,15 +43,16 @@ func (d *DamengDB) getDSN(config connection.ConnectionConfig) string {
 			q.Set("SSL_KEY_PATH", keyPath)
 		}
 	}
-	if escapedPassword != config.Password {
-		// 达梦驱动要求：密码包含特殊字符时，password 需 PathEscape，并添加 escapeProcess=true 让驱动解码。
-		q.Set("escapeProcess", "true")
-	}
 	mergeConnectionParamsFromConfig(q, config, "dm", "dameng")
 
-	dsn := fmt.Sprintf("dm://%s:%s@%s", config.User, escapedPassword, address)
+	// 当前达梦 Go 驱动使用字符串切分解析 DSN，认证信息不会做 URL 反解码。
+	// 密码保持原样传入，避免 p%40ss 这类转义文本被当作真实密码登录。
+	dsn := fmt.Sprintf("dm://%s:%s@%s", config.User, config.Password, address)
 	encoded := q.Encode()
 	if encoded == "" {
+		if strings.Contains(config.User, "?") || strings.Contains(config.Password, "?") {
+			return dsn + "?"
+		}
 		return dsn
 	}
 	return dsn + "?" + encoded

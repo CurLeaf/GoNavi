@@ -65,6 +65,12 @@ type BatchApplier interface {
 	ApplyChanges(tableName string, changes connection.ChangeSet) error
 }
 
+// ChangePreviewer 是可选的变更预览接口。
+// 驱动可实现此接口提供自定义 SQL 预览格式；若未实现，调用方回退到 GenerateChangePreview。
+type ChangePreviewer interface {
+	PreviewChanges(tableName string, changes connection.ChangeSet) (deletes, updates, inserts []string)
+}
+
 func requireSingleRowAffected(result sql.Result, action string) error {
 	affected, err := result.RowsAffected()
 	if err != nil {

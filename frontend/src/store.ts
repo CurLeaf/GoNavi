@@ -13,6 +13,7 @@ import {
   ExternalSQLDirectory,
   JVMDiagnosticCommandDraft,
   JVMDiagnosticEventChunk,
+  SqlSnippet,
 } from "./types";
 import {
   ShortcutAction,
@@ -23,6 +24,10 @@ import {
   sanitizeShortcutOptions,
 } from "./utils/shortcuts";
 import { buildExternalSQLDirectoryId } from "./utils/externalSqlTree";
+import {
+  DEFAULT_SQL_SNIPPETS,
+  BUILTIN_SNIPPET_MAP,
+} from "./utils/sqlSnippetDefaults";
 import { toPersistedGlobalProxy } from "./utils/globalProxyDraft";
 import {
   DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -60,7 +65,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 8;
+const PERSIST_VERSION = 9;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
@@ -788,6 +793,7 @@ interface AppState {
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
   shortcutOptions: ShortcutOptions;
+  sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, "name" | "frequency">;
@@ -875,6 +881,9 @@ interface AppState {
     binding: Partial<ShortcutBinding>,
   ) => void;
   resetShortcutOptions: () => void;
+  saveSqlSnippet: (snippet: SqlSnippet) => void;
+  deleteSqlSnippet: (id: string) => void;
+  resetBuiltinSqlSnippet: (id: string) => void;
 
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
@@ -959,6 +968,37 @@ const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
       sql,
       connectionId,
       dbName,
+      createdAt: Number.isFinite(Number(raw.createdAt))
+        ? Number(raw.createdAt)
+        : Date.now(),
+    });
+  });
+  return result;
+};
+
+const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
+  if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
+  const result: SqlSnippet[] = [];
+  const seenIds = new Set<string>();
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    const prefix = toTrimmedString(raw.prefix)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 20);
+    const body = toTrimmedString(raw.body);
+    if (!prefix || !body) return;
+    const id = toTrimmedString(raw.id, `snippet-${index + 1}`) || `snippet-${index + 1}`;
+    if (seenIds.has(id)) return;
+    seenIds.add(id);
+    result.push({
+      id,
+      prefix,
+      name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
+      description: toTrimmedString(raw.description) || undefined,
+      body,
+      isBuiltin: raw.isBuiltin === true,
       createdAt: Number.isFinite(Number(raw.createdAt))
         ? Number(raw.createdAt)
         : Date.now(),
@@ -1153,7 +1193,7 @@ const sanitizeAppearance = (
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
-    dataTableColumnWidthMode: dataGridDisplaySettings.dataTableColumnWidthMode,
+    dataTableDensity: dataGridDisplaySettings.dataTableDensity,
   };
   if (version < 2 && isLegacyDefaultAppearance(appearance)) {
     return { ...DEFAULT_APPEARANCE };
@@ -1402,6 +1442,7 @@ export const useStore = create<AppState>()(
         showColumnType: true,
       },
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
+      sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
       tableAccessCount: {},
       tableSortPreference: {},
@@ -1805,6 +1846,33 @@ export const useStore = create<AppState>()(
         });
       },
 
+      saveSqlSnippet: (snippet) =>
+        set((state) => {
+          const existing = state.sqlSnippets.findIndex((s) => s.id === snippet.id);
+          if (existing >= 0) {
+            const updated = [...state.sqlSnippets];
+            updated[existing] = snippet;
+            return { sqlSnippets: updated };
+          }
+          return { sqlSnippets: [...state.sqlSnippets, snippet] };
+        }),
+      deleteSqlSnippet: (id) =>
+        set((state) => ({
+          sqlSnippets: state.sqlSnippets.filter(
+            (s) => s.id !== id || s.isBuiltin,
+          ),
+        })),
+      resetBuiltinSqlSnippet: (id) =>
+        set((state) => {
+          const original = BUILTIN_SNIPPET_MAP[id];
+          if (!original) return state;
+          return {
+            sqlSnippets: state.sqlSnippets.map((s) =>
+              s.id === id ? { ...original } : s,
+            ),
+          };
+        }),
+
       addSqlLog: (log) =>
         set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
       clearSqlLogs: () => set({ sqlLogs: [] }),
@@ -2140,6 +2208,15 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
+        const existingSnippets = sanitizeSqlSnippets(state.sqlSnippets);
+        const existingSnippetIds = new Set(existingSnippets.map((s) => s.id));
+        const missingSnippets = DEFAULT_SQL_SNIPPETS.filter(
+          (d) => !existingSnippetIds.has(d.id),
+        );
+        nextState.sqlSnippets =
+          missingSnippets.length > 0
+            ? [...existingSnippets, ...missingSnippets]
+            : existingSnippets;
         nextState.tableAccessCount = sanitizeTableAccessCount(
           state.tableAccessCount,
         );
@@ -2204,6 +2281,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
+          sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
           // AI 会话数据不再从 localStorage 恢复，改为从后端文件加载
@@ -2228,6 +2306,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
+          sqlSnippets: state.sqlSnippets,
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,
           tableColumnOrders: state.tableColumnOrders,

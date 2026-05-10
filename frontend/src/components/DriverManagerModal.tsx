@@ -4,6 +4,7 @@ import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, FolderOpenOutline
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { buildDriverManagerWorkbenchTheme } from '../utils/driverManagerWorkbenchTheme';
 import {
   DRIVER_LOCAL_IMPORT_BUTTON_LABEL,
   DRIVER_LOCAL_IMPORT_DIRECTORY_HELP,
@@ -178,6 +179,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const driverManagerTheme = useMemo(
+    () => buildDriverManagerWorkbenchTheme(darkMode, opacity),
+    [darkMode, opacity],
+  );
   const [loading, setLoading] = useState(false);
   const [downloadDir, setDownloadDir] = useState('');
   const [networkChecking, setNetworkChecking] = useState(false);
@@ -200,6 +205,33 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   useEffect(() => {
     downloadDirRef.current = downloadDir;
   }, [downloadDir]);
+
+  const modalBodyStyle = useMemo<React.CSSProperties>(() => ({
+    maxHeight: 'calc(100vh - 220px)',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    paddingRight: 18,
+    background: driverManagerTheme.pageBg,
+    color: driverManagerTheme.titleText,
+  }), [driverManagerTheme]);
+
+  const managerSectionStyle = useMemo<React.CSSProperties>(() => ({
+    border: driverManagerTheme.sectionBorder,
+    borderRadius: 8,
+    background: driverManagerTheme.sectionBg,
+  }), [driverManagerTheme]);
+
+  const managerStatStyle = useMemo<React.CSSProperties>(() => ({
+    border: driverManagerTheme.statBorder,
+    borderRadius: 8,
+    background: driverManagerTheme.statBg,
+  }), [driverManagerTheme]);
+
+  const managerUpdateNoteStyle = useMemo<React.CSSProperties>(() => ({
+    border: driverManagerTheme.updateNoteBorder,
+    borderRadius: 8,
+    background: driverManagerTheme.updateNoteBg,
+  }), [driverManagerTheme]);
 
   const appendOperationLog = useCallback((
     driverType: string,
@@ -1029,6 +1061,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           row.needsUpdate ? 'driver-manager-card-warning' : '',
           row.connectable ? 'driver-manager-card-ready' : '',
         ].filter(Boolean).join(' ')}
+        style={{
+          border: row.needsUpdate
+            ? driverManagerTheme.cardWarningBorder
+            : (row.connectable ? driverManagerTheme.cardReadyBorder : driverManagerTheme.cardBorder),
+          background: driverManagerTheme.cardBg,
+        }}
       >
         <div className="driver-manager-card-main">
           <div className="driver-manager-card-info">
@@ -1043,7 +1081,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
               {affectedText ? <Text type="secondary">{affectedText}</Text> : null}
             </div>
             {row.needsUpdate && issueText ? (
-              <div className="driver-manager-update-note">
+              <div className="driver-manager-update-note" style={managerUpdateNoteStyle}>
                 <Text strong type="warning">需要重装</Text>
                 <Paragraph
                   className="driver-manager-note-text"
@@ -1115,12 +1153,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       style={{ top: 24 }}
       className="driver-manager-modal"
       styles={{
-        body: {
-          maxHeight: 'calc(100vh - 220px)',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          paddingRight: 18,
-        },
+        body: modalBodyStyle,
       }}
       destroyOnHidden
       footer={(
@@ -1137,26 +1170,26 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         </Space>
       )}
     >
-      <div className="driver-manager-shell">
-        <div className="driver-manager-header">
+      <div className="driver-manager-shell" data-driver-theme={driverManagerTheme.isDark ? 'dark' : 'light'}>
+        <div className="driver-manager-header" style={managerSectionStyle}>
           <div className="driver-manager-heading">
             <Text type="secondary">除 MySQL / Redis / Oracle / PostgreSQL 外，其他数据源需先安装启用后再连接。</Text>
             <Text type="secondary">驱动代理独立运行，GoNavi 升级后如提示重装，请重新安装对应驱动以应用新的 agent 逻辑。</Text>
           </div>
           <div className="driver-manager-stats">
-            <div className="driver-manager-stat">
+            <div className="driver-manager-stat" style={managerStatStyle}>
               <span>{statusSummary.total}</span>
               <Text type="secondary">全部</Text>
             </div>
-            <div className="driver-manager-stat">
+            <div className="driver-manager-stat" style={managerStatStyle}>
               <span>{statusSummary.enabled}</span>
               <Text type="secondary">已启用</Text>
             </div>
-            <div className="driver-manager-stat driver-manager-stat-warning">
-              <span>{statusSummary.needsUpdate}</span>
+            <div className="driver-manager-stat driver-manager-stat-warning" style={managerStatStyle}>
+              <span style={{ color: driverManagerTheme.warningText }}>{statusSummary.needsUpdate}</span>
               <Text type="secondary">需重装</Text>
             </div>
-            <div className="driver-manager-stat">
+            <div className="driver-manager-stat" style={managerStatStyle}>
               <span>{statusSummary.notEnabled}</span>
               <Text type="secondary">未启用</Text>
             </div>
@@ -1239,7 +1272,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           />
         )}
 
-        <div className="driver-manager-directory-panel">
+        <div className="driver-manager-directory-panel" style={managerSectionStyle}>
           <Collapse
             size="small"
             ghost

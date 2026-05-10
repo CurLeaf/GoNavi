@@ -108,13 +108,13 @@ func (p *AnthropicProvider) Validate() error {
 // --- 请求体类型 ---
 
 type anthropicRequest struct {
-	Model       string              `json:"model"`
-	Messages    []anthropicMessage  `json:"messages"`
-	System      string              `json:"system,omitempty"`
-	MaxTokens   int                 `json:"max_tokens"`
-	Temperature float64             `json:"temperature,omitempty"`
-	Stream      bool                `json:"stream,omitempty"`
-	Tools       []anthropicTool     `json:"tools,omitempty"`
+	Model       string             `json:"model"`
+	Messages    []anthropicMessage `json:"messages"`
+	System      string             `json:"system,omitempty"`
+	MaxTokens   int                `json:"max_tokens"`
+	Temperature float64            `json:"temperature,omitempty"`
+	Stream      bool               `json:"stream,omitempty"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
 }
 
 // anthropicTool Anthropic 格式的工具定义
@@ -321,10 +321,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 			toolCalls = append(toolCalls, ai.ToolCall{
 				ID:   block.ID,
 				Type: "function",
-				Function: struct {
-					Name      string `json:"name"`
-					Arguments string `json:"arguments"`
-				}{
+				Function: ai.ToolCallFunction{
 					Name:      block.Name,
 					Arguments: argsStr,
 				},
@@ -388,9 +385,9 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	// 跟踪当前活跃的 tool_use blocks
 	type activeToolUse struct {
-		id        string
-		name      string
-		argsJSON  strings.Builder
+		id       string
+		name     string
+		argsJSON strings.Builder
 	}
 	activeBlocks := make(map[int]*activeToolUse) // index -> block
 
@@ -443,10 +440,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 						{
 							ID:   block.id,
 							Type: "function",
-							Function: struct {
-								Name      string `json:"name"`
-								Arguments string `json:"arguments"`
-							}{
+							Function: ai.ToolCallFunction{
 								Name:      block.name,
 								Arguments: argsStr,
 							},

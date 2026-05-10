@@ -285,7 +285,7 @@ func (p *PostgresDB) GetDatabases() ([]string, error) {
 }
 
 func (p *PostgresDB) GetTables(dbName string) ([]string, error) {
-	query := "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg_%' ORDER BY schemaname, tablename"
+	query := "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, tablename"
 	data, _, err := p.Query(query)
 	if err != nil {
 		return nil, err
@@ -594,7 +594,7 @@ func (p *PostgresDB) GetAllColumns(dbName string) ([]connection.ColumnDefinition
 SELECT table_schema, table_name, column_name, data_type
 FROM information_schema.columns
 WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-  AND table_schema NOT LIKE 'pg_%'
+  AND table_schema NOT LIKE 'pg|_%' ESCAPE '|'
 ORDER BY table_schema, table_name, ordinal_position`
 
 	data, _, err := p.Query(query)
@@ -692,7 +692,7 @@ func (p *PostgresDB) queryUserSchemas() []string {
 
 	query := `SELECT nspname FROM pg_namespace
 		WHERE nspname NOT IN ('pg_catalog', 'information_schema')
-		  AND nspname NOT LIKE 'pg_%'
+		  AND nspname NOT LIKE 'pg|_%' ESCAPE '|'
 		ORDER BY nspname`
 
 	rows, err := p.conn.Query(query)

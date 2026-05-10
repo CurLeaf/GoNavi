@@ -126,7 +126,7 @@ func TestOracleDSN_EscapesUserAndPassword(t *testing.T) {
 	}
 }
 
-func TestDamengDSN_EscapesPasswordAndEnablesEscapeProcess(t *testing.T) {
+func TestDamengDSN_KeepsRawPasswordForDriverParser(t *testing.T) {
 	d := &DamengDB{}
 	cfg := connection.ConnectionConfig{
 		Type:     "dameng",
@@ -138,17 +138,33 @@ func TestDamengDSN_EscapesPasswordAndEnablesEscapeProcess(t *testing.T) {
 	}
 
 	dsn := d.getDSN(cfg)
-	if strings.Contains(dsn, cfg.Password) {
-		t.Fatalf("dsn 包含原始密码：%s", dsn)
+	if !strings.Contains(dsn, "SYSDBA:p@ss:wo/rd@127.0.0.1:5236") {
+		t.Fatalf("dsn 未保留达梦驱动可识别的原始认证信息：%s", dsn)
 	}
-	if strings.Contains(dsn, "wo/rd") || !strings.Contains(dsn, "wo%2Frd") {
-		t.Fatalf("dsn 未按达梦驱动要求转义密码（至少应转义 '/'）：%s", dsn)
+	if strings.Contains(dsn, "p%40ss") || strings.Contains(dsn, "wo%2Frd") {
+		t.Fatalf("dsn 不应转义达梦密码，驱动不会反解码认证信息：%s", dsn)
 	}
-	if !strings.Contains(dsn, "escapeProcess=true") {
-		t.Fatalf("dsn 缺少 escapeProcess=true：%s", dsn)
+	if strings.Contains(dsn, "escapeProcess=true") {
+		t.Fatalf("dsn 不应自动添加 escapeProcess=true：%s", dsn)
 	}
 	if !strings.Contains(dsn, "schema=DBName") {
 		t.Fatalf("dsn 缺少 schema 参数：%s", dsn)
+	}
+}
+
+func TestDamengDSN_AppendsQuerySentinelForQuestionMarkInPassword(t *testing.T) {
+	d := &DamengDB{}
+	cfg := connection.ConnectionConfig{
+		Type:     "dameng",
+		Host:     "127.0.0.1",
+		Port:     5236,
+		User:     "SYSDBA",
+		Password: "p?ss",
+	}
+
+	dsn := d.getDSN(cfg)
+	if dsn != "dm://SYSDBA:p?ss@127.0.0.1:5236?" {
+		t.Fatalf("dsn = %q, want raw password with trailing query sentinel", dsn)
 	}
 }
 

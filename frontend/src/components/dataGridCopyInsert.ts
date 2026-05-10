@@ -51,9 +51,9 @@ const normalizeDateTimeString = (val: string): string => {
   }
 
   const match = val.match(
-    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
   );
-  return match ? `${match[1]} ${match[2]}` : val;
+  return match ? `${match[1]} ${match[2]}${match[3] || ''}` : val;
 };
 
 const normalizeTimezoneAwareDateTimeString = (val: string): string => {
@@ -66,13 +66,14 @@ const normalizeTimezoneAwareDateTimeString = (val: string): string => {
   }
 
   const match = val.match(
-    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:\s*(Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(?:\s*(Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?$/
   );
   if (!match) {
     return val;
   }
-  const suffix = match[3] || '';
-  return `${match[1]} ${match[2]}${suffix}`;
+  const fractional = match[3] || '';
+  const suffix = match[4] || '';
+  return `${match[1]} ${match[2]}${fractional}${suffix}`;
 };
 
 const isTemporalColumnType = (columnType?: string): boolean => {
@@ -165,22 +166,36 @@ const toNormalizedLiteralText = (value: any, columnType?: string): string => {
   return String(value);
 };
 
+const hasFractionalSeconds = (value: string): boolean => /\d{2}:\d{2}:\d{2}\.\d+/.test(value);
+
+const stripFractionalSeconds = (value: string): string => (
+  value.replace(/(\d{2}:\d{2}:\d{2})\.\d+/, '$1')
+);
+
 const formatOracleTemporalLiteral = (value: any, columnType?: string): string | null => {
   if (!isTemporalColumnType(columnType)) {
     return null;
   }
   const normalized = toNormalizedLiteralText(value, columnType);
-  const escaped = escapeLiteral(normalized);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+  const rawType = String(columnType || '').toLowerCase();
+  const isTimestamp = rawType.includes('timestamp');
+  const oracleValue = isTimestamp ? normalized : stripFractionalSeconds(normalized);
+  const escaped = escapeLiteral(oracleValue);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(oracleValue)) {
     return `TO_DATE('${escaped}', 'YYYY-MM-DD')`;
   }
-  if (isTimezoneAwareColumnType(columnType) && /[+-]\d{2}:?\d{2}$/.test(normalized)) {
-    const compactOffset = normalized.replace(/([+-]\d{2}):(\d{2})$/, '$1:$2');
-    return `TO_TIMESTAMP_TZ('${escapeLiteral(compactOffset)}', 'YYYY-MM-DD HH24:MI:SSTZH:TZM')`;
+  if (isTimezoneAwareColumnType(columnType) && /[+-]\d{2}:?\d{2}$/.test(oracleValue)) {
+    const compactOffset = oracleValue.replace(/([+-]\d{2}):(\d{2})$/, '$1:$2');
+    const temporalFormat = hasFractionalSeconds(oracleValue)
+      ? 'YYYY-MM-DD HH24:MI:SS.FFTZH:TZM'
+      : 'YYYY-MM-DD HH24:MI:SSTZH:TZM';
+    return `TO_TIMESTAMP_TZ('${escapeLiteral(compactOffset)}', '${temporalFormat}')`;
   }
-  const rawType = String(columnType || '').toLowerCase();
-  if (rawType.includes('timestamp')) {
-    return `TO_TIMESTAMP('${escaped}', 'YYYY-MM-DD HH24:MI:SS')`;
+  if (isTimestamp) {
+    const temporalFormat = hasFractionalSeconds(oracleValue)
+      ? 'YYYY-MM-DD HH24:MI:SS.FF'
+      : 'YYYY-MM-DD HH24:MI:SS';
+    return `TO_TIMESTAMP('${escaped}', '${temporalFormat}')`;
   }
   return `TO_DATE('${escaped}', 'YYYY-MM-DD HH24:MI:SS')`;
 };

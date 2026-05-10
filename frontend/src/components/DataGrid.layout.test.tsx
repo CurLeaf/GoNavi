@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import DataGrid from './DataGrid';
+import DataGrid, { formatCellDisplayText, resolveContextMenuFieldName } from './DataGrid';
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -14,7 +14,7 @@ vi.mock('../store', () => ({
       opacity: 1,
       blur: 0,
       showDataTableVerticalBorders: false,
-      dataTableColumnWidthMode: 'standard',
+      dataTableDensity: 'comfortable',
     },
     queryOptions: {
       showColumnComment: false,
@@ -83,6 +83,15 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('当前页查找...');
   });
 
+  it('preserves fractional seconds when rendering datetime values', () => {
+    expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
+  });
+
+  it('resolves the field name copied from the cell context menu', () => {
+    expect(resolveContextMenuFieldName('created_at', '创建时间')).toBe('created_at');
+    expect(resolveContextMenuFieldName('', 'fallback_name')).toBe('fallback_name');
+  });
+
   it('renders a DDL action for table data pages only', () => {
     const tableMarkup = renderToStaticMarkup(
       <DataGrid
@@ -103,6 +112,7 @@ describe('DataGrid layout', () => {
 
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
+    expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
     const schemaTableMarkup = renderToStaticMarkup(
       <DataGrid
@@ -167,6 +177,26 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-paste-row-action="true"');
     expect(markup).toContain('复制行');
     expect(markup).toContain('粘贴行');
+  });
+
+  it('renders a clickable copy action for aggregate query results', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            'COUNT(*)': 12,
+          },
+        ]}
+        columnNames={['COUNT(*)']}
+        loading={false}
+        exportScope="queryResult"
+      />,
+    );
+
+    expect(markup).toContain('data-grid-query-copy-action="true"');
+    expect(markup).not.toMatch(/data-grid-query-copy-action="true"[^>]*disabled/);
+    expect(markup).toContain('复制');
   });
 
   it('renders a quick WHERE condition editor when table filters are visible', () => {

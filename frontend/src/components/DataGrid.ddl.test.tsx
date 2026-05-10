@@ -27,7 +27,7 @@ const storeState = vi.hoisted(() => ({
     opacity: 1,
     blur: 0,
     showDataTableVerticalBorders: false,
-    dataTableColumnWidthMode: 'standard',
+    dataTableDensity: 'comfortable',
   },
   queryOptions: {
     showColumnComment: false,

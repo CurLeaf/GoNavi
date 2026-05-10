@@ -176,6 +176,46 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('does not add fallback ORDER BY for DuckDB table preview when a primary key is available', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-order', dbName: 'main', tableName: 'events', title: 'events' }));
+
+    const tableQueries = backendApp.DBQuery.mock.calls
+      .map((call: any[]) => String(call[2] || ''))
+      .filter((sql: string) => sql.includes('FROM "events"'));
+    expect(tableQueries.length).toBeGreaterThan(0);
+    expect(tableQueries.every((sql: string) => !/\border\s+by\b/i.test(sql))).toBe(true);
+    expect(tableQueries[tableQueries.length - 1]).toContain('LIMIT 101 OFFSET 0');
+    renderer.unmount();
+  });
+
+  it('shows an actionable message for DuckDB timeout interruption errors', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: false,
+      message: 'context deadline exceeded INTERRUPT Error: Interrupted!',
+      fields: [],
+      data: [],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-timeout', dbName: 'main', tableName: 'events', title: 'events' }));
+
+    expect(messageApi.error).toHaveBeenCalledWith('DuckDB 查询超过连接超时时间，已中断。请调大连接超时时间，或减少排序/筛选范围后重试。');
+    expect(storeState.addSqlLog.mock.calls.some((call: any[]) => String(call[0]?.message || '').includes('context deadline exceeded'))).toBe(true);
+    renderer.unmount();
+  });
+
   it('keeps non-Oracle table preview read-only when no safe locator exists', async () => {
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';

@@ -9,8 +9,8 @@ import { useStore } from '../store';
 import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
-import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from '../utils/mongodb';
-import { getShortcutDisplay, isEditableElement, isShortcutMatch } from '../utils/shortcuts';
+import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
+import { getShortcutDisplay, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
@@ -178,8 +178,13 @@ const SQL_FUNCTIONS: { name: string; detail: string }[] = [
     { name: 'SLEEP', detail: '工具 - 延时' },
 ];
 
-// 模块级标志：确保 SQL completion provider 全局只注册一次
-let sqlCompletionRegistered = false;
+// HMR 重载时释放旧注册避免补全项重复
+const _g = globalThis as any;
+if (!_g.__gonaviSqlCompletionState) {
+    _g.__gonaviSqlCompletionState = { registered: false, disposables: [] as any[] };
+}
+let sqlCompletionRegistered = _g.__gonaviSqlCompletionState.registered;
+let sqlCompletionDisposables = _g.__gonaviSqlCompletionState.disposables;
 
 // 模块级共享变量：completion provider 从这些变量读取当前活跃 Tab 的状态。
 // 每个 QueryEditor 实例在成为活跃 Tab 时更新这些变量，确保 provider 始终使用正确的上下文。
@@ -203,6 +208,7 @@ const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
 
 type SimpleSelectInfo = {
     selectsAll: boolean;
+    selectsBareAll: boolean;
     writableColumns: Record<string, string>;
 };
 
@@ -282,6 +288,7 @@ const splitTopLevelComma = (text: string): string[] => {
 const SIMPLE_IDENTIFIER_PATH_RE = /^(?:[`"\[]?[A-Za-z_][\w$]*[`"\]]?\s*\.\s*){0,2}[`"\[]?[A-Za-z_][\w$]*[`"\]]?$/;
 const QUERY_ALIAS_RESERVED = new Set([
     'where', 'group', 'order', 'having', 'limit', 'fetch', 'offset', 'join', 'left', 'right', 'inner', 'outer', 'on', 'union',
+    'for', 'connect', 'start', 'window', 'sample', 'pivot', 'unpivot', 'qualify', 'model',
 ]);
 
 const getLastIdentifierPart = (path: string): string => {
@@ -325,16 +332,21 @@ const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
 
     const writableColumns: Record<string, string> = {};
     let selectsAll = false;
+    let selectsBareAll = false;
     for (const item of splitTopLevelComma(selectList)) {
+        const trimmedItem = String(item || '').trim();
         const resolved = resolveSimpleSelectItemColumn(item);
         if (!resolved) continue;
         if (resolved === 'all') {
             selectsAll = true;
+            if (trimmedItem === '*') {
+                selectsBareAll = true;
+            }
             continue;
         }
         writableColumns[resolved.resultName] = resolved.sourceName;
     }
-    return { selectsAll, writableColumns };
+    return { selectsAll, selectsBareAll, writableColumns };
 };
 
 const appendQuerySelectExpressions = (sql: string, expressions: string[]): string => {
@@ -343,6 +355,89 @@ const appendQuerySelectExpressions = (sql: string, expressions: string[]): strin
         /^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+[\s\S]*)$/i,
         (_match, prefix, selectList, rest) => `${prefix}${String(selectList).trimEnd()}, ${expressions.join(', ')}${rest}`,
     );
+};
+
+const QUERY_LOCATOR_SOURCE_ALIAS = 'gonavi_query_source';
+
+const rewriteOracleSelectAllWithExpressions = (sql: string, expressions: string[]): string | undefined => {
+    if (expressions.length === 0) return undefined;
+
+    const match = String(sql || '').match(/^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+)([\s\S]*)$/i);
+    if (!match) return undefined;
+
+    const prefix = match[1];
+    const selectList = match[2].trim();
+    const fromKeyword = match[3];
+    const fromTail = match[4];
+    const selectItems = splitTopLevelComma(selectList);
+    if (selectItems.length === 0) return undefined;
+
+    let selectAllFound = false;
+    for (const item of selectItems) {
+        if (String(item || '').trim() === '*') {
+            selectAllFound = true;
+            break;
+        }
+    }
+    if (!selectAllFound) return undefined;
+
+    const fromTrimmed = fromTail.trimStart();
+    const tableMatch = fromTrimmed.match(/^((?:[`"\[]?\w+[`"\]]?)(?:\s*\.\s*(?:[`"\[]?\w+[`"\]]?)){0,2})([\s\S]*)$/);
+    if (!tableMatch) return undefined;
+
+    const tableText = tableMatch[1];
+    const afterTable = tableMatch[2] || '';
+
+    const parseAlias = (tail: string): { alias: string; remainder: string } => {
+        const trimmedTail = String(tail || '').trimStart();
+        if (!trimmedTail) {
+            return { alias: '', remainder: tail };
+        }
+
+        const asMatch = trimmedTail.match(/^AS\s+([`"\[]?[A-Za-z_][\w$]*[`"\]]?)([\s\S]*)$/i);
+        if (asMatch) {
+            const candidate = stripQueryIdentifierQuotes(asMatch[1]);
+            if (candidate && !QUERY_ALIAS_RESERVED.has(candidate.toLowerCase())) {
+                return { alias: candidate, remainder: asMatch[2] || '' };
+            }
+        }
+
+        const bareMatch = trimmedTail.match(/^([`"\[]?[A-Za-z_][\w$]*[`"\]]?)([\s\S]*)$/);
+        if (bareMatch) {
+            const candidate = stripQueryIdentifierQuotes(bareMatch[1]);
+            if (candidate && !QUERY_ALIAS_RESERVED.has(candidate.toLowerCase())) {
+                return { alias: candidate, remainder: bareMatch[2] || '' };
+            }
+        }
+
+        return { alias: '', remainder: tail };
+    };
+
+    const parsedAlias = parseAlias(afterTable);
+    const sourceAlias = parsedAlias.alias || QUERY_LOCATOR_SOURCE_ALIAS;
+    const qualifiedExpressions = expressions
+        .map((expression) => {
+            const trimmed = String(expression || '').trim();
+            if (!trimmed) return '';
+            if (/^ROWID\b/i.test(trimmed)) {
+                return trimmed.replace(/^(\s*)ROWID\b/i, `$1${sourceAlias}.ROWID`);
+            }
+            return trimmed;
+        })
+        .filter(Boolean);
+    if (qualifiedExpressions.length === 0) return undefined;
+
+    const rewrittenSelectItems = selectItems.map((item) => {
+        const trimmed = String(item || '').trim();
+        if (trimmed === '*') {
+            return `${sourceAlias}.*`;
+        }
+        return item.trimEnd();
+    });
+
+    const aliasClause = parsedAlias.alias ? ` ${parsedAlias.alias}` : ` ${sourceAlias}`;
+    const finalSelectItems = [...rewrittenSelectItems, ...qualifiedExpressions];
+    return `${prefix}${finalSelectItems.join(', ')}${fromKeyword}${tableText}${aliasClause}${parsedAlias.remainder}`;
 };
 
 const findWritableResultColumnForSource = (writableColumns: Record<string, string>, target: string): string | undefined => {
@@ -361,8 +456,8 @@ const buildQueryLocatorColumnExpression = (dbType: string, column: string, alias
     `${quoteIdentPart(dbType, column)} AS ${quoteIdentPart(dbType, alias)}`
 );
 
-const buildQueryRowIDExpression = (dbType: string): string => (
-    `ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
+const buildQueryRowIDExpression = (dbType: string, sourceAlias?: string): string => (
+    `${sourceAlias ? `${sourceAlias}.` : ''}ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
 );
 
 const resolveQueryLocatorPlan = async ({
@@ -428,6 +523,7 @@ const resolveQueryLocatorPlan = async ({
         });
         const appendExpressions: string[] = [];
         const hiddenColumns: string[] = [];
+        let needsOracleRowIDExpression = false;
 
         const buildColumnLocator = (strategy: 'primary-key' | 'unique-key', locatorColumns: string[]): EditRowLocator => {
             const valueColumns = locatorColumns.map((column, index) => {
@@ -457,7 +553,7 @@ const resolveQueryLocatorPlan = async ({
             if (uniqueKeyGroup) {
                 plan.editLocator = buildColumnLocator('unique-key', uniqueKeyGroup);
             } else if (isOracleLikeDialect(dbType)) {
-                appendExpressions.push(buildQueryRowIDExpression(dbType));
+                needsOracleRowIDExpression = true;
                 plan.editLocator = {
                     strategy: 'oracle-rowid',
                     columns: ['ROWID'],
@@ -475,7 +571,25 @@ const resolveQueryLocatorPlan = async ({
             }
         }
 
-        plan.executedSql = appendQuerySelectExpressions(statement, appendExpressions);
+        const executableAppendExpressions = [
+            ...(needsOracleRowIDExpression ? [buildQueryRowIDExpression(dbType)] : []),
+            ...appendExpressions,
+        ];
+
+        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {
+            const rewritten = rewriteOracleSelectAllWithExpressions(statement, executableAppendExpressions);
+            if (rewritten) {
+                plan.executedSql = rewritten;
+                return plan;
+            }
+
+            const reason = 'Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。';
+            plan.editLocator = buildQueryReadOnlyLocator(reason);
+            plan.warning = `查询结果保持只读：${reason}`;
+            return plan;
+        }
+
+        plan.executedSql = appendQuerySelectExpressions(statement, executableAppendExpressions);
         return plan;
     } catch {
         const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
@@ -522,6 +636,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [editorHeight, setEditorHeight] = useState(300);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+  const runQueryActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(tab.query || '');
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
@@ -809,10 +924,31 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           });
       });
 
-      // 全局只注册一次 SQL completion provider，避免多 tab 重复注册导致补全项重复
+      // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding
+      const runBinding = shortcutOptions.runQuery;
+      if (runBinding?.enabled && runBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              runBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              runQueryActionRef.current = editor.addAction({
+                  id: 'gonavi.runQuery',
+                  label: 'GoNavi: 执行 SQL',
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: () => {
+                      window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+                  },
+              });
+          }
+      }
+
+      // HMR 重载时释放旧注册避免补全项重复
       if (!sqlCompletionRegistered) {
       sqlCompletionRegistered = true;
-      monaco.languages.registerCompletionItemProvider('sql', {
+      _g.__gonaviSqlCompletionState.registered = true;
+      sqlCompletionDisposables.forEach((d: any) => d?.dispose?.());
+      sqlCompletionDisposables.length = 0;
+      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['.'],
           provideCompletionItems: async (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
@@ -1219,7 +1355,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               ];
               return { suggestions };
           }
-      });
+      }));
       // 注册 / 斜杠命令 AI 快捷补全
       const slashCmdDefs = [
           { cmd: '/query',    label: '🔍 自然语言查询',  desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
@@ -1234,7 +1370,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       // 全局变量存储命令定义，供 onDidChangeModelContent 使用
       (window as any).__gonaviSlashCmdDefs = slashCmdDefs;
 
-      monaco.languages.registerCompletionItemProvider('sql', {
+      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['/'],
           provideCompletionItems: (model: any, position: any) => {
               const lineContent = model.getLineContent(position.lineNumber);
@@ -1258,6 +1394,42 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       insertText: `__AI_${c.cmd.slice(1).toUpperCase()}__`,
                       range,
                       sortText: String(i).padStart(2, '0'),
+                  })),
+              };
+          },
+      }));
+
+
+      // SQL snippet completion provider
+      monaco.languages.registerCompletionItemProvider('sql', {
+          provideCompletionItems: (model: any, position: any) => {
+              const word = model.getWordUntilPosition(position);
+              const prefix = word.word.toLowerCase();
+              if (!prefix) return { suggestions: [] };
+
+              const range = {
+                  startLineNumber: position.lineNumber,
+                  endLineNumber: position.lineNumber,
+                  startColumn: word.startColumn,
+                  endColumn: word.endColumn,
+              };
+
+              const allSnippets = useStore.getState().sqlSnippets;
+              const matched = allSnippets.filter(s =>
+                  s.prefix.toLowerCase().startsWith(prefix) ||
+                  s.name.toLowerCase().includes(prefix)
+              );
+
+              return {
+                  suggestions: matched.map(s => ({
+                      label: s.prefix,
+                      kind: monaco.languages.CompletionItemKind.Snippet,
+                      insertText: s.body,
+                      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                      detail: s.name,
+                      documentation: s.description || s.body,
+                      range,
+                      sortText: '04' + s.prefix,
                   })),
               };
           },
@@ -1353,6 +1525,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onClick: () => setSqlFormatOptions({ keywordCase: 'lower' }) 
       },
       { type: 'divider' },
+      {
+          key: 'snippet-settings',
+          label: '代码片段管理...',
+          onClick: () => window.dispatchEvent(new CustomEvent('gonavi:open-snippet-settings')),
+      },
       {
           key: 'shortcut-settings',
           label: '快捷键管理...',
@@ -2009,11 +2186,45 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           void handleRun();
       };
 
-      window.addEventListener('keydown', handleRunShortcut);
+      window.addEventListener('keydown', handleRunShortcut, true);
       return () => {
-          window.removeEventListener('keydown', handleRunShortcut);
+          window.removeEventListener('keydown', handleRunShortcut, true);
       };
   }, [activeTabId, tab.id, shortcutOptions.runQuery, handleRun]);
+
+  // Re-register Monaco internal keybinding when runQuery shortcut changes
+  useEffect(() => {
+      if (runQueryActionRef.current) {
+          runQueryActionRef.current.dispose();
+          runQueryActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = shortcutOptions.runQuery;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          runQueryActionRef.current = editor.addAction({
+              id: 'gonavi.runQuery',
+              label: 'GoNavi: 执行 SQL',
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (runQueryActionRef.current) {
+              runQueryActionRef.current.dispose();
+              runQueryActionRef.current = null;
+          }
+      };
+  }, [shortcutOptions.runQuery]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {

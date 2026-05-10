@@ -1853,7 +1853,7 @@ const ConnectionModal: React.FC<{
       case "mongodb":
         return "retryWrites=true&readPreference=secondaryPreferred";
       case "dameng":
-        return "schema=SYSDBA&escapeProcess=true";
+        return "schema=SYSDBA";
       case "tdengine":
         return "timezone=Asia%2FShanghai";
       default:
