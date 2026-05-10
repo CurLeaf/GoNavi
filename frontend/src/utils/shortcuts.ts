@@ -312,3 +312,179 @@ export const getShortcutDisplay = (combo: string): string => {
   return normalized || '-';
 };
 
+export type ConflictContext = 'global' | 'monaco' | 'datagrid';
+
+export interface ReservedShortcut {
+  combo: string;
+  label: string;
+  context: ConflictContext;
+  monacoCommandId?: string;
+}
+
+export interface ConflictInfo {
+  label: string;
+  context: ConflictContext;
+  monacoCommandId?: string;
+}
+
+export const RESERVED_SHORTCUTS: ReservedShortcut[] = [
+  // Browser / WebView built-in shortcuts
+  { combo: 'Ctrl+S',           label: '浏览器保存',        context: 'global' },
+  { combo: 'Ctrl+P',           label: '浏览器打印',        context: 'global' },
+  { combo: 'Ctrl+W',           label: '浏览器关闭标签页',  context: 'global' },
+  { combo: 'Ctrl+T',           label: '浏览器新建标签页',  context: 'global' },
+  { combo: 'Ctrl+N',           label: '浏览器新建窗口',    context: 'global' },
+  { combo: 'Ctrl+Shift+N',     label: '浏览器新建隐身窗口', context: 'global' },
+
+  // Monaco editor built-in shortcuts
+  { combo: 'Ctrl+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find' },
+  { combo: 'Meta+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find' },
+  { combo: 'Ctrl+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction' },
+  { combo: 'Meta+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction' },
+  { combo: 'Ctrl+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine' },
+  { combo: 'Meta+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine' },
+  { combo: 'Ctrl+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen' },
+  { combo: 'Meta+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen' },
+  { combo: 'Ctrl+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate' },
+  { combo: 'Meta+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate' },
+  { combo: 'Ctrl+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch' },
+  { combo: 'Meta+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch' },
+  { combo: 'Ctrl+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines' },
+  { combo: 'Meta+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines' },
+  { combo: 'Ctrl+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter' },
+  { combo: 'Meta+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter' },
+  { combo: 'Ctrl+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore' },
+  { combo: 'Meta+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore' },
+  { combo: 'F2',               label: '编辑器重命名符号',         context: 'monaco', monacoCommandId: 'editor.action.rename' },
+
+  // DataGrid shortcuts
+  { combo: 'Ctrl+C',           label: '数据表格复制',     context: 'datagrid' },
+  { combo: 'Meta+C',           label: '数据表格复制',     context: 'datagrid' },
+];
+
+const CONTEXT_DESCRIPTION: Record<ConflictContext, string> = {
+  global: '浏览器',
+  monaco: '编辑器',
+  datagrid: '数据表格',
+};
+
+export const describeConflictContext = (context: ConflictContext): string => {
+  return CONTEXT_DESCRIPTION[context] || context;
+};
+
+export const splitConflictsByContext = (conflicts: ConflictInfo[]) => {
+  const monaco = conflicts.filter(c => c.context === 'monaco');
+  const other = conflicts.filter(c => c.context !== 'monaco');
+  const dedupe = (items: ConflictInfo[], fn: (c: ConflictInfo) => string) =>
+    [...new Set(items.map(fn))].join('、');
+  return {
+    monacoLabels: dedupe(monaco, c => c.label),
+    otherLabels: dedupe(other, c => c.label),
+    otherContexts: dedupe(other, c => describeConflictContext(c.context)),
+    hasMonaco: monaco.length > 0,
+    hasOther: other.length > 0,
+  };
+};
+
+export const findReservedConflict = (normalizedCombo: string): ConflictInfo | null => {
+  const conflict = RESERVED_SHORTCUTS.find((r) => r.combo === normalizedCombo);
+  if (!conflict) return null;
+  return { label: conflict.label, context: conflict.context, monacoCommandId: conflict.monacoCommandId };
+};
+
+export const findReservedConflicts = (normalizedCombo: string): ConflictInfo[] => {
+  return RESERVED_SHORTCUTS
+    .filter((r) => r.combo === normalizedCombo)
+    .map((r) => ({ label: r.label, context: r.context, monacoCommandId: r.monacoCommandId }));
+};
+
+export interface MonacoKeyBinding {
+  keyMod: number;
+  keyCode: number;
+}
+
+/** Map key token (after normalization) to a function that returns KeyCode.
+ *  The function receives the KeyCode enum to avoid importing monaco at module level. */
+type KeyCodeResolver = (kc: Record<string, number>) => number;
+
+const MONACO_KEY_MAP: Record<string, KeyCodeResolver> = {
+  Enter:          (kc) => kc.Enter,
+  Tab:            (kc) => kc.Tab,
+  Esc:            (kc) => kc.Escape,
+  Space:          (kc) => kc.Space,
+  Backspace:      (kc) => kc.Backspace,
+  Delete:         (kc) => kc.Delete,
+  Home:           (kc) => kc.Home,
+  End:            (kc) => kc.End,
+  PageUp:         (kc) => kc.PageUp,
+  PageDown:       (kc) => kc.PageDown,
+  Up:             (kc) => kc.UpArrow,
+  Down:           (kc) => kc.DownArrow,
+  Left:           (kc) => kc.LeftArrow,
+  Right:          (kc) => kc.RightArrow,
+  Insert:         (kc) => kc.Insert,
+  '/':            (kc) => kc.Oem2,
+  ',':            (kc) => kc.OemComma,
+  '-':            (kc) => kc.OemMinus,
+  '=':            (kc) => kc.OemPlus,
+  '.':            (kc) => kc.OemPeriod,
+  ';':            (kc) => kc.Oem1,
+  "'":            (kc) => kc.Oem7,
+  '[':            (kc) => kc.Oem4,
+  ']':            (kc) => kc.Oem6,
+  '\\':           (kc) => kc.Oem5,
+  '`':            (kc) => kc.Oem3,
+};
+
+function resolveKeyCode(token: string, kc: Record<string, number>): number | null {
+  // F1-F12
+  const fMatch = token.match(/^F([1-9]|1[0-2])$/);
+  if (fMatch) {
+    return kc['F' + fMatch[1]] ?? null;
+  }
+  // A-Z
+  if (/^[A-Z]$/.test(token)) {
+    return kc['Key' + token] ?? null;
+  }
+  // 0-9
+  if (/^[0-9]$/.test(token)) {
+    return kc['Digit' + token] ?? null;
+  }
+  // Special keys map
+  const resolver = MONACO_KEY_MAP[token];
+  if (resolver) {
+    return resolver(kc);
+  }
+  return null;
+}
+
+export const comboToMonacoKeyBinding = (
+  combo: string,
+  keyModEnum: Record<string, number>,
+  keyCodeEnum: Record<string, number>,
+): MonacoKeyBinding | null => {
+  const normalized = normalizeShortcutCombo(combo);
+  if (!normalized) return null;
+
+  const pieces = normalized.split('+');
+  let keyMod = 0;
+  let keyCode: number | null = null;
+
+  for (const piece of pieces) {
+    if (piece === 'Ctrl') {
+      keyMod |= keyModEnum.CtrlCmd ?? 0;
+    } else if (piece === 'Meta') {
+      keyMod |= keyModEnum.WinCtrl ?? 0;
+    } else if (piece === 'Alt') {
+      keyMod |= keyModEnum.Alt ?? 0;
+    } else if (piece === 'Shift') {
+      keyMod |= keyModEnum.Shift ?? 0;
+    } else {
+      keyCode = resolveKeyCode(piece, keyCodeEnum);
+    }
+  }
+
+  if (keyCode == null) return null;
+  return { keyMod, keyCode };
+};
+
