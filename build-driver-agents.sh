@@ -23,6 +23,8 @@ usage() {
   --out-dir <目录>      输出目录根路径，默认：dist/driver-agents
   --bundle-name <文件名> 驱动总包 zip 名称，默认：GoNavi-DriverAgents.zip
   --strict              任一驱动构建失败即中断（默认失败后继续，最后汇总）
+  --upx                 要求使用 UPX 压缩支持的平台产物（默认 auto：有 upx 则压缩）
+  --no-upx              禁用 UPX 压缩
   -h, --help            显示帮助
 
 示例：
@@ -200,6 +202,7 @@ target_platform=""
 out_root="dist/driver-agents"
 bundle_name="GoNavi-DriverAgents.zip"
 strict_mode="false"
+upx_mode="${GONAVI_DRIVER_AGENT_UPX:-auto}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -221,6 +224,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strict)
       strict_mode="true"
+      shift
+      ;;
+    --upx)
+      upx_mode="required"
+      shift
+      ;;
+    --no-upx)
+      upx_mode="off"
       shift
       ;;
     -h|--help)
@@ -372,10 +383,12 @@ for platform in "${platforms[@]}"; do
       continue
     fi
 
+    GONAVI_DRIVER_AGENT_UPX="$upx_mode" "$SCRIPT_DIR/tools/compress-driver-artifact.sh" "$output_path" "$platform" "$platform_dir/$asset_name"
     cp "$output_path" "$bundle_platform_dir/$asset_name"
     if [[ -n "$duckdb_lib_dir" ]]; then
       cp "$duckdb_lib_dir/$DUCKDB_WINDOWS_SUPPORT_DLL" "$output_dir_abs/$DUCKDB_WINDOWS_SUPPORT_DLL"
-      cp "$duckdb_lib_dir/$DUCKDB_WINDOWS_SUPPORT_DLL" "$bundle_platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL"
+      GONAVI_DRIVER_AGENT_UPX="$upx_mode" "$SCRIPT_DIR/tools/compress-driver-artifact.sh" "$output_dir_abs/$DUCKDB_WINDOWS_SUPPORT_DLL" "$platform" "$platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL"
+      cp "$output_dir_abs/$DUCKDB_WINDOWS_SUPPORT_DLL" "$bundle_platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL"
       built_assets+=("$platform_dir/$DUCKDB_WINDOWS_SUPPORT_DLL")
     fi
     built_assets+=("$platform_dir/$asset_name")

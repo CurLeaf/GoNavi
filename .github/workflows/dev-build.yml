@@ -313,6 +313,7 @@ jobs:
                   -o "${OUTPUT_PATH}" \
                   ./cmd/optional-driver-agent
                 cp "$DUCKDB_LIB_DIR/duckdb.dll" "$OUTDIR/duckdb.dll"
+                bash ./tools/compress-driver-artifact.sh "$OUTDIR/duckdb.dll" "$TARGET_PLATFORM" "${{ matrix.os_name }}/duckdb.dll"
               else
                 CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
                   -tags "${BUILD_TAGS}" \
@@ -329,6 +330,7 @@ jobs:
                 -o "${OUTPUT_PATH}" \
                 ./cmd/optional-driver-agent
             fi
+            bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
           done
 
       # macOS Packaging

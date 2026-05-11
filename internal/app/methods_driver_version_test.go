@@ -3,10 +3,14 @@ package app
 import (
 	"archive/zip"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -179,7 +183,7 @@ func TestBuiltinActivatePinnedVersionDoesNotRestrictBundleFallback(t *testing.T)
 }
 
 func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
-	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, 1, 2)
+	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, false, 1, 2)
 	if !strings.Contains(message, "先尝试 1 个预编译直链") {
 		t.Fatalf("expected direct-download hint, got %q", message)
 	}
@@ -376,6 +380,68 @@ func TestShouldPreferSourceBuildBeforeDownloadDoesNotPreferKingbase(t *testing.T
 	}
 }
 
+func TestShouldPreferSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
+	if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mariadb", "1.9.3") {
+		t.Fatal("expected development build to prefer local driver-agent source build")
+	}
+	if !shouldPreferSourceBuildBeforeDownloadForBuildType("development", "clickhouse", "2.43.1") {
+		t.Fatal("expected development build alias to prefer local driver-agent source build")
+	}
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("production", "mariadb", "1.9.3") {
+		t.Fatal("expected production build not to prefer source build for MariaDB")
+	}
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mysql", "") {
+		t.Fatal("expected built-in drivers not to prefer optional driver-agent source build")
+	}
+}
+
+func TestShouldRequireSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
+	if !shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build to require local DuckDB driver-agent source build")
+	}
+	if !shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
+		t.Fatal("expected development build alias to require local driver-agent source build")
+	}
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("production", "duckdb", "2.5.6") {
+		t.Fatal("expected production build to allow DuckDB release bundle fallback")
+	}
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "mysql", "") {
+		t.Fatal("expected built-in drivers not to require optional driver-agent source build")
+	}
+}
+
+func TestResolveDuckDBWindowsCGOToolchainBinFromCandidates(t *testing.T) {
+	binDir := t.TempDir()
+	writeSelfExecutable(t, filepath.Join(binDir, "gcc.exe"))
+	writeSelfExecutable(t, filepath.Join(binDir, "g++.exe"))
+
+	got, err := resolveDuckDBWindowsCGOToolchainBinFromCandidates([]string{
+		filepath.Join(t.TempDir(), "missing"),
+		binDir,
+	})
+	if err != nil {
+		t.Fatalf("expected toolchain bin to resolve: %v", err)
+	}
+	if got != filepath.Clean(binDir) {
+		t.Fatalf("expected %q, got %q", filepath.Clean(binDir), got)
+	}
+}
+
+func TestPrependPathEnvUsesCurrentEnvPath(t *testing.T) {
+	basePath := "base-path"
+	firstPath := "first-path"
+	secondPath := "second-path"
+	env := []string{"PATH=" + basePath}
+	env = prependPathEnv(env, firstPath)
+	env = prependPathEnv(env, secondPath)
+
+	got := envValue(env, "PATH")
+	want := strings.Join([]string{secondPath, firstPath, basePath}, string(os.PathListSeparator))
+	if got != want {
+		t.Fatalf("expected PATH %q, got %q", want, got)
+	}
+}
+
 func TestResolveOptionalDriverAgentDownloadURLsIncludesPublishedKingbaseAsset(t *testing.T) {
 	definition, ok := resolveDriverDefinition("kingbase")
 	if !ok {
@@ -457,6 +523,85 @@ func TestInstallOptionalDriverAgentFromLocalPathSupportsMongoV1ZipImport(t *test
 	}
 	if _, err := os.Stat(meta.ExecutablePath); err != nil {
 		t.Fatalf("expected imported executable to exist, got %v", err)
+	}
+}
+
+func TestDownloadOptionalDriverAgentFromBundleSharesConcurrentDownload(t *testing.T) {
+	resetOptionalDriverBundleDownloadCacheForTest(t)
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
+
+	bundlePath := filepath.Join(t.TempDir(), "GoNavi-DriverAgents.zip")
+	writeZipWithSelfExecutableEntries(t, bundlePath, []string{
+		optionalDriverBundleEntryPath("clickhouse"),
+		optionalDriverBundleEntryPath("mongodb"),
+	})
+
+	var requestCount int32
+	releaseDownload := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseDownload)
+		})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		<-releaseDownload
+		http.ServeFile(w, r, bundlePath)
+	}))
+	defer server.Close()
+	defer release()
+
+	errCh := make(chan error, 2)
+	clickhouseTarget := filepath.Join(t.TempDir(), optionalDriverExecutableBaseName("clickhouse"))
+	mongodbTarget := filepath.Join(t.TempDir(), optionalDriverExecutableBaseName("mongodb"))
+	go func() {
+		_, _, err := downloadOptionalDriverAgentFromBundle(
+			nil,
+			driverDefinition{Type: "clickhouse", Name: "ClickHouse"},
+			server.URL,
+			clickhouseTarget,
+		)
+		errCh <- err
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&requestCount) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&requestCount) != 1 {
+		t.Fatalf("expected first bundle request to start, got %d", atomic.LoadInt32(&requestCount))
+	}
+
+	go func() {
+		_, _, err := downloadOptionalDriverAgentFromBundle(
+			nil,
+			driverDefinition{Type: "mongodb", Name: "MongoDB"},
+			server.URL,
+			mongodbTarget,
+		)
+		errCh <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if got := atomic.LoadInt32(&requestCount); got != 1 {
+		t.Fatalf("expected concurrent bundle install to wait for first download, got %d requests", got)
+	}
+	release()
+
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("bundle install failed: %v", err)
+		}
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 1 {
+		t.Fatalf("expected one shared bundle download, got %d requests", got)
 	}
 }
 
@@ -617,6 +762,11 @@ func writeSelfExecutable(t *testing.T, targetPath string) {
 
 func writeZipWithSelfExecutable(t *testing.T, zipPath string, entryName string) {
 	t.Helper()
+	writeZipWithSelfExecutableEntries(t, zipPath, []string{entryName})
+}
+
+func writeZipWithSelfExecutableEntries(t *testing.T, zipPath string, entryNames []string) {
+	t.Helper()
 
 	selfPath, err := os.Executable()
 	if err != nil {
@@ -634,14 +784,36 @@ func writeZipWithSelfExecutable(t *testing.T, zipPath string, entryName string) 
 	defer file.Close()
 
 	writer := zip.NewWriter(file)
-	entry, err := writer.Create(entryName)
-	if err != nil {
-		t.Fatalf("create zip entry failed: %v", err)
-	}
-	if _, err := entry.Write(content); err != nil {
-		t.Fatalf("write zip entry failed: %v", err)
+	for _, entryName := range entryNames {
+		entry, err := writer.Create(entryName)
+		if err != nil {
+			t.Fatalf("create zip entry failed: %v", err)
+		}
+		if _, err := entry.Write(content); err != nil {
+			t.Fatalf("write zip entry failed: %v", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("close zip writer failed: %v", err)
 	}
+}
+
+func resetOptionalDriverBundleDownloadCacheForTest(t *testing.T) {
+	t.Helper()
+	reset := func() {
+		optionalDriverBundleDownloadMu.Lock()
+		paths := make([]string, 0, len(optionalDriverBundleDownloads))
+		for _, state := range optionalDriverBundleDownloads {
+			if state != nil && strings.TrimSpace(state.path) != "" {
+				paths = append(paths, state.path)
+			}
+		}
+		optionalDriverBundleDownloads = make(map[string]*optionalDriverBundleDownloadState)
+		optionalDriverBundleDownloadMu.Unlock()
+		for _, path := range paths {
+			_ = os.Remove(path)
+		}
+	}
+	reset()
+	t.Cleanup(reset)
 }

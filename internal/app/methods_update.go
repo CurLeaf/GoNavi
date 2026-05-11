@@ -31,9 +31,9 @@ const (
 )
 
 var (
-	updateFetchLatestRelease  = fetchLatestRelease
-	updateFetchReleaseSHA256  = fetchReleaseSHA256
-	updateLogCheckError       = func(err error) { logger.Error(err, "检查更新失败") }
+	updateFetchLatestRelease = fetchLatestRelease
+	updateFetchReleaseSHA256 = fetchReleaseSHA256
+	updateLogCheckError      = func(err error) { logger.Error(err, "检查更新失败") }
 )
 
 type updateState struct {
@@ -642,7 +642,14 @@ func (w *downloadProgressWriter) Write(p []byte) (int, error) {
 }
 
 func downloadFileWithHash(url, filePath string, onProgress func(downloaded, total int64)) (string, error) {
-	client := newHTTPClientWithGlobalProxy(10 * time.Minute)
+	return downloadFileWithHashWithTimeout(url, filePath, onProgress, 10*time.Minute)
+}
+
+func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downloaded, total int64), timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	client := newHTTPClientWithGlobalProxy(timeout)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return "", err

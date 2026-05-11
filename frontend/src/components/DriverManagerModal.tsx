@@ -62,6 +62,18 @@ type ProgressState = {
 };
 
 type DriverActionKind = '' | 'install' | 'remove' | 'local';
+type DriverBatchActionKind = '' | 'install-all' | 'reinstall-updates' | 'remove-all';
+
+type DriverBatchProgressState = {
+  total: number;
+  completed: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  currentDriverType: string;
+  currentDriverName: string;
+  currentMessage: string;
+};
 
 type DriverLogEntry = {
   time: string;
@@ -117,6 +129,29 @@ const buildVersionSizeLoadingKey = (driverType: string, optionKey: string) => `$
 const DRIVER_STATUS_CACHE_TTL_MS = 60 * 1000;
 const DRIVER_NETWORK_CACHE_TTL_MS = 5 * 60 * 1000;
 const normalizeDriverSearchText = (value: string) => String(value || '').trim().toLowerCase();
+const isSlimBuildInstallUnavailable = (row: DriverStatusRow) => (row.message || '').includes('精简构建') && !row.packageInstalled;
+const resolveDriverBatchActionLabel = (actionKind: DriverBatchActionKind) => {
+  switch (actionKind) {
+    case 'install-all':
+      return '安装所有驱动';
+    case 'reinstall-updates':
+      return '重装需更新驱动';
+    case 'remove-all':
+      return '删除所有驱动';
+    default:
+      return '批量操作';
+  }
+};
+const createDriverBatchProgress = (total: number, currentMessage: string): DriverBatchProgressState => ({
+  total,
+  completed: 0,
+  success: 0,
+  failed: 0,
+  skipped: 0,
+  currentDriverType: '',
+  currentDriverName: '',
+  currentMessage,
+});
 
 let driverStatusSnapshotCache: { rows: DriverStatusRow[]; downloadDir: string; cachedAt: number } | null = null;
 let driverNetworkSnapshotCache: { status: DriverNetworkStatus; cachedAt: number } | null = null;
@@ -190,6 +225,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const [searchKeyword, setSearchKeyword] = useState('');
   const [rows, setRows] = useState<DriverStatusRow[]>([]);
   const [actionState, setActionState] = useState<{ driverType: string; kind: DriverActionKind }>({ driverType: '', kind: '' });
+  const [batchAction, setBatchAction] = useState<DriverBatchActionKind>('');
+  const [batchProgress, setBatchProgress] = useState<DriverBatchProgressState | null>(null);
   const [progressMap, setProgressMap] = useState<Record<string, ProgressState>>({});
   const [operationLogMap, setOperationLogMap] = useState<Record<string, DriverLogEntry[]>>({});
   const [logDriverType, setLogDriverType] = useState('');
@@ -201,6 +238,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const [versionLoadingMap, setVersionLoadingMap] = useState<Record<string, boolean>>({});
   const [versionSizeLoadingMap, setVersionSizeLoadingMap] = useState<Record<string, boolean>>({});
   const downloadDirRef = useRef(downloadDir);
+  const batchBusy = batchDirectoryImporting || batchAction !== '' || actionState.kind !== '';
 
   useEffect(() => {
     downloadDirRef.current = downloadDir;
@@ -584,38 +622,42 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   }, [checkNetworkStatus, open, refreshStatus]);
 
   useEffect(() => {
-    if (!open) {
-      return;
+    let off: (() => void) | undefined;
+    try {
+      off = EventsOn('driver:download-progress', (event: DriverProgressEvent) => {
+        if (!event) {
+          return;
+        }
+        const driverType = String(event.driverType || '').trim().toLowerCase();
+        const status = event.status;
+        if (!driverType || !status) {
+          return;
+        }
+        const messageText = String(event.message || '').trim();
+        const percent = Math.max(0, Math.min(100, Number(event.percent || 0)));
+        setProgressMap((prev) => ({
+          ...prev,
+          [driverType]: {
+            status,
+            message: messageText,
+            percent,
+          },
+        }));
+        const progressText = `${Math.round(percent)}%`;
+        const statusText = String(status || '').toUpperCase();
+        const lineText = `[${statusText}] ${messageText || '-'} (${progressText})`;
+        const lineSignature = `${statusText}|${messageText || '-'}`;
+        appendOperationLog(driverType, lineText, lineSignature, 'update-last');
+      });
+    } catch (error) {
+      console.warn('Wails API: EventsOn unavailable', error);
     }
-    const off = EventsOn('driver:download-progress', (event: DriverProgressEvent) => {
-      if (!event) {
-        return;
-      }
-      const driverType = String(event.driverType || '').trim().toLowerCase();
-      const status = event.status;
-      if (!driverType || !status) {
-        return;
-      }
-      const messageText = String(event.message || '').trim();
-      const percent = Math.max(0, Math.min(100, Number(event.percent || 0)));
-      setProgressMap((prev) => ({
-        ...prev,
-        [driverType]: {
-          status,
-          message: messageText,
-          percent,
-        },
-      }));
-      const progressText = `${Math.round(percent)}%`;
-      const statusText = String(status || '').toUpperCase();
-      const lineText = `[${statusText}] ${messageText || '-'} (${progressText})`;
-      const lineSignature = `${statusText}|${messageText || '-'}`;
-      appendOperationLog(driverType, lineText, lineSignature, 'update-last');
-    });
     return () => {
-      off();
+      if (off) {
+        off();
+      }
     };
-  }, [appendOperationLog, open]);
+  }, [appendOperationLog]);
 
   const resolveLocalImportVersion = useCallback((row: DriverStatusRow) => {
     const options = versionMap[row.type] || [];
@@ -627,7 +669,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     return selectedOption?.version || row.pinnedVersion || '';
   }, [selectedVersionMap, versionMap]);
 
-  const installDriver = useCallback(async (row: DriverStatusRow) => {
+  const installDriver = useCallback(async (
+    row: DriverStatusRow,
+    actionOptions?: { silentToast?: boolean; skipRefresh?: boolean },
+  ) => {
     setActionState({ driverType: row.type, kind: 'install' });
     setProgressMap((prev) => ({
       ...prev,
@@ -639,15 +684,15 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     }));
     appendOperationLog(row.type, '[START] 开始自动安装');
     try {
-      let options = versionMap[row.type] || [];
-      if (options.length === 0) {
-        options = await loadVersionOptions(row, true);
+      let versionOptions = versionMap[row.type] || [];
+      if (versionOptions.length === 0) {
+        versionOptions = await loadVersionOptions(row, true);
       }
       const selectedKey = selectedVersionMap[row.type];
       const selectedOption =
-        options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
-        options.find((item) => item.recommended) ||
-        options[0];
+        versionOptions.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+        versionOptions.find((item) => item.recommended) ||
+        versionOptions[0];
       const selectedVersion = selectedOption?.version || row.pinnedVersion || '';
       const selectedDownloadURL = selectedOption?.downloadUrl || row.defaultDownloadUrl || '';
 
@@ -655,13 +700,20 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       if (!result?.success) {
         const errText = result?.message || `安装 ${row.name} 失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
-        message.error(errText);
-        return;
+        if (!actionOptions?.silentToast) {
+          message.error(errText);
+        }
+        return false;
       }
       const versionTip = selectedVersion ? `（${selectedVersion}）` : '';
       appendOperationLog(row.type, `[DONE] 自动安装完成 ${versionTip}`);
-      message.success(`${row.name}${versionTip} 已安装启用`);
-      refreshStatus(false);
+      if (!actionOptions?.silentToast) {
+        message.success(`${row.name}${versionTip} 已安装启用`);
+      }
+      if (!actionOptions?.skipRefresh) {
+        await refreshStatus(false);
+      }
+      return true;
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
@@ -829,7 +881,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     setLogModalOpen(true);
   }, []);
 
-  const removeDriver = useCallback(async (row: DriverStatusRow) => {
+  const removeDriver = useCallback(async (
+    row: DriverStatusRow,
+    options?: { silentToast?: boolean; skipRefresh?: boolean },
+  ) => {
     setActionState({ driverType: row.type, kind: 'remove' });
     appendOperationLog(row.type, '[START] 开始移除驱动');
     try {
@@ -837,17 +892,24 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       if (!result?.success) {
         const errText = result?.message || `移除 ${row.name} 失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
-        message.error(errText);
-        return;
+        if (!options?.silentToast) {
+          message.error(errText);
+        }
+        return false;
       }
       appendOperationLog(row.type, '[DONE] 驱动移除完成');
-      message.success(`${row.name} 已移除`);
+      if (!options?.silentToast) {
+        message.success(`${row.name} 已移除`);
+      }
       setProgressMap((prev) => {
         const next = { ...prev };
         delete next[row.type];
         return next;
       });
-      refreshStatus(false);
+      if (!options?.skipRefresh) {
+        await refreshStatus(false);
+      }
+      return true;
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
@@ -938,7 +1000,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           size="small"
           style={{ width: '100%' }}
           loading={!!versionLoadingMap[row.type]}
-          disabled={actionState.driverType === row.type}
+          disabled={batchBusy || actionState.driverType === row.type}
           placeholder={options.length > 0 ? '选择驱动版本' : '点击加载版本'}
           value={selectedKey}
           options={selectOptions as any}
@@ -965,7 +1027,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     if (row.builtIn) {
       return null;
     }
-    const isSlimBuildUnavailable = (row.message || '').includes('精简构建');
+    const isSlimBuildUnavailable = isSlimBuildInstallUnavailable(row);
     const loadingInstallOrRemove =
       actionState.driverType === row.type && (actionState.kind === 'install' || actionState.kind === 'remove');
     const loadingLocal = actionState.driverType === row.type && actionState.kind === 'local';
@@ -977,15 +1039,15 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     }
 
     const mainAction = row.needsUpdate ? (
-      <Button type="primary" icon={<DownloadOutlined />} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
+      <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
         重装驱动
       </Button>
     ) : row.connectable ? (
-      <Button danger icon={<DeleteOutlined />} loading={loadingInstallOrRemove} onClick={() => removeDriver(row)}>
+      <Button danger icon={<DeleteOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => removeDriver(row)}>
         移除
       </Button>
     ) : (
-      <Button type="primary" icon={<DownloadOutlined />} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
+      <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
         安装启用
       </Button>
     );
@@ -993,7 +1055,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     return (
       <Space size={8} wrap className="driver-manager-card-actions">
         {mainAction}
-        <Button icon={<FileSearchOutlined />} loading={loadingLocal} onClick={() => installDriverFromLocalFile(row)}>
+        <Button icon={<FileSearchOutlined />} disabled={batchBusy} loading={loadingLocal} onClick={() => installDriverFromLocalFile(row)}>
           {DRIVER_LOCAL_IMPORT_BUTTON_LABEL}
         </Button>
         <Button type={hasLogs ? 'default' : 'text'} disabled={!hasLogs} onClick={() => openDriverLog(row.type)}>
@@ -1044,6 +1106,203 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       notEnabled: optionalRows.filter((row) => !row.connectable && !row.packageInstalled).length,
     };
   }, [rows]);
+  const reinstallableRows = useMemo(() => rows.filter((row) => !row.builtIn && row.needsUpdate), [rows]);
+  const installableRows = useMemo(
+    () => rows.filter((row) => !row.builtIn && !row.connectable),
+    [rows],
+  );
+  const removableRows = useMemo(
+    () => rows.filter((row) => !row.builtIn && (row.connectable || row.packageInstalled)),
+    [rows],
+  );
+  const batchProgressPercent = useMemo(() => {
+    if (!batchProgress || batchProgress.total <= 0) {
+      return 0;
+    }
+    const currentProgress = batchProgress.currentDriverType
+      ? progressMap[batchProgress.currentDriverType]
+      : undefined;
+    const shouldUseCurrentProgress = batchAction === 'install-all' || batchAction === 'reinstall-updates';
+    const currentContribution = shouldUseCurrentProgress && currentProgress && currentProgress.status !== 'error'
+      ? Math.max(0, Math.min(100, Number(currentProgress.percent || 0))) / 100
+      : 0;
+    const completed = Math.max(0, Math.min(batchProgress.completed, batchProgress.total));
+    const percent = ((completed + currentContribution) / batchProgress.total) * 100;
+    return Math.max(0, Math.min(100, Math.round(percent)));
+  }, [batchAction, batchProgress, progressMap]);
+  const activeBatchDriverProgress = (batchAction === 'install-all' || batchAction === 'reinstall-updates') && batchProgress?.currentDriverType
+    ? progressMap[batchProgress.currentDriverType]
+    : undefined;
+  const batchProgressMessage = activeBatchDriverProgress?.message || batchProgress?.currentMessage || '';
+
+  const runBatchInstall = useCallback(async (
+    targetRows: DriverStatusRow[],
+    actionKind: DriverBatchActionKind,
+    emptyMessage: string,
+    successLabel: string,
+  ) => {
+    if (targetRows.length === 0) {
+      message.info(emptyMessage);
+      return;
+    }
+
+    setBatchAction(actionKind);
+    setBatchProgress(createDriverBatchProgress(targetRows.length, `准备${successLabel}`));
+    let successCount = 0;
+    let failCount = 0;
+    let slimSkipCount = 0;
+    try {
+      for (const row of targetRows) {
+        if (isSlimBuildInstallUnavailable(row)) {
+          slimSkipCount += 1;
+          appendOperationLog(row.type, '[WARN] 当前发行包为精简构建，已跳过自动安装');
+          setBatchProgress((prev) => {
+            if (!prev) {
+              return prev;
+            }
+            const completed = Math.min(prev.total, prev.completed + 1);
+            return {
+              ...prev,
+              completed,
+              skipped: prev.skipped + 1,
+              currentDriverType: '',
+              currentDriverName: '',
+              currentMessage: `已跳过 ${row.name}`,
+            };
+          });
+          continue;
+        }
+        setBatchProgress((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          return {
+            ...prev,
+            currentDriverType: row.type,
+            currentDriverName: row.name,
+            currentMessage: `正在${successLabel}：${row.name}`,
+          };
+        });
+        const ok = await installDriver(row, { silentToast: true, skipRefresh: true });
+        if (ok) {
+          successCount += 1;
+          await refreshStatus(false, { showLoading: false });
+        } else {
+          failCount += 1;
+        }
+        setBatchProgress((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          const completed = Math.min(prev.total, prev.completed + 1);
+          return {
+            ...prev,
+            completed,
+            success: prev.success + (ok ? 1 : 0),
+            failed: prev.failed + (ok ? 0 : 1),
+            currentDriverType: '',
+            currentDriverName: '',
+            currentMessage: ok ? `已完成 ${row.name}` : `失败 ${row.name}`,
+          };
+        });
+      }
+      await refreshStatus(false);
+    } finally {
+      setBatchAction('');
+      setBatchProgress(null);
+    }
+
+    const skipTip = slimSkipCount > 0 ? `，精简版跳过 ${slimSkipCount}` : '';
+    if (failCount === 0) {
+      message.success(`${successLabel}完成：成功 ${successCount}${skipTip}`);
+      return;
+    }
+    if (successCount > 0) {
+      message.warning(`${successLabel}完成：成功 ${successCount}，失败 ${failCount}${skipTip}`);
+      return;
+    }
+    message.error(`${successLabel}失败：失败 ${failCount}${skipTip}`);
+  }, [appendOperationLog, installDriver, refreshStatus]);
+
+  const reinstallNeededDrivers = useCallback(async () => {
+    await runBatchInstall(reinstallableRows, 'reinstall-updates', '当前没有需要重装的外置驱动', '重装需要更新的驱动');
+  }, [reinstallableRows, runBatchInstall]);
+
+  const installAllDrivers = useCallback(async () => {
+    await runBatchInstall(installableRows, 'install-all', '当前没有需要安装或启用的外置驱动', '安装所有驱动');
+  }, [installableRows, runBatchInstall]);
+
+  const removeAllDrivers = useCallback(() => {
+    if (removableRows.length === 0) {
+      message.info('当前没有可删除的外置驱动');
+      return;
+    }
+
+    Modal.confirm({
+      title: '删除所有已安装外置驱动？',
+      content: `将移除 ${removableRows.length} 个外置驱动包，后续连接对应数据源前需要重新安装。`,
+      okText: '删除所有',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setBatchAction('remove-all');
+        setBatchProgress(createDriverBatchProgress(removableRows.length, '准备删除所有驱动'));
+        let successCount = 0;
+        let failCount = 0;
+        try {
+          for (const row of removableRows) {
+            setBatchProgress((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              return {
+                ...prev,
+                currentDriverType: row.type,
+                currentDriverName: row.name,
+                currentMessage: `正在删除：${row.name}`,
+              };
+            });
+            const ok = await removeDriver(row, { silentToast: true, skipRefresh: true });
+            if (ok) {
+              successCount += 1;
+              await refreshStatus(false, { showLoading: false });
+            } else {
+              failCount += 1;
+            }
+            setBatchProgress((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              const completed = Math.min(prev.total, prev.completed + 1);
+              return {
+                ...prev,
+                completed,
+                success: prev.success + (ok ? 1 : 0),
+                failed: prev.failed + (ok ? 0 : 1),
+                currentDriverType: '',
+                currentDriverName: '',
+                currentMessage: ok ? `已完成 ${row.name}` : `删除失败 ${row.name}`,
+              };
+            });
+          }
+          await refreshStatus(false);
+        } finally {
+          setBatchAction('');
+          setBatchProgress(null);
+        }
+
+        if (failCount === 0) {
+          message.success(`删除所有驱动完成：成功 ${successCount}`);
+          return;
+        }
+        if (successCount > 0) {
+          message.warning(`删除所有驱动完成：成功 ${successCount}，失败 ${failCount}`);
+          return;
+        }
+        message.error(`删除所有驱动失败：失败 ${failCount}`);
+      },
+    });
+  }, [refreshStatus, removableRows, removeDriver]);
 
   const renderDriverCard = (row: DriverStatusRow) => {
     const progress = resolveDriverProgress(row);
@@ -1165,7 +1424,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             网络检测
           </Button>
           <Button key="close" type="primary" onClick={onClose}>
-            关闭
+            {batchBusy ? '后台运行' : '关闭'}
           </Button>
         </Space>
       )}
@@ -1313,10 +1572,38 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Switch
               checked={forceOverwriteInstalled}
               onChange={(checked) => setForceOverwriteInstalled(checked)}
-              disabled={batchDirectoryImporting}
+              disabled={batchBusy}
             />
             <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              disabled={batchBusy || installableRows.length === 0}
+              loading={batchAction === 'install-all'}
+              onClick={() => void installAllDrivers()}
+            >
+              安装所有驱动
+            </Button>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              disabled={batchBusy || reinstallableRows.length === 0}
+              loading={batchAction === 'reinstall-updates'}
+              onClick={() => void reinstallNeededDrivers()}
+            >
+              重装需更新驱动
+            </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={batchBusy || removableRows.length === 0}
+              loading={batchAction === 'remove-all'}
+              onClick={() => void removeAllDrivers()}
+            >
+              删除所有驱动
+            </Button>
+            <Button
               icon={<FolderOpenOutlined />}
+              disabled={batchBusy}
               onClick={() => void openDriverDirectory()}
             >
               打开驱动目录
@@ -1324,12 +1611,29 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               icon={<FolderOpenOutlined />}
               loading={batchDirectoryImporting}
+              disabled={batchBusy && !batchDirectoryImporting}
               onClick={() => void installDriversFromDirectory()}
             >
               导入驱动目录
             </Button>
           </Space>
         </div>
+        {batchProgress ? (
+          <div className="driver-manager-batch-progress-panel" style={managerSectionStyle}>
+            <div className="driver-manager-batch-progress-header">
+              <Text strong>{resolveDriverBatchActionLabel(batchAction)}</Text>
+              <Text type="secondary">{batchProgressMessage || '批量任务运行中'}</Text>
+            </div>
+            <Progress percent={batchProgressPercent} status="active" />
+            <div className="driver-manager-batch-progress-meta">
+              <Text type="secondary">已处理 {batchProgress.completed} / {batchProgress.total}</Text>
+              <Text type="secondary">成功 {batchProgress.success}</Text>
+              {batchProgress.failed > 0 ? <Text type="danger">失败 {batchProgress.failed}</Text> : null}
+              {batchProgress.skipped > 0 ? <Text type="secondary">跳过 {batchProgress.skipped}</Text> : null}
+              {batchProgress.currentDriverName ? <Text type="secondary">当前：{batchProgress.currentDriverName}</Text> : null}
+            </div>
+          </div>
+        ) : null}
         <div className="driver-manager-list-head">
           <Text type="secondary">{filterSummaryText}</Text>
           {loading ? <Text type="secondary">正在刷新状态...</Text> : null}
