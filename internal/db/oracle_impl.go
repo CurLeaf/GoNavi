@@ -217,9 +217,13 @@ func (o *OracleDB) GetDatabases() ([]string, error) {
 
 func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 	// dbName is Schema/Owner
-	query := "SELECT table_name FROM user_tables"
+	// 始终返回 OWNER.TABLE_NAME，避免下游 SQL 缺少 schema 前缀导致 ORA-00942（refs issue #445）
+	// 列别名用双引号包裹强制大写，避免不同驱动版本返回不一致 case 导致 row map 取值失败
+	var query string
 	if dbName != "" {
-		query = fmt.Sprintf("SELECT owner, table_name FROM all_tables WHERE owner = '%s' ORDER BY table_name", strings.ToUpper(dbName))
+		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, strings.ToUpper(dbName))
+	} else {
+		query = `SELECT USER AS "OWNER", table_name AS "TABLE_NAME" FROM user_tables ORDER BY table_name`
 	}
 
 	data, _, err := o.Query(query)
@@ -229,16 +233,14 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 
 	var tables []string
 	for _, row := range data {
-		if dbName != "" {
-			if owner, okOwner := row["OWNER"]; okOwner {
-				if name, okName := row["TABLE_NAME"]; okName {
-					tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
-					continue
-				}
-			}
+		owner, okOwner := row["OWNER"]
+		name, okName := row["TABLE_NAME"]
+		if okOwner && okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
+			continue
 		}
-		if val, ok := row["TABLE_NAME"]; ok {
-			tables = append(tables, fmt.Sprintf("%v", val))
+		if okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v", name))
 		}
 	}
 	return tables, nil

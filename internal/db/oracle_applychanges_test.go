@@ -28,6 +28,12 @@ type oracleRecordingState struct {
 	execQueries  []string
 	execArgs     [][]driver.NamedValue
 	rowsAffected int64
+	queryResults map[string]oracleRecordingQueryResult
+}
+
+type oracleRecordingQueryResult struct {
+	columns []string
+	rows    [][]driver.Value
 }
 
 func (s *oracleRecordingState) snapshotExecQueries() []string {
@@ -80,6 +86,16 @@ func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args 
 }
 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	c.state.mu.Lock()
+	if result, ok := c.state.queryResults[query]; ok {
+		c.state.mu.Unlock()
+		return &oracleRecordingRows{
+			columns: append([]string(nil), result.columns...),
+			rows:    cloneOracleRecordingRows(result.rows),
+		}, nil
+	}
+	c.state.mu.Unlock()
+
 	if strings.Contains(strings.ToLower(query), "tab_columns") {
 		return &oracleRecordingRows{
 			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT"},
@@ -90,6 +106,14 @@ func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []
 		}, nil
 	}
 	return &oracleRecordingRows{}, nil
+}
+
+func cloneOracleRecordingRows(src [][]driver.Value) [][]driver.Value {
+	dst := make([][]driver.Value, len(src))
+	for i, row := range src {
+		dst[i] = append([]driver.Value(nil), row...)
+	}
+	return dst
 }
 
 var _ driver.ExecerContext = (*oracleRecordingConn)(nil)
@@ -135,7 +159,7 @@ func openOracleRecordingDB(t *testing.T) (*sql.DB, *oracleRecordingState) {
 	oracleRecordingDriverMu.Lock()
 	oracleRecordingDriverSeq++
 	dsn := fmt.Sprintf("oracle-recording-%d", oracleRecordingDriverSeq)
-	state := &oracleRecordingState{rowsAffected: 1}
+	state := &oracleRecordingState{rowsAffected: 1, queryResults: map[string]oracleRecordingQueryResult{}}
 	oracleRecordingDriverStates[dsn] = state
 	oracleRecordingDriverMu.Unlock()
 
