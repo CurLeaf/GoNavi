@@ -2435,6 +2435,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         }
         .query-result-tabs .ant-tabs-nav {
           flex: 0 0 auto;
+          margin: 0;
         }
         .query-result-tabs .ant-tabs-content-holder {
           flex: 1 1 auto;
@@ -2468,7 +2469,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         }
       `}</style>
       <div ref={editorPaneRef}>
-      <div style={{ padding: '8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+      <div style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
             placeholder="选择连接"
