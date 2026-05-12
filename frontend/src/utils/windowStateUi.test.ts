@@ -20,7 +20,7 @@ describe('windowStateUi', () => {
   it('applies the Windows scale fix when a minimized taskbar window is restored with viewport drift', () => {
     expect(shouldApplyWindowsScaleFix('restore', true)).toBe(true);
     expect(shouldApplyWindowsScaleFix('restore', false)).toBe(false);
-    expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(true);
+    expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(false);
   });
 
   it('debounces resize-triggered Windows scale checks until window transitions settle', () => {

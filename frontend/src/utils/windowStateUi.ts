@@ -8,7 +8,10 @@ export const shouldApplyWindowsScaleFix = (
   hasViewportScaleDrift: boolean,
 ): boolean => (reason === 'ratio-change' || reason === 'restore') && hasViewportScaleDrift;
 
-export const shouldToggleMaximisedWindowForScaleFix = shouldApplyWindowsScaleFix;
+export const shouldToggleMaximisedWindowForScaleFix = (
+  reason: WindowScaleFixReason,
+  hasViewportScaleDrift: boolean,
+): boolean => reason === 'ratio-change' && hasViewportScaleDrift;
 
 export const resolveWindowsScaleCheckDelayMs = (trigger: WindowsScaleCheckTrigger): number =>
   trigger === 'resize' ? 240 : 0;

@@ -738,6 +738,10 @@ function App() {
               return;
           }
           lastRatio = currentRatio;
+          if (minimisedSeen || hiddenSeen) {
+              scheduleActivationFix();
+              return;
+          }
           void fixWindowScaleIfNeeded('ratio-change');
       };
 
@@ -764,6 +768,7 @@ function App() {
           if (activationTimer !== null) {
               window.clearTimeout(activationTimer);
           }
+          const delayMs = (minimisedSeen || hiddenSeen) ? 260 : 80;
           activationTimer = window.setTimeout(async () => {
               activationTimer = null;
               if (cancelled) return;
@@ -774,7 +779,7 @@ function App() {
               minimisedSeen = false;
               hiddenSeen = false;
               void fixWindowScaleIfNeeded(reason);
-          }, 80);
+          }, delayMs);
       };
 
       const handleWindowFocus = () => {
