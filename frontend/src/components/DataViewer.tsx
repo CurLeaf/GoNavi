@@ -85,6 +85,11 @@ const parseTotalFromCountRow = (row: any): number | null => {
   return null;
 };
 
+const isKnownTotalFreshForPage = (total: unknown, minExpectedTotal: number): boolean => {
+  const parsedTotal = toNonNegativeFiniteNumber(total);
+  return parsedTotal !== null && parsedTotal >= minExpectedTotal;
+};
+
 const buildDataViewerReadOnlyLocator = (reason: string): EditRowLocator => ({
   strategy: 'none',
   columns: [],
@@ -743,9 +748,16 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
             const countKey = `${tab.connectionId}|${dbName}|${tableName}|${whereSQL}`;
             const derivedTotalKnown = !hasMore;
             const derivedTotal = derivedTotalKnown ? offset + resultData.length : currentPage * size + 1;
-            const isDuckDB = dbTypeLower === 'duckdb';
             const minExpectedTotal = hasMore ? offset + resultData.length + 1 : offset + resultData.length;
             if (derivedTotalKnown) countKeyRef.current = countKey;
+            const staleKnownTotalForCurrentPage =
+              !derivedTotalKnown &&
+              pagination.totalKnown &&
+              countKeyRef.current === countKey &&
+              !isKnownTotalFreshForPage(pagination.total, minExpectedTotal);
+            if (staleKnownTotalForCurrentPage) {
+                countKeyRef.current = '';
+            }
             latestConfigRef.current = config;
             latestDbTypeRef.current = dbTypeLower;
             latestDbNameRef.current = dbName;
@@ -767,12 +779,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
                     };
                 }
                 if (prev.totalKnown && countKeyRef.current === countKey) {
-                    if (!isDuckDB) {
-                        return { ...prev, current: currentPage, pageSize: size };
-                    }
                     // 当当前页存在“下一页”信号时，已知总数至少应大于当前页末尾。
-                    // 若旧总数不满足该条件（例如历史统计值为 0），降级为未知总数并回退到 derivedTotal。
-                    if (Number.isFinite(prev.total) && prev.total >= minExpectedTotal) {
+                    // 若旧总数不满足该条件（例如清空表后又外部写入数据），降级为未知总数并重新统计。
+                    if (isKnownTotalFreshForPage(prev.total, minExpectedTotal)) {
                         return { ...prev, current: currentPage, pageSize: size };
                     }
                 }
