@@ -73,7 +73,7 @@ import {
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -635,10 +635,12 @@ function App() {
       let lastFixAt = 0;
       let activationTimer: number | null = null;
       let resizeTimer: number | null = null;
+      let minimisedSeen = false;
+      let hiddenSeen = document.visibilityState === 'hidden';
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-      const fixWindowScaleIfNeeded = async (reason: 'activation' | 'ratio-change') => {
+      const fixWindowScaleIfNeeded = async (reason: WindowScaleFixReason) => {
           if (cancelled || inFlight) return;
           const now = Date.now();
           if (now - lastFixAt < 700) return;
@@ -713,6 +715,22 @@ function App() {
           }
       };
 
+      const rememberMinimisedState = async (): Promise<boolean> => {
+          if (cancelled) return false;
+          const isMinimised = await WindowIsMinimised().catch(() => false);
+          if (isMinimised) {
+              minimisedSeen = true;
+          }
+          return isMinimised;
+      };
+
+      const rememberMinimisedStateSoon = () => {
+          window.setTimeout(() => {
+              if (cancelled) return;
+              void rememberMinimisedState();
+          }, 120);
+      };
+
       const checkDevicePixelRatio = () => {
           if (cancelled) return;
           const currentRatio = Number(window.devicePixelRatio) || 1;
@@ -746,10 +764,16 @@ function App() {
           if (activationTimer !== null) {
               window.clearTimeout(activationTimer);
           }
-          activationTimer = window.setTimeout(() => {
+          activationTimer = window.setTimeout(async () => {
               activationTimer = null;
               if (cancelled) return;
-              void fixWindowScaleIfNeeded('activation');
+              if (await rememberMinimisedState()) {
+                  return;
+              }
+              const reason: WindowScaleFixReason = (minimisedSeen || hiddenSeen) ? 'restore' : 'activation';
+              minimisedSeen = false;
+              hiddenSeen = false;
+              void fixWindowScaleIfNeeded(reason);
           }, 80);
       };
 
@@ -759,9 +783,19 @@ function App() {
           scheduleActivationFix();
       };
 
+      const handleWindowBlur = () => {
+          if (cancelled) return;
+          if (document.visibilityState === 'hidden') {
+              hiddenSeen = true;
+          }
+          rememberMinimisedStateSoon();
+      };
+
       const handleVisibilityChange = () => {
           if (cancelled) return;
           if (document.visibilityState !== 'visible') {
+              hiddenSeen = true;
+              rememberMinimisedStateSoon();
               return;
           }
           scheduleDevicePixelRatioCheck('visibilitychange');
@@ -775,12 +809,17 @@ function App() {
       };
 
       const handleWindowResize = () => {
+          rememberMinimisedStateSoon();
           scheduleDevicePixelRatioCheck('resize');
       };
 
-      const pollTimer = window.setInterval(checkDevicePixelRatio, 900);
+      const pollTimer = window.setInterval(() => {
+          void rememberMinimisedState();
+          checkDevicePixelRatio();
+      }, 900);
       window.addEventListener('resize', handleWindowResize);
       window.addEventListener('focus', handleWindowFocus);
+      window.addEventListener('blur', handleWindowBlur);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -795,6 +834,7 @@ function App() {
           window.clearInterval(pollTimer);
           window.removeEventListener('resize', handleWindowResize);
           window.removeEventListener('focus', handleWindowFocus);
+          window.removeEventListener('blur', handleWindowBlur);
           window.removeEventListener('pageshow', handlePageShow);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
       };

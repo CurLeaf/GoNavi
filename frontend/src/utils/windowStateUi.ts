@@ -1,12 +1,12 @@
 export type WindowVisualState = 'normal' | 'maximized' | 'fullscreen';
-export type WindowScaleFixReason = 'activation' | 'ratio-change';
+export type WindowScaleFixReason = 'activation' | 'ratio-change' | 'restore';
 export type WindowsScaleCheckTrigger = 'focus' | 'pageshow' | 'poll' | 'resize' | 'visibilitychange';
 export type TitleBarToggleIconKey = 'maximize' | 'restore';
 
 export const shouldApplyWindowsScaleFix = (
   reason: WindowScaleFixReason,
   hasViewportScaleDrift: boolean,
-): boolean => reason === 'ratio-change' && hasViewportScaleDrift;
+): boolean => (reason === 'ratio-change' || reason === 'restore') && hasViewportScaleDrift;
 
 export const shouldToggleMaximisedWindowForScaleFix = shouldApplyWindowsScaleFix;
 
