@@ -108,6 +108,41 @@ const getTableColumnNames = (columns: ColumnDefinition[] | undefined): string[] 
     .filter(Boolean)
 );
 
+const MONGODB_ID_COLUMN = '_id';
+const MONGODB_ID_LOCATOR_COLUMN = '__gonavi_mongodb_id_locator__';
+
+const buildMongoDataViewerEditLocator = (resultColumns: string[]): EditRowLocator => {
+  const columns = (resultColumns || [])
+    .map((column) => String(column || '').trim())
+    .filter(Boolean);
+  const idColumn = columns.find((column) => column.toLowerCase() === MONGODB_ID_COLUMN);
+  if (!idColumn) {
+    return buildDataViewerReadOnlyLocator('MongoDB 结果集中缺少 _id，无法安全提交修改。');
+  }
+
+  const locatorValueColumn = columns.find((column) => column === MONGODB_ID_LOCATOR_COLUMN) || idColumn;
+  const writableColumns: Record<string, string> = {};
+  columns.forEach((column) => {
+    const normalized = String(column || '').trim();
+    if (
+      !normalized ||
+      normalized === GONAVI_ROW_KEY ||
+      normalized === MONGODB_ID_LOCATOR_COLUMN ||
+      normalized.toLowerCase() === MONGODB_ID_COLUMN
+    ) return;
+    writableColumns[normalized] = normalized;
+  });
+
+  return {
+    strategy: 'primary-key',
+    columns: [MONGODB_ID_COLUMN],
+    valueColumns: [locatorValueColumn],
+    hiddenColumns: locatorValueColumn === MONGODB_ID_LOCATOR_COLUMN ? [MONGODB_ID_LOCATOR_COLUMN] : undefined,
+    writableColumns,
+    readOnly: false,
+  };
+};
+
 const resolveDataViewerOrderFallbackColumns = (locator: EditRowLocator | undefined, pkColumns: string[]): string[] => {
   if (locator && !locator.readOnly && locator.strategy !== 'oracle-rowid') {
     return locator.valueColumns.length > 0 ? locator.valueColumns : locator.columns;
@@ -506,6 +541,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
     let pkColumnsForQuery = pkColumns;
     let editLocatorForQuery = editLocator;
+    if (isMongoDB && !forceReadOnly && tableName) {
+        pkColumnsForQuery = [MONGODB_ID_COLUMN];
+    }
     if (!isMongoDB && !forceReadOnly && tableName) {
         const locatorKey = `${tab.connectionId}|${dbTypeLower}|${dbName}|${tableName}`;
         if (pkKeyRef.current !== locatorKey || !editLocatorForQuery) {
@@ -602,13 +640,14 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     let clickHouseReverseHasMore = false;
     let sql = '';
     if (isMongoDB) {
-        const mongoSort = buildMongoSort(sortInfo, pkColumns);
+        const mongoSort = buildMongoSort(sortInfo, pkColumnsForQuery);
         sql = buildMongoFindCommand({
             collection: tableName,
             filter: mongoFilter || {},
             sort: mongoSort,
             limit: size + 1,
             skip: offset,
+            includeObjectIDLocator: true,
         });
     } else {
         const baseSql = buildDataViewerBaseSelectSQL(dbType, tableName, whereSQL, editLocatorForQuery);
@@ -740,6 +779,16 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
                 fieldNames = Object.keys(resultData[0]);
             }
             if (fetchSeqRef.current !== seq) return;
+            if (isMongoDB && !forceReadOnly && tableName) {
+                const nextLocator = buildMongoDataViewerEditLocator(fieldNames);
+                pkColumnsForQuery = nextLocator.readOnly ? [] : [MONGODB_ID_COLUMN];
+                editLocatorForQuery = nextLocator;
+                setPkColumns(pkColumnsForQuery);
+                setEditLocator(nextLocator);
+                if (nextLocator.readOnly && resultData.length > 0) {
+                    message.warning(`集合 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason || '当前结果没有可用的安全行定位方式，无法提交修改。'}`);
+                }
+            }
             setColumnNames(fieldNames);
             resultData.forEach((row: any, i: number) => {
                 if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = `row-${offset + i}`;

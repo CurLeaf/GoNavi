@@ -328,6 +328,63 @@ describe('DataGrid commit change set', () => {
     });
   });
 
+  it('uses MongoDB _id as the locator and keeps _id out of update values', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [{
+        [GONAVI_ROW_KEY]: 'new-1',
+        _id: '507f1f77bcf86cd799439013',
+        __gonavi_mongodb_id_locator__: { $oid: '507f1f77bcf86cd799439013' },
+        name: 'insert-name',
+      }],
+      modifiedRows: {
+        'row-1': {
+          [GONAVI_ROW_KEY]: 'row-1',
+          _id: '507f1f77bcf86cd799439999',
+          __gonavi_mongodb_id_locator__: '507f1f77bcf86cd799439999',
+          name: 'new-name',
+        },
+      },
+      deletedRowKeys: new Set(['row-2']),
+      data: [
+        {
+          [GONAVI_ROW_KEY]: 'row-1',
+          _id: '507f1f77bcf86cd799439011',
+          __gonavi_mongodb_id_locator__: { $oid: '507f1f77bcf86cd799439011' },
+          name: 'old-name',
+        },
+        {
+          [GONAVI_ROW_KEY]: 'row-2',
+          _id: '507f1f77bcf86cd799439012',
+          __gonavi_mongodb_id_locator__: '507f1f77bcf86cd799439012',
+          name: 'to-delete',
+        },
+      ],
+      editLocator: {
+        strategy: 'primary-key',
+        columns: ['_id'],
+        valueColumns: ['__gonavi_mongodb_id_locator__'],
+        hiddenColumns: ['__gonavi_mongodb_id_locator__'],
+        writableColumns: {
+          name: 'name',
+        },
+        readOnly: false,
+      },
+      visibleColumnNames: ['_id', 'name'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [{ name: 'insert-name' }],
+        updates: [{ keys: { _id: { $oid: '507f1f77bcf86cd799439011' } }, values: { name: 'new-name' } }],
+        deletes: [{ _id: '507f1f77bcf86cd799439012' }],
+      },
+    });
+  });
+
   it('fails closed when no safe locator is available', () => {
     const result = buildDataGridCommitChangeSet({
       addedRows: [],

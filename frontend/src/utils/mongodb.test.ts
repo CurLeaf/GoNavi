@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from './mongodb';
+import { applyMongoQueryAutoLimit, buildMongoFindCommand, convertMongoShellToJsonCommand } from './mongodb';
 
 const parseCommand = (command: string | undefined) => JSON.parse(command || '{}');
 
@@ -118,5 +118,19 @@ describe('applyMongoQueryAutoLimit', () => {
   it('does not limit non-read or invalid commands', () => {
     expect(applyMongoQueryAutoLimit('{"count":"users","query":{}}', 500).applied).toBe(false);
     expect(applyMongoQueryAutoLimit('db.users.find({})', 500).applied).toBe(false);
+  });
+});
+
+describe('buildMongoFindCommand', () => {
+  it('marks DataViewer Mongo find commands to include typed _id locator', () => {
+    expect(parseCommand(buildMongoFindCommand({
+      collection: 'users',
+      filter: {},
+      includeObjectIDLocator: true,
+    }))).toEqual({
+      find: 'users',
+      filter: {},
+      __gonaviIncludeObjectIDLocator: true,
+    });
   });
 });

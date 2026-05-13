@@ -651,11 +651,15 @@ export const buildMongoFindCommand = (params: {
   limit?: number;
   skip?: number;
   projection?: Record<string, unknown>;
+  includeObjectIDLocator?: boolean;
 }): string => {
   const command: Record<string, unknown> = {
     find: String(params.collection || '').trim(),
     filter: params.filter || {},
   };
+  if (params.includeObjectIDLocator) {
+    command.__gonaviIncludeObjectIDLocator = true;
+  }
   if (params.projection && Object.keys(params.projection).length > 0) {
     command.projection = params.projection;
   }
