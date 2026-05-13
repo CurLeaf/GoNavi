@@ -1,3 +1,5 @@
+import { resolveOceanBaseProtocolForDialect } from './oceanBaseProtocol';
+
 export type ColumnTypeOption = { value: string };
 
 export type SqlFunctionCompletion = {
@@ -34,9 +36,7 @@ const optionValues = (values: string[]): ColumnTypeOption[] => values.map((value
 
 const normalizeRawDialect = (value: string): string => String(value || '').trim().toLowerCase();
 
-export const normalizeOceanBaseSqlProtocol = (value: unknown): 'mysql' | 'oracle' => (
-  String(value || '').trim().toLowerCase() === 'oracle' ? 'oracle' : 'mysql'
-);
+export const normalizeOceanBaseSqlProtocol = resolveOceanBaseProtocolForDialect;
 
 export const resolveSqlDialect = (
   rawType: string,

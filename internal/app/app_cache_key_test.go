@@ -211,3 +211,50 @@ func TestGetCacheKey_OceanBaseProtocolParamWinsOverAliases(t *testing.T) {
 		t.Fatalf("expected explicit protocol=mysql to win over alias, got %s vs %s", left, right)
 	}
 }
+
+func TestGetCacheKey_OceanBaseExplicitProtocolOverridesConnectionParams(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:             "oceanbase",
+		Host:             "ob.local",
+		Port:             2881,
+		User:             "root@test",
+		Database:         "app",
+		ConnectionParams: "connectTimeout=10",
+	}
+	modified := base
+	modified.OceanBaseProtocol = "mysql"
+	modified.ConnectionParams = "protocol=oracle&connectTimeout=10"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left != right {
+		t.Fatalf("expected explicit OceanBase protocol=mysql to override params protocol=oracle, got %s vs %s", left, right)
+	}
+}
+
+func TestGetCacheKey_KeepOceanBaseUnsupportedProtocolIsolation(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:             "oceanbase",
+		Host:             "ob.local",
+		Port:             2881,
+		User:             "root@test",
+		Database:         "app",
+		ConnectionParams: "protocol=mysql",
+	}
+	modified := base
+	modified.ConnectionParams = "protocol=native"
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left == right {
+		t.Fatalf("expected unsupported OceanBase protocol to stay isolated from MySQL cache key")
+	}
+
+	masked := base
+	masked.OceanBaseProtocol = "mysql"
+	masked.ConnectionParams = "protocol=native"
+
+	if left == getCacheKey(masked) {
+		t.Fatalf("expected unsupported OceanBase params protocol to stay isolated even with explicit mysql")
+	}
+}

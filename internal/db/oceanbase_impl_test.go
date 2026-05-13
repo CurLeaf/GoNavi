@@ -79,8 +79,47 @@ func TestResolveOceanBaseProtocol(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := resolveOceanBaseProtocol(tt.config); got != tt.want {
+			got, err := resolveOceanBaseProtocol(tt.config)
+			if err != nil {
+				t.Fatalf("resolveOceanBaseProtocol() unexpected error: %v", err)
+			}
+			if got != tt.want {
 				t.Fatalf("resolveOceanBaseProtocol() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveOceanBaseProtocolRejectsUnsupportedNative(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config connection.ConnectionConfig
+	}{
+		{
+			name: "params native",
+			config: connection.ConnectionConfig{
+				Type:             "oceanbase",
+				ConnectionParams: "protocol=native",
+			},
+		},
+		{
+			name: "explicit mysql does not mask params native",
+			config: connection.ConnectionConfig{
+				Type:              "oceanbase",
+				OceanBaseProtocol: "mysql",
+				ConnectionParams:  "protocol=native",
+			},
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := resolveOceanBaseProtocol(tt.config)
+			if err == nil || !strings.Contains(err.Error(), "不支持") {
+				t.Fatalf("expected unsupported protocol error, got %v", err)
 			}
 		})
 	}

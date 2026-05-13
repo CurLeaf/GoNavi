@@ -65,6 +65,13 @@ import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
+  describeUnsupportedOceanBaseProtocol,
+  normalizeOceanBaseProtocol,
+  OCEANBASE_PROTOCOL_PARAM_KEYS,
+  resolveOceanBaseProtocolFromQueryText as resolveOceanBaseProtocolQueryText,
+  type OceanBaseProtocol,
+} from "../utils/oceanBaseProtocol";
+import {
   applyNoAutoCapAttributes,
   noAutoCapInputProps,
 } from "../utils/inputAutoCap";
@@ -98,7 +105,7 @@ type ChoiceCardOption = {
   description?: string;
 };
 type ClickHouseProtocolChoice = "auto" | "http" | "native";
-type OceanBaseProtocolChoice = "mysql" | "oracle";
+type OceanBaseProtocolChoice = OceanBaseProtocol;
 const MAX_URI_LENGTH = 4096;
 const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
@@ -122,15 +129,6 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
-const OCEANBASE_PROTOCOL_PARAM_KEYS = [
-  "protocol",
-  "oceanBaseProtocol",
-  "oceanbaseProtocol",
-  "tenantMode",
-  "compatMode",
-  "mode",
-];
-
 const normalizeClickHouseProtocolValue = (
   value: unknown,
 ): ClickHouseProtocolChoice => {
@@ -144,10 +142,7 @@ const normalizeClickHouseProtocolValue = (
 const normalizeOceanBaseProtocolValue = (
   value: unknown,
 ): OceanBaseProtocolChoice => {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase();
-  return text === "oracle" ? "oracle" : "mysql";
+  return normalizeOceanBaseProtocol(value) || "mysql";
 };
 const resolveOceanBaseProtocolValue = (
   value: unknown,
@@ -156,29 +151,12 @@ const resolveOceanBaseProtocolValue = (
     .trim()
     .toLowerCase();
   if (!text) return undefined;
-  return ["oracle", "oracle-mode", "oracle_mode", "oboracle"].includes(text)
-    ? "oracle"
-    : "mysql";
+  return normalizeOceanBaseProtocol(text);
 };
 const resolveOceanBaseProtocolFromQueryText = (
   value: unknown,
 ): OceanBaseProtocolChoice | undefined => {
-  let text = String(value || "").trim();
-  if (!text) return undefined;
-  const queryIndex = text.indexOf("?");
-  if (queryIndex >= 0) {
-    text = text.slice(queryIndex + 1);
-  }
-  const hashIndex = text.indexOf("#");
-  if (hashIndex >= 0) {
-    text = text.slice(0, hashIndex);
-  }
-  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
-  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
-    const protocol = resolveOceanBaseProtocolValue(params.get(key));
-    if (protocol) return protocol;
-  }
-  return undefined;
+  return resolveOceanBaseProtocolQueryText(value).protocol;
 };
 const resolveOceanBaseProtocolForConfig = (
   config: Partial<ConnectionConfig>,
@@ -1179,7 +1157,12 @@ const ConnectionModal: React.FC<{
     rawParams: unknown,
     selectedProtocol: OceanBaseProtocolChoice,
   ) => {
-    const params = new URLSearchParams(normalizeConnectionParamsText(rawParams));
+    const normalizedParamsText = normalizeConnectionParamsText(rawParams);
+    const protocolFromParams = resolveOceanBaseProtocolQueryText(normalizedParamsText);
+    if (protocolFromParams.unsupportedValue) {
+      throw new Error(describeUnsupportedOceanBaseProtocol(protocolFromParams.unsupportedValue));
+    }
+    const params = new URLSearchParams(normalizedParamsText);
     for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
       params.delete(key);
     }
@@ -4775,7 +4758,7 @@ const ConnectionModal: React.FC<{
                     <Form.Item
                       name="oceanBaseProtocol"
                       label="OceanBase 协议"
-                      help="MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。该选择会同时影响连接测试、浏览表结构和 SQL 方言。"
+                      help="MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。OceanBase 租户兼容模式不包含 Native，该选择会同时影响连接测试、浏览表结构和 SQL 方言。"
                       style={{ marginBottom: 0 }}
                     >
                       <Select

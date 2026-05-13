@@ -96,7 +96,7 @@ const CONNECTION_CONFIG_SECTION_COPY: Record<
   },
   oceanBaseProtocol: {
     title: 'OceanBase 协议',
-    description: '明确选择 MySQL 租户协议或 Oracle 租户协议。',
+    description: '明确选择 MySQL 或 Oracle 租户兼容协议。',
   },
   mongoDiscovery: {
     title: 'MongoDB 寻址',

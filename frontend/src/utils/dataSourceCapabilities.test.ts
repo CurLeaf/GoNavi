@@ -40,4 +40,16 @@ describe('dataSourceCapabilities', () => {
       supportsApproximateTableCount: true,
     });
   });
+
+  it('treats custom OceanBase Oracle driver as Oracle capabilities', () => {
+    expect(getDataSourceCapabilities({
+      type: 'custom',
+      driver: 'oceanbase',
+      oceanBaseProtocol: 'oracle',
+    })).toMatchObject({
+      type: 'oracle',
+      preferManualTotalCount: true,
+      supportsApproximateTableCount: true,
+    });
+  });
 });

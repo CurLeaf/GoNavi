@@ -110,6 +110,31 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.connectionParams).toBe('protocol=mysql');
   });
 
+  it('rejects unsupported OceanBase native protocol instead of falling back to MySQL', () => {
+    expect(() => buildRpcConnectionConfig({
+      id: 'conn-oceanbase-native',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'root@test',
+      database: 'app',
+      connectionParams: 'protocol=native',
+    } as any)).toThrow(/不支持.*native/);
+  });
+
+  it('rejects unsupported OceanBase protocol even when form protocol is explicit MySQL', () => {
+    expect(() => buildRpcConnectionConfig({
+      id: 'conn-oceanbase-native-masked',
+      type: 'oceanbase',
+      host: 'ob.local',
+      port: 2881,
+      user: 'root@test',
+      database: 'app',
+      oceanBaseProtocol: 'mysql',
+      connectionParams: 'protocol=native',
+    } as any)).toThrow(/不支持.*native/);
+  });
+
   it('preserves extra connection params for RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-mysql',

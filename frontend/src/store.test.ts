@@ -119,6 +119,36 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().connections[0]?.config.password).toBe('secret');
   });
 
+  it('does not fail hydration when persisted OceanBase connection uses unsupported native protocol', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connections: [
+          {
+            id: 'oceanbase-native',
+            name: 'OceanBase Native',
+            config: {
+              id: 'oceanbase-native',
+              type: 'oceanbase',
+              host: 'ob.local',
+              port: 2881,
+              user: 'root@test',
+              oceanBaseProtocol: 'mysql',
+              connectionParams: 'protocol=native',
+            },
+          },
+        ],
+      },
+      version: 9,
+    }));
+
+    const { useStore } = await importStore();
+    const config = useStore.getState().connections[0]?.config;
+
+    expect(useStore.getState().connections).toHaveLength(1);
+    expect(config?.connectionParams).toBe('protocol=native');
+    expect(config?.oceanBaseProtocol).toBe('mysql');
+  });
+
   it('preserves JVM Arthas diagnostic config when replacing saved connections', async () => {
     const { useStore } = await importStore();
 
@@ -289,6 +319,32 @@ describe('store appearance persistence', () => {
       },
     ]);
 
+    expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
+      'mysql',
+    );
+  });
+
+  it('keeps saved OceanBase native protocol loadable for connect-time rejection', async () => {
+    const { useStore } = await importStore();
+
+    expect(() => useStore.getState().replaceConnections([
+      {
+        id: 'oceanbase-native',
+        name: 'OceanBase Native',
+        config: {
+          id: 'oceanbase-native',
+          type: 'oceanbase',
+          host: 'ob.local',
+          port: 2881,
+          user: 'root@test',
+          oceanBaseProtocol: 'mysql',
+          connectionParams: 'protocol=native',
+        },
+      },
+    ])).not.toThrow();
+    expect(useStore.getState().connections[0]?.config.connectionParams).toBe(
+      'protocol=native',
+    );
     expect(useStore.getState().connections[0]?.config.oceanBaseProtocol).toBe(
       'mysql',
     );

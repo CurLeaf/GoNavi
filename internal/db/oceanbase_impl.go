@@ -151,36 +151,62 @@ func normalizeOceanBaseProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case oceanBaseProtocolOracle, "oracle-mode", "oracle_mode", "oboracle":
 		return oceanBaseProtocolOracle
-	case oceanBaseProtocolMySQL, "mysql-compatible", "mysql_compatible", "mysql-mode", "mysql_mode", "":
+	case oceanBaseProtocolMySQL, "mysql-compatible", "mysql_compatible", "mysql-mode", "mysql_mode", "obmysql", "":
 		return oceanBaseProtocolMySQL
 	default:
-		return oceanBaseProtocolMySQL
+		return ""
 	}
 }
 
-func resolveOceanBaseProtocolFromValues(values url.Values) string {
+func unsupportedOceanBaseProtocolError(raw string) error {
+	return fmt.Errorf("OceanBase 当前仅支持 MySQL/Oracle 租户协议，不支持 %q；请改为 MySQL 或 Oracle", strings.TrimSpace(raw))
+}
+
+func resolveOceanBaseProtocolFromValues(values url.Values) (string, error) {
 	if len(values) == 0 {
-		return ""
+		return "", nil
 	}
 	for _, key := range []string{"protocol", "oceanBaseProtocol", "oceanbaseProtocol", "tenantMode", "compatMode", "mode"} {
 		if value := strings.TrimSpace(values.Get(key)); value != "" {
-			return normalizeOceanBaseProtocol(value)
+			protocol := normalizeOceanBaseProtocol(value)
+			if protocol == "" {
+				return "", unsupportedOceanBaseProtocolError(value)
+			}
+			return protocol, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
-func resolveOceanBaseProtocol(config connection.ConnectionConfig) string {
+func resolveOceanBaseProtocol(config connection.ConnectionConfig) (string, error) {
+	explicitProtocol := ""
 	if explicit := strings.TrimSpace(config.OceanBaseProtocol); explicit != "" {
-		return normalizeOceanBaseProtocol(explicit)
+		protocol := normalizeOceanBaseProtocol(explicit)
+		if protocol == "" {
+			return "", unsupportedOceanBaseProtocolError(explicit)
+		}
+		explicitProtocol = protocol
 	}
-	if protocol := resolveOceanBaseProtocolFromValues(connectionParamsFromText(config.ConnectionParams)); protocol != "" {
-		return protocol
+	if protocol, err := resolveOceanBaseProtocolFromValues(connectionParamsFromText(config.ConnectionParams)); err != nil {
+		return "", err
+	} else if protocol != "" {
+		if explicitProtocol != "" {
+			return explicitProtocol, nil
+		}
+		return protocol, nil
 	}
-	if protocol := resolveOceanBaseProtocolFromValues(connectionParamsFromURI(config.URI, "oceanbase", "mysql")); protocol != "" {
-		return protocol
+	if protocol, err := resolveOceanBaseProtocolFromValues(connectionParamsFromURI(config.URI, "oceanbase", "mysql")); err != nil {
+		return "", err
+	} else if protocol != "" {
+		if explicitProtocol != "" {
+			return explicitProtocol, nil
+		}
+		return protocol, nil
 	}
-	return oceanBaseProtocolMySQL
+	if explicitProtocol != "" {
+		return explicitProtocol, nil
+	}
+	return oceanBaseProtocolMySQL, nil
 }
 
 func stripOceanBaseProtocolParams(raw string) string {
@@ -256,7 +282,10 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 	o.oracle = nil
 	o.protocol = oceanBaseProtocolMySQL
 	appliedConfig := applyOceanBaseURI(config)
-	protocol := resolveOceanBaseProtocol(appliedConfig)
+	protocol, err := resolveOceanBaseProtocol(appliedConfig)
+	if err != nil {
+		return err
+	}
 	runConfig := withoutOceanBaseProtocolParams(appliedConfig)
 	if protocol == oceanBaseProtocolOracle {
 		logger.Infof("OceanBase 使用 Oracle 协议连接：地址=%s:%d 用户=%s", runConfig.Host, runConfig.Port, runConfig.User)

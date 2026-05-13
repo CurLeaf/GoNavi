@@ -1,3 +1,5 @@
+import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
+
 const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
   const raw = String(qualifiedName || '').trim();
   if (!raw) return { schemaName: '', objectName: '' };
@@ -18,12 +20,14 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBa
     if (normalizedDriver === 'postgresql' || normalizedDriver === 'postgres' || normalizedDriver === 'pg') return 'postgres';
     if (normalizedDriver === 'opengauss' || normalizedDriver === 'open_gauss' || normalizedDriver === 'open-gauss') return 'opengauss';
     if (normalizedDriver === 'dameng' || normalizedDriver === 'dm' || normalizedDriver === 'dm8') return 'dm';
-    if (normalizedDriver === 'oceanbase') return 'mysql';
+    if (normalizedDriver === 'oceanbase') {
+      return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
+    }
     if (normalizedDriver.includes('oracle')) return 'oracle';
     return normalizedDriver;
   }
   if (normalizedType === 'oceanbase') {
-    return String(oceanBaseProtocol || '').trim().toLowerCase() === 'oracle' ? 'oracle' : 'mysql';
+    return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
   }
   if (normalizedType === 'open_gauss' || normalizedType === 'open-gauss') return 'opengauss';
   if (normalizedType === 'dameng') return 'dm';

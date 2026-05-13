@@ -48,6 +48,7 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { resolveConnectionHostTokens } from '../utils/tabDisplay';
 import {
     findSidebarNodePathByKey,
@@ -686,11 +687,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'custom') {
           const driver = String(conn?.config?.driver || '').trim().toLowerCase();
           if (driver === 'diros' || driver === 'doris') return 'mysql';
-          if (driver === 'oceanbase') return 'mysql';
+          if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
           if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
           return driver;
       }
-      if (type === 'oceanbase' && String(conn?.config?.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
+      if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
       if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
       if (type === 'dameng') return 'dm';
       return type;
