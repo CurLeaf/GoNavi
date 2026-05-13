@@ -76,6 +76,10 @@ interface TreeNode {
   type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
+export const resolveSidebarTableNameForCopy = (node: Pick<TreeNode, 'title' | 'dataRef'> | null | undefined): string => {
+  return String(node?.dataRef?.tableName || node?.title || '').trim();
+};
+
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
@@ -2052,6 +2056,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           message.success('表结构已复制到剪贴板');
       } else {
           message.error(res.message);
+      }
+  };
+
+  const handleCopyTableName = async (node: any) => {
+      const tableName = resolveSidebarTableNameForCopy(node);
+      if (!tableName) {
+          message.warning('表名为空，无法复制');
+          return;
+      }
+      try {
+          await navigator.clipboard.writeText(tableName);
+          message.success('表名已复制到剪贴板');
+      } catch (e: any) {
+          message.error('复制表名失败: ' + (e?.message || String(e)));
       }
   };
 
@@ -4301,6 +4319,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '设计表',
                 icon: <EditOutlined />,
                 onClick: () => openDesign(node, 'columns', false)
+            },
+            {
+                key: 'copy-table-name',
+                label: '复制表名',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
             },
             {
                 key: 'copy-structure',

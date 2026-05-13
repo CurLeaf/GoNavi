@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import Sidebar from './Sidebar';
+import Sidebar, { resolveSidebarTableNameForCopy } from './Sidebar';
 
 const mocks = vi.hoisted(() => ({
   noop: vi.fn(),
@@ -80,6 +80,17 @@ vi.mock('../../wailsjs/runtime/runtime', () => ({
 }));
 
 describe('Sidebar locate toolbar', () => {
+  it('resolves the table name used by the sidebar copy action', () => {
+    expect(resolveSidebarTableNameForCopy({
+      title: 'users',
+      dataRef: { tableName: 'public.users' },
+    })).toBe('public.users');
+    expect(resolveSidebarTableNameForCopy({
+      title: 'users',
+      dataRef: {},
+    })).toBe('users');
+  });
+
   it('renders the current table locate action in the sidebar toolbar', () => {
     const markup = renderToStaticMarkup(<Sidebar />);
     const externalSqlActionIndex = markup.indexOf('data-sidebar-open-external-sql-file-action="true"');
