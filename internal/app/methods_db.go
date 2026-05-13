@@ -1105,6 +1105,7 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 
 	qualifiedTable := quoteTableIdentByType(dbType, schemaName, table)
 	columnLines := make([]string, 0, len(columns)+1)
+	columnCommentLines := make([]string, 0, len(columns))
 	primaryKeys := make([]string, 0, 2)
 
 	for _, col := range columns {
@@ -1131,6 +1132,9 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 		}
 
 		columnLines = append(columnLines, "  "+strings.Join(defParts, " "))
+		if commentSQL := buildFallbackColumnCommentStatement(dbType, qualifiedTable, colNameRaw, col.Comment); commentSQL != "" {
+			columnCommentLines = append(columnCommentLines, commentSQL)
+		}
 		if strings.EqualFold(strings.TrimSpace(col.Key), "PRI") {
 			primaryKeys = append(primaryKeys, colName)
 		}
@@ -1149,7 +1153,21 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 	ddl.WriteString(" (\n")
 	ddl.WriteString(strings.Join(columnLines, ",\n"))
 	ddl.WriteString("\n);")
+	if len(columnCommentLines) > 0 {
+		ddl.WriteString("\n")
+		ddl.WriteString(strings.Join(columnCommentLines, "\n"))
+	}
 	return ddl.String(), nil
+}
+
+func buildFallbackColumnCommentStatement(dbType string, qualifiedTable string, columnName string, comment string) string {
+	colName := strings.TrimSpace(columnName)
+	commentText := strings.TrimSpace(comment)
+	if colName == "" || commentText == "" {
+		return ""
+	}
+	columnRef := fmt.Sprintf("%s.%s", qualifiedTable, quoteIdentByType(dbType, colName))
+	return fmt.Sprintf("COMMENT ON COLUMN %s IS '%s';", columnRef, strings.ReplaceAll(commentText, "'", "''"))
 }
 
 func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {

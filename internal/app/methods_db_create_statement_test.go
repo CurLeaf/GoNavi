@@ -172,6 +172,35 @@ func TestResolveCreateStatementWithFallback_CustomKingbaseUsesPublicSchema(t *te
 	}
 }
 
+func TestResolveCreateStatementWithFallback_KingbaseIncludesColumnComments(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "SHOW CREATE TABLE not directly supported in Kingbase/Postgres via SQL",
+		columns: []connection.ColumnDefinition{
+			{Name: "mes_third_sys_log_id", Type: "bigint", Nullable: "NO", Key: "PRI", Comment: "主键"},
+			{Name: "api_name", Type: "character varying(100 char)", Nullable: "YES", Comment: "接口名称"},
+			{Name: "request_param", Type: "longtext", Nullable: "YES", Comment: "请求参数's"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type: "kingbase",
+	}, "demo_db", "ldf_server.mes_third_sys_log")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	for _, want := range []string{
+		`COMMENT ON COLUMN ldf_server.mes_third_sys_log.mes_third_sys_log_id IS '主键';`,
+		`COMMENT ON COLUMN ldf_server.mes_third_sys_log.api_name IS '接口名称';`,
+		`COMMENT ON COLUMN ldf_server.mes_third_sys_log.request_param IS '请求参数''s';`,
+	} {
+		if !strings.Contains(ddl, want) {
+			t.Fatalf("expected fallback DDL to contain %q, got: %s", want, ddl)
+		}
+	}
+}
+
 func TestResolveCreateStatementWithFallback_KeepQualifiedSchema(t *testing.T) {
 	t.Parallel()
 
