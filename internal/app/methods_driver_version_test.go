@@ -36,9 +36,39 @@ func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
 		t.Fatalf("expected version %q, got %q", version, gotVersion)
 	}
 
-	wantURL := fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", updateRepo, version, assetName)
+	wantURL := fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", driverReleaseRepo, version, assetName)
 	if gotURL != wantURL {
 		t.Fatalf("expected published release URL %q, got %q", wantURL, gotURL)
+	}
+}
+
+func TestCurrentDriverReleaseTagUsesDevLatestForDevBuild(t *testing.T) {
+	originalVersion := AppVersion
+	AppVersion = "dev-abc1234"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	if got := currentDriverReleaseTag(); got != driverReleaseDevTag {
+		t.Fatalf("expected dev driver release tag %q, got %q", driverReleaseDevTag, got)
+	}
+}
+
+func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing.T) {
+	originalVersion := AppVersion
+	AppVersion = "0.7.4"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	urls := resolveOptionalDriverBundleDownloadURLs()
+	wantTagged := driverReleaseDownloadURL("v0.7.4", optionalDriverBundleAssetName)
+	wantLatest := driverReleaseLatestDownloadURL(optionalDriverBundleAssetName)
+	if len(urls) != 2 {
+		t.Fatalf("expected tagged and latest bundle URLs, got %v", urls)
+	}
+	if urls[0] != wantTagged || urls[1] != wantLatest {
+		t.Fatalf("unexpected driver bundle URLs: got %v want [%q %q]", urls, wantTagged, wantLatest)
 	}
 }
 
@@ -119,7 +149,7 @@ func TestResolveOptionalDriverAgentDownloadURLsDoesNotFallbackForHistoricalVersi
 		t.Fatal("expected mongodb driver definition")
 	}
 
-	explicitURL := fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/download/v1.17.4/%s", mongoVersionedReleaseAssetName(1))
+	explicitURL := driverReleaseDownloadURL("v1.17.4", mongoVersionedReleaseAssetName(1))
 	urls := resolveOptionalDriverAgentDownloadURLs(
 		definition,
 		explicitURL,
@@ -364,7 +394,7 @@ func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
 		t.Fatal("expected mongodb v1 builtin install to keep source build mode")
 	}
 
-	explicitURL := fmt.Sprintf("https://github.com/%s/releases/download/v1.17.4/%s", updateRepo, mongoVersionedReleaseAssetName(1))
+	explicitURL := driverReleaseDownloadURL("v1.17.4", mongoVersionedReleaseAssetName(1))
 	if shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", explicitURL) {
 		t.Fatal("expected mongodb v1 published asset install to skip forced source build")
 	}

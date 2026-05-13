@@ -293,6 +293,9 @@ type driverBundleAssetIndex struct {
 const (
 	// 默认使用内置 manifest，避免依赖网络与外部仓库 404。
 	defaultDriverManifestURLValue       = "builtin://manifest"
+	driverReleaseRepo                   = "Syngnat/GoNavi-DriverAgents"
+	driverReleaseLatestAPIURL           = "https://api.github.com/repos/" + driverReleaseRepo + "/releases/latest"
+	driverReleaseDevTag                 = "dev-latest"
 	optionalDriverBundleAssetName       = "GoNavi-DriverAgents.zip"
 	optionalDriverBundleIndexAssetName  = "GoNavi-DriverAgents-Index.json"
 	optionalDriverBundleDownloadTimeout = 45 * time.Minute
@@ -883,7 +886,7 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 		},
 		{
 			Name: "GitHub 驱动发布",
-			URL:  fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, optionalDriverBundleAssetName),
+			URL:  driverReleaseLatestDownloadURL(optionalDriverBundleAssetName),
 		},
 		{
 			Name: "GitHub Release 资产域名",
@@ -1873,18 +1876,26 @@ func optionalDriverSourceBuildAvailable(definition driverDefinition, selectedVer
 }
 
 func resolvePublishedDriverDownloadURL(definition driverDefinition, version string) (string, bool) {
-	driverType := normalizeDriverType(definition.Type)
 	versionText := normalizeVersion(strings.TrimSpace(version))
-	if driverType == "" || versionText == "" {
+	if versionText == "" {
 		return "", false
 	}
 
-	tag := "v" + versionText
-	assetName, ok := resolvePublishedDriverReleaseAssetName(driverType, versionText, tag)
+	return resolvePublishedDriverDownloadURLForTag(definition, versionText, "v"+versionText)
+}
+
+func resolvePublishedDriverDownloadURLForTag(definition driverDefinition, selectedVersion string, tag string) (string, bool) {
+	driverType := normalizeDriverType(definition.Type)
+	tagName := strings.TrimSpace(tag)
+	if driverType == "" || tagName == "" {
+		return "", false
+	}
+
+	assetName, ok := resolvePublishedDriverReleaseAssetName(driverType, selectedVersion, tagName)
 	if !ok {
 		return "", false
 	}
-	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, tag, assetName), true
+	return driverReleaseDownloadURL(tagName, assetName), true
 }
 
 func resolvePublishedDriverReleaseAssetName(driverType string, version string, tag string) (string, bool) {
@@ -2265,7 +2276,7 @@ func resolveDriverVersionOptionsFromReleases(definition driverDefinition) []driv
 		}
 		result = append(result, driverVersionOptionItem{
 			Version:     version,
-			DownloadURL: fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", updateRepo, tag, assetName),
+			DownloadURL: driverReleaseDownloadURL(tag, assetName),
 			Source:      "release",
 		})
 	}
@@ -2311,7 +2322,7 @@ func loadDriverReleaseListCached() ([]githubRelease, error) {
 }
 
 func fetchDriverReleaseList() ([]githubRelease, error) {
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=30", updateRepo)
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=30", driverReleaseRepo)
 	client := newHTTPClientWithGlobalProxy(driverReleaseListProbeTimeout)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -4175,6 +4186,34 @@ func optionalDriverReleaseAssetNameForVersion(driverType string, selectedVersion
 	return names[0]
 }
 
+func currentDriverReleaseTag() string {
+	currentVersion := normalizeVersion(getCurrentVersion())
+	if currentVersion == "" || currentVersion == "0.0.0" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(currentVersion), "dev-") {
+		return driverReleaseDevTag
+	}
+	return "v" + currentVersion
+}
+
+func driverReleaseDownloadURL(tag string, assetName string) string {
+	tagName := strings.TrimSpace(tag)
+	asset := strings.TrimSpace(assetName)
+	if tagName == "" || asset == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", driverReleaseRepo, url.PathEscape(tagName), url.PathEscape(asset))
+}
+
+func driverReleaseLatestDownloadURL(assetName string) string {
+	asset := strings.TrimSpace(assetName)
+	if asset == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", driverReleaseRepo, url.PathEscape(asset))
+}
+
 func optionalDriverBundlePlatformDir(goos string) string {
 	switch strings.ToLower(strings.TrimSpace(goos)) {
 	case "windows":
@@ -4261,11 +4300,10 @@ func resolveOptionalDriverBundleDownloadURLs() []string {
 		candidates = append(candidates, trimmed)
 	}
 
-	currentVersion := normalizeVersion(getCurrentVersion())
-	if currentVersion != "" && currentVersion != "0.0.0" {
-		appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/download/v%s/%s", currentVersion, optionalDriverBundleAssetName))
+	if tag := currentDriverReleaseTag(); tag != "" {
+		appendURL(driverReleaseDownloadURL(tag, optionalDriverBundleAssetName))
 	}
-	appendURL(fmt.Sprintf("https://github.com/Syngnat/GoNavi/releases/latest/download/%s", optionalDriverBundleAssetName))
+	appendURL(driverReleaseLatestDownloadURL(optionalDriverBundleAssetName))
 	return candidates
 }
 
@@ -4483,9 +4521,8 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 		return candidates
 	}
 
-	currentVersion := normalizeVersion(getCurrentVersion())
-	if currentVersion != "" && currentVersion != "0.0.0" {
-		if publishedURL, ok := resolvePublishedDriverDownloadURL(definition, currentVersion); ok {
+	if tag := currentDriverReleaseTag(); tag != "" {
+		if publishedURL, ok := resolvePublishedDriverDownloadURLForTag(definition, selectedVersion, tag); ok {
 			appendURL(publishedURL)
 		}
 	}
@@ -4907,11 +4944,7 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 		return result
 	}
 
-	currentVersion := normalizeVersion(getCurrentVersion())
-	tag := ""
-	if currentVersion != "" && currentVersion != "0.0.0" {
-		tag = "v" + currentVersion
-	}
+	tag := currentDriverReleaseTag()
 
 	fillFromSizes := func(sizeByAsset map[string]int64, driverTypes []string) []string {
 		missing := make([]string, 0, len(driverTypes))
@@ -5098,7 +5131,7 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 }
 
 func fetchLatestReleaseForDriverAssets() (*githubRelease, error) {
-	return fetchDriverReleaseByURL(updateAPIURL)
+	return fetchDriverReleaseByURL(driverReleaseLatestAPIURL)
 }
 
 func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (string, bool) {
@@ -5114,7 +5147,7 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
 		for _, assetName := range assetNames {
 			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
-				return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+				return driverReleaseLatestDownloadURL(assetName), true
 			}
 		}
 		return "", false
@@ -5126,7 +5159,7 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	}
 	for _, assetName := range assetNames {
 		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
-			return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", updateRepo, assetName), true
+			return driverReleaseLatestDownloadURL(assetName), true
 		}
 	}
 	return "", false
@@ -5137,7 +5170,7 @@ func fetchReleaseByTag(tag string) (*githubRelease, error) {
 	if tagName == "" {
 		return nil, fmt.Errorf("Tag 为空")
 	}
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", updateRepo, url.PathEscape(tagName))
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", driverReleaseRepo, url.PathEscape(tagName))
 	return fetchDriverReleaseByURL(apiURL)
 }
 

@@ -620,8 +620,12 @@ jobs:
           out_name = "GoNavi-DriverAgents.zip"
           index_name = "GoNavi-DriverAgents-Index.json"
           base = Path("drivers")
-          out_path = Path(out_name)
-          index_path = Path(index_name)
+          driver_release_dir = Path("../driver-release-assets")
+          if driver_release_dir.exists():
+              shutil.rmtree(driver_release_dir)
+          driver_release_dir.mkdir(parents=True, exist_ok=True)
+          out_path = driver_release_dir / out_name
+          index_path = driver_release_dir / index_name
           if out_path.exists():
               out_path.unlink()
           if index_path.exists():
@@ -638,7 +642,7 @@ jobs:
                       raise RuntimeError(f"driver asset name conflict: {p.name}")
                   zf.write(p, arcname)
                   size_index[p.name] = p.stat().st_size
-                  standalone_path = Path(p.name)
+                  standalone_path = driver_release_dir / p.name
                   if standalone_path.exists():
                       raise RuntimeError(f"release asset already exists: {standalone_path}")
                   shutil.copy2(p, standalone_path)
@@ -654,7 +658,7 @@ jobs:
           print(f"published standalone driver assets={len(standalone_assets)}")
           PY
 
-          # Release 同时发布单驱动资产与总包：应用优先下载单驱动，失败后仍可用总包兜底。
+          # GoNavi 主仓库只保留主程序包；驱动资产发布到独立仓库。
           rm -rf drivers
 
       - name: Generate SHA256SUMS
@@ -673,6 +677,36 @@ jobs:
           else
             sha256sum "${FILES[@]}" > SHA256SUMS
           fi
+
+      - name: Generate Driver SHA256SUMS
+        shell: bash
+        run: |
+          cd driver-release-assets
+          FILES=()
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              FILES+=("$file")
+            fi
+          done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -exec basename {} \; | sort)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "❌ 未找到驱动发布资产"
+            exit 1
+          fi
+          sha256sum "${FILES[@]}" > SHA256SUMS
+
+      - name: Create Driver Agents Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repository: Syngnat/GoNavi-DriverAgents
+          tag_name: ${{ github.ref_name }}
+          name: "GoNavi Driver Agents ${{ github.ref_name }}"
+          files: driver-release-assets/*
+          fail_on_unmatched_files: true
+          make_latest: true
+          body: |
+            GoNavi driver-agent assets for `${{ github.ref_name }}`.
+          token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
 
       - name: Checkout code for changelog
         uses: actions/checkout@v4
