@@ -64,7 +64,7 @@ func (p *PostgresDB) getDSN(config connection.ConnectionConfig) string {
 	q := url.Values{}
 	q.Set("sslmode", resolvePostgresSSLMode(config))
 	q.Set("connect_timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
-	mergeConnectionParamsFromConfig(q, config, "postgres", "postgresql", "opengauss")
+	mergeConnectionParamsFromConfigWithAllowlist(q, config, postgresConnectionParamNames, "postgres", "postgresql", "opengauss")
 	u.RawQuery = q.Encode()
 
 	return u.String()

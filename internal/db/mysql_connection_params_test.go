@@ -64,7 +64,7 @@ func TestMySQLDSN_MapsCommonJDBCParamsWithoutLeakingUnsupportedKeys(t *testing.T
 		User:     "root",
 		Database: "app",
 		ConnectionParams: "useUnicode=true&characterEncoding=utf8&autoReconnect=true&" +
-			"useSSL=false&verifyServerCertificate=false&useOldAliasMetadataBehavior=true",
+			"allowPublicKeyRetrieval=true&useSSL=false&verifyServerCertificate=false&useOldAliasMetadataBehavior=true",
 	})
 	if err != nil {
 		t.Fatalf("getDSN failed: %v", err)
@@ -81,6 +81,7 @@ func TestMySQLDSN_MapsCommonJDBCParamsWithoutLeakingUnsupportedKeys(t *testing.T
 		"useUnicode",
 		"characterEncoding",
 		"autoReconnect",
+		"allowPublicKeyRetrieval",
 		"useSSL",
 		"verifyServerCertificate",
 		"useOldAliasMetadataBehavior",
@@ -119,6 +120,153 @@ func TestMySQLDSN_MapsJDBCUTF8EncodingToMySQLCharset(t *testing.T) {
 	}
 	if got := query.Get("loc"); got != "Asia%2FShanghai" && got != "Asia/Shanghai" {
 		t.Fatalf("serverTimezone=GMT+8 should map to loc=Asia/Shanghai, got=%q", got)
+	}
+}
+
+func TestMySQLDSN_DropsJDBCAllowPublicKeyRetrievalParam(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:             "db.local",
+		Port:             3306,
+		User:             "root",
+		Database:         "app",
+		URI:              "jdbc:mysql://db.local:3306/app?allowPublicKeyRetrieval=true&useSSL=false",
+		ConnectionParams: "allowPublicKeyRetrieval=true&readtimeout=10&writetimeout=11",
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	if _, exists := query["allowPublicKeyRetrieval"]; exists {
+		t.Fatalf("JDBC allowPublicKeyRetrieval should not be passed to Go MySQL driver: %v", query)
+	}
+	if got := query.Get("tls"); got != "false" {
+		t.Fatalf("useSSL=false should still map to tls=false, got=%q", got)
+	}
+	if got := query.Get("readTimeout"); got != "10s" {
+		t.Fatalf("readtimeout should canonicalize to readTimeout duration, got=%q", got)
+	}
+	if got := query.Get("writeTimeout"); got != "11s" {
+		t.Fatalf("writetimeout should canonicalize to writeTimeout duration, got=%q", got)
+	}
+}
+
+func TestMySQLDSN_PreservesSupportedGoDriverParamsAndDropsUnknownParams(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:     "db.local",
+		Port:     3306,
+		User:     "root",
+		Database: "app",
+		ConnectionParams: strings.Join([]string{
+			"allowAllFiles=true",
+			"allowCleartextPasswords=true",
+			"allowFallbackToPlaintext=true",
+			"allowNativePasswords=false",
+			"allowOldPasswords=true",
+			"checkConnLiveness=false",
+			"clientFoundRows=true",
+			"charset=latin1",
+			"collation=utf8mb4_unicode_ci",
+			"columnsWithAlias=true",
+			"compress=true",
+			"connectionAttributes=program_name:GoNavi",
+			"interpolateParams=true",
+			"loc=UTC",
+			"maxAllowedPacket=1048576",
+			"multiStatements=false",
+			"parseTime=false",
+			"readtimeout=7",
+			"rejectReadOnly=true",
+			"serverPubKey=testKey",
+			"timeTruncate=2",
+			"timeout=8",
+			"tls=preferred",
+			"writetimeout=9",
+			"strict=true",
+			"unsupportedJdbcParam=true",
+		}, "&"),
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	want := map[string]string{
+		"allowAllFiles":            "true",
+		"allowCleartextPasswords":  "true",
+		"allowFallbackToPlaintext": "true",
+		"allowNativePasswords":     "false",
+		"allowOldPasswords":        "true",
+		"checkConnLiveness":        "false",
+		"clientFoundRows":          "true",
+		"charset":                  "latin1",
+		"collation":                "utf8mb4_unicode_ci",
+		"columnsWithAlias":         "true",
+		"compress":                 "true",
+		"connectionAttributes":     "program_name:GoNavi",
+		"interpolateParams":        "true",
+		"loc":                      "UTC",
+		"maxAllowedPacket":         "1048576",
+		"multiStatements":          "false",
+		"parseTime":                "false",
+		"readTimeout":              "7s",
+		"rejectReadOnly":           "true",
+		"serverPubKey":             "testKey",
+		"timeTruncate":             "2s",
+		"timeout":                  "8s",
+		"tls":                      "preferred",
+		"writeTimeout":             "9s",
+	}
+	for key, value := range want {
+		if got := query.Get(key); got != value {
+			t.Fatalf("%s should be %q, got %q; query=%v", key, value, got, query)
+		}
+	}
+	for _, forbidden := range []string{"strict", "unsupportedJdbcParam"} {
+		if _, exists := query[forbidden]; exists {
+			t.Fatalf("unsupported parameter %s should not be passed to Go MySQL driver: %v", forbidden, query)
+		}
+	}
+}
+
+func TestMySQLDSN_MapsAdditionalJDBCAliases(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:     "db.local",
+		Port:     3306,
+		User:     "root",
+		Database: "app",
+		ConnectionParams: strings.Join([]string{
+			"sslMode=required",
+			"allowMultiQueries=false",
+			"useCompression=true",
+			"connectionCollation=utf8mb4_bin",
+		}, "&"),
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	if got := query.Get("tls"); got != "true" {
+		t.Fatalf("sslMode=required should map to tls=true, got=%q", got)
+	}
+	if got := query.Get("multiStatements"); got != "false" {
+		t.Fatalf("allowMultiQueries=false should map to multiStatements=false, got=%q", got)
+	}
+	if got := query.Get("compress"); got != "true" {
+		t.Fatalf("useCompression=true should map to compress=true, got=%q", got)
+	}
+	if got := query.Get("collation"); got != "utf8mb4_bin" {
+		t.Fatalf("connectionCollation should map to collation, got=%q", got)
 	}
 }
 

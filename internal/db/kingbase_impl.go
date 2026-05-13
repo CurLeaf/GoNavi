@@ -71,7 +71,7 @@ func (k *KingbaseDB) getDSN(config connection.ConnectionConfig) string {
 	params.Set("dbname", config.Database)
 	params.Set("sslmode", resolvePostgresSSLMode(config))
 	params.Set("connect_timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
-	mergeConnectionParamsFromConfig(params, config, "kingbase")
+	mergeConnectionParamsFromConfigWithAllowlist(params, config, kingbaseConnectionParamNames, "kingbase")
 
 	preferred := []string{"host", "port", "user", "password", "dbname", "sslmode", "connect_timeout"}
 	seen := make(map[string]struct{}, len(params))

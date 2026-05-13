@@ -37,13 +37,13 @@ func (d *DamengDB) getDSN(config connection.ConnectionConfig) string {
 	}
 	if config.UseSSL {
 		if certPath := strings.TrimSpace(config.SSLCertPath); certPath != "" {
-			q.Set("SSL_CERT_PATH", certPath)
+			q.Set("sslCertPath", certPath)
 		}
 		if keyPath := strings.TrimSpace(config.SSLKeyPath); keyPath != "" {
-			q.Set("SSL_KEY_PATH", keyPath)
+			q.Set("sslKeyPath", keyPath)
 		}
 	}
-	mergeConnectionParamsFromConfig(q, config, "dm", "dameng")
+	mergeConnectionParamsFromConfigWithAllowlist(q, config, damengConnectionParamNames, "dm", "dameng")
 
 	// 当前达梦 Go 驱动使用字符串切分解析 DSN，认证信息不会做 URL 反解码。
 	// 密码保持原样传入，避免 p%40ss 这类转义文本被当作真实密码登录。

@@ -77,9 +77,67 @@ func mergeConnectionParamValues(params url.Values, values url.Values) {
 	}
 }
 
+func normalizeConnectionParamName(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), " "))
+}
+
+func newConnectionParamNameMap(names ...string) map[string]string {
+	result := make(map[string]string, len(names))
+	for _, name := range names {
+		addConnectionParamName(result, name)
+	}
+	return result
+}
+
+func addConnectionParamName(names map[string]string, canonical string) {
+	key := normalizeConnectionParamName(canonical)
+	if key == "" {
+		return
+	}
+	names[key] = canonical
+}
+
+func addConnectionParamAlias(names map[string]string, alias string, canonical string) {
+	key := normalizeConnectionParamName(alias)
+	if key == "" {
+		return
+	}
+	if existing, ok := names[normalizeConnectionParamName(canonical)]; ok {
+		canonical = existing
+	}
+	names[key] = canonical
+}
+
+func mergeConnectionParamValuesWithAllowlist(params url.Values, values url.Values, canonicalNames map[string]string) {
+	if len(values) == 0 || len(canonicalNames) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		canonical, ok := canonicalNames[normalizeConnectionParamName(key)]
+		if !ok {
+			continue
+		}
+		for _, value := range values[key] {
+			params.Set(canonical, value)
+		}
+	}
+}
+
 func mergeConnectionParamsFromConfig(params url.Values, config connection.ConnectionConfig, allowedSchemes ...string) {
 	mergeConnectionParamValues(params, connectionParamsFromURI(config.URI, allowedSchemes...))
 	mergeConnectionParamValues(params, connectionParamsFromText(config.ConnectionParams))
+}
+
+func mergeConnectionParamsFromConfigWithAllowlist(params url.Values, config connection.ConnectionConfig, canonicalNames map[string]string, allowedSchemes ...string) {
+	mergeConnectionParamValuesWithAllowlist(params, connectionParamsFromURI(config.URI, allowedSchemes...), canonicalNames)
+	mergeConnectionParamValuesWithAllowlist(params, connectionParamsFromText(config.ConnectionParams), canonicalNames)
 }
 
 func mergeConnectionParamsIntoRawURI(raw string, connectionParams string, allowedSchemes ...string) string {

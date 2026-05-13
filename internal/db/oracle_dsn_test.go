@@ -40,7 +40,7 @@ func TestOracleGetDSNMergesConnectionParams(t *testing.T) {
 		User:             "scott",
 		Password:         "tiger",
 		Database:         "ORCLPDB1",
-		ConnectionParams: "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc",
+		ConnectionParams: "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc&connect_timeout=10&FAILOVER=3&unknown=bad",
 	})
 
 	parsed, err := url.Parse(dsn)
@@ -53,5 +53,14 @@ func TestOracleGetDSNMergesConnectionParams(t *testing.T) {
 	}
 	if got := query.Get("TRACE FILE"); got != "/tmp/go-ora.trc" {
 		t.Fatalf("TRACE FILE = %q, want /tmp/go-ora.trc", got)
+	}
+	if got := query.Get("CONNECT TIMEOUT"); got != "10" {
+		t.Fatalf("CONNECT TIMEOUT = %q, want 10", got)
+	}
+	if got := query.Get("FAILOVER"); got != "" {
+		t.Fatalf("FAILOVER should be filtered because go-ora no longer supports it, got %q", got)
+	}
+	if got := query.Get("unknown"); got != "" {
+		t.Fatalf("unknown should be filtered, got %q", got)
 	}
 }
