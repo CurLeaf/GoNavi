@@ -710,7 +710,8 @@ jobs:
               });
               core.info(`Deleted ref ${ref}`);
             } catch (error) {
-              if (error.status === 404) {
+              const message = String(error.response?.data?.message || error.message || '');
+              if (error.status === 404 || (error.status === 422 && message.includes('Reference does not exist'))) {
                 core.info(`No existing ref found for ${ref}`);
               } else {
                 throw error;
@@ -753,7 +754,8 @@ jobs:
               });
               core.info(`Deleted driver ref ${ref}`);
             } catch (error) {
-              if (error.status === 404) {
+              const message = String(error.response?.data?.message || error.message || '');
+              if (error.status === 404 || (error.status === 422 && message.includes('Reference does not exist'))) {
                 core.info(`No existing driver ref found for ${ref}`);
               } else {
                 throw error;
