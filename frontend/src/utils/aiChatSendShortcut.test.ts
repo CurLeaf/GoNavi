@@ -52,6 +52,9 @@ describe('aiChatSendShortcut', () => {
     expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', shiftKey: true })).toBe(false);
     expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', isComposing: true })).toBe(false);
     expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', nativeEvent: { isComposing: true } })).toBe(false);
+    expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', keyCode: 229 })).toBe(false);
+    expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', which: 229 })).toBe(false);
+    expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'Enter', nativeEvent: { keyCode: 229 } })).toBe(false);
     expect(shouldSendAIChatOnKeyDown(binding('Enter'), { key: 'a' })).toBe(false);
     expect(shouldSendAIChatOnKeyDown(binding('Enter', false), { key: 'Enter' })).toBe(false);
   });

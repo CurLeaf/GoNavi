@@ -2,6 +2,8 @@ import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplay, isShortcutMatch, type Sho
 
 export interface AIChatSendShortcutKeyEventLike {
   key?: string;
+  keyCode?: number;
+  which?: number;
   shiftKey?: boolean;
   metaKey?: boolean;
   ctrlKey?: boolean;
@@ -9,6 +11,8 @@ export interface AIChatSendShortcutKeyEventLike {
   isComposing?: boolean;
   nativeEvent?: {
     isComposing?: boolean;
+    keyCode?: number;
+    which?: number;
   };
   preventDefault?: () => void;
   stopPropagation?: () => void;
@@ -29,7 +33,12 @@ export const shouldSendAIChatOnKeyDown = (
   if (!binding?.enabled) {
     return false;
   }
-  if (event.shiftKey || event.isComposing || event.nativeEvent?.isComposing) {
+  // Some IMEs report Enter during an active candidate/composition as keyCode 229.
+  const isImeCandidateEvent = event.keyCode === 229
+    || event.which === 229
+    || event.nativeEvent?.keyCode === 229
+    || event.nativeEvent?.which === 229;
+  if (event.shiftKey || event.isComposing || event.nativeEvent?.isComposing || isImeCandidateEvent) {
     return false;
   }
   return isShortcutMatch(event as KeyboardEvent, binding.combo);
