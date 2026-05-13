@@ -572,6 +572,7 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import shutil
           import zipfile
           from pathlib import Path
 
@@ -586,13 +587,21 @@ jobs:
               index_path.unlink()
 
           size_index = {}
+          standalone_assets = []
           with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-              for p in base.rglob("*"):
+              for p in sorted(base.rglob("*")):
                   if not p.is_file():
                       continue
                   arcname = p.relative_to(base).as_posix()
+                  if p.name in size_index:
+                      raise RuntimeError(f"driver asset name conflict: {p.name}")
                   zf.write(p, arcname)
                   size_index[p.name] = p.stat().st_size
+                  standalone_path = Path(p.name)
+                  if standalone_path.exists():
+                      raise RuntimeError(f"release asset already exists: {standalone_path}")
+                  shutil.copy2(p, standalone_path)
+                  standalone_assets.append(standalone_path.name)
 
           index_path.write_text(
               json.dumps({"assets": size_index}, ensure_ascii=False, indent=2),
@@ -601,6 +610,7 @@ jobs:
 
           print(f"created {out_name} size={out_path.stat().st_size} bytes")
           print(f"created {index_name} entries={len(size_index)}")
+          print(f"published standalone driver assets={len(standalone_assets)}")
           PY
 
           rm -rf drivers
