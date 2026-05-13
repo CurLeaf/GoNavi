@@ -12,6 +12,8 @@ func normalizeMigrationDBType(dbType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
 	case "dm", "dm8":

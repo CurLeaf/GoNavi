@@ -50,6 +50,18 @@ func TestNormalizeSchemaAndTable_PostgresStillSplitsQualifiedName(t *testing.T) 
 	}
 }
 
+func TestNormalizeSchemaAndTable_KingbaseNormalizesEscapedQualifiedName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "kingbase",
+	}, "demo_db", `\"Idf_server\".\"mes_bip_wip_finished\"`)
+
+	if schema != "Idf_server" || table != "mes_bip_wip_finished" {
+		t.Fatalf("expected kingbase qualified split to Idf_server.mes_bip_wip_finished, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeRunConfig_OceanBaseOracleKeepsServiceName(t *testing.T) {
 	t.Parallel()
 
@@ -86,7 +98,7 @@ func TestQuoteTableIdentByType_KingbaseNormalizesQuotedQualifiedTable(t *testing
 		t.Fatalf("expected kingbase qualified split to Idf_server.mes_bip_wip_finished, got %q.%q", schema, table)
 	}
 
-	if got := quoteTableIdentByType("kingbase", schema, table); got != `"Idf_server"."mes_bip_wip_finished"` {
+	if got := quoteTableIdentByType("kingbase", schema, table); got != `"Idf_server".mes_bip_wip_finished` {
 		t.Fatalf("unexpected kingbase table identifier: %s", got)
 	}
 }

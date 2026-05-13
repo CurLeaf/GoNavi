@@ -98,6 +98,14 @@ func TestResolveDDLDBType_OceanBaseOracleProtocol(t *testing.T) {
 	}
 }
 
+func TestResolveDDLDBType_KingbaseTypeAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "kingbase8"}); got != "kingbase" {
+		t.Fatalf("expected kingbase8 type alias to resolve to kingbase, got %q", got)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +117,7 @@ func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 		wantTable  string
 	}{
 		{name: "postgres quoted dots", dbType: "postgres", tableName: `"sales.schema"."order.items"`, wantSchema: "sales.schema", wantTable: "order.items"},
+		{name: "kingbase escaped lowercase", dbType: "kingbase", tableName: `\"ldf_server\".\"andon_events\"`, wantSchema: "ldf_server", wantTable: "andon_events"},
 		{name: "highgo escaped quoted", dbType: "highgo", tableName: `\"sales\".\"orders\"`, wantSchema: "sales", wantTable: "orders"},
 		{name: "vastbase quoted table only", dbType: "vastbase", tableName: `"order.items"`, wantSchema: "public", wantTable: "order.items"},
 	}
@@ -158,7 +167,7 @@ func TestResolveCreateStatementWithFallback_CustomKingbaseUsesPublicSchema(t *te
 	if dbInst.createSchema != "public" || dbInst.colsSchema != "public" {
 		t.Fatalf("expected fallback schema public, got create=%q columns=%q", dbInst.createSchema, dbInst.colsSchema)
 	}
-	if !strings.Contains(ddl, `CREATE TABLE "public"."orders"`) {
+	if !strings.Contains(ddl, `CREATE TABLE public.orders`) {
 		t.Fatalf("expected fallback DDL with public schema, got: %s", ddl)
 	}
 }

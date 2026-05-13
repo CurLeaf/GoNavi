@@ -42,6 +42,15 @@ func TestOptionalDriverAgentRevisionsGeneratedForOptionalDrivers(t *testing.T) {
 	}
 }
 
+func TestKingbaseRuntimeAliasesNormalizeToKingbase(t *testing.T) {
+	if got := normalizeRuntimeDriverType("kingbase8"); got != "kingbase" {
+		t.Fatalf("expected kingbase8 runtime alias to normalize to kingbase, got %q", got)
+	}
+	if got := normalizeDatabaseType("kingbasees"); got != "kingbase" {
+		t.Fatalf("expected kingbasees database alias to normalize to kingbase, got %q", got)
+	}
+}
+
 func TestManagedDriverRequiresInstallMarker(t *testing.T) {
 	tmpDir := t.TempDir()
 	SetExternalDriverDownloadDirectory(tmpDir)

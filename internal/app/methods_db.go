@@ -155,6 +155,12 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "mssql" || dbType == "sql_server" || dbType == "sql-server" {
 		return "sqlserver"
 	}
+	if dbType == "postgresql" {
+		return "postgres"
+	}
+	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
+		return "kingbase"
+	}
 	if dbType == "oceanbase" && isOceanBaseOracleProtocol(config) {
 		return "oracle"
 	}
@@ -490,7 +496,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	timeoutSeconds := runConfig.Timeout
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 30
@@ -586,7 +592,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	timeoutSeconds := runConfig.Timeout
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 30
@@ -785,7 +791,7 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 		}
 	}()
 
-	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	timeoutSeconds := runConfig.Timeout
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 30

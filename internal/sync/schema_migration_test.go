@@ -118,16 +118,16 @@ func TestBuildMySQLToKingbaseCreateTablePlan_GeneratesAndSkipsIndexes(t *testing
 	if err != nil {
 		t.Fatalf("buildMySQLToKingbaseCreateTablePlan returned error: %v", err)
 	}
-	if !strings.Contains(createSQL, `CREATE TABLE "public"."orders"`) {
+	if !strings.Contains(createSQL, `CREATE TABLE public.orders`) {
 		t.Fatalf("unexpected create SQL: %s", createSQL)
 	}
-	if !strings.Contains(createSQL, `PRIMARY KEY ("id")`) {
+	if !strings.Contains(createSQL, `PRIMARY KEY (id)`) {
 		t.Fatalf("create SQL missing primary key: %s", createSQL)
 	}
 	if idxCreate != 1 || idxSkip != 2 {
 		t.Fatalf("unexpected index summary: create=%d skip=%d", idxCreate, idxSkip)
 	}
-	if len(postSQL) != 1 || !strings.Contains(postSQL[0], `CREATE INDEX "idx_user_status"`) {
+	if len(postSQL) != 1 || !strings.Contains(postSQL[0], `CREATE INDEX idx_user_status`) {
 		t.Fatalf("unexpected post SQL: %v", postSQL)
 	}
 	if len(warnings) != 0 {
@@ -177,7 +177,7 @@ func TestBuildSchemaMigrationPlan_AutoCreateWhenTargetMissing(t *testing.T) {
 	if !strings.Contains(plan.PlannedAction, "自动建表") {
 		t.Fatalf("unexpected planned action: %s", plan.PlannedAction)
 	}
-	if !strings.Contains(plan.CreateTableSQL, `CREATE TABLE "public"."orders"`) {
+	if !strings.Contains(plan.CreateTableSQL, `CREATE TABLE public.orders`) {
 		t.Fatalf("unexpected create table SQL: %s", plan.CreateTableSQL)
 	}
 }
@@ -665,13 +665,13 @@ func TestBuildTDengineToPGLikePlan_AutoCreateWhenTargetMissing(t *testing.T) {
 	if !plan.AutoCreate {
 		t.Fatalf("expected auto create enabled")
 	}
-	if !strings.Contains(plan.CreateTableSQL, `CREATE TABLE "public"."cpu"`) {
+	if !strings.Contains(plan.CreateTableSQL, `CREATE TABLE public.cpu`) {
 		t.Fatalf("unexpected create table sql: %s", plan.CreateTableSQL)
 	}
-	if !strings.Contains(plan.CreateTableSQL, `"ts" timestamp`) {
+	if !strings.Contains(plan.CreateTableSQL, `ts timestamp`) {
 		t.Fatalf("expected timestamp mapping, got: %s", plan.CreateTableSQL)
 	}
-	if !strings.Contains(plan.CreateTableSQL, `"payload" jsonb`) {
+	if !strings.Contains(plan.CreateTableSQL, `payload jsonb`) {
 		t.Fatalf("expected json mapping, got: %s", plan.CreateTableSQL)
 	}
 	if len(plan.Warnings) == 0 || !strings.Contains(strings.Join(plan.Warnings, " "), "TAG") {

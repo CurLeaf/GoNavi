@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
 )
 
 func normalizeRunConfig(config connection.ConnectionConfig, dbName string) connection.ConnectionConfig {
@@ -55,6 +56,16 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 			targetDB = strings.TrimSpace(config.Database)
 		}
 		return targetDB, rawTable
+	}
+
+	if dbType == "kingbase" {
+		schema, table := db.SplitKingbaseQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "public", table
+		}
 	}
 
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {

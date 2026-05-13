@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -931,62 +930,6 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 	}
 
 	return tx.Commit()
-}
-
-func normalizeKingbaseIdentifier(raw string) string {
-	return normalizeKingbaseIdentCommon(raw)
-}
-
-// kingbaseIdentNeedsQuote 判断标识符是否需要双引号包裹。
-// 与前端 sql.ts 中 needsQuote 逻辑保持一致。
-func kingbaseIdentNeedsQuote(ident string) bool {
-	if ident == "" {
-		return false
-	}
-	// 不是合法裸标识符格式（必须以字母或下划线开头，仅含字母、数字、下划线）
-	if matched, _ := regexp.MatchString(`^[a-zA-Z_][a-zA-Z0-9_]*$`, ident); !matched {
-		return true
-	}
-	// 包含大写字母时需要引号保护（KingbaseES/PostgreSQL 默认将未加引号的标识符折叠为小写）
-	for _, r := range ident {
-		if r >= 'A' && r <= 'Z' {
-			return true
-		}
-	}
-	// 是 SQL 保留字
-	return isKingbaseReservedWord(ident)
-}
-
-// isKingbaseReservedWord 检查是否为常见 SQL 保留字（简化版，与前端保持一致）。
-func isKingbaseReservedWord(ident string) bool {
-	switch strings.ToLower(ident) {
-	case "select", "from", "where", "table", "index", "user", "order", "group", "by",
-		"limit", "offset", "and", "or", "not", "null", "true", "false", "key",
-		"primary", "foreign", "references", "default", "constraint",
-		"create", "drop", "alter", "insert", "update", "delete", "set", "values", "into",
-		"join", "left", "right", "inner", "outer", "on", "as", "is", "in", "like",
-		"between", "case", "when", "then", "else", "end", "having", "distinct",
-		"all", "any", "exists", "union", "except", "intersect",
-		"column", "check", "unique", "with", "grant", "revoke", "trigger",
-		"begin", "commit", "rollback", "schema", "database", "view", "function",
-		"procedure", "sequence", "type", "domain", "role", "session", "current",
-		"authorization", "cross", "full", "natural", "some", "cast", "fetch",
-		"for", "to", "do", "if", "return", "returns", "declare", "cursor", "server", "owner":
-		return true
-	}
-	return false
-}
-
-func quoteKingbaseIdent(name string) string {
-	n := normalizeKingbaseIdentifier(name)
-	if n == "" {
-		return "\"\""
-	}
-	if !kingbaseIdentNeedsQuote(n) {
-		return n
-	}
-	n = strings.ReplaceAll(n, `"`, `""`)
-	return `"` + n + `"`
 }
 
 func splitKingbaseQualifiedTable(tableName string) (schema string, table string) {
