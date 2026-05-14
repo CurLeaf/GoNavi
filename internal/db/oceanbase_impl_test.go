@@ -3,6 +3,7 @@
 package db
 
 import (
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"testing"
@@ -148,51 +149,68 @@ func TestWithoutOceanBaseProtocolParamsStripsDriverMeta(t *testing.T) {
 	}
 }
 
-func TestPrepareOceanBaseOracleConfigPromotesURIParams(t *testing.T) {
+func TestOceanBaseOracleProtocolUsesMySQLWireConnection(t *testing.T) {
 	t.Parallel()
 
-	config := prepareOceanBaseOracleConfig(connection.ConnectionConfig{
-		Type:             "oceanbase",
-		URI:              "oceanbase://sys%40oracle001:pass@127.0.0.1:2881/ORCL?protocol=oracle&CONNECT_TIMEOUT=12&DBA_PRIVILEGE=SYSDBA",
-		ConnectionParams: "protocol=oracle&READ_TIMEOUT=7",
-	})
+	dbConn, state := openOracleRecordingDB(t)
+	state.queryResults["SELECT username FROM all_users ORDER BY username"] = oracleRecordingQueryResult{
+		columns: []string{"USERNAME"},
+		rows:    [][]driver.Value{{"SYS"}},
+	}
 
-	if config.Type != "oracle" {
-		t.Fatalf("expected routed type oracle, got %q", config.Type)
+	oceanbaseDB := &OceanBaseDB{}
+	oceanbaseDB.bindConnectedDatabase(dbConn, 0, oceanBaseProtocolOracle)
+
+	if oceanbaseDB.oracle == nil {
+		t.Fatal("expected Oracle metadata wrapper for OceanBase Oracle tenant")
 	}
-	if config.URI != "" {
-		t.Fatalf("expected routed Oracle config to clear oceanbase URI, got %q", config.URI)
+	if oceanbaseDB.conn != nil {
+		t.Fatal("expected MySQLDB connection slot to stay empty for Oracle tenant wrapper")
 	}
-	params := connectionParamsFromText(config.ConnectionParams)
-	if got := params.Get("CONNECT TIMEOUT"); got != "12" {
-		t.Fatalf("expected URI CONNECT_TIMEOUT promoted, got %q in %q", got, config.ConnectionParams)
+	if oceanbaseDB.protocol != oceanBaseProtocolOracle {
+		t.Fatalf("expected protocol oracle, got %q", oceanbaseDB.protocol)
 	}
-	if got := params.Get("READ TIMEOUT"); got != "7" {
-		t.Fatalf("expected explicit READ_TIMEOUT kept, got %q in %q", got, config.ConnectionParams)
+
+	databases, err := oceanbaseDB.GetDatabases()
+	if err != nil {
+		t.Fatalf("GetDatabases() unexpected error: %v", err)
 	}
-	if got := params.Get("DBA PRIVILEGE"); got != "SYSDBA" {
-		t.Fatalf("expected URI DBA_PRIVILEGE promoted, got %q in %q", got, config.ConnectionParams)
-	}
-	if strings.Contains(config.ConnectionParams, "protocol=") {
-		t.Fatalf("expected OceanBase protocol param stripped, got %q", config.ConnectionParams)
+	if len(databases) != 1 || databases[0] != "SYS" {
+		t.Fatalf("GetDatabases() = %#v, want [SYS]", databases)
 	}
 }
 
-func TestOceanBaseOracleRequiresServiceName(t *testing.T) {
+func TestOceanBaseOracleApplyChangesUsesMySQLWirePlaceholders(t *testing.T) {
 	t.Parallel()
 
-	err := (&OceanBaseDB{}).Connect(connection.ConnectionConfig{
-		Type:             "oceanbase",
-		Host:             "127.0.0.1",
-		Port:             2881,
-		User:             "sys@oracle001",
-		ConnectionParams: "protocol=oracle",
-	})
-	if err == nil {
-		t.Fatal("expected missing service name error")
+	dbConn, state := openOracleRecordingDB(t)
+	oceanbaseDB := &OceanBaseDB{}
+	oceanbaseDB.bindConnectedDatabase(dbConn, 0, oceanBaseProtocolOracle)
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": 7,
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
 	}
-	if !strings.Contains(err.Error(), "服务名") {
-		t.Fatalf("expected service name hint, got %v", err)
+
+	if err := oceanbaseDB.ApplyChanges("APP.USERS", changes); err != nil {
+		t.Fatalf("ApplyChanges() unexpected error: %v", err)
+	}
+
+	queries := state.snapshotExecQueries()
+	if len(queries) != 1 {
+		t.Fatalf("expected one exec query, got %#v", queries)
+	}
+	if strings.Contains(queries[0], ":1") {
+		t.Fatalf("expected MySQL wire placeholder style, got %q", queries[0])
+	}
+	if !strings.Contains(queries[0], `"NAME" = ?`) || !strings.Contains(queries[0], `"ID" = ?`) {
+		t.Fatalf("expected question mark placeholders, got %q", queries[0])
 	}
 }
 
