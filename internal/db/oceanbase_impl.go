@@ -249,6 +249,28 @@ func withoutOceanBaseProtocolParams(config connection.ConnectionConfig) connecti
 	return next
 }
 
+// ensureOceanBaseOracleANSIQuotes 在 ConnectionParams 中注入 sql_mode='ANSI_QUOTES'，
+// 让 OceanBase Oracle 租户通过 MySQL wire 连接时，把双引号当作标识符引用（Oracle 语义），
+// 否则元数据查询的列别名 `AS "OWNER"` 和 ApplyChanges 的 `"schema"."table"` 会被当作字符串字面量。
+// 用户已显式设置 sql_mode 时，追加 ANSI_QUOTES，保留其它 mode。
+func ensureOceanBaseOracleANSIQuotes(raw string) string {
+	values := connectionParamsFromText(raw)
+	if values == nil {
+		values = url.Values{}
+	}
+	existing := strings.TrimSpace(values.Get("sql_mode"))
+	if existing == "" {
+		values.Set("sql_mode", "'ANSI_QUOTES'")
+		return values.Encode()
+	}
+	if strings.Contains(strings.ToUpper(existing), "ANSI_QUOTES") {
+		return values.Encode()
+	}
+	trimmed := strings.Trim(existing, "'")
+	values.Set("sql_mode", "'"+trimmed+",ANSI_QUOTES'")
+	return values.Encode()
+}
+
 func isOceanBaseOracleTenantMySQLDriverError(err error) bool {
 	if err == nil {
 		return false
@@ -314,6 +336,9 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 		candidateConfig.Host = host
 		candidateConfig.Port = port
 		candidateConfig.User, candidateConfig.Password = resolveMySQLCredential(runConfig, index)
+		if protocol == oceanBaseProtocolOracle {
+			candidateConfig.ConnectionParams = ensureOceanBaseOracleANSIQuotes(candidateConfig.ConnectionParams)
+		}
 
 		dsn, err := o.getDSN(candidateConfig)
 		if err != nil {
@@ -468,7 +493,10 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 		return fmt.Errorf("连接未打开")
 	}
 
-	columnTypeMap := o.oracle.loadColumnTypeMap(tableName)
+	columnTypeMap, err := o.oracle.loadColumnTypeMap(tableName)
+	if err != nil {
+		return fmt.Errorf("OceanBase Oracle 租户 %w", err)
+	}
 
 	tx, err := o.oracle.conn.Begin()
 	if err != nil {

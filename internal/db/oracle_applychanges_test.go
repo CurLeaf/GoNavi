@@ -29,6 +29,7 @@ type oracleRecordingState struct {
 	execArgs     [][]driver.NamedValue
 	rowsAffected int64
 	queryResults map[string]oracleRecordingQueryResult
+	queryError   error
 }
 
 type oracleRecordingQueryResult struct {
@@ -87,6 +88,10 @@ func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args 
 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
+	if err := c.state.queryError; err != nil {
+		c.state.mu.Unlock()
+		return nil, err
+	}
 	if result, ok := c.state.queryResults[query]; ok {
 		c.state.mu.Unlock()
 		return &oracleRecordingRows{

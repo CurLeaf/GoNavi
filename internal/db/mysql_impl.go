@@ -120,6 +120,7 @@ var mysqlSupportedDriverParamNames = map[string]string{
 	"readtimeout":              "readTimeout",
 	"rejectreadonly":           "rejectReadOnly",
 	"serverpubkey":             "serverPubKey",
+	"sql_mode":                 "sql_mode",
 	"timetruncate":             "timeTruncate",
 	"timeout":                  "timeout",
 	"tls":                      "tls",

@@ -86,6 +86,12 @@ func stripOceanBaseConnectionParamsForCache(raw string) string {
 	if text == "" {
 		return ""
 	}
+	if queryIndex := strings.Index(text, "?"); queryIndex >= 0 {
+		text = text[queryIndex+1:]
+	}
+	if hashIndex := strings.Index(text, "#"); hashIndex >= 0 {
+		text = text[:hashIndex]
+	}
 	values, err := url.ParseQuery(strings.TrimLeft(text, "?&"))
 	if err != nil {
 		return text

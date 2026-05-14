@@ -5,7 +5,7 @@ package db
 func init() {
 	optionalDriverAgentRevisions = map[string]string{
 		"mariadb":    "src-1a1cc64f8f92d92b",
-		"oceanbase":  "src-f6f19676bb5102d1",
+		"oceanbase":  "src-b10df5902bf60a23",
 		"diros":      "src-bcc78fa43671ade5",
 		"sphinx":     "src-404765c2fda68c5f",
 		"sqlserver":  "src-d9fba1eca0a27c49",

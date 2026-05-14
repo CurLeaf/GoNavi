@@ -515,17 +515,16 @@ func splitOracleQualifiedTableName(raw string) (string, string) {
 	return schema, table
 }
 
-func (o *OracleDB) loadColumnTypeMap(tableName string) map[string]string {
+func (o *OracleDB) loadColumnTypeMap(tableName string) (map[string]string, error) {
 	result := map[string]string{}
 	schema, table := splitOracleQualifiedTableName(tableName)
 	if table == "" {
-		return result
+		return result, nil
 	}
 
 	columns, err := o.GetColumns(schema, table)
 	if err != nil {
-		logger.Warnf("加载 Oracle 列元数据失败（不影响提交）：表=%s err=%v", tableName, err)
-		return result
+		return nil, fmt.Errorf("加载列元数据失败（表=%s）：%w；请检查 ALL_TAB_COLUMNS 查询权限与表是否存在", tableName, err)
 	}
 
 	for _, col := range columns {
@@ -535,7 +534,7 @@ func (o *OracleDB) loadColumnTypeMap(tableName string) map[string]string {
 		}
 		result[name] = strings.TrimSpace(col.Type)
 	}
-	return result
+	return result, nil
 }
 
 func normalizeOracleValueForWrite(columnName string, value interface{}, columnTypeMap map[string]string) interface{} {
@@ -614,7 +613,10 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		return fmt.Errorf("连接未打开")
 	}
 
-	columnTypeMap := o.loadColumnTypeMap(tableName)
+	columnTypeMap, err := o.loadColumnTypeMap(tableName)
+	if err != nil {
+		return err
+	}
 
 	tx, err := o.conn.Begin()
 	if err != nil {
