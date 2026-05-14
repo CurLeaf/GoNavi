@@ -20,7 +20,13 @@ describe('windowStateUi', () => {
   it('applies the Windows scale fix when a minimized taskbar window is restored with viewport drift', () => {
     expect(shouldApplyWindowsScaleFix('restore', true)).toBe(true);
     expect(shouldApplyWindowsScaleFix('restore', false)).toBe(false);
-    expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(false);
+  });
+
+  it('toggles maximised windows on restore so taskbar-restored fonts return to the correct size', () => {
+    // maximised 状态下 OS 拒绝 SetSize nudge，唯一可行的修复是切一次 maximise；
+    // 重复触发由 inFlight 互斥 + 700ms 冷却 + ratio-change 合并到 activationTimer 防御。
+    expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(true);
+    expect(shouldToggleMaximisedWindowForScaleFix('restore', false)).toBe(false);
   });
 
   it('debounces resize-triggered Windows scale checks until window transitions settle', () => {
