@@ -17,6 +17,7 @@ import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSql
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart } from '../utils/sql';
+import { resolveCurrentSqlStatementRange } from '../utils/sqlStatementSelection';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 
@@ -637,6 +638,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const runQueryActionRef = useRef<any>(null);
+  const selectCurrentStatementActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(tab.query || '');
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
@@ -719,6 +721,31 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const val = editorRef.current?.getValue?.();
       if (typeof val === 'string') return val;
       return query || '';
+  };
+
+  const handleSelectCurrentStatement = () => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel?.();
+      const position = editor?.getPosition?.();
+      if (!editor || !monaco || !model || !position) {
+          return;
+      }
+
+      const fullSQL = String(model.getValue?.() || '');
+      const cursorOffset = model.getOffsetAt?.(position);
+      const range = resolveCurrentSqlStatementRange(fullSQL, Number(cursorOffset));
+      if (!range) {
+          void message.info('没有可选择的 SQL 语句。');
+          return;
+      }
+
+      const start = model.getPositionAt(range.start);
+      const end = model.getPositionAt(range.end);
+      const selection = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+      editor.setSelection(selection);
+      editor.revealRangeInCenterIfOutsideViewport?.(selection);
+      editor.focus?.();
   };
 
   const syncQueryToEditor = (sql: string) => {
@@ -938,6 +965,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   run: () => {
                       window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
                   },
+              });
+          }
+      }
+
+      const selectStatementBinding = shortcutOptions.selectCurrentStatement;
+      if (selectStatementBinding?.enabled && selectStatementBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              selectStatementBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              selectCurrentStatementActionRef.current = editor.addAction({
+                  id: 'gonavi.selectCurrentStatement',
+                  label: 'GoNavi: 选择当前语句',
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: handleSelectCurrentStatement,
               });
           }
       }
@@ -2225,6 +2267,37 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       };
   }, [shortcutOptions.runQuery]);
+
+  useEffect(() => {
+      if (selectCurrentStatementActionRef.current) {
+          selectCurrentStatementActionRef.current.dispose();
+          selectCurrentStatementActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = shortcutOptions.selectCurrentStatement;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          selectCurrentStatementActionRef.current = editor.addAction({
+              id: 'gonavi.selectCurrentStatement',
+              label: 'GoNavi: 选择当前语句',
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: handleSelectCurrentStatement,
+          });
+      }
+
+      return () => {
+          if (selectCurrentStatementActionRef.current) {
+              selectCurrentStatementActionRef.current.dispose();
+              selectCurrentStatementActionRef.current = null;
+          }
+      };
+  }, [shortcutOptions.selectCurrentStatement]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {

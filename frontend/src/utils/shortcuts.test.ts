@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
   findReservedConflicts,
   describeConflictContext,
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
+  SHORTCUT_ACTION_META,
 } from './shortcuts';
 import type { ConflictInfo } from './shortcuts';
 
@@ -110,6 +112,21 @@ describe('RESERVED_SHORTCUTS', () => {
       expect(entry.label).toBeTruthy();
       expect(['global', 'monaco', 'datagrid']).toContain(entry.context);
     }
+  });
+});
+
+// ─── shortcut defaults ───────────────────────────────────────────────
+
+describe('shortcut defaults', () => {
+  it('registers select current statement as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.selectCurrentStatement).toEqual({
+      combo: 'Ctrl+E',
+      enabled: true,
+    });
+    expect(SHORTCUT_ACTION_META.selectCurrentStatement).toMatchObject({
+      label: '选择当前语句',
+      scope: 'queryEditor',
+    });
   });
 });
 
