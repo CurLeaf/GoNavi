@@ -248,6 +248,33 @@ func withoutOceanBaseProtocolParams(config connection.ConnectionConfig) connecti
 	return next
 }
 
+func promoteOceanBaseOracleURIParams(config connection.ConnectionConfig) connection.ConnectionConfig {
+	uriParams := connectionParamsFromURI(config.URI, "oceanbase", "mysql")
+	if len(uriParams) == 0 {
+		return config
+	}
+	for _, key := range []string{"protocol", "oceanBaseProtocol", "oceanbaseProtocol", "tenantMode", "compatMode", "mode"} {
+		uriParams.Del(key)
+	}
+	if len(uriParams) == 0 {
+		return config
+	}
+	merged := url.Values{}
+	mergeConnectionParamValuesWithAllowlist(merged, uriParams, oracleConnectionParamNames)
+	mergeConnectionParamValuesWithAllowlist(merged, connectionParamsFromText(config.ConnectionParams), oracleConnectionParamNames)
+	config.ConnectionParams = merged.Encode()
+	return config
+}
+
+func prepareOceanBaseOracleConfig(config connection.ConnectionConfig) connection.ConnectionConfig {
+	runConfig := withoutOceanBaseProtocolParams(applyOceanBaseURI(config))
+	runConfig = promoteOceanBaseOracleURIParams(runConfig)
+	runConfig.Type = "oracle"
+	// OracleDB 不解析 oceanbase:// URI。连接要素已落到结构化字段和 ConnectionParams。
+	runConfig.URI = ""
+	return runConfig
+}
+
 func isOceanBaseOracleTenantMySQLDriverError(err error) bool {
 	if err == nil {
 		return false
@@ -264,8 +291,7 @@ func formatOceanBaseMySQLAttemptError(address string, err error) string {
 }
 
 func (o *OceanBaseDB) connectOracle(config connection.ConnectionConfig) error {
-	runConfig := withoutOceanBaseProtocolParams(applyOceanBaseURI(config))
-	runConfig.Type = "oracle"
+	runConfig := prepareOceanBaseOracleConfig(config)
 	if strings.TrimSpace(runConfig.Database) == "" {
 		return fmt.Errorf("OceanBase Oracle 协议需要填写服务名（Service Name），请在连接配置中填写租户监听的服务名")
 	}

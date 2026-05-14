@@ -48,11 +48,61 @@ func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	q.Set("PREFETCH_ROWS", "10000")
 	// LOB 数据延迟加载，避免大 LOB 列影响普通查询性能
 	q.Set("LOB FETCH", "POST")
+	timeoutSeconds := strconv.Itoa(getConnectTimeoutSeconds(config))
+	q.Set("CONNECT TIMEOUT", timeoutSeconds)
+	q.Set("READ TIMEOUT", timeoutSeconds)
 	mergeConnectionParamsFromConfigWithAllowlist(q, config, oracleConnectionParamNames, "oracle")
 	if encoded := q.Encode(); encoded != "" {
 		u.RawQuery = encoded
 	}
 	return u.String()
+}
+
+func oracleQueryValue(values url.Values, key string) string {
+	return strings.TrimSpace(values.Get(key))
+}
+
+func oracleQueryValueOrDefault(values url.Values, key string) string {
+	value := oracleQueryValue(values, key)
+	if value == "" {
+		return "未配置"
+	}
+	return value
+}
+
+func oracleDSNLogSummary(config connection.ConnectionConfig, dsn string) string {
+	serviceName := strings.TrimSpace(config.Database)
+	params := url.Values{}
+	if parsed, err := url.Parse(dsn); err == nil && parsed != nil {
+		if pathService, unescapeErr := url.PathUnescape(strings.TrimPrefix(parsed.EscapedPath(), "/")); unescapeErr == nil && strings.TrimSpace(pathService) != "" {
+			serviceName = strings.TrimSpace(pathService)
+		}
+		params = parsed.Query()
+	}
+	if serviceName == "" {
+		serviceName = "(未配置)"
+	}
+	return fmt.Sprintf("服务名=%s CONNECT_TIMEOUT=%s READ_TIMEOUT=%s SSL=%s SSL_VERIFY=%s AUTH_TYPE=%s DBA_PRIVILEGE=%s SID=%s",
+		serviceName,
+		oracleQueryValueOrDefault(params, "CONNECT TIMEOUT"),
+		oracleQueryValueOrDefault(params, "READ TIMEOUT"),
+		oracleQueryValueOrDefault(params, "SSL"),
+		oracleQueryValueOrDefault(params, "SSL VERIFY"),
+		oracleQueryValueOrDefault(params, "AUTH TYPE"),
+		oracleQueryValueOrDefault(params, "DBA PRIVILEGE"),
+		oracleQueryValueOrDefault(params, "SID"),
+	)
+}
+
+func annotateOracleValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "use of closed network connection") {
+		return err
+	}
+	return fmt.Errorf("%w（Oracle 连接在验证阶段被服务端关闭或被驱动超时中断；请检查监听端口是否为 Oracle 协议端口、Service Name 是否正确、认证参数如 DBA_PRIVILEGE/AUTH_TYPE 是否匹配）", err)
 }
 
 func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
@@ -101,6 +151,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 	var failures []string
 	for idx, attempt := range attempts {
 		dsn := o.getDSN(attempt)
+		logger.Infof("Oracle 连接参数摘要：地址=%s:%d 用户=%s %s", attempt.Host, attempt.Port, attempt.User, oracleDSNLogSummary(attempt, dsn))
 		db, err := sql.Open("oracle", dsn)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
@@ -111,7 +162,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 		if err := o.Ping(); err != nil {
 			_ = db.Close()
 			o.conn = nil
-			failures = append(failures, fmt.Sprintf("第%d次连接验证失败: %v", idx+1, err))
+			failures = append(failures, fmt.Sprintf("第%d次连接验证失败: %v", idx+1, annotateOracleValidationError(err)))
 			continue
 		}
 		if idx > 0 {

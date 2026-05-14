@@ -148,6 +148,36 @@ func TestWithoutOceanBaseProtocolParamsStripsDriverMeta(t *testing.T) {
 	}
 }
 
+func TestPrepareOceanBaseOracleConfigPromotesURIParams(t *testing.T) {
+	t.Parallel()
+
+	config := prepareOceanBaseOracleConfig(connection.ConnectionConfig{
+		Type:             "oceanbase",
+		URI:              "oceanbase://sys%40oracle001:pass@127.0.0.1:2881/ORCL?protocol=oracle&CONNECT_TIMEOUT=12&DBA_PRIVILEGE=SYSDBA",
+		ConnectionParams: "protocol=oracle&READ_TIMEOUT=7",
+	})
+
+	if config.Type != "oracle" {
+		t.Fatalf("expected routed type oracle, got %q", config.Type)
+	}
+	if config.URI != "" {
+		t.Fatalf("expected routed Oracle config to clear oceanbase URI, got %q", config.URI)
+	}
+	params := connectionParamsFromText(config.ConnectionParams)
+	if got := params.Get("CONNECT TIMEOUT"); got != "12" {
+		t.Fatalf("expected URI CONNECT_TIMEOUT promoted, got %q in %q", got, config.ConnectionParams)
+	}
+	if got := params.Get("READ TIMEOUT"); got != "7" {
+		t.Fatalf("expected explicit READ_TIMEOUT kept, got %q in %q", got, config.ConnectionParams)
+	}
+	if got := params.Get("DBA PRIVILEGE"); got != "SYSDBA" {
+		t.Fatalf("expected URI DBA_PRIVILEGE promoted, got %q in %q", got, config.ConnectionParams)
+	}
+	if strings.Contains(config.ConnectionParams, "protocol=") {
+		t.Fatalf("expected OceanBase protocol param stripped, got %q", config.ConnectionParams)
+	}
+}
+
 func TestOceanBaseOracleRequiresServiceName(t *testing.T) {
 	t.Parallel()
 

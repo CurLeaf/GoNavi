@@ -543,6 +543,9 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
+	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
+	}
 
 	dbInst, err := newDatabaseFunc(effectiveConfig.Type)
 	if err != nil {
@@ -655,6 +658,9 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
 		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
 	}
+	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
+	}
 
 	initialKey := key
 	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
@@ -742,6 +748,32 @@ func formatConnectFailureCooldown(remaining time.Duration) time.Duration {
 		return time.Second
 	}
 	return remaining.Truncate(time.Second)
+}
+
+func verifyRuntimeOptionalDriverAgentRevision(config connection.ConnectionConfig) error {
+	driverType := normalizeDriverType(config.Type)
+	if !db.IsOptionalGoDriver(driverType) {
+		return nil
+	}
+	executablePath, err := db.ResolveOptionalDriverAgentExecutablePath("", driverType)
+	if err != nil {
+		return err
+	}
+	pkg, packageMetaExists := readInstalledDriverPackage("", driverType)
+	selectedVersion := ""
+	if packageMetaExists {
+		selectedVersion = strings.TrimSpace(pkg.Version)
+	}
+	agentRevision, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
+	if err != nil {
+		return err
+	}
+	if expectedRevision := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType)); expectedRevision != "" {
+		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+		logger.Infof("%s driver-agent revision 校验通过：已安装=%s 当前需要=%s version=%s path=%s",
+			displayName, strings.TrimSpace(agentRevision), expectedRevision, selectedVersion, executablePath)
+	}
+	return nil
 }
 
 func shortenCacheKey(key string) string {

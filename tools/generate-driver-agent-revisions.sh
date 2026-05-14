@@ -93,6 +93,7 @@ internal/db/timeout.go)
   case "$driver:$identity" in
     mariadb:internal/db/mariadb_impl.go|\
 oceanbase:internal/db/oceanbase_impl.go|\
+oceanbase:internal/db/oracle_impl.go|\
 oceanbase:internal/db/mysql_impl.go|\
 diros:internal/db/diros_impl.go|\
 diros:internal/db/mysql_impl.go|\
