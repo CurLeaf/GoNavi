@@ -448,6 +448,13 @@ const findWritableResultColumnForSource = (writableColumns: Record<string, strin
     ))?.[0];
 };
 
+const resolveMetadataColumnName = (tableColumnNames: string[], sourceColumn: string): string => {
+    const normalizedSource = String(sourceColumn || '').trim();
+    if (!normalizedSource) return '';
+    return tableColumnNames.find((column) => String(column || '').trim().toLowerCase() === normalizedSource.toLowerCase())
+        || normalizedSource;
+};
+
 const buildQueryLocatorAlias = (column: string, index: number): string => {
     const normalized = String(column || '').trim().replace(/[^A-Za-z0-9_]/g, '_').slice(0, 48) || 'column';
     return `${QUERY_LOCATOR_ALIAS_PREFIX}${index}_${normalized}`;
@@ -520,7 +527,8 @@ const resolveQueryLocatorPlan = async ({
             ? Object.fromEntries(tableColumnNames.map((column) => [column, column]))
             : {};
         Object.entries(selectInfo.writableColumns).forEach(([resultColumn, sourceColumn]) => {
-            writableColumns[resultColumn] = sourceColumn;
+            const metadataColumn = resolveMetadataColumnName(tableColumnNames, sourceColumn);
+            if (metadataColumn) writableColumns[resultColumn] = metadataColumn;
         });
         const appendExpressions: string[] = [];
         const hiddenColumns: string[] = [];

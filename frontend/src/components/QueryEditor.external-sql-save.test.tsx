@@ -334,6 +334,47 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('normalizes unquoted lowercase Oracle identifiers before committing query result edits', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_locator_1_ID'], rows: [{ NAME: 'old-name', __gonavi_locator_1_ID: 7 }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'anonymous', query: 'select name from mycimled.edc_log' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'MYCIMLED', 'EDC_LOG');
+    expect(dataGridState.latestProps?.tableName).toBe('MYCIMLED.EDC_LOG');
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['ID'],
+      valueColumns: ['__gonavi_locator_1_ID'],
+      hiddenColumns: ['__gonavi_locator_1_ID'],
+      writableColumns: {
+        name: 'NAME',
+      },
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it('uses a unique index locator for query results without primary keys', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
@@ -579,7 +620,8 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(dataGridState.latestProps?.tableName).toBe(forceReadOnlyQueryResult ? undefined : 'users');
+      const expectedTableName = dbType === 'oracle' || dbType === 'dameng' ? 'USERS' : 'users';
+      expect(dataGridState.latestProps?.tableName).toBe(forceReadOnlyQueryResult ? undefined : expectedTableName);
       expect(dataGridState.latestProps?.editLocator).toBeUndefined();
       expect(dataGridState.latestProps?.readOnly).toBe(true);
       expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
