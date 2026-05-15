@@ -58,7 +58,7 @@ import {
   type SecurityUpdateRepairSource,
   type SecurityUpdateSettingsFocusTarget,
 } from './utils/securityUpdateRepairFlow';
-import { applyWindowsViewportZoomNudge, getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
+import { getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -670,11 +670,20 @@ function App() {
 
               if (isMaximised) {
                   if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
-                      // restore 场景刻意不走 Unmaximise→Maximise（避免可见的重复最大化抖动）。
-                      // 改用 CSS zoom nudge 强制 Chromium 重算 layout，让 viewport drift 后残留的
-                      // 字体度量恢复正确——同样能修字体，且无动画。
+                      // restore + drift（任务栏点击恢复后字体异常变大）的零感知修复路径：
+                      // 调 backend App.ResetWebViewZoom 触发 WebView2 ICoreWebView2Controller::put_ZoomFactor(1.0)，
+                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
+                      // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
+                      // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
                       if (hasViewportScaleDrift) {
-                          applyWindowsViewportZoomNudge();
+                          try {
+                              const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+                              if (!res?.success) {
+                                  console.warn('ResetWebViewZoom unavailable in fixWindowScaleIfNeeded:', res?.message);
+                              }
+                          } catch (e) {
+                              console.warn('ResetWebViewZoom call failed in fixWindowScaleIfNeeded', e);
+                          }
                       }
                       window.dispatchEvent(new Event('resize'));
                       lastFixAt = Date.now();
@@ -2317,6 +2326,57 @@ function App() {
       }
       void handleTitleBarWindowToggle();
   };
+
+  // handleManualResetWindowZoom 由 resetWindowZoom 快捷键（默认 Ctrl+Shift+0）触发，
+  // 作为自动路径失败时的兜底入口。
+  //
+  // 优先调 backend App.ResetWebViewZoom 走 WebView2 zoom reset（零动画零感知）；
+  // 失败时回退到 Unmaximise→Maximise toggle —— 用户主动按了快捷键，预期看见动画。
+  const handleManualResetWindowZoom = React.useCallback(async () => {
+      if (!isWindowsPlatform()) {
+          message.info('该功能仅在 Windows 平台生效');
+          return;
+      }
+      try {
+          const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+          if (res?.success) {
+              window.dispatchEvent(new Event('resize'));
+              message.success('已重置窗口缩放');
+              return;
+          }
+          console.warn('ResetWebViewZoom backend reported failure, falling back to maximise toggle:', res?.message);
+      } catch (e) {
+          console.warn('ResetWebViewZoom backend unavailable, falling back to maximise toggle', e);
+      }
+      try {
+          const isFullscreen = await WindowIsFullscreen().catch(() => false);
+          if (isFullscreen) {
+              message.info('全屏状态下无法重置缩放，请先退出全屏');
+              return;
+          }
+          const isMaximised = await WindowIsMaximised().catch(() => false);
+          if (isMaximised) {
+              WindowUnmaximise();
+              await new Promise((resolve) => window.setTimeout(resolve, 96));
+              WindowMaximise();
+              await new Promise((resolve) => window.setTimeout(resolve, 96));
+          } else {
+              const size = await WindowGetSize().catch(() => null);
+              const width = Math.trunc(Number(size?.w) || 0);
+              const height = Math.trunc(Number(size?.h) || 0);
+              if (width > 0 && height > 0) {
+                  WindowSetSize(getWindowsScaleFixNudgedWidth(width), height);
+                  await new Promise((resolve) => window.setTimeout(resolve, 28));
+                  WindowSetSize(width, height);
+              }
+          }
+          window.dispatchEvent(new Event('resize'));
+          message.success('已重置窗口缩放（回退方案）');
+      } catch (e) {
+          console.warn('重置窗口缩放失败', e);
+          message.error('重置窗口缩放失败');
+      }
+  }, []);
   
   // Sidebar Resizing
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
@@ -2576,6 +2636,9 @@ function App() {
                       void handleTitleBarWindowToggle();
                   }
                   break;
+              case 'resetWindowZoom':
+                  void handleManualResetWindowZoom();
+                  break;
           }
       };
 
@@ -2583,7 +2646,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
+  }, [handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {

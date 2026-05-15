@@ -9,7 +9,8 @@ export type ShortcutAction =
   | 'toggleLogPanel'
   | 'toggleTheme'
   | 'openShortcutManager'
-  | 'toggleMacFullscreen';
+  | 'toggleMacFullscreen'
+  | 'resetWindowZoom';
 
 export interface ShortcutBinding {
   combo: string;
@@ -87,6 +88,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleTheme',
   'openShortcutManager',
   'toggleMacFullscreen',
+  'resetWindowZoom',
 ];
 
 export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = {
@@ -135,6 +137,11 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     description: 'macOS 原生窗口控制模式下的全屏切换（⌃⌘F）',
     platformOnly: 'mac',
   },
+  resetWindowZoom: {
+    label: '重置窗口缩放',
+    description: 'Windows 任务栏恢复后字体异常变大时主动触发；会切一次最大化让 WebView2 重算字体度量',
+    allowInEditable: true,
+  },
 };
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
@@ -147,6 +154,7 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   toggleTheme: { combo: 'Ctrl+Shift+D', enabled: true },
   openShortcutManager: { combo: 'Ctrl+,', enabled: true },
   toggleMacFullscreen: { combo: 'Ctrl+Meta+F', enabled: true },
+  resetWindowZoom: { combo: 'Ctrl+Shift+0', enabled: true },
 };
 
 const normalizeKeyToken = (value: string): string => {

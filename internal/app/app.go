@@ -133,6 +133,16 @@ func (a *App) SetMacNativeWindowControls(enabled bool) {
 	setMacNativeWindowControls(enabled)
 }
 
+// ResetWebViewZoom 把 WebView2 zoom factor 强制重置为 1.0，让 WebView2 重算字体度量。
+// 用于 Windows 任务栏恢复后字体异常变大的"零感知"修复：不动窗口、零动画。
+// 仅 Windows 上生效，其他平台返回错误（前端按需忽略）。
+func (a *App) ResetWebViewZoom() connection.QueryResult {
+	if err := resetWebViewZoomFactor(a.ctx, 1.0); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "WebView2 zoom factor reset to 1.0"}
+}
+
 // LogWindowDiagnostic 记录前端采集到的窗口诊断信息，便于排查 macOS 原生全屏异常。
 func (a *App) LogWindowDiagnostic(stage string, payload string) {
 	stage = strings.TrimSpace(stage)

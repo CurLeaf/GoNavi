@@ -128,6 +128,19 @@ describe('shortcut defaults', () => {
       scope: 'queryEditor',
     });
   });
+
+  // Windows 任务栏恢复后字体异常变大的兜底入口（方案 3）。
+  // 自动 fix 路径（9848b8b2）刻意不再 toggle 以避免可见动画，由该快捷键给用户主动触发的修复入口。
+  it('registers reset window zoom shortcut with default Ctrl+Shift+0', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.resetWindowZoom).toEqual({
+      combo: 'Ctrl+Shift+0',
+      enabled: true,
+    });
+    expect(SHORTCUT_ACTION_META.resetWindowZoom).toMatchObject({
+      label: '重置窗口缩放',
+      allowInEditable: true,
+    });
+  });
 });
 
 // ─── comboToMonacoKeyBinding ─────────────────────────────────────────
