@@ -202,6 +202,7 @@ const getDefaultPortByType = (type: string) => {
       return 2881;
     case "doris":
     case "diros":
+    case "starrocks":
       return 9030;
     case "sphinx":
       return 9306;
@@ -259,6 +260,7 @@ const sslSupportedTypes = new Set([
   "oceanbase",
   "doris",
   "diros",
+  "starrocks",
   "sphinx",
   "dameng",
   "clickhouse",
@@ -290,6 +292,7 @@ const isMySQLCompatibleType = (type: string) =>
   type === "oceanbase" ||
   type === "doris" ||
   type === "diros" ||
+  type === "starrocks" ||
   type === "sphinx";
 
 const supportsConnectionParamsForType = (type: string) =>
@@ -1359,6 +1362,8 @@ const ConnectionModal: React.FC<{
         parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
         parseMultiHostUri(trimmedUri, "oceanbase") ||
         parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
+        parseMultiHostUri(trimmedUri, "starrocks") ||
+        parseMultiHostUri(trimmedUri, "jdbc:starrocks") ||
         parseMultiHostUri(trimmedUri, "diros") ||
         parseMultiHostUri(trimmedUri, "doris");
       if (!parsed) {
@@ -1782,7 +1787,7 @@ const ConnectionModal: React.FC<{
     if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
       const scheme =
-        dbType === "diros" ? "doris" : dbType === "oceanbase" ? "oceanbase" : "mysql";
+        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : "mysql";
       if (dbType === "oceanbase") {
         return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
       }
@@ -1896,7 +1901,7 @@ const ConnectionModal: React.FC<{
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       const scheme =
-        type === "diros" ? "doris" : type === "oceanbase" ? "oceanbase" : "mysql";
+        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
@@ -2256,6 +2261,7 @@ const ConnectionModal: React.FC<{
           configType === "mariadb" ||
           configType === "oceanbase" ||
           configType === "diros" ||
+          configType === "starrocks" ||
           configType === "sphinx"
             ? normalizedHosts.slice(1)
             : [];
@@ -3630,6 +3636,11 @@ const ConnectionModal: React.FC<{
           key: "diros",
           name: "Doris",
           icon: getDbIcon("diros", undefined, 36),
+        },
+        {
+          key: "starrocks",
+          name: "StarRocks",
+          icon: getDbIcon("starrocks", undefined, 36),
         },
         {
           key: "sphinx",

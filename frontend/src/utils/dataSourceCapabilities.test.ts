@@ -30,6 +30,16 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('keeps StarRocks as an independent SQL datasource capability', () => {
+    expect(getDataSourceCapabilities({ type: 'starrocks' })).toMatchObject({
+      type: 'starrocks',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      preferManualTotalCount: false,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

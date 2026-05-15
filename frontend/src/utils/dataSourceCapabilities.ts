@@ -8,6 +8,8 @@ const normalizeDataSourceToken = (raw: string): string => {
   switch (normalized) {
     case 'doris':
       return 'diros';
+    case 'starrocks':
+      return 'starrocks';
     case 'postgresql':
       return 'postgres';
     case 'opengauss':
@@ -42,6 +44,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'mariadb',
   'oceanbase',
   'diros',
+  'starrocks',
   'sphinx',
   'postgres',
   'kingbase',
@@ -62,6 +65,7 @@ const COPY_INSERT_TYPES = new Set([
   'mariadb',
   'oceanbase',
   'diros',
+  'starrocks',
   'sphinx',
   'postgres',
   'kingbase',

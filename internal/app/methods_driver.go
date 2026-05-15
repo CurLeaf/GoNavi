@@ -336,6 +336,7 @@ const builtinDriverManifestJSON = `{
     "mariadb":   { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mariadb" },
     "oceanbase": { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/oceanbase" },
     "doris":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/doris" },
+    "starrocks": { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/starrocks" },
     "sphinx":    { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/sphinx" },
     "sqlserver": { "engine": "go", "version": "1.9.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/sqlserver" },
     "sqlite":    { "engine": "go", "version": "1.44.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/sqlite" },
@@ -391,6 +392,7 @@ var latestDriverVersionMap = map[string]string{
 	"mariadb":    "1.9.3",
 	"oceanbase":  "1.9.3",
 	"diros":      "1.9.3",
+	"starrocks":  "1.9.3",
 	"sphinx":     "1.9.3",
 	"sqlserver":  "1.9.6",
 	"sqlite":     "1.46.1",
@@ -412,6 +414,7 @@ var driverGoModulePathMap = map[string]string{
 	"mariadb":    "github.com/go-sql-driver/mysql",
 	"oceanbase":  "github.com/go-sql-driver/mysql",
 	"diros":      "github.com/go-sql-driver/mysql",
+	"starrocks":  "github.com/go-sql-driver/mysql",
 	"sphinx":     "github.com/go-sql-driver/mysql",
 	"sqlserver":  "github.com/microsoft/go-mssqldb",
 	"sqlite":     "modernc.org/sqlite",
@@ -1472,6 +1475,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("mariadb", "MariaDB", packages),
 		buildOptionalGoDriverDefinition("oceanbase", "OceanBase", packages),
 		buildOptionalGoDriverDefinition("diros", "Doris", packages),
+		buildOptionalGoDriverDefinition("starrocks", "StarRocks", packages),
 		buildOptionalGoDriverDefinition("sphinx", "Sphinx", packages),
 		buildOptionalGoDriverDefinition("sqlserver", "SQL Server", packages),
 		buildOptionalGoDriverDefinition("sqlite", "SQLite", packages),
@@ -3780,6 +3784,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_oceanbase_driver", nil
 	case "diros":
 		return "gonavi_diros_driver", nil
+	case "starrocks":
+		return "gonavi_starrocks_driver", nil
 	case "sphinx":
 		return "gonavi_sphinx_driver", nil
 	case "sqlserver":

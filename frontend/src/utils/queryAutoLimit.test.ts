@@ -9,6 +9,7 @@ describe('applyQueryAutoLimit', () => {
     'oceanbase',
     'diros',
     'doris',
+    'starrocks',
     'sphinx',
     'postgres',
     'postgresql',
@@ -60,6 +61,7 @@ describe('applyQueryAutoLimit', () => {
     ['mssql', 'SELECT TOP 500 * FROM users'],
     ['postgresql', 'SELECT * FROM users LIMIT 500'],
     ['doris', 'SELECT * FROM users LIMIT 500'],
+    ['starrocks', 'SELECT * FROM users LIMIT 500'],
     ['sqlite3', 'SELECT * FROM users LIMIT 500'],
   ])('uses custom driver dialect %s', (driver, expected) => {
     expect(applyQueryAutoLimit('SELECT * FROM users', 'custom', 500, driver).sql)

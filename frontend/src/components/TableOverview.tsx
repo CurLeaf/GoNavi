@@ -72,6 +72,7 @@ const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: strin
         const escapeLiteral = (s: string) => s.replace(/'/g, "''");
         switch (dialect) {
         case 'mysql':
+        case 'starrocks':
             return `
 SELECT
     TABLE_NAME AS table_name,

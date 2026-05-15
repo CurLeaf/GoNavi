@@ -17,6 +17,7 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('OpenGauss')).toBe('opengauss');
     expect(resolveSqlDialect('OceanBase')).toBe('oceanbase');
     expect(resolveSqlDialect('doris')).toBe('diros');
+    expect(resolveSqlDialect('StarRocks')).toBe('starrocks');
     expect(resolveSqlDialect('dameng')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'kingbase8')).toBe('kingbase');
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
@@ -26,6 +27,7 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
     expect(isMysqlFamilyDialect('oceanbase')).toBe(true);
+    expect(isMysqlFamilyDialect('starrocks')).toBe(true);
     expect(isMysqlFamilyDialect('oracle')).toBe(false);
   });
 
@@ -38,6 +40,7 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('oceanbase'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('kingbase'))).not.toContain('tinyint(1)');
     expect(values(resolveColumnTypeOptions('diros'))).toContain('LARGEINT');
+    expect(values(resolveColumnTypeOptions('starrocks'))).toContain('PERCENTILE');
     expect(values(resolveColumnTypeOptions('sphinx'))).toContain('text');
     expect(values(resolveColumnTypeOptions('clickhouse'))).toContain('DateTime64(3)');
     expect(values(resolveColumnTypeOptions('tdengine'))).toContain('TIMESTAMP');
@@ -55,6 +58,8 @@ describe('sqlDialect', () => {
   it('resolves mysql-family completion keywords and functions with mysql syntax', () => {
     expect(resolveSqlKeywords('mariadb')).toEqual(expect.arrayContaining(['LIMIT', 'CHANGE', 'AUTO_INCREMENT']));
     expect(names(resolveSqlFunctions('diros'))).toEqual(expect.arrayContaining(['DATE_FORMAT', 'GROUP_CONCAT']));
+    expect(resolveSqlKeywords('starrocks')).toEqual(expect.arrayContaining(['OLAP', 'DISTRIBUTED BY', 'BUCKETS', 'ADD ROLLUP', 'EXTERNAL CATALOG']));
+    expect(names(resolveSqlFunctions('starrocks'))).toEqual(expect.arrayContaining(['TO_BITMAP', 'HLL_UNION_AGG']));
   });
 
   it('resolves sqlserver completion without mysql-only ddl tokens', () => {

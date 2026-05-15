@@ -128,6 +128,7 @@ func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 		"mariadb",
 		"oceanbase",
 		"diros",
+		"starrocks",
 		"sphinx",
 		"sqlserver",
 		"sqlite",

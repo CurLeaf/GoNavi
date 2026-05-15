@@ -9,7 +9,7 @@ import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, Trigg
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
-import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges } from './tableDesignerSchemaSql';
+import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
 import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
@@ -367,6 +367,18 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [newTableName, setNewTableName] = useState('');
   const [charset, setCharset] = useState('utf8mb4');
   const [collation, setCollation] = useState('utf8mb4_unicode_ci');
+  const [starRocksTableKind, setStarRocksTableKind] = useState<StarRocksTableKind>('olap');
+  const [starRocksKeyModel, setStarRocksKeyModel] = useState<StarRocksKeyModel>('DUPLICATE');
+  const [starRocksKeyColumns, setStarRocksKeyColumns] = useState<string[]>([]);
+  const [starRocksPartitionClause, setStarRocksPartitionClause] = useState('');
+  const [starRocksDistributionType, setStarRocksDistributionType] = useState<StarRocksDistributionType>('HASH');
+  const [starRocksDistributionColumns, setStarRocksDistributionColumns] = useState<string[]>([]);
+  const [starRocksBucketMode, setStarRocksBucketMode] = useState<'AUTO' | 'NUMBER'>('AUTO');
+  const [starRocksBucketCount, setStarRocksBucketCount] = useState('');
+  const [starRocksProperties, setStarRocksProperties] = useState('');
+  const [starRocksRollups, setStarRocksRollups] = useState('');
+  const [starRocksExternalEngine, setStarRocksExternalEngine] = useState('hive');
+  const [starRocksExternalProperties, setStarRocksExternalProperties] = useState('"resource" = "hive0"\n"database" = "raw_db"\n"table" = "raw_table"');
   
   const [loading, setLoading] = useState(false);
   const [previewSql, setPreviewSql] = useState<string>('');
@@ -849,11 +861,11 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
           || customDriver === 'sphinx'
           || customDriver === 'tidb'
           || customDriver === 'oceanbase'
-          || customDriver === 'starrocks'
           || customDriver.includes('mysql')
       ) {
           return 'mysql';
       }
+      if (customDriver === 'starrocks') return 'starrocks';
       if (customDriver === 'dameng') return 'dm';
       return customDriver;
   };
@@ -876,6 +888,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       case 'mariadb':
       case 'oceanbase':
       case 'diros':
+      case 'starrocks':
         return `CREATE TRIGGER trigger_name
 BEFORE INSERT ON \`${tblName}\`
 FOR EACH ROW
@@ -938,6 +951,7 @@ END;`;
       case 'mariadb':
       case 'oceanbase':
       case 'diros':
+      case 'starrocks':
         return `DROP TRIGGER IF EXISTS \`${triggerName}\``;
       case 'postgres':
       case 'kingbase':
@@ -1309,6 +1323,43 @@ ${selectedTrigger.statement}`;
       [columns]
   );
 
+  const isStarRocksNewTable = isNewTable && getDbType() === 'starrocks';
+
+  const parseStarRocksRollupOptions = (raw: string): StarRocksCreateTableOptions['rollups'] => (
+      String(raw || '')
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(Boolean)
+          .map(line => {
+              const [namePart, columnsPart] = line.split(':');
+              const name = String(namePart || '').trim();
+              const columnNames = String(columnsPart || '')
+                  .split(',')
+                  .map(item => item.trim())
+                  .filter(Boolean);
+              return { name, columnNames };
+          })
+          .filter(item => item.name && item.columnNames.length > 0)
+  );
+
+  const buildStarRocksCreateOptions = (): StarRocksCreateTableOptions | undefined => {
+      if (!isStarRocksNewTable) return undefined;
+      return {
+          tableKind: starRocksTableKind,
+          keyModel: starRocksKeyModel,
+          keyColumnNames: starRocksKeyColumns,
+          partitionClause: starRocksPartitionClause,
+          distributionType: starRocksDistributionType,
+          distributionColumnNames: starRocksDistributionColumns,
+          bucketMode: starRocksBucketMode,
+          bucketCount: Number(starRocksBucketCount) || undefined,
+          properties: starRocksProperties,
+          rollups: parseStarRocksRollupOptions(starRocksRollups),
+          externalEngine: starRocksExternalEngine,
+          externalProperties: starRocksExternalProperties,
+      };
+  };
+
   useEffect(() => {
       if (selectedIndexKeys.length === 0) return;
       const validKeys = selectedIndexKeys.filter(key => groupedIndexes.some(idx => idx.key === key));
@@ -1489,6 +1540,7 @@ ${selectedTrigger.statement}`;
           columns: targetColumns,
           charset: targetCharset,
           collation: targetCollation,
+          starRocksOptions: buildStarRocksCreateOptions(),
       });
   };
 
@@ -2350,6 +2402,134 @@ END;`;
       })),
   ];
 
+  const starRocksAdvancedTabContent = (
+      <div style={{ height: '100%', overflow: 'auto', padding: 12 }}>
+          <Space direction="vertical" size={14} style={{ width: '100%', maxWidth: 960 }}>
+              <Radio.Group
+                  value={starRocksTableKind}
+                  onChange={(e) => setStarRocksTableKind(e.target.value)}
+                  optionType="button"
+                  buttonStyle="solid"
+                  options={[
+                      { label: 'OLAP 表', value: 'olap' },
+                      { label: '外部表', value: 'external' },
+                  ]}
+              />
+
+              {starRocksTableKind === 'olap' ? (
+                  <>
+                      <Space wrap>
+                          <Select
+                              value={starRocksKeyModel}
+                              onChange={setStarRocksKeyModel}
+                              options={[
+                                  { label: 'Duplicate Key', value: 'DUPLICATE' },
+                                  { label: 'Primary Key', value: 'PRIMARY' },
+                                  { label: 'Unique Key', value: 'UNIQUE' },
+                                  { label: 'Aggregate Key', value: 'AGGREGATE' },
+                              ]}
+                              style={{ width: 180 }}
+                          />
+                          <Select
+                              mode="multiple"
+                              allowClear
+                              placeholder="Key 字段"
+                              value={starRocksKeyColumns}
+                              onChange={setStarRocksKeyColumns}
+                              options={localColumnOptions}
+                              style={{ minWidth: 280 }}
+                          />
+                      </Space>
+
+                      <Input.TextArea
+                          value={starRocksPartitionClause}
+                          onChange={(e) => setStarRocksPartitionClause(e.target.value)}
+                          autoSize={{ minRows: 3, maxRows: 8 }}
+                          placeholder={'PARTITION BY date_trunc(\'day\', `event_time`)\n-- 或按业务需要填写完整 PARTITION BY 子句'}
+                      />
+
+                      <Space wrap>
+                          <Select
+                              value={starRocksDistributionType}
+                              onChange={setStarRocksDistributionType}
+                              options={[
+                                  { label: 'Hash 分桶', value: 'HASH' },
+                                  { label: 'Random 分桶', value: 'RANDOM' },
+                                  { label: '不生成分桶子句', value: 'NONE' },
+                              ]}
+                              style={{ width: 180 }}
+                          />
+                          <Select
+                              mode="multiple"
+                              allowClear
+                              disabled={starRocksDistributionType !== 'HASH'}
+                              placeholder="分桶字段"
+                              value={starRocksDistributionColumns}
+                              onChange={setStarRocksDistributionColumns}
+                              options={localColumnOptions}
+                              style={{ minWidth: 260 }}
+                          />
+                          <Select
+                              value={starRocksBucketMode}
+                              onChange={setStarRocksBucketMode}
+                              options={[
+                                  { label: 'Buckets Auto', value: 'AUTO' },
+                                  { label: '指定 Buckets', value: 'NUMBER' },
+                              ]}
+                              style={{ width: 160 }}
+                          />
+                          <Input
+                              {...noAutoCapInputProps}
+                              disabled={starRocksBucketMode !== 'NUMBER'}
+                              value={starRocksBucketCount}
+                              onChange={(e) => setStarRocksBucketCount(e.target.value.replace(/[^\d]/g, ''))}
+                              placeholder="Buckets"
+                              style={{ width: 120 }}
+                          />
+                      </Space>
+
+                      <Input.TextArea
+                          value={starRocksProperties}
+                          onChange={(e) => setStarRocksProperties(e.target.value)}
+                          autoSize={{ minRows: 3, maxRows: 8 }}
+                          placeholder={'"replication_num" = "1"\n"storage_medium" = "SSD"'}
+                      />
+
+                      <Input.TextArea
+                          value={starRocksRollups}
+                          onChange={(e) => setStarRocksRollups(e.target.value)}
+                          autoSize={{ minRows: 3, maxRows: 8 }}
+                          placeholder={'rollup_name: column1, column2\nrollup_daily: dt, user_id'}
+                      />
+                  </>
+              ) : (
+                  <>
+                      <Space wrap>
+                          <Select
+                              value={starRocksExternalEngine}
+                              onChange={setStarRocksExternalEngine}
+                              options={[
+                                  { label: 'Hive', value: 'hive' },
+                                  { label: 'MySQL', value: 'mysql' },
+                                  { label: 'Iceberg', value: 'iceberg' },
+                                  { label: 'Hudi', value: 'hudi' },
+                                  { label: 'JDBC', value: 'jdbc' },
+                              ]}
+                              style={{ width: 180 }}
+                          />
+                      </Space>
+                      <Input.TextArea
+                          value={starRocksExternalProperties}
+                          onChange={(e) => setStarRocksExternalProperties(e.target.value)}
+                          autoSize={{ minRows: 6, maxRows: 14 }}
+                          placeholder={'"resource" = "hive0"\n"database" = "raw_db"\n"table" = "raw_table"'}
+                      />
+                  </>
+              )}
+          </Space>
+      </div>
+  );
+
   const columnsTabContent = (
       <div
           ref={containerRef}
@@ -2593,6 +2773,13 @@ END;`;
                     label: '字段',
                     children: columnsTabContent
                 },
+                ...(isStarRocksNewTable ? [
+                    {
+                        key: 'starrocks',
+                        label: 'StarRocks',
+                        children: starRocksAdvancedTabContent,
+                    },
+                ] : []),
                 ...(!isNewTable ? [
                     {
                         key: 'indexes',

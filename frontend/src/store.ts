@@ -110,6 +110,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "oceanbase",
   "doris",
   "diros",
+  "starrocks",
   "sphinx",
   "clickhouse",
   "postgres",
@@ -133,6 +134,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mariadb",
   "oceanbase",
   "diros",
+  "starrocks",
   "sphinx",
   "dameng",
   "clickhouse",
@@ -159,6 +161,7 @@ const getDefaultPortByType = (type: string): number => {
       return 2881;
     case "doris":
     case "diros":
+    case "starrocks":
       return 9030;
     case "duckdb":
       return 0;

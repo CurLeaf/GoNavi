@@ -29,6 +29,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     highgo:     '#00A86B',
     tdengine:   '#2962FF',
     diros:      '#0050B3',
+    starrocks:  '#00A6A6',
     sphinx:     '#2F5D62',
     custom:     '#888888',
 };
@@ -121,6 +122,9 @@ const SQLServerIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const DorisIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="diros" size={size} color={color} />
 );
+const StarRocksIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.starrocks} label="SR" />
+);
 const SphinxIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="sphinx" size={size} color={color} />
 );
@@ -175,6 +179,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     mariadb: MariaDBIcon,
     oceanbase: OceanBaseIcon,
     diros: DorisIcon,
+    starrocks: StarRocksIcon,
     sphinx: SphinxIcon,
     postgres: PostgresIcon,
     redis: RedisIcon,
@@ -197,7 +202,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 /** 可选图标类型列表（用于图标选择器 UI） */
 export const DB_ICON_TYPES: string[] = [
     'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
-    'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse',
+    'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
     'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'tdengine', 'custom',
 ];
 
@@ -218,6 +223,7 @@ export const getDbIconLabel = (type: string): string => {
         redis: 'Redis', mongodb: 'MongoDB', jvm: 'JVM',
         oracle: 'Oracle',
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
+        starrocks: 'StarRocks',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
         vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', tdengine: 'TDengine',
         custom: '自定义',

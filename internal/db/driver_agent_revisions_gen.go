@@ -7,6 +7,7 @@ func init() {
 		"mariadb":    "src-4e1ec648c70c87ea",
 		"oceanbase":  "src-8e445fc4899d850f",
 		"diros":      "src-74927b3809258666",
+		"starrocks":  "src-3b5aad8a32f79b61",
 		"sphinx":     "src-269bd60a34df47d3",
 		"sqlserver":  "src-84553484c72e7253",
 		"sqlite":     "src-762863d48f653b89",

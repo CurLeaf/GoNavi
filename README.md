@@ -39,6 +39,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Cache | Redis | Built-in | Key browsing, command execution, encoding/view switch |
 | Relational | MariaDB | Optional driver agent | Querying, object management, data editing |
 | Relational | Doris | Optional driver agent | Querying, object browsing, SQL execution |
+| Columnar Analytics | StarRocks | Optional driver agent | Querying, object browsing, SQL execution |
 | Search | Sphinx | Optional driver agent | SphinxQL querying and object browsing |
 | Relational | SQL Server | Optional driver agent | Schema browsing, SQL query, object management |
 | File-based | SQLite | Optional driver agent | Local DB browsing, editing, export |

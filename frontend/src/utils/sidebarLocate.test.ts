@@ -96,6 +96,28 @@ describe('sidebarLocate', () => {
     })).toBeNull();
   });
 
+  it('keeps StarRocks materialized view tabs on the materialized views branch', () => {
+    const request = normalizeSidebarLocateObjectRequestFromTab({
+      id: 'view-def-conn-1-main-sales.mv_daily',
+      type: 'view-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      viewName: 'sales.mv_daily',
+      viewKind: 'materialized',
+    });
+
+    expect(request).toMatchObject({
+      tableName: 'sales.mv_daily',
+      schemaName: 'sales',
+      objectGroup: 'materializedViews',
+    });
+
+    expect(resolveSidebarLocateTarget(request!, { groupBySchema: true })).toMatchObject({
+      targetKey: 'view-def-conn-1-main-sales.mv_daily',
+      objectGroupKey: 'conn-1-main-schema-sales-materializedViews',
+    });
+  });
+
   it('finds a locate path from loaded tree data even when the target key is absent', () => {
     const target = resolveSidebarLocateTarget(
       {

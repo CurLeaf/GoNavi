@@ -1,4 +1,4 @@
-export type SidebarLocateObjectGroup = 'tables' | 'views';
+export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews';
 
 export interface SidebarLocateObjectRequest {
   tabId?: string;
@@ -37,6 +37,7 @@ export interface SidebarLocateTabLike {
   dbName?: string;
   tableName?: string;
   viewName?: string;
+  viewKind?: string;
 }
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
@@ -55,12 +56,15 @@ export const splitSidebarQualifiedName = (qualifiedName: string): { schemaName: 
 const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string, dbName: string): SidebarLocateObjectGroup => {
   const explicitGroup = toTrimmedString(detail.objectGroup);
   if (explicitGroup === 'views' || explicitGroup === 'view') return 'views';
+  if (explicitGroup === 'materializedViews' || explicitGroup === 'materialized-view') return 'materializedViews';
 
   const explicitType = toTrimmedString(detail.objectType);
   if (explicitType === 'view' || explicitType === 'views') return 'views';
+  if (explicitType === 'materialized' || explicitType === 'materialized-view') return 'materializedViews';
 
   const tabId = toTrimmedString(detail.tabId);
   const dbNodeKey = `${connectionId}-${dbName}`;
+  if (tabId.startsWith(`${dbNodeKey}-materialized-view-`)) return 'materializedViews';
   if (tabId.startsWith(`${dbNodeKey}-view-`)) return 'views';
 
   return 'tables';
@@ -103,7 +107,9 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
     connectionId: tab.connectionId,
     dbName: tab.dbName,
     tableName: objectName,
-    objectGroup: tab.type === 'view-def' ? 'views' : undefined,
+    objectGroup: tab.type === 'view-def'
+      ? (tab.viewKind === 'materialized' ? 'materializedViews' : 'views')
+      : undefined,
   });
 };
 
@@ -113,9 +119,9 @@ export const resolveSidebarLocateTarget = (
 ): SidebarLocateTarget => {
   const connectionKey = request.connectionId;
   const databaseKey = `${request.connectionId}-${request.dbName}`;
-  const fallbackTargetKey = request.objectGroup === 'views'
-    ? `${databaseKey}-view-${request.tableName}`
-    : `${databaseKey}-${request.tableName}`;
+  const fallbackTargetKey = request.objectGroup === 'materializedViews'
+    ? `${databaseKey}-materialized-view-${request.tableName}`
+    : (request.objectGroup === 'views' ? `${databaseKey}-view-${request.tableName}` : `${databaseKey}-${request.tableName}`);
   const targetKey = request.tabId || fallbackTargetKey;
   const schemaSegment = request.schemaName || 'default';
   const schemaKey = options.groupBySchema ? `${databaseKey}-schema-${schemaSegment}` : undefined;
@@ -190,6 +196,11 @@ const matchesLocateObjectNode = (node: SidebarLocateTreeNodeLike, target: Sideba
 
   if (target.objectGroup === 'views') {
     if (node.type !== 'view') return false;
+    return matchesLocateObjectName(target, toTrimmedString(dataRef.viewName || dataRef.tableName), toTrimmedString(dataRef.schemaName));
+  }
+
+  if (target.objectGroup === 'materializedViews') {
+    if (node.type !== 'materialized-view') return false;
     return matchesLocateObjectName(target, toTrimmedString(dataRef.viewName || dataRef.tableName), toTrimmedString(dataRef.schemaName));
   }
 

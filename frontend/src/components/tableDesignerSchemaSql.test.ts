@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCreateTablePreviewSql,
   buildAlterTablePreviewSql,
+  buildStarRocksMaterializedViewPreviewSql,
   hasAlterTableDraftChanges,
   type BuildAlterTablePreviewInput,
   type EditableColumnSnapshot,
@@ -216,6 +217,88 @@ describe('tableDesignerSchemaSql', () => {
     expect(tdengineSql).not.toContain('CHANGE COLUMN');
     expect(clickhouseSql).not.toContain('AFTER');
     expect(tdengineSql).not.toContain('AFTER');
+  });
+
+  it('builds StarRocks create table preview with OLAP engine and conservative distribution', () => {
+    const sql = buildCreateTablePreviewSql({
+      tableName: 'sales.orders',
+      dbType: 'starrocks',
+      columns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'NO', key: 'PRI' }),
+        baseColumn({ _key: 'amount', name: 'amount', type: 'DECIMAL(10,2)', nullable: 'YES' }),
+      ],
+    });
+
+    expect(sql).toContain('CREATE TABLE `sales`.`orders`');
+    expect(sql).toContain('ENGINE=OLAP');
+    expect(sql).toContain('DUPLICATE KEY (`id`)');
+    expect(sql).toContain('DISTRIBUTED BY HASH(`id`) BUCKETS AUTO');
+    expect(sql).not.toContain('ENGINE=InnoDB');
+  });
+
+  it('builds StarRocks advanced OLAP table preview with key model, partition, buckets, properties and rollup', () => {
+    const sql = buildCreateTablePreviewSql({
+      tableName: 'sales.events',
+      dbType: 'starrocks',
+      columns: [
+        baseColumn({ _key: 'dt', name: 'dt', type: 'DATE', nullable: 'NO' }),
+        baseColumn({ _key: 'user_id', name: 'user_id', type: 'BIGINT', nullable: 'NO' }),
+        baseColumn({ _key: 'amount', name: 'amount', type: 'DECIMAL(10,2)', nullable: 'YES', extra: 'SUM' }),
+      ],
+      starRocksOptions: {
+        keyModel: 'AGGREGATE',
+        keyColumnNames: ['dt', 'user_id'],
+        partitionClause: 'PARTITION BY date_trunc(\'day\', `dt`)',
+        distributionColumnNames: ['user_id'],
+        bucketMode: 'NUMBER',
+        bucketCount: 12,
+        properties: '"replication_num" = "1"',
+        rollups: [{ name: 'rollup_dt', columnNames: ['dt', 'amount'] }],
+      },
+    });
+
+    expect(sql).toContain('AGGREGATE KEY (`dt`, `user_id`)');
+    expect(sql).toContain("PARTITION BY date_trunc('day', `dt`)");
+    expect(sql).toContain('DISTRIBUTED BY HASH(`user_id`) BUCKETS 12');
+    expect(sql).toContain('PROPERTIES (');
+    expect(sql).toContain('ALTER TABLE `sales`.`events`\nADD ROLLUP `rollup_dt` (`dt`, `amount`);');
+  });
+
+  it('builds StarRocks external table preview with external engine and properties', () => {
+    const sql = buildCreateTablePreviewSql({
+      tableName: 'ext.raw_orders',
+      dbType: 'starrocks',
+      columns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'NO' }),
+        baseColumn({ _key: 'payload', name: 'payload', type: 'STRING', nullable: 'YES' }),
+      ],
+      starRocksOptions: {
+        tableKind: 'external',
+        externalEngine: 'hive',
+        externalProperties: '"resource" = "hive0"\n"database" = "ods"\n"table" = "orders"',
+      },
+    });
+
+    expect(sql).toContain('CREATE EXTERNAL TABLE `ext`.`raw_orders`');
+    expect(sql).toContain('ENGINE=HIVE');
+    expect(sql).toContain('"resource" = "hive0"');
+    expect(sql).not.toContain('ENGINE=OLAP');
+  });
+
+  it('builds StarRocks materialized view preview with refresh and distribution clauses', () => {
+    const sql = buildStarRocksMaterializedViewPreviewSql({
+      name: 'sales.mv_user_amount',
+      query: 'SELECT user_id, SUM(amount) AS total_amount FROM sales.events GROUP BY user_id',
+      distributionColumnNames: ['user_id'],
+      bucketCount: 8,
+      refreshClause: 'REFRESH SCHEDULE EVERY(INTERVAL 10 MINUTE)',
+      properties: '"replication_num" = "1"',
+    });
+
+    expect(sql).toContain('CREATE MATERIALIZED VIEW `sales`.`mv_user_amount`');
+    expect(sql).toContain('REFRESH SCHEDULE EVERY(INTERVAL 10 MINUTE)');
+    expect(sql).toContain('DISTRIBUTED BY HASH(`user_id`) BUCKETS 8');
+    expect(sql).toContain('AS\nSELECT user_id, SUM(amount) AS total_amount FROM sales.events GROUP BY user_id;');
   });
 
   it('treats mariadb and sphinx as mysql-family only where mysql syntax is intended', () => {

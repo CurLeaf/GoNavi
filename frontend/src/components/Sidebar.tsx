@@ -48,6 +48,7 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { resolveConnectionHostTokens } from '../utils/tabDisplay';
 import {
@@ -74,7 +75,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
 export const resolveSidebarTableNameForCopy = (node: Pick<TreeNode, 'title' | 'dataRef'> | null | undefined): string => {
@@ -841,7 +842,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const buildViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
       const safeDbName = escapeSQLLiteral(dbName);
       switch (dialect) {
-          case 'mysql': {
+          case 'mysql':
+          case 'starrocks': {
               const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
               return normalizeMetadataQuerySpecs([
                   {
@@ -886,7 +888,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const buildTriggersMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
       const safeDbName = escapeSQLLiteral(dbName);
       switch (dialect) {
-          case 'mysql': {
+          case 'mysql':
+          case 'starrocks': {
               const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
               return normalizeMetadataQuerySpecs([
                   {
@@ -927,6 +930,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const safeDbName = escapeSQLLiteral(dbName);
       switch (dialect) {
           case 'mysql':
+          case 'starrocks':
               return normalizeMetadataQuerySpecs([
                   {
                       sql: safeDbName
@@ -1044,6 +1048,46 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               views.push(fullName);
           });
       });
+      return { views, supported: hasSuccessfulQuery };
+  };
+
+  const loadStarRocksMaterializedViews = async (
+      conn: any,
+      dbName: string
+  ): Promise<{ views: string[]; supported: boolean }> => {
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      if (dialect !== 'starrocks') {
+          return { views: [], supported: false };
+      }
+
+      const safeDbName = escapeSQLLiteral(dbName);
+      const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+      const querySpecs = normalizeMetadataQuerySpecs([
+          {
+              sql: safeDbName
+                  ? `SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name FROM information_schema.tables WHERE TABLE_SCHEMA = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%MATERIALIZED%' ORDER BY TABLE_NAME`
+                  : '',
+          },
+          { sql: dbIdent ? `SHOW MATERIALIZED VIEWS FROM \`${dbIdent}\`` : '' },
+          { sql: `SHOW MATERIALIZED VIEWS` },
+      ]);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
+      const seen = new Set<string>();
+      const views: string[] = [];
+
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'table_schema', 'db', 'database']);
+              const viewName =
+                  getCaseInsensitiveValue(row, ['object_name', 'view_name', 'table_name', 'name', 'materialized_view_name', 'mv_name'])
+                  || getFirstRowValue(row);
+              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
+              if (!fullName || seen.has(fullName)) return;
+              seen.add(fullName);
+              views.push(fullName);
+          });
+      });
+
       return { views, supported: hasSuccessfulQuery };
   };
 
@@ -1425,8 +1469,9 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                };
 	            });
 
-	            const [viewsResult, triggersResult, routinesResult] = await Promise.all([
+	            const [viewsResult, materializedViewsResult, triggersResult, routinesResult] = await Promise.all([
 	                loadViews(conn, conn.dbName),
+	                loadStarRocksMaterializedViews(conn, conn.dbName),
 	                loadDatabaseTriggers(conn, conn.dbName),
 	                loadFunctions(conn, conn.dbName),
 	            ]);
@@ -1459,6 +1504,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 }));
 
             const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
+            const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
 
@@ -1470,6 +1516,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                    displayName: getSidebarTableDisplayName(conn, viewName),
 	                };
 	            });
+
+            const materializedViewEntries = materializedViewRows.map((viewName: string) => {
+                const parsed = splitQualifiedName(viewName);
+                return {
+                    viewName,
+                    schemaName: parsed.schemaName,
+                    displayName: getSidebarTableDisplayName(conn, viewName),
+                };
+            });
 
             const triggerEntries = (() => {
                 const deduped: Array<{ displayName: string; triggerName: string; tableName: string; schemaName: string }> = [];
@@ -1548,6 +1603,8 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	            // Sort views by name (case-insensitive)
 	            viewEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
+	            materializedViewEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+
 	            // Sort triggers by display name (case-insensitive)
 	            triggerEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
@@ -1569,6 +1626,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                icon: <EyeOutlined />,
 	                type: 'view',
 	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
+	                isLeaf: true,
+	            });
+
+	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => ({
+	                title: entry.displayName,
+	                key: `${conn.id}-${conn.dbName}-materialized-view-${entry.viewName}`,
+	                icon: <ThunderboltOutlined />,
+	                type: 'materialized-view',
+	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
 	                isLeaf: true,
 	            });
 
@@ -1613,6 +1679,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                    schemaName: string;
 	                    tables: TreeNode[];
 	                    views: TreeNode[];
+	                    materializedViews: TreeNode[];
 	                    routines: TreeNode[];
 	                    triggers: TreeNode[];
 	                };
@@ -1627,6 +1694,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                            schemaName,
 	                            tables: [],
 	                            views: [],
+	                            materializedViews: [],
 	                            routines: [],
 	                            triggers: [],
 	                        };
@@ -1637,11 +1705,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
 	                tableEntries.forEach((entry) => getSchemaBucket(entry.schemaName).tables.push(buildTableNode(entry)));
 	                viewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).views.push(buildViewNode(entry)));
+	                materializedViewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).materializedViews.push(buildMaterializedViewNode(entry)));
 	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
 	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
 
 	                const dialect = getMetadataDialect(conn as SavedConnection);
 	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
+	                const includeMaterializedViews = dialect === 'starrocks';
 
 	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
 	                    .filter((bucket) => !(isOracleLike && !bucket.schemaName))
@@ -1657,6 +1727,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 	                        const groupedNodes: TreeNode[] = [
 	                            buildObjectGroup(schemaNodeKey, 'tables', '表', <TableOutlined />, bucket.tables, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'views', '视图', <EyeOutlined />, bucket.views, { schemaName: bucket.schemaName }),
+	                            ...(includeMaterializedViews ? [buildObjectGroup(schemaNodeKey, 'materializedViews', '物化视图', <ThunderboltOutlined />, bucket.materializedViews, { schemaName: bucket.schemaName })] : []),
 	                            buildObjectGroup(schemaNodeKey, 'routines', '函数', <CodeOutlined />, bucket.routines, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'triggers', '触发器', <FunctionOutlined />, bucket.triggers, { schemaName: bucket.schemaName }),
 	                        ];
@@ -1674,9 +1745,11 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
 	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...schemaNodes]);
 	            } else {
+	                const includeMaterializedViews = getMetadataDialect(conn as SavedConnection) === 'starrocks';
 	                const groupedNodes: TreeNode[] = [
 	                    buildObjectGroup(key as string, 'tables', '表', <TableOutlined />, tableEntries.map(buildTableNode)),
 	                    buildObjectGroup(key as string, 'views', '视图', <EyeOutlined />, viewEntries.map(buildViewNode)),
+	                    ...(includeMaterializedViews ? [buildObjectGroup(key as string, 'materializedViews', '物化视图', <ThunderboltOutlined />, materializedViewEntries.map(buildMaterializedViewNode))] : []),
 	                    buildObjectGroup(key as string, 'routines', '函数', <CodeOutlined />, routineEntries.map(buildRoutineNode)),
 	                    buildObjectGroup(key as string, 'triggers', '触发器', <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
 	                ];
@@ -1719,7 +1792,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       const target = resolveSidebarLocateTarget(request, {
           groupBySchema: shouldHideSchemaPrefix(conn),
       });
-      const objectLabel = request.objectGroup === 'views' ? '视图' : '表';
+      const objectLabel = request.objectGroup === 'materializedViews' ? '物化视图' : (request.objectGroup === 'views' ? '视图' : '表');
 
       let path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
       const dbLoadKey = `dbs-${request.connectionId}`;
@@ -1893,7 +1966,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: dataRef.id, dbName: '' });
-      } else if (type === 'view' || type === 'db-trigger' || type === 'routine') {
+      } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'routine') {
           setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -1940,7 +2013,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       if (type === 'connection') setActiveContext({ connectionId: nodeKey, dbName: '' });
       else if (type === 'database') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') setActiveContext({ connectionId: dataRef.id, dbName: '' });
-      else if (type === 'table' || type === 'view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
+      else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'routine') setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
@@ -1958,7 +2031,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
               tableName,
           });
           return;
-      } else if (node.type === 'view') {
+      } else if (node.type === 'view' || node.type === 'materialized-view') {
           const { viewName, dbName, id } = node.dataRef;
           addTab({
               id: node.key,
@@ -2145,7 +2218,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           if (node.type === 'database') {
               connId = node.dataRef.id;
               dbName = node.title;
-          } else if (node.type === 'table' || node.type === 'view') {
+          } else if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
               connId = node.dataRef.id;
               dbName = node.dataRef.dbName;
           }
@@ -3138,13 +3211,15 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   // --- 视图操作 ---
   const openViewDefinition = (node: any) => {
       const { viewName, dbName, id } = node.dataRef;
+      const isMaterialized = node.type === 'materialized-view' || node.dataRef?.objectKind === 'materialized-view';
       addTab({
           id: `view-def-${id}-${dbName}-${viewName}`,
-          title: `视图: ${viewName}`,
+          title: `${isMaterialized ? '物化视图' : '视图'}: ${viewName}`,
           type: 'view-def',
           connectionId: id,
           dbName,
           viewName,
+          viewKind: isMaterialized ? 'materialized' : 'view',
       });
   };
 
@@ -3160,6 +3235,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           let query = '';
           switch (dialect) {
               case 'mysql':
+              case 'starrocks':
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
               case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
@@ -3216,6 +3292,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       let template: string;
       switch (dialect) {
           case 'mysql':
+          case 'starrocks':
               template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
           case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
@@ -3241,6 +3318,56 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
           connectionId: id,
           dbName,
           query: template
+      });
+  };
+
+  const openCreateStarRocksMaterializedView = (node: any) => {
+      const conn = node.dataRef;
+      const { dbName, id } = conn;
+      const schemaPrefix = String(conn.schemaName || dbName || '').trim();
+      const mvName = schemaPrefix ? `${schemaPrefix}.mv_name` : 'mv_name';
+      const template = buildStarRocksMaterializedViewPreviewSql({
+          name: mvName,
+          query: 'SELECT\n  column1,\n  COUNT(*) AS cnt\nFROM table_name\nGROUP BY column1',
+          distributionColumnNames: ['column1'],
+          refreshClause: 'REFRESH ASYNC',
+          properties: '"replication_num" = "1"',
+      });
+      addTab({
+          id: `query-create-starrocks-mv-${Date.now()}`,
+          title: '新建物化视图',
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: template,
+      });
+  };
+
+  const openCreateStarRocksExternalCatalog = (node: any) => {
+      const conn = node.dataRef;
+      const { dbName, id } = conn;
+      addTab({
+          id: `query-create-starrocks-catalog-${Date.now()}`,
+          title: '新建外部 Catalog',
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: `CREATE EXTERNAL CATALOG catalog_name\nPROPERTIES (\n  "type" = "hive",\n  "hive.metastore.uris" = "thrift://127.0.0.1:9083"\n);`,
+      });
+  };
+
+  const openCreateStarRocksRollup = (node: any) => {
+      const conn = node.dataRef;
+      const { tableName, dbName, id } = conn;
+      const safeTable = String(tableName || 'table_name').trim();
+      const quotedTable = safeTable.includes('`') ? safeTable : safeTable.split('.').map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
+      addTab({
+          id: `query-create-starrocks-rollup-${Date.now()}`,
+          title: '新增 Rollup',
+          type: 'query',
+          connectionId: id,
+          dbName,
+          query: `ALTER TABLE ${quotedTable}\nADD ROLLUP rollup_name (column1, column2);`,
       });
   };
 
@@ -3327,6 +3454,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
           switch (dialect) {
               case 'mysql':
+              case 'starrocks':
                   query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
                   break;
               case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
@@ -3395,6 +3523,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
       switch (dialect) {
           case 'mysql':
+          case 'starrocks':
               template = isProc
                   ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
                   : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
@@ -3626,6 +3755,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
   const isObjectNode = (node: TreeNode): boolean => {
       return node.type === 'table'
           || node.type === 'view'
+          || node.type === 'materialized-view'
           || node.type === 'db-trigger'
           || node.type === 'routine'
           || node.type === 'object-group';
@@ -3736,6 +3866,17 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 label: '新建视图',
                 icon: <PlusOutlined />,
                 onClick: () => openCreateView(node)
+            },
+        ];
+    }
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'materializedViews') {
+        return [
+            {
+                key: 'create-materialized-view',
+                label: '新建物化视图',
+                icon: <PlusOutlined />,
+                onClick: () => openCreateStarRocksMaterializedView(node)
             },
         ];
     }
@@ -4107,6 +4248,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             }
         ];
     } else if (node.type === 'database') {
+       const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
        return [
            {
                key: 'new-table',
@@ -4114,6 +4256,20 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                icon: <TableOutlined />,
                onClick: () => openNewTableDesign(node)
            },
+           ...(isStarRocks ? [
+               {
+                   key: 'new-materialized-view',
+                   label: '新建物化视图',
+                   icon: <ThunderboltOutlined />,
+                   onClick: () => openCreateStarRocksMaterializedView(node)
+               },
+               {
+                   key: 'new-external-catalog',
+                   label: '新建外部 Catalog',
+                   icon: <CloudOutlined />,
+                   onClick: () => openCreateStarRocksExternalCatalog(node)
+               },
+           ] : []),
            {
                key: 'rename-db',
                label: '重命名数据库',
@@ -4263,6 +4419,36 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 ]
             },
         ];
+    } else if (node.type === 'materialized-view') {
+        return [
+            {
+                key: 'open-materialized-view',
+                label: '浏览物化视图数据',
+                icon: <EyeOutlined />,
+                onClick: () => onDoubleClick(null, node)
+            },
+            {
+                key: 'materialized-view-definition',
+                label: '查看物化视图定义',
+                icon: <CodeOutlined />,
+                onClick: () => openViewDefinition(node)
+            },
+            {
+                key: 'new-query',
+                label: '新建查询',
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `query-${Date.now()}`,
+                        title: `新建查询`,
+                        type: 'query',
+                        connectionId: node.dataRef.id,
+                        dbName: node.dataRef.dbName,
+                        query: buildTableSelectQuery('starrocks', String(node.dataRef?.tableName || node.dataRef?.viewName || ''))
+                    });
+                }
+            },
+        ];
     } else if (node.type === 'routine') {
         const routineType = node.dataRef?.routineType || 'FUNCTION';
         const typeLabel = routineType === 'PROCEDURE' ? '存储过程' : '函数';
@@ -4296,6 +4482,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
             },
         ];
     } else if (node.type === 'table') {
+        const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
         return [
             {
                 key: 'new-query',
@@ -4321,6 +4508,12 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
                 icon: <EditOutlined />,
                 onClick: () => openDesign(node, 'columns', false)
             },
+            ...(isStarRocks ? [{
+                key: 'new-rollup',
+                label: '新增 Rollup',
+                icon: <ThunderboltOutlined />,
+                onClick: () => openCreateStarRocksRollup(node)
+            }] : []),
             {
                 key: 'copy-table-name',
                 label: '复制表名',
@@ -4507,7 +4700,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
     const displayTitle = String(node.title ?? '');
     let hoverTitle = displayTitle;
-    if (node.type === 'table' || node.type === 'view') {
+    if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
         const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || '').trim();
         const conn = node?.dataRef as SavedConnection | undefined;
         if (rawTableName && shouldHideSchemaPrefix(conn)) {

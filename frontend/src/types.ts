@@ -419,6 +419,7 @@ export interface TabData {
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
   viewName?: string; // View name for view definition tabs
+  viewKind?: "view" | "materialized";
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
   savedQueryId?: string; // Saved query identity for quick-save behavior

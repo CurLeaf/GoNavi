@@ -1251,7 +1251,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -1386,7 +1386,7 @@ func quoteIdentByType(dbType string, ident string) string {
 
 	dbType = resolveDDLDBType(connection.ConnectionConfig{Type: dbType})
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "kingbase":
 		return db.QuoteKingbaseIdentifier(ident)
@@ -1608,7 +1608,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 	dbType := resolveDDLDBType(config)
 	escapedDbName := escapeSQLLiteral(dbName)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx":
 		queries := []string{
 			fmt.Sprintf(`SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE TABLE_TYPE='VIEW' AND TABLE_SCHEMA='%s' ORDER BY TABLE_NAME`, escapedDbName),
 		}
@@ -1711,7 +1711,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 	escapedDB := escapeSQLLiteral(dbName)
 
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx":
 		if safeSchema == "" {
 			safeSchema = strings.TrimSpace(dbName)
 		}
@@ -1991,7 +1991,7 @@ func formatSQLValue(dbType string, v interface{}) string {
 		return "'" + val.Format("2006-01-02 15:04:05") + "'"
 	case string:
 		normalizedType := strings.ToLower(strings.TrimSpace(dbType))
-		if (normalizedType == "mysql" || normalizedType == "oceanbase" || normalizedType == "diros") && isMySQLHexLiteral(val) {
+		if (normalizedType == "mysql" || normalizedType == "oceanbase" || normalizedType == "diros" || normalizedType == "starrocks") && isMySQLHexLiteral(val) {
 			return val
 		}
 		escaped := strings.ReplaceAll(val, "'", "''")

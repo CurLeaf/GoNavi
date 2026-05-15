@@ -59,6 +59,7 @@ const mysqlCompatibleTypes = new Set([
   'oceanbase',
   'doris',
   'diros',
+  'starrocks',
   'sphinx',
 ]);
 const postgresCompatibleTypes = new Set([

@@ -12,6 +12,7 @@ export type SqlDialect =
   | 'mariadb'
   | 'oceanbase'
   | 'diros'
+  | 'starrocks'
   | 'sphinx'
   | 'postgres'
   | 'kingbase'
@@ -70,6 +71,8 @@ export const resolveSqlDialect = (
     case 'doris':
     case 'diros':
       return 'diros';
+    case 'starrocks':
+      return 'starrocks';
     case 'dm':
     case 'dm8':
     case 'dameng':
@@ -107,6 +110,7 @@ export const resolveSqlDialect = (
   if (source.includes('mariadb')) return 'mariadb';
   if (source.includes('mysql')) return 'mysql';
   if (source.includes('doris') || source.includes('diros')) return 'diros';
+  if (source.includes('starrocks')) return 'starrocks';
   if (source.includes('sphinx')) return 'sphinx';
   if (source.includes('kingbase')) return 'kingbase';
   if (source.includes('highgo')) return 'highgo';
@@ -123,7 +127,7 @@ export const resolveSqlDialect = (
 };
 
 export const isMysqlFamilyDialect = (dbType: string): boolean => (
-  ['mysql', 'mariadb', 'oceanbase', 'diros', 'sphinx', 'tidb', 'starrocks'].includes(resolveSqlDialect(dbType))
+  ['mysql', 'mariadb', 'oceanbase', 'diros', 'starrocks', 'sphinx', 'tidb'].includes(resolveSqlDialect(dbType))
 );
 
 export const isPgLikeDialect = (dbType: string): boolean => (
@@ -358,6 +362,30 @@ const DORIS_TYPES = optionValues([
   'STRUCT<name:STRING>',
 ]);
 
+const STARROCKS_TYPES = optionValues([
+  'BOOLEAN',
+  'TINYINT',
+  'SMALLINT',
+  'INT',
+  'BIGINT',
+  'LARGEINT',
+  'FLOAT',
+  'DOUBLE',
+  'DECIMAL(10,2)',
+  'DATE',
+  'DATETIME',
+  'CHAR(50)',
+  'VARCHAR(255)',
+  'STRING',
+  'JSON',
+  'BITMAP',
+  'HLL',
+  'PERCENTILE',
+  'ARRAY<INT>',
+  'MAP<STRING,STRING>',
+  'STRUCT<name STRING>',
+]);
+
 const SPHINX_TYPES = optionValues([
   'text',
   'string',
@@ -444,6 +472,7 @@ const COMMON_TYPES = optionValues(['int', 'varchar(255)', 'text', 'datetime', 'd
 export const resolveColumnTypeOptions = (dbType: string): ColumnTypeOption[] => {
   const dialect = resolveSqlDialect(dbType);
   if (dialect === 'diros') return DORIS_TYPES;
+  if (dialect === 'starrocks') return STARROCKS_TYPES;
   if (dialect === 'sphinx') return SPHINX_TYPES;
   if (isMysqlFamilyDialect(dialect)) return MYSQL_TYPES;
   if (isPgLikeDialect(dialect)) return PG_TYPES;
@@ -495,10 +524,19 @@ const CLICKHOUSE_KEYWORDS = [
   'SAMPLE', 'MATERIALIZED', 'ALIAS', 'SETTINGS', 'TTL', 'CODEC',
 ];
 
+const STARROCKS_KEYWORDS = [
+  'LIMIT', 'OFFSET', 'ENGINE', 'OLAP', 'DUPLICATE KEY', 'PRIMARY KEY',
+  'AGGREGATE KEY', 'UNIQUE KEY', 'DISTRIBUTED BY', 'HASH', 'BUCKETS',
+  'PARTITION BY', 'PROPERTIES', 'MATERIALIZED VIEW', 'REFRESH ASYNC',
+  'REFRESH MANUAL', 'ROLLUP', 'ADD ROLLUP', 'EXTERNAL CATALOG',
+  'CREATE EXTERNAL TABLE', 'BITMAP', 'HLL',
+];
+
 const TDENGINE_KEYWORDS = ['LIMIT', 'SLIMIT', 'SOFFSET', 'TAGS', 'USING', 'INTERVAL', 'FILL', 'PARTITION BY'];
 
 export const resolveSqlKeywords = (dbType: string): string[] => {
   const dialect = resolveSqlDialect(dbType);
+  if (dialect === 'starrocks') return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS, ...STARROCKS_KEYWORDS]);
   if (isMysqlFamilyDialect(dialect)) return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS]);
   if (isPgLikeDialect(dialect)) return unique([...COMMON_KEYWORDS, ...PG_KEYWORDS]);
   if (isOracleLikeDialect(dialect)) return unique([...COMMON_KEYWORDS, ...ORACLE_KEYWORDS]);
@@ -692,6 +730,21 @@ const CLICKHOUSE_FUNCTIONS = [
   fn('toInt64', 'ClickHouse - 转 Int64'),
 ];
 
+const STARROCKS_FUNCTIONS = [
+  fn('DATE_FORMAT', 'StarRocks - 日期格式化'),
+  fn('STR_TO_DATE', 'StarRocks - 字符串转日期'),
+  fn('FROM_UNIXTIME', 'StarRocks - Unix 时间戳转时间'),
+  fn('TO_BITMAP', 'StarRocks - 构造 Bitmap'),
+  fn('BITMAP_UNION', 'StarRocks - Bitmap 聚合'),
+  fn('BITMAP_COUNT', 'StarRocks - Bitmap 计数'),
+  fn('HLL_HASH', 'StarRocks - HLL 哈希'),
+  fn('HLL_UNION_AGG', 'StarRocks - HLL 聚合'),
+  fn('APPROX_COUNT_DISTINCT', 'StarRocks - 近似去重'),
+  fn('PERCENTILE_APPROX', 'StarRocks - 近似分位数'),
+  fn('GET_JSON_STRING', 'StarRocks - JSON 字符串提取'),
+  fn('ARRAY_LENGTH', 'StarRocks - 数组长度'),
+];
+
 const TDENGINE_FUNCTIONS = [
   fn('NOW', 'TDengine - 当前时间'),
   fn('TODAY', 'TDengine - 当前日期'),
@@ -723,6 +776,7 @@ const mergeFunctions = (items: SqlFunctionCompletion[]): SqlFunctionCompletion[]
 
 export const resolveSqlFunctions = (dbType: string): SqlFunctionCompletion[] => {
   const dialect = resolveSqlDialect(dbType);
+  if (dialect === 'starrocks') return mergeFunctions([...COMMON_FUNCTIONS, ...MYSQL_FUNCTIONS, ...STARROCKS_FUNCTIONS]);
   if (isMysqlFamilyDialect(dialect)) return mergeFunctions([...COMMON_FUNCTIONS, ...MYSQL_FUNCTIONS]);
   if (isPgLikeDialect(dialect)) return mergeFunctions([...COMMON_FUNCTIONS, ...PG_FUNCTIONS]);
   if (isOracleLikeDialect(dialect)) return mergeFunctions([...COMMON_FUNCTIONS, ...ORACLE_FUNCTIONS]);

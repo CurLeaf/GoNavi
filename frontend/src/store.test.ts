@@ -240,6 +240,28 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('keeps StarRocks saved connections as independent datasource type', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'starrocks-fe',
+        name: 'StarRocks FE',
+        config: {
+          id: 'starrocks-fe',
+          type: 'starrocks',
+          host: 'starrocks.local',
+          port: 9030,
+          user: 'root',
+        },
+      },
+    ]);
+
+    const config = useStore.getState().connections[0]?.config;
+    expect(config?.type).toBe('starrocks');
+    expect(config?.port).toBe(9030);
+  });
+
   it('normalizes OceanBase protocol override when replacing saved connections', async () => {
     const { useStore } = await importStore();
 

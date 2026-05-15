@@ -36,6 +36,46 @@ export interface BuildCreateTablePreviewInput {
   columns: EditableColumnSnapshot[];
   charset?: string;
   collation?: string;
+  starRocksOptions?: StarRocksCreateTableOptions;
+}
+
+export type StarRocksTableKind = 'olap' | 'external';
+export type StarRocksKeyModel = 'DUPLICATE' | 'PRIMARY' | 'UNIQUE' | 'AGGREGATE';
+export type StarRocksDistributionType = 'HASH' | 'RANDOM' | 'NONE';
+
+export interface StarRocksRollupOption {
+  name: string;
+  columnNames: string[];
+  fromIndexName?: string;
+  properties?: string;
+}
+
+export interface StarRocksCreateTableOptions {
+  tableKind?: StarRocksTableKind;
+  keyModel?: StarRocksKeyModel;
+  keyColumnNames?: string[];
+  partitionClause?: string;
+  distributionType?: StarRocksDistributionType;
+  distributionColumnNames?: string[];
+  bucketMode?: 'AUTO' | 'NUMBER';
+  bucketCount?: number;
+  properties?: string;
+  rollups?: StarRocksRollupOption[];
+  externalEngine?: string;
+  externalProperties?: string;
+}
+
+export interface BuildStarRocksMaterializedViewPreviewInput {
+  name: string;
+  query: string;
+  async?: boolean;
+  comment?: string;
+  distributionColumnNames?: string[];
+  bucketCount?: number;
+  refreshClause?: string;
+  partitionClause?: string;
+  orderByColumnNames?: string[];
+  properties?: string;
 }
 
 const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
@@ -152,6 +192,20 @@ const buildDorisColumnDefinition = (column: EditableColumnSnapshot, dbType: stri
     column.nullable === 'NO' ? 'NOT NULL' : 'NULL',
     defaultSql,
     autoIncrementSql,
+    `COMMENT '${escapeSqlString(column.comment || '')}'`,
+  ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+};
+
+const buildStarRocksColumnDefinition = (column: EditableColumnSnapshot): string => {
+  const defaultSql = buildDefaultSql(column.default, 'starrocks');
+  const extraText = String(column.extra || '').trim().toUpperCase();
+  const aggregateSql = DORIS_AGG_TYPES.has(extraText) ? extraText : '';
+  return [
+    quoteIdentifierPart(column.name, 'starrocks'),
+    String(column.type || '').trim(),
+    aggregateSql,
+    column.nullable === 'NO' ? 'NOT NULL' : 'NULL',
+    defaultSql,
     `COMMENT '${escapeSqlString(column.comment || '')}'`,
   ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 };
@@ -607,6 +661,7 @@ export const buildAlterTablePreviewSql = (input: BuildAlterTablePreviewInput): s
   if (dbType === 'sqlite') return buildSqliteAlterPreviewSql({ ...input, dbType });
   if (dbType === 'duckdb') return buildDuckDbAlterPreviewSql({ ...input, dbType });
   if (dbType === 'diros') return buildDorisAlterPreviewSql({ ...input, dbType }, dbType);
+  if (dbType === 'starrocks') return buildLimitedBacktickAlterPreviewSql({ ...input, dbType }, dbType, 'StarRocks');
   if (dbType === 'clickhouse') return buildLimitedBacktickAlterPreviewSql({ ...input, dbType }, dbType, 'ClickHouse');
   if (dbType === 'tdengine') return buildLimitedBacktickAlterPreviewSql({ ...input, dbType }, dbType, 'TDengine');
   if (isMysqlFamilyDialect(dbType)) return buildMySqlAlterPreviewSql({ ...input, dbType }, dbType);
@@ -647,8 +702,150 @@ const buildCreateColumnComments = (tableRef: string, input: BuildCreateTablePrev
     .filter(Boolean)
 );
 
+const normalizeStarRocksKeyModel = (value: unknown): StarRocksKeyModel => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'PRIMARY' || normalized === 'UNIQUE' || normalized === 'AGGREGATE') return normalized;
+  return 'DUPLICATE';
+};
+
+const normalizeStarRocksDistributionType = (value: unknown): StarRocksDistributionType => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (normalized === 'RANDOM' || normalized === 'NONE') return normalized;
+  return 'HASH';
+};
+
+const pickStarRocksKeyColumns = (
+  input: BuildCreateTablePreviewInput,
+  options: StarRocksCreateTableOptions,
+): string[] => {
+  const requested = Array.isArray(options.keyColumnNames) ? options.keyColumnNames : [];
+  const fallback = input.columns.filter((column) => column.key === 'PRI').map((column) => column.name);
+  const source = requested.length > 0 ? requested : (fallback.length > 0 ? fallback : input.columns.slice(0, 1).map((column) => column.name));
+  return source.map((columnName) => String(columnName || '').trim()).filter(Boolean);
+};
+
+const quoteStarRocksColumnList = (columnNames: string[]): string => (
+  columnNames.map((columnName) => quoteIdentifierPart(columnName, 'starrocks')).filter(Boolean).join(', ')
+);
+
+const normalizeStarRocksPropertiesBlock = (raw: unknown): string => {
+  const lines = String(raw || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/,+$/, ''))
+    .filter(Boolean);
+  if (lines.length === 0) return '';
+  return `PROPERTIES (\n  ${lines.join(',\n  ')}\n)`;
+};
+
+const buildStarRocksDistributionSql = (
+  input: BuildCreateTablePreviewInput,
+  options: StarRocksCreateTableOptions,
+  keyColumns: string[],
+): string => {
+  const distributionType = normalizeStarRocksDistributionType(options.distributionType);
+  if (distributionType === 'NONE') return '';
+  if (distributionType === 'RANDOM') {
+    return options.bucketMode === 'NUMBER' && Number(options.bucketCount) > 0
+      ? `DISTRIBUTED BY RANDOM BUCKETS ${Number(options.bucketCount)}`
+      : 'DISTRIBUTED BY RANDOM BUCKETS AUTO';
+  }
+
+  const requested = Array.isArray(options.distributionColumnNames) ? options.distributionColumnNames : [];
+  const distributionColumns = requested.length > 0 ? requested : keyColumns;
+  const columnList = quoteStarRocksColumnList(
+    distributionColumns.length > 0 ? distributionColumns : input.columns.slice(0, 1).map((column) => column.name)
+  );
+  if (!columnList) return '';
+
+  const bucketSql = options.bucketMode === 'NUMBER' && Number(options.bucketCount) > 0
+    ? `BUCKETS ${Number(options.bucketCount)}`
+    : 'BUCKETS AUTO';
+  return `DISTRIBUTED BY HASH(${columnList}) ${bucketSql}`;
+};
+
+const buildStarRocksRollupSql = (tableRef: string, rollups: StarRocksRollupOption[] | undefined): string[] => (
+  (Array.isArray(rollups) ? rollups : [])
+    .map((rollup) => {
+      const rollupName = String(rollup?.name || '').trim();
+      const columnList = quoteStarRocksColumnList(Array.isArray(rollup?.columnNames) ? rollup.columnNames : []);
+      if (!rollupName || !columnList) return '';
+      const fromSql = String(rollup.fromIndexName || '').trim()
+        ? ` FROM ${quoteIdentifierPart(String(rollup.fromIndexName || '').trim(), 'starrocks')}`
+        : '';
+      const propertiesSql = normalizeStarRocksPropertiesBlock(rollup.properties);
+      const suffix = propertiesSql ? `\n${propertiesSql}` : '';
+      return `ALTER TABLE ${tableRef}\nADD ROLLUP ${quoteIdentifierPart(rollupName, 'starrocks')} (${columnList})${fromSql}${suffix};`;
+    })
+    .filter(Boolean)
+);
+
+const buildStarRocksCreateTablePreviewSql = (input: BuildCreateTablePreviewInput): string => {
+  const options = input.starRocksOptions || {};
+  const tableRef = quoteIdentifierPath(input.tableName, 'starrocks');
+  const colDefs = input.columns.map((column) => buildStarRocksColumnDefinition(column));
+  const createPrefix = options.tableKind === 'external' ? 'CREATE EXTERNAL TABLE' : 'CREATE TABLE';
+  const createSql = `${createPrefix} ${tableRef} (\n  ${colDefs.join(',\n  ')}\n)`;
+
+  if (options.tableKind === 'external') {
+    const engine = String(options.externalEngine || 'hive').trim().toUpperCase();
+    const propertiesSql = normalizeStarRocksPropertiesBlock(options.externalProperties || options.properties);
+    return `${createSql}\nENGINE=${engine}${propertiesSql ? `\n${propertiesSql}` : ''};`;
+  }
+
+  const keyModel = normalizeStarRocksKeyModel(options.keyModel);
+  const keyColumns = pickStarRocksKeyColumns(input, options);
+  const keyColumnSql = quoteStarRocksColumnList(keyColumns);
+  const keySql = keyColumnSql ? `${keyModel} KEY (${keyColumnSql})` : '';
+  const partitionSql = String(options.partitionClause || '').trim().replace(/;+\s*$/, '');
+  const distributionSql = buildStarRocksDistributionSql(input, options, keyColumns);
+  const propertiesSql = normalizeStarRocksPropertiesBlock(options.properties);
+
+  const clauses = [
+    'ENGINE=OLAP',
+    keySql,
+    partitionSql,
+    distributionSql,
+    propertiesSql,
+  ].filter(Boolean);
+  const createStatement = `${createSql}\n${clauses.join('\n')};`;
+  const rollupStatements = buildStarRocksRollupSql(tableRef, options.rollups);
+  return [createStatement, ...rollupStatements].join('\n');
+};
+
+export const buildStarRocksMaterializedViewPreviewSql = (
+  input: BuildStarRocksMaterializedViewPreviewInput,
+): string => {
+  const name = quoteIdentifierPath(input.name || 'mv_name', 'starrocks');
+  const query = String(input.query || '').trim().replace(/;+\s*$/, '') || 'SELECT column1, COUNT(*) AS cnt\nFROM table_name\nGROUP BY column1';
+  const commentSql = String(input.comment || '').trim() ? `\nCOMMENT '${escapeSqlString(String(input.comment || '').trim())}'` : '';
+  const refreshSql = String(input.refreshClause || '').trim()
+    || (input.async === false ? 'REFRESH MANUAL' : 'REFRESH ASYNC');
+  const partitionSql = String(input.partitionClause || '').trim().replace(/;+\s*$/, '');
+  const distributionColumns = quoteStarRocksColumnList(Array.isArray(input.distributionColumnNames) ? input.distributionColumnNames : []);
+  const distributionSql = distributionColumns
+    ? `DISTRIBUTED BY HASH(${distributionColumns}) BUCKETS ${Number(input.bucketCount) > 0 ? Number(input.bucketCount) : 'AUTO'}`
+    : '';
+  const orderByColumns = quoteStarRocksColumnList(Array.isArray(input.orderByColumnNames) ? input.orderByColumnNames : []);
+  const orderBySql = orderByColumns ? `ORDER BY (${orderByColumns})` : '';
+  const propertiesSql = normalizeStarRocksPropertiesBlock(input.properties);
+  return [
+    `CREATE MATERIALIZED VIEW ${name}${commentSql}`,
+    refreshSql,
+    partitionSql,
+    distributionSql,
+    orderBySql,
+    propertiesSql,
+    'AS',
+    `${query};`,
+  ].filter(Boolean).join('\n');
+};
+
 export const buildCreateTablePreviewSql = (input: BuildCreateTablePreviewInput): string => {
   const dbType = resolveSqlDialect(input.dbType);
+  if (dbType === 'starrocks') {
+    return buildStarRocksCreateTablePreviewSql({ ...input, dbType });
+  }
+
   const tableRef = quoteIdentifierPath(input.tableName, dbType);
   const colDefs = input.columns.map((column) => buildCreateTableColumnDefinition(column, dbType));
   const pkColumns = input.columns.filter((column) => column.key === 'PRI');

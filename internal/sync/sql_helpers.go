@@ -26,7 +26,7 @@ func quoteIdentByType(dbType string, ident string) string {
 	}
 
 	switch normalizeMigrationDBType(dbType) {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "clickhouse", "tdengine":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "clickhouse", "tdengine":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "kingbase":
 		return db.QuoteKingbaseIdentifier(ident)
@@ -140,7 +140,7 @@ func qualifiedNameForQuery(dbType string, schema string, table string, original 
 			return raw
 		}
 		return s + "." + table
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "clickhouse", "tdengine":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "clickhouse", "tdengine":
 		s := strings.TrimSpace(schema)
 		if s == "" || table == "" {
 			return table

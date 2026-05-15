@@ -252,7 +252,7 @@ jobs:
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          DRIVERS=(mariadb oceanbase doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
+          DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
           DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
@@ -577,6 +577,10 @@ jobs:
             "drivers/MacOS/clickhouse-driver-agent-darwin-amd64"
             "drivers/MacOS/clickhouse-driver-agent-darwin-arm64"
             "drivers/Linux/clickhouse-driver-agent-linux-amd64"
+            "drivers/Windows/starrocks-driver-agent-windows-amd64.exe"
+            "drivers/MacOS/starrocks-driver-agent-darwin-amd64"
+            "drivers/MacOS/starrocks-driver-agent-darwin-arm64"
+            "drivers/Linux/starrocks-driver-agent-linux-amd64"
           )
 
           missing=0

@@ -25,6 +25,8 @@ const resolveCustomDriverDialect = (driver: string): string => {
     case 'diros':
     case 'doris':
       return 'diros';
+    case 'starrocks':
+      return 'starrocks';
     case 'oceanbase':
       return 'oceanbase';
     case 'kingbase':
@@ -49,6 +51,7 @@ const resolveCustomDriverDialect = (driver: string): string => {
   if (normalized.includes('sqlite')) return 'sqlite';
   if (normalized.includes('sphinx')) return 'sphinx';
   if (normalized.includes('diros') || normalized.includes('doris')) return 'diros';
+  if (normalized.includes('starrocks')) return 'starrocks';
   return normalized;
 };
 
@@ -65,6 +68,7 @@ export const supportsTableTruncateAction = (type: string, driver?: string): bool
     case 'mysql':
     case 'mariadb':
     case 'oceanbase':
+    case 'starrocks':
     case 'postgres':
     case 'kingbase':
     case 'highgo':

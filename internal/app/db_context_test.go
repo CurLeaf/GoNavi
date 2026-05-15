@@ -77,6 +77,19 @@ func TestNormalizeRunConfig_OceanBaseOracleKeepsServiceName(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_StarRocksUsesDatabaseFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "starrocks",
+		Database: "default_cluster",
+	}, "analytics")
+
+	if runConfig.Database != "analytics" {
+		t.Fatalf("expected StarRocks database from tree, got %q", runConfig.Database)
+	}
+}
+
 func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *testing.T) {
 	t.Parallel()
 

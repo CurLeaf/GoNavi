@@ -24,6 +24,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"mariadb":    {},
 	"oceanbase":  {},
 	"diros":      {},
+	"starrocks":  {},
 	"sphinx":     {},
 	"sqlserver":  {},
 	"sqlite":     {},
@@ -78,6 +79,8 @@ func driverDisplayName(driverType string) string {
 		return "OceanBase"
 	case "diros":
 		return "Doris"
+	case "starrocks":
+		return "StarRocks"
 	case "sphinx":
 		return "Sphinx"
 	case "postgres":

@@ -53,6 +53,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         const safeDbName = escapeSQLLiteral(dbName);
         switch (dialect) {
             case 'mysql':
+            case 'starrocks':
                 return [
                     `SHOW CREATE TRIGGER \`${triggerName.replace(/`/g, '``')}\``,
                     safeDbName
@@ -161,7 +162,8 @@ LIMIT 1`];
         const row = data[0];
 
         switch (dialect) {
-            case 'mysql': {
+            case 'mysql':
+            case 'starrocks': {
                 // MySQL SHOW CREATE TRIGGER returns: Trigger, sql_mode, SQL Original Statement, ...
                 const keys = Object.keys(row);
                 if (row.trigger_definition || row.TRIGGER_DEFINITION) {
