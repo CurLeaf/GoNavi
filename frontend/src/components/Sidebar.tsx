@@ -3830,6 +3830,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
 
         return [
             {
+                key: 'new-table',
+                label: '新建表',
+                icon: <TableOutlined />,
+                onClick: () => openNewTableDesign(node)
+            },
+            { type: 'divider' },
+            {
                 key: 'sort-by-name',
                 label: '按名称排序',
                 icon: currentSort === 'name' ? <CheckSquareOutlined /> : null,
