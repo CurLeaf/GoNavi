@@ -1,9 +1,87 @@
 package redis
 
 import (
+	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 )
+
+// 回归保护：HGETALL 在 RESP3 下返回 map[interface{}]interface{}（go-redis v9 默认 RESP3），
+// 这种类型 encoding/json 无法序列化，原值穿透到 Wails RPC 会让 Windows 进程退出（用户感知闪退）。
+// formatCommandResult 必须把 map 平展成交错 [k1, v1, k2, v2, ...] array，前端按 array 渲染。
+func TestFormatCommandResultFlattensRESP3MapForJSONMarshal(t *testing.T) {
+	input := map[interface{}]interface{}{
+		"name": "alice",
+		"age":  "30",
+	}
+	got := formatCommandResult(input)
+
+	arr, ok := got.([]interface{})
+	if !ok {
+		t.Fatalf("expected flattened []interface{}, got %T (%#v)", got, got)
+	}
+	if len(arr) != 4 {
+		t.Fatalf("expected 4 elements (2 pairs flattened), got %d: %#v", len(arr), arr)
+	}
+
+	// 平展后必须能被 encoding/json 序列化——这是修复的根本目的
+	if _, err := json.Marshal(arr); err != nil {
+		t.Fatalf("flattened result must be JSON-marshalable, got error: %v", err)
+	}
+
+	// 验证 key+value 都保留下来了（顺序由 map 遍历决定，不强断言顺序）
+	collected := make([]string, 0, 4)
+	for _, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			t.Fatalf("expected string element, got %T", item)
+		}
+		collected = append(collected, s)
+	}
+	sort.Strings(collected)
+	want := []string{"30", "age", "alice", "name"}
+	for i, w := range want {
+		if collected[i] != w {
+			t.Fatalf("flattened content mismatch at %d: got %q want %q (all=%v)", i, collected[i], w, collected)
+		}
+	}
+}
+
+// 嵌套 array 内含 map[interface{}]interface{} 也要递归平展，
+// 保证 XINFO STREAM 等返回嵌套结构的命令不会卡在序列化阶段。
+func TestFormatCommandResultRecursivelyFlattensNestedMap(t *testing.T) {
+	input := []interface{}{
+		"stream-id",
+		map[interface{}]interface{}{"k": "v"},
+	}
+	got := formatCommandResult(input)
+	arr, ok := got.([]interface{})
+	if !ok || len(arr) != 2 {
+		t.Fatalf("expected []interface{} of length 2, got %#v", got)
+	}
+	nested, ok := arr[1].([]interface{})
+	if !ok {
+		t.Fatalf("expected nested map to be flattened to []interface{}, got %T", arr[1])
+	}
+	if _, err := json.Marshal(arr); err != nil {
+		t.Fatalf("recursively flattened result must be JSON-marshalable, got error: %v", err)
+	}
+	_ = nested
+}
+
+// 已经是 string-key 简单类型的命令（HGET、SET 之类）不应被改变。
+func TestFormatCommandResultPreservesScalarAndByteSlice(t *testing.T) {
+	if got := formatCommandResult("ok"); got != "ok" {
+		t.Fatalf("string scalar should pass through, got %v", got)
+	}
+	if got := formatCommandResult([]byte("ok")); got != "ok" {
+		t.Fatalf("[]byte should be converted to string, got %v", got)
+	}
+	if got := formatCommandResult(int64(42)); got != int64(42) {
+		t.Fatalf("int64 scalar should pass through, got %v", got)
+	}
+}
 
 func TestSanitizeRedisPassword(t *testing.T) {
 	tests := []struct {
