@@ -92,6 +92,7 @@ import {
   TestConnection,
   RedisConnect,
   SelectDatabaseFile,
+  SelectCertificateFile,
   SelectSSHKeyFile,
   TestJVMConnection,
 } from "../../wailsjs/go/app/App";
@@ -283,6 +284,69 @@ const supportsSSLForType = (type: string) =>
       .toLowerCase(),
   );
 
+const sslCAPathSupportedTypes = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "clickhouse",
+  "postgres",
+  "sqlserver",
+  "kingbase",
+  "highgo",
+  "vastbase",
+  "opengauss",
+  "mongodb",
+  "redis",
+]);
+
+const sslClientCertificateSupportedTypes = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "dameng",
+  "clickhouse",
+  "postgres",
+  "kingbase",
+  "highgo",
+  "vastbase",
+  "opengauss",
+  "mongodb",
+  "redis",
+]);
+
+const supportsSSLCAPathForType = (type: string) =>
+  sslCAPathSupportedTypes.has(
+    String(type || "")
+      .trim()
+      .toLowerCase(),
+  );
+
+const supportsSSLClientCertificateForType = (type: string) =>
+  sslClientCertificateSupportedTypes.has(
+    String(type || "")
+      .trim()
+      .toLowerCase(),
+  );
+
+const isPostgresCompatibleSSLType = (type: string) =>
+  [
+    "postgres",
+    "kingbase",
+    "highgo",
+    "vastbase",
+    "opengauss",
+  ].includes(
+    String(type || "")
+      .trim()
+      .toLowerCase(),
+  );
+
 const isFileDatabaseType = (type: string) =>
   type === "sqlite" || type === "duckdb";
 
@@ -394,6 +458,9 @@ const ConnectionModal: React.FC<{
   const [driverStatusLoaded, setDriverStatusLoaded] = useState(false);
   const [selectingDbFile, setSelectingDbFile] = useState(false);
   const [selectingSSHKey, setSelectingSSHKey] = useState(false);
+  const [selectingCertificateField, setSelectingCertificateField] = useState<
+    "sslCAPath" | "sslCertPath" | "sslKeyPath" | null
+  >(null);
   const [clearSecrets, setClearSecrets] = useState<ConnectionSecretClearState>(
     createEmptyConnectionSecretClearState,
   );
@@ -445,17 +512,24 @@ const ConnectionModal: React.FC<{
   const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
   const supportsConnectionParams = supportsConnectionParamsForType(dbType);
   const isSSLType = supportsSSLForType(dbType);
+  const supportsSSLCAPath = supportsSSLCAPathForType(dbType);
+  const supportsSSLClientCertificate =
+    supportsSSLClientCertificateForType(dbType);
   const sslHintText = isMySQLLike
-    ? "当 MySQL/MariaDB/Doris/Sphinx 开启安全传输策略时，请启用 SSL；本地自签证书场景可先用 Preferred 或 Skip Verify。"
+    ? "MySQL 兼容数据源支持 CA 证书、客户端证书与私钥；本地自签证书场景可先用 Preferred 或 Skip Verify。"
     : isOceanBaseOracle
-      ? "OceanBase Oracle 租户使用 Oracle 协议连接，SSL 参数按 Oracle 驱动规则传递。"
+      ? "OceanBase Oracle 租户使用 Oracle 协议连接；如需 Wallet，请在高级参数中配置 Oracle 驱动参数。"
       : dbType === "dameng"
       ? "达梦驱动启用 SSL 需要客户端证书与私钥路径（sslCertPath / sslKeyPath）。"
       : dbType === "sqlserver"
-        ? "SQL Server 推荐在生产环境使用 Required，并关闭 TrustServerCertificate。"
+        ? "SQL Server 可配置服务端证书/CA 文件；生产环境建议使用 Required，并关闭 TrustServerCertificate。"
         : dbType === "mongodb"
-          ? "MongoDB 可通过 TLS 保护连接，证书校验异常时可先用 Skip Verify 验证连通性。"
-          : "建议优先使用 Required；仅在测试环境或自签证书场景使用 Skip Verify。";
+          ? "MongoDB 支持 CA 证书、客户端证书与私钥；证书校验异常时可先用 Skip Verify 验证连通性。"
+          : dbType === "oracle"
+            ? "Oracle PEM 证书请优先使用 Wallet 并在高级参数中配置 WALLET；这里仅控制 SSL 开关与校验策略。"
+            : dbType === "tdengine"
+              ? "TDengine 当前仅配置 WSS 与校验策略；证书文件请通过服务端信任链处理。"
+              : "支持的驱动可配置 CA 证书、客户端证书与私钥；仅在测试环境或自签证书场景使用 Skip Verify。";
 
   const getSectionBg = (darkHex: string) => {
     if (!darkMode) {
@@ -1339,8 +1413,100 @@ const ConnectionModal: React.FC<{
       clickHouseProtocol: "http",
       useSSL: isHttps,
       sslMode: isHttps ? (skipVerify ? "skip-verify" : "required") : "disable",
+      ...extractSSLPathValuesFromParams(parsed.params, "clickhouse"),
       connectionParams: serializeConnectionParams(parsed.params),
     };
+  };
+
+  const firstConnectionParamValue = (
+    params: URLSearchParams,
+    names: string[],
+  ): string => {
+    for (const name of names) {
+      const value = String(params.get(name) || "").trim();
+      if (value) return value;
+    }
+    return "";
+  };
+
+  const extractSSLPathValuesFromParams = (
+    params: URLSearchParams,
+    type: string,
+  ): Record<string, string> => {
+    const caPath = firstConnectionParamValue(params, [
+      "sslCAPath",
+      "ssl_ca_path",
+      "sslrootcert",
+      "sslRootCert",
+      "tlsCAFile",
+      "caFile",
+      "certificate",
+      "servercertificate",
+      "serverCertificate",
+    ]);
+    const certPath = firstConnectionParamValue(params, [
+      "sslCertPath",
+      "ssl_cert_path",
+      "SSL_CERT_PATH",
+      "sslcert",
+      "sslCert",
+      "tlsCertificateFile",
+    ]);
+    const keyPath = firstConnectionParamValue(params, [
+      "sslKeyPath",
+      "ssl_key_path",
+      "SSL_KEY_PATH",
+      "sslkey",
+      "sslKey",
+      "tlsKeyFile",
+    ]);
+    return {
+      ...(supportsSSLCAPathForType(type) && caPath ? { sslCAPath: caPath } : {}),
+      ...(supportsSSLClientCertificateForType(type) && certPath ? { sslCertPath: certPath } : {}),
+      ...(supportsSSLClientCertificateForType(type) && keyPath ? { sslKeyPath: keyPath } : {}),
+    };
+  };
+
+  const appendSSLPathParamsForUri = (
+    params: URLSearchParams,
+    type: string,
+    values: Record<string, any>,
+  ) => {
+    const caPath = String(values.sslCAPath || "").trim();
+    const certPath = String(values.sslCertPath || "").trim();
+    const keyPath = String(values.sslKeyPath || "").trim();
+    const mode = String(values.sslMode || "preferred")
+      .trim()
+      .toLowerCase();
+    if (supportsSSLCAPathForType(type) && caPath) {
+      if (isPostgresCompatibleSSLType(type)) {
+        if (mode !== "skip-verify" && mode !== "disable") {
+          params.set("sslrootcert", caPath);
+        }
+      } else if (type === "sqlserver") {
+        params.set("certificate", caPath);
+      } else {
+        params.set("sslCAPath", caPath);
+      }
+    }
+    if (supportsSSLClientCertificateForType(type) && certPath) {
+      if (type === "dameng") {
+        params.set("SSL_CERT_PATH", certPath);
+      } else if (isPostgresCompatibleSSLType(type)) {
+        params.set("sslcert", certPath);
+      } else {
+        params.set("sslCertPath", certPath);
+      }
+    }
+    if (supportsSSLClientCertificateForType(type) && keyPath) {
+      if (type === "dameng") {
+        params.set("SSL_KEY_PATH", keyPath);
+      } else if (isPostgresCompatibleSSLType(type)) {
+        params.set("sslkey", keyPath);
+      } else {
+        params.set("sslKeyPath", keyPath);
+      }
+    }
   };
 
   const parseUriToValues = (
@@ -1419,6 +1585,7 @@ const ConnectionModal: React.FC<{
         database: parsed.database || "",
         useSSL: sslMode !== "disable",
         sslMode,
+        ...extractSSLPathValuesFromParams(parsed.params, type),
         oceanBaseProtocol: parsedOceanBaseProtocol,
         mysqlTopology:
           parsedOceanBaseProtocol === "oracle"
@@ -1491,6 +1658,7 @@ const ConnectionModal: React.FC<{
             ? "skip-verify"
             : "required"
           : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
         redisTopology:
           hostList.length > 1 || topologyParam === "cluster"
             ? "cluster"
@@ -1564,6 +1732,7 @@ const ConnectionModal: React.FC<{
             ? "skip-verify"
             : "required"
           : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
         mongoTopology:
           hostList.length > 1 || !!parsed.params.get("replicaSet")
             ? "replica"
@@ -1616,6 +1785,7 @@ const ConnectionModal: React.FC<{
       }
 
       if (supportsSSLForType(type)) {
+        Object.assign(parsedValues, extractSSLPathValuesFromParams(parsed.params, type));
         const normalizeBool = (raw: unknown) => {
           const text = String(raw ?? "")
             .trim()
@@ -1891,6 +2061,7 @@ const ConnectionModal: React.FC<{
           params.set("tls", "preferred");
         }
       }
+      appendSSLPathParamsForUri(params, type, values);
       if (Number.isFinite(timeout) && timeout > 0) {
         params.set("timeout", String(timeout));
       }
@@ -1939,6 +2110,7 @@ const ConnectionModal: React.FC<{
           params.set("skip_verify", "true");
         }
       }
+      appendSSLPathParamsForUri(params, type, values);
       const query = params.toString();
       const scheme = values.useSSL ? "rediss" : "redis";
       return `${scheme}://${redisAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
@@ -1997,6 +2169,7 @@ const ConnectionModal: React.FC<{
           params.delete("tlsInsecure");
         }
       }
+      appendSSLPathParamsForUri(params, type, values);
       if (Number.isFinite(timeout) && timeout > 0) {
         params.set("connectTimeoutMS", String(timeout * 1000));
         params.set("serverSelectionTimeoutMS", String(timeout * 1000));
@@ -2025,20 +2198,23 @@ const ConnectionModal: React.FC<{
       const mode = String(values.sslMode || "preferred")
         .trim()
         .toLowerCase();
-      if (
-        type === "postgres" ||
-        type === "kingbase" ||
-        type === "highgo" ||
-        type === "vastbase" ||
-        type === "opengauss"
-      ) {
-        params.set("sslmode", "require");
+      if (isPostgresCompatibleSSLType(type)) {
+        params.set(
+          "sslmode",
+          mode === "skip-verify"
+            ? "require"
+            : String(values.sslCAPath || "").trim()
+              ? "verify-ca"
+              : "require",
+        );
+        appendSSLPathParamsForUri(params, type, values);
       } else if (type === "sqlserver") {
         params.set("encrypt", "true");
         params.set(
           "TrustServerCertificate",
           mode === "skip-verify" || mode === "preferred" ? "true" : "false",
         );
+        appendSSLPathParamsForUri(params, type, values);
       } else if (type === "clickhouse") {
         if (clickHouseProtocol === "http") {
           if (mode === "skip-verify" || mode === "preferred") {
@@ -2050,11 +2226,9 @@ const ConnectionModal: React.FC<{
             params.set("skip_verify", "true");
           }
         }
+        appendSSLPathParamsForUri(params, type, values);
       } else if (type === "dameng") {
-        const certPath = String(values.sslCertPath || "").trim();
-        const keyPath = String(values.sslKeyPath || "").trim();
-        if (certPath) params.set("SSL_CERT_PATH", certPath);
-        if (keyPath) params.set("SSL_KEY_PATH", keyPath);
+        appendSSLPathParamsForUri(params, type, values);
       } else if (type === "oracle") {
         params.set("SSL", "TRUE");
         params.set("SSL VERIFY", mode === "required" ? "TRUE" : "FALSE");
@@ -2065,13 +2239,7 @@ const ConnectionModal: React.FC<{
         }
       }
     } else if (supportsSSLForType(type)) {
-      if (
-        type === "postgres" ||
-        type === "kingbase" ||
-        type === "highgo" ||
-        type === "vastbase" ||
-        type === "opengauss"
-      ) {
+      if (isPostgresCompatibleSSLType(type)) {
         params.set("sslmode", "disable");
       } else if (type === "sqlserver") {
         params.set("encrypt", "disable");
@@ -2179,6 +2347,34 @@ const ConnectionModal: React.FC<{
       message.error(`选择私钥文件失败: ${e?.message || String(e)}`);
     } finally {
       setSelectingSSHKey(false);
+    }
+  };
+
+  const handleSelectCertificateFile = async (
+    fieldName: "sslCAPath" | "sslCertPath" | "sslKeyPath",
+    certKind: "ca" | "client-cert" | "client-key",
+  ) => {
+    if (selectingCertificateField) {
+      return;
+    }
+    try {
+      setSelectingCertificateField(fieldName);
+      const currentPath = String(form.getFieldValue(fieldName) || "").trim();
+      const res = await SelectCertificateFile(currentPath, certKind);
+      if (res?.success) {
+        const data = res.data || {};
+        const selectedPath =
+          typeof data === "string" ? data : String(data.path || "").trim();
+        if (selectedPath) {
+          form.setFieldValue(fieldName, selectedPath);
+        }
+      } else if (res?.message !== "已取消") {
+        message.error(`选择证书文件失败: ${res?.message || "未知错误"}`);
+      }
+    } catch (e: any) {
+      message.error(`选择证书文件失败: ${e?.message || String(e)}`);
+    } finally {
+      setSelectingCertificateField(null);
     }
   };
 
@@ -2317,6 +2513,7 @@ const ConnectionModal: React.FC<{
           includeRedisDatabases: initialValues.includeRedisDatabases,
           useSSL: !!config.useSSL,
           sslMode: config.sslMode || "preferred",
+          sslCAPath: config.sslCAPath || "",
           sslCertPath: config.sslCertPath || "",
           sslKeyPath: config.sslKeyPath || "",
           useSSH: config.useSSH,
@@ -3166,6 +3363,9 @@ const ConnectionModal: React.FC<{
             ? "disable"
             : "preferred";
     const effectiveUseSSL = sslCapableType && !!mergedValues.useSSL;
+    const sslCAPath = sslCapableType
+      ? String(mergedValues.sslCAPath || "").trim()
+      : "";
     const sslCertPath = sslCapableType
       ? String(mergedValues.sslCertPath || "").trim()
       : "";
@@ -3174,6 +3374,9 @@ const ConnectionModal: React.FC<{
       : "";
     if (type === "dameng" && effectiveUseSSL && (!sslCertPath || !sslKeyPath)) {
       throw new Error("达梦启用 SSL 时必须填写证书路径与私钥路径");
+    }
+    if (effectiveUseSSL && supportsSSLClientCertificateForType(type) && (!!sslCertPath !== !!sslKeyPath)) {
+      throw new Error("TLS 客户端证书与私钥路径需要同时填写");
     }
 
     let primaryHost = "localhost";
@@ -3369,6 +3572,7 @@ const ConnectionModal: React.FC<{
       database: mergedValues.database || "",
       useSSL: effectiveUseSSL,
       sslMode: effectiveUseSSL ? sslMode : "disable",
+      sslCAPath: sslCAPath,
       sslCertPath: sslCertPath,
       sslKeyPath: sslKeyPath,
       useSSH: !!mergedValues.useSSH,
@@ -3438,6 +3642,7 @@ const ConnectionModal: React.FC<{
         database: "",
         useSSL: false,
         sslMode: undefined,
+        sslCAPath: undefined,
         sslCertPath: undefined,
         sslKeyPath: undefined,
         useSSH: false,
@@ -3501,6 +3706,7 @@ const ConnectionModal: React.FC<{
         database: "",
         useSSL: false,
         sslMode: "preferred",
+        sslCAPath: "",
         sslCertPath: "",
         sslKeyPath: "",
         useSSH: false,
@@ -3551,6 +3757,7 @@ const ConnectionModal: React.FC<{
         port: defaultPort,
         useSSL: sslCapableType ? false : undefined,
         sslMode: sslCapableType ? "preferred" : undefined,
+        sslCAPath: sslCapableType ? "" : undefined,
         sslCertPath: sslCapableType ? "" : undefined,
         sslKeyPath: sslCapableType ? "" : undefined,
         useHttpTunnel: false,
@@ -5556,41 +5763,84 @@ const ConnectionModal: React.FC<{
                             ],
                           })}
                         </div>
-                        {dbType === "dameng" && (
-                          <>
-                            <Form.Item
-                              name="sslCertPath"
-                              label="客户端证书路径 (SSL_CERT_PATH)"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: "达梦 SSL 需要证书路径",
-                                },
-                              ]}
-                              style={{ marginBottom: 8 }}
-                            >
-                              <Input
-                                {...noAutoCapInputProps}
-                                placeholder="例如: C:\certs\client-cert.pem"
-                              />
-                            </Form.Item>
-                            <Form.Item
-                              name="sslKeyPath"
-                              label="客户端私钥路径 (SSL_KEY_PATH)"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: "达梦 SSL 需要私钥路径",
-                                },
-                              ]}
-                              style={{ marginBottom: 8 }}
-                            >
-                              <Input
-                                {...noAutoCapInputProps}
-                                placeholder="例如: C:\certs\client-key.pem"
-                              />
-                            </Form.Item>
-                          </>
+                        {(supportsSSLCAPath || supportsSSLClientCertificate) && (
+                          <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                            {supportsSSLCAPath && (
+                              <Form.Item
+                                label={dbType === "sqlserver" ? "服务端证书/CA 路径" : "CA 证书路径"}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Space.Compact style={{ width: "100%" }}>
+                                  <Form.Item name="sslCAPath" noStyle>
+                                    <Input
+                                      {...noAutoCapInputProps}
+                                      placeholder="例如: C:\certs\ca.pem"
+                                    />
+                                  </Form.Item>
+                                  <Button
+                                    onClick={() => handleSelectCertificateFile("sslCAPath", "ca")}
+                                    loading={selectingCertificateField === "sslCAPath"}
+                                  >
+                                    浏览...
+                                  </Button>
+                                </Space.Compact>
+                              </Form.Item>
+                            )}
+                            {supportsSSLClientCertificate && (
+                              <>
+                                <Form.Item
+                                  label={dbType === "dameng" ? "客户端证书路径 (SSL_CERT_PATH)" : "客户端证书路径"}
+                                  rules={[
+                                    {
+                                      required: dbType === "dameng",
+                                      message: "达梦 SSL 需要证书路径",
+                                    },
+                                  ]}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Space.Compact style={{ width: "100%" }}>
+                                    <Form.Item name="sslCertPath" noStyle>
+                                      <Input
+                                        {...noAutoCapInputProps}
+                                        placeholder="例如: C:\certs\client-cert.pem"
+                                      />
+                                    </Form.Item>
+                                    <Button
+                                      onClick={() => handleSelectCertificateFile("sslCertPath", "client-cert")}
+                                      loading={selectingCertificateField === "sslCertPath"}
+                                    >
+                                      浏览...
+                                    </Button>
+                                  </Space.Compact>
+                                </Form.Item>
+                                <Form.Item
+                                  label={dbType === "dameng" ? "客户端私钥路径 (SSL_KEY_PATH)" : "客户端私钥路径"}
+                                  rules={[
+                                    {
+                                      required: dbType === "dameng",
+                                      message: "达梦 SSL 需要私钥路径",
+                                    },
+                                  ]}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Space.Compact style={{ width: "100%" }}>
+                                    <Form.Item name="sslKeyPath" noStyle>
+                                      <Input
+                                        {...noAutoCapInputProps}
+                                        placeholder="例如: C:\certs\client-key.pem"
+                                      />
+                                    </Form.Item>
+                                    <Button
+                                      onClick={() => handleSelectCertificateFile("sslKeyPath", "client-key")}
+                                      loading={selectingCertificateField === "sslKeyPath"}
+                                    >
+                                      浏览...
+                                    </Button>
+                                  </Space.Compact>
+                                </Form.Item>
+                              </>
+                            )}
+                          </div>
                         )}
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {sslHintText}
@@ -6216,6 +6466,7 @@ const ConnectionModal: React.FC<{
           user: "root",
           useSSL: false,
           sslMode: "preferred",
+          sslCAPath: "",
           sslCertPath: "",
           sslKeyPath: "",
           useSSH: false,

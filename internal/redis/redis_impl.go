@@ -277,7 +277,10 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 		var failures []string
 		for idx, attempt := range attempts {
 			var tlsConfig *tls.Config
-			if cfg := resolveRedisTLSConfig(attempt); cfg != nil {
+			if cfg, err := resolveRedisTLSConfig(attempt); err != nil {
+				failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败: %v", idx+1, err))
+				continue
+			} else if cfg != nil {
 				if host, _, err := net.SplitHostPort(seedAddrs[0]); err == nil && host != "" {
 					cfg.ServerName = host
 				}
@@ -332,7 +335,10 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	var failures []string
 	for idx, attempt := range attempts {
 		var tlsConfig *tls.Config
-		if cfg := resolveRedisTLSConfig(attempt); cfg != nil {
+		if cfg, err := resolveRedisTLSConfig(attempt); err != nil {
+			failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败: %v", idx+1, err))
+			continue
+		} else if cfg != nil {
 			if host, _, err := net.SplitHostPort(addr); err == nil && host != "" {
 				cfg.ServerName = host
 			}

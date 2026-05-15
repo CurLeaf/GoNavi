@@ -214,7 +214,7 @@ func (s *StarRocksDB) getDSN(config connection.ConnectionConfig) (string, error)
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func resolveStarRocksCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {

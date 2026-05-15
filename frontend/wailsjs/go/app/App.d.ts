@@ -242,6 +242,8 @@ export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:st
 
 export function RenameView(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ResetWebViewZoom():Promise<connection.QueryResult>;
+
 export function ResolveDriverDownloadDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function ResolveDriverPackageDownloadURL(arg1:string,arg2:string):Promise<connection.QueryResult>;
@@ -255,6 +257,8 @@ export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequ
 export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function SelectCertificateFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
 

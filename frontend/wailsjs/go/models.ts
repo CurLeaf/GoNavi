@@ -673,6 +673,7 @@ export namespace connection {
 	    database: string;
 	    useSSL?: boolean;
 	    sslMode?: string;
+	    sslCAPath?: string;
 	    sslCertPath?: string;
 	    sslKeyPath?: string;
 	    useSSH: boolean;
@@ -718,6 +719,7 @@ export namespace connection {
 	        this.database = source["database"];
 	        this.useSSL = source["useSSL"];
 	        this.sslMode = source["sslMode"];
+	        this.sslCAPath = source["sslCAPath"];
 	        this.sslCertPath = source["sslCertPath"];
 	        this.sslKeyPath = source["sslKeyPath"];
 	        this.useSSH = source["useSSH"];

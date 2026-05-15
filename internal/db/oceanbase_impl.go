@@ -185,7 +185,7 @@ func (o *OceanBaseDB) getDSN(config connection.ConnectionConfig) (string, error)
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func normalizeOceanBaseProtocol(raw string) string {

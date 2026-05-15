@@ -529,6 +529,7 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     database: toTrimmedString(raw.database),
     useSSL: sslCapable ? !!raw.useSSL : false,
     sslMode: sslCapable ? sslMode : "disable",
+    sslCAPath: sslCapable ? toTrimmedString(raw.sslCAPath) : "",
     sslCertPath: sslCapable ? toTrimmedString(raw.sslCertPath) : "",
     sslKeyPath: sslCapable ? toTrimmedString(raw.sslKeyPath) : "",
     useSSH: !!raw.useSSH,

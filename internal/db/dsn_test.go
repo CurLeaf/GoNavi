@@ -55,6 +55,78 @@ func TestPostgresDSN_SSLModeRequireWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestPostgresDSN_AppendsSSLPathParams(t *testing.T) {
+	p := &PostgresDB{}
+	cfg := connection.ConnectionConfig{
+		Type:        "postgres",
+		Host:        "127.0.0.1",
+		Port:        5432,
+		User:        "user",
+		Password:    "pass",
+		Database:    "db",
+		UseSSL:      true,
+		SSLMode:     "required",
+		SSLCAPath:   "C:\\certs\\ca.pem",
+		SSLCertPath: "C:\\certs\\client-cert.pem",
+		SSLKeyPath:  "C:\\certs\\client-key.pem",
+	}
+
+	dsn := p.getDSN(cfg)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse postgres dsn: %v", err)
+	}
+	query := parsed.Query()
+	if got := query.Get("sslmode"); got != "verify-ca" {
+		t.Fatalf("sslmode = %q, want verify-ca", got)
+	}
+	if got := query.Get("sslrootcert"); got != cfg.SSLCAPath {
+		t.Fatalf("sslrootcert = %q, want %q", got, cfg.SSLCAPath)
+	}
+	if got := query.Get("sslcert"); got != cfg.SSLCertPath {
+		t.Fatalf("sslcert = %q, want %q", got, cfg.SSLCertPath)
+	}
+	if got := query.Get("sslkey"); got != cfg.SSLKeyPath {
+		t.Fatalf("sslkey = %q, want %q", got, cfg.SSLKeyPath)
+	}
+}
+
+func TestPostgresDSN_SkipVerifyOmitsSSLRootCert(t *testing.T) {
+	p := &PostgresDB{}
+	cfg := connection.ConnectionConfig{
+		Type:        "postgres",
+		Host:        "127.0.0.1",
+		Port:        5432,
+		User:        "user",
+		Password:    "pass",
+		Database:    "db",
+		UseSSL:      true,
+		SSLMode:     "skip-verify",
+		SSLCAPath:   "C:\\certs\\ca.pem",
+		SSLCertPath: "C:\\certs\\client-cert.pem",
+		SSLKeyPath:  "C:\\certs\\client-key.pem",
+	}
+
+	dsn := p.getDSN(cfg)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse postgres dsn: %v", err)
+	}
+	query := parsed.Query()
+	if got := query.Get("sslmode"); got != "require" {
+		t.Fatalf("sslmode = %q, want require", got)
+	}
+	if got := query.Get("sslrootcert"); got != "" {
+		t.Fatalf("sslrootcert should be omitted for skip-verify, got %q", got)
+	}
+	if got := query.Get("sslcert"); got != cfg.SSLCertPath {
+		t.Fatalf("sslcert = %q, want %q", got, cfg.SSLCertPath)
+	}
+	if got := query.Get("sslkey"); got != cfg.SSLKeyPath {
+		t.Fatalf("sslkey = %q, want %q", got, cfg.SSLKeyPath)
+	}
+}
+
 func TestPostgresDSN_MergesConnectionParams(t *testing.T) {
 	p := &PostgresDB{}
 	cfg := connection.ConnectionConfig{
@@ -106,6 +178,65 @@ func TestMySQLDSN_UsesTLSParamWhenSSLEnabled(t *testing.T) {
 	}
 	if !strings.Contains(dsn, "tls=true") {
 		t.Fatalf("dsn 缺少 tls=true 参数：%s", dsn)
+	}
+}
+
+func TestMySQLDSN_UsesCustomTLSConfigWhenCertificatePathsAreConfigured(t *testing.T) {
+	m := &MySQLDB{}
+	cfg := connection.ConnectionConfig{
+		Type:        "mysql",
+		Host:        "127.0.0.1",
+		Port:        3306,
+		User:        "root",
+		Password:    "pass",
+		Database:    "db",
+		UseSSL:      true,
+		SSLMode:     "required",
+		SSLCAPath:   "../../third_party/highgo-pq/certs/root.crt",
+		SSLCertPath: "../../third_party/highgo-pq/certs/postgresql.crt",
+		SSLKeyPath:  "../../third_party/highgo-pq/certs/postgresql.key",
+	}
+
+	dsn, err := m.getDSN(cfg)
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+	if strings.Contains(dsn, "tls=true") {
+		t.Fatalf("dsn 应使用自定义 TLS 配置名而不是 tls=true：%s", dsn)
+	}
+	if !strings.Contains(dsn, "tls=gonavi-") {
+		t.Fatalf("dsn 缺少自定义 TLS 配置名：%s", dsn)
+	}
+	if strings.Contains(dsn, "allowFallbackToPlaintext=true") {
+		t.Fatalf("required 模式不应启用明文回退：%s", dsn)
+	}
+}
+
+func TestMySQLDSN_PreservesPreferredFallbackWithCustomTLSConfig(t *testing.T) {
+	m := &MySQLDB{}
+	cfg := connection.ConnectionConfig{
+		Type:        "mysql",
+		Host:        "127.0.0.1",
+		Port:        3306,
+		User:        "root",
+		Password:    "pass",
+		Database:    "db",
+		UseSSL:      true,
+		SSLMode:     "preferred",
+		SSLCAPath:   "../../third_party/highgo-pq/certs/root.crt",
+		SSLCertPath: "../../third_party/highgo-pq/certs/postgresql.crt",
+		SSLKeyPath:  "../../third_party/highgo-pq/certs/postgresql.key",
+	}
+
+	dsn, err := m.getDSN(cfg)
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+	if !strings.Contains(dsn, "tls=gonavi-") {
+		t.Fatalf("dsn 缺少自定义 TLS 配置名：%s", dsn)
+	}
+	if !strings.Contains(dsn, "allowFallbackToPlaintext=true") {
+		t.Fatalf("preferred 自定义 TLS 配置应保留明文回退：%s", dsn)
 	}
 }
 
@@ -380,6 +511,30 @@ func TestSQLServerDSN_MergesConnectionParams(t *testing.T) {
 	}
 }
 
+func TestSQLServerDSN_AppendsCertificateParam(t *testing.T) {
+	s := &SqlServerDB{}
+	cfg := connection.ConnectionConfig{
+		Type:      "sqlserver",
+		Host:      "127.0.0.1",
+		Port:      1433,
+		User:      "sa",
+		Password:  "pass",
+		Database:  "master",
+		UseSSL:    true,
+		SSLMode:   "required",
+		SSLCAPath: "C:\\certs\\sqlserver-ca.pem",
+	}
+
+	dsn := s.getDSN(cfg)
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse sqlserver dsn: %v", err)
+	}
+	if got := parsed.Query().Get("certificate"); got != cfg.SSLCAPath {
+		t.Fatalf("certificate = %q, want %q", got, cfg.SSLCAPath)
+	}
+}
+
 func TestClickHouseOptions_UsesStructuredTimeoutAndAuth(t *testing.T) {
 	c := &ClickHouseDB{}
 	cfg := normalizeClickHouseConfig(connection.ConnectionConfig{
@@ -392,7 +547,10 @@ func TestClickHouseOptions_UsesStructuredTimeoutAndAuth(t *testing.T) {
 		Timeout:  15,
 	})
 
-	opts := c.buildClickHouseOptions(cfg)
+	opts, err := c.buildClickHouseOptions(cfg)
+	if err != nil {
+		t.Fatalf("buildClickHouseOptions failed: %v", err)
+	}
 	if opts == nil {
 		t.Fatal("options 为空")
 	}
@@ -438,7 +596,10 @@ func TestClickHouseOptions_MergesConnectionParamsIntoOptionsAndSettings(t *testi
 		ConnectionParams: "max_execution_time=60&compress=lz4&read_timeout=10s",
 	})
 
-	opts := c.buildClickHouseOptions(cfg)
+	opts, err := c.buildClickHouseOptions(cfg)
+	if err != nil {
+		t.Fatalf("buildClickHouseOptions failed: %v", err)
+	}
 	if opts == nil {
 		t.Fatal("options 为空")
 	}
@@ -465,7 +626,10 @@ func TestClickHouseOptions_ReadTimeoutUsesLargerConfiguredTimeout(t *testing.T) 
 		Timeout:  900,
 	})
 
-	opts := c.buildClickHouseOptions(cfg)
+	opts, err := c.buildClickHouseOptions(cfg)
+	if err != nil {
+		t.Fatalf("buildClickHouseOptions failed: %v", err)
+	}
 	if opts == nil {
 		t.Fatal("options 为空")
 	}

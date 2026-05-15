@@ -36,7 +36,7 @@ func (m *MariaDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func (m *MariaDB) Connect(config connection.ConnectionConfig) error {

@@ -553,6 +553,61 @@ func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
 }
 
+func (a *App) SelectCertificateFile(currentPath string, certKind string) connection.QueryResult {
+	defaultDir := strings.TrimSpace(currentPath)
+	if defaultDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			defaultDir = home
+		}
+	}
+	if filepath.Ext(defaultDir) != "" {
+		defaultDir = filepath.Dir(defaultDir)
+	}
+	if defaultDir != "" && !filepath.IsAbs(defaultDir) {
+		if abs, err := filepath.Abs(defaultDir); err == nil {
+			defaultDir = abs
+		}
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(certKind))
+	title := "选择 TLS 证书文件"
+	displayName := "证书文件"
+	switch kind {
+	case "ca":
+		title = "选择 CA/服务端证书文件"
+	case "client-cert":
+		title = "选择客户端证书文件"
+	case "client-key":
+		title = "选择客户端私钥文件"
+		displayName = "私钥文件"
+	}
+
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            title,
+		DefaultDirectory: defaultDir,
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: displayName,
+				Pattern:     "*.pem;*.crt;*.cer;*.cert;*.key",
+			},
+			{
+				DisplayName: "所有文件",
+				Pattern:     "*",
+			},
+		},
+	})
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if strings.TrimSpace(selection) == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
+}
+
 func (a *App) SelectDatabaseFile(currentPath string, driverType string) connection.QueryResult {
 	defaultDir := strings.TrimSpace(currentPath)
 	if defaultDir == "" {

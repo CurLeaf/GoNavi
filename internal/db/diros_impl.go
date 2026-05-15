@@ -139,7 +139,7 @@ func (d *DirosDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func resolveDirosCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {
