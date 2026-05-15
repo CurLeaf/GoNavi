@@ -1453,6 +1453,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [dataPanelIsJson, setDataPanelIsJson] = useState(false);
   const dataPanelDirtyRef = useRef(false);
   const dataPanelOriginalRef = useRef('');
+  const focusedCellWritable = useMemo(() => (
+      canModifyData &&
+      !!focusedCellInfo &&
+      isWritableResultColumn(focusedCellInfo.dataIndex, effectiveEditLocator)
+  ), [canModifyData, focusedCellInfo, effectiveEditLocator]);
   const [rowEditorOpen, setRowEditorOpen] = useState(false);
   const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
   const rowEditorBaseRawRef = useRef<Record<string, any>>({});
@@ -3020,6 +3025,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       return;
     }
 
+    const writablePatchValues = Object.fromEntries(
+      Object.entries(copiedCellPatch.values)
+        .filter(([colName]) => isWritableResultColumn(colName, effectiveEditLocator))
+    );
+    if (Object.keys(writablePatchValues).length === 0) {
+      void message.info('没有可粘贴的可编辑字段');
+      return;
+    }
+
     const targetKeySet = new Set<string>();
     const selectedKeys = selectedRowKeysRef.current;
     if (selectedKeys.length > 0) {
@@ -3060,7 +3074,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const addedRow = addedRowMap.get(targetRowKey);
       const baseRow = baseRowMap.get(targetRowKey);
 
-      Object.entries(copiedCellPatch.values).forEach(([colName, nextValue]) => {
+      Object.entries(writablePatchValues).forEach(([colName, nextValue]) => {
         let currentValue: any;
 
         if (addedRow) {
@@ -3112,10 +3126,14 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     void message.success(`已粘贴到 ${patchesByRow.size} 行，共 ${updatedCellCount} 个单元格`);
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [copiedCellPatch, addedRows, modifiedRows, rowKeyStr]);
+  }, [copiedCellPatch, addedRows, modifiedRows, rowKeyStr, effectiveEditLocator]);
 
   // 批量填充到选中行
   const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {
+    if (!isWritableResultColumn(dataIndex, effectiveEditLocator)) {
+      void message.info('当前字段不可编辑');
+      return;
+    }
     const sourceValue = sourceRecord[dataIndex];
     const selKeys = selectedRowKeysRef.current;
 
@@ -3170,7 +3188,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     void message.success(`已填充 ${updatedCount} 行`);
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [addedRows, rowKeyStr]);
+  }, [addedRows, rowKeyStr, effectiveEditLocator]);
 
   const displayData = useMemo(() => {
       return [...data, ...addedRows];
@@ -3431,6 +3449,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const changedFields: Record<string, any> = {};
           for (const col of Object.keys(row)) {
               if (col === GONAVI_ROW_KEY) continue;
+              if (!isWritableResultColumn(col, effectiveEditLocator)) continue;
               if (!isCellValueEqualForDiff(originalRow[col], row[col])) {
                   changedFields[col] = row[col];
               }
@@ -3464,10 +3483,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           });
           setModifiedRows(prev => ({ ...prev, [keyStr]: row }));
       }
-  }, [addedRows, data, rowKeyStr]);
+  }, [addedRows, data, rowKeyStr, deletedRowKeys, effectiveEditLocator]);
 
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
+      if (!focusedCellWritable) {
+          void message.info('当前字段不可编辑');
+          return;
+      }
       // 与 updateFocusedCell 设置的原始值比较，避免幽灵变更
       if (dataPanelValue === dataPanelOriginalRef.current) {
           dataPanelDirtyRef.current = false;
@@ -3479,16 +3502,26 @@ const DataGrid: React.FC<DataGridProps> = ({
       dataPanelOriginalRef.current = dataPanelValue;
       dataPanelDirtyRef.current = false;
       void message.success('已保存');
-  }, [focusedCellInfo, dataPanelValue, handleCellSave]);
+  }, [focusedCellInfo, focusedCellWritable, dataPanelValue, handleCellSave]);
 
   const handleCellSetNull = useCallback(() => {
     if (!cellContextMenu.record) return;
+    if (!isWritableResultColumn(cellContextMenu.dataIndex, effectiveEditLocator)) {
+      void message.info('当前字段不可编辑');
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+      return;
+    }
     handleCellSave({ ...cellContextMenu.record, [cellContextMenu.dataIndex]: null });
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [cellContextMenu, handleCellSave]);
+  }, [cellContextMenu, handleCellSave, effectiveEditLocator]);
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
+      if (!isWritableResultColumn(cellEditorMeta.dataIndex, effectiveEditLocator)) {
+          void message.info('当前字段不可编辑');
+          closeCellEditor();
+          return;
+      }
       const apply = cellEditorApplyRef.current;
       if (apply) {
           apply(cellEditorValue);
@@ -3498,7 +3531,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
       handleCellSave(nextRow);
       closeCellEditor();
-  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor]);
+  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor, effectiveEditLocator]);
 
   const handleFormatJsonInEditor = useCallback(() => {
       if (!cellEditorIsJson) return;
@@ -3666,7 +3699,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       rowEditorForm.setFieldsValue(formMap);
       setRowEditorRowKey(keyStr);
       setRowEditorOpen(true);
-  }, [canModifyData, mergedDisplayData, data, addedRows, displayColumnNames, rowEditorForm, rowKeyStr, columnMetaMap, columnMetaMapByLowerName]);
+  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowEditorForm, rowKeyStr, columnMetaMap, columnMetaMapByLowerName]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -3789,15 +3822,16 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
           const keyStr = rowKeyStr(rowKey);
           const normalizedNext: Record<string, any> = {};
-          let hasAnyVisibleChange = false;
+          let hasAnyWritableChange = false;
           visibleColumnNames.forEach((col) => {
+              if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               const currentVal = (currentRow as any)?.[col];
               const editedVal = Object.prototype.hasOwnProperty.call(nextItem, col) ? (nextItem as any)[col] : currentVal;
-              if (!isJsonViewValueEqual(currentVal, editedVal)) hasAnyVisibleChange = true;
+              if (!isJsonViewValueEqual(currentVal, editedVal)) hasAnyWritableChange = true;
               normalizedNext[col] = coerceJsonEditorValueForStorage(currentVal, editedVal);
           });
 
-          if (!hasAnyVisibleChange) {
+          if (!hasAnyWritableChange) {
               continue;
           }
 
@@ -3810,6 +3844,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (!originalRow) continue;
           const patch: Record<string, any> = {};
           visibleColumnNames.forEach((col) => {
+              if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               const prevVal = (originalRow as any)?.[col];
               const nextVal = normalizedNext[col];
               if (!isCellValueEqualForDiff(prevVal, nextVal)) patch[col] = nextVal;
@@ -3836,10 +3871,14 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       setJsonEditorOpen(false);
       void message.success("JSON 修改已应用到当前结果集，可继续“提交事务”");
-  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, displayColumnNames]);
+  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator]);
 
   const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
       if (!dataIndex) return;
+      if (!isWritableResultColumn(dataIndex, effectiveEditLocator)) {
+          void message.info('当前字段不可编辑');
+          return;
+      }
       const val = rowEditorForm.getFieldValue(dataIndex);
       openCellEditor(
           { [dataIndex]: val ?? '' },
@@ -3847,7 +3886,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           dataIndex,
           (nextVal) => rowEditorForm.setFieldsValue({ [dataIndex]: nextVal }),
       );
-  }, [rowEditorForm, openCellEditor]);
+  }, [rowEditorForm, openCellEditor, effectiveEditLocator]);
 
   const applyRowEditor = useCallback(() => {
       const keyStr = rowEditorRowKey;
@@ -3859,6 +3898,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           const convertedValues: Record<string, any> = {};
           Object.entries(values).forEach(([col, val]) => {
+              if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               if (val && dayjs.isDayjs(val)) {
                   const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
                   const rowPickerType = getTemporalPickerType(colMeta?.type);
@@ -3875,6 +3915,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const baseRawMap = rowEditorBaseRawRef.current || {};
       const patch: Record<string, any> = {};
       visibleColumnNames.forEach((col) => {
+          if (!isWritableResultColumn(col, effectiveEditLocator)) return;
           let nextVal = values[col];
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           if (nextVal && dayjs.isDayjs(nextVal)) {
@@ -3894,7 +3935,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName]);
 
 
   const enableVirtual = viewMode === 'table';
@@ -4071,7 +4112,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const copiedRows = buildCopiedRowsForPaste({
           rows: mergedDisplayData as Array<Record<string, any>>,
           selectedRowKeys,
-          columnNames: displayOutputColumnNames,
+          columnNames: displayOutputColumnNames.filter((columnName) => isWritableResultColumn(columnName, effectiveEditLocator)),
           rowKeyField: GONAVI_ROW_KEY,
           rowKeyToString: rowKeyStr,
       });
@@ -4082,7 +4123,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       setCopiedRowsForPaste(copiedRows);
       void message.success(`已复制 ${copiedRows.length} 行，可粘贴为新增行`);
-  }, [selectedRowKeys, mergedDisplayData, displayOutputColumnNames, rowKeyStr]);
+  }, [selectedRowKeys, mergedDisplayData, displayOutputColumnNames, rowKeyStr, effectiveEditLocator]);
 
   const handlePasteCopiedRowsAsNew = useCallback(() => {
       if (copiedRowsForPaste.length === 0) {
@@ -4092,7 +4133,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const nextRows = buildPastedRowsFromCopiedRows({
           rows: copiedRowsForPaste,
-          columnNames: displayOutputColumnNames,
+          columnNames: displayOutputColumnNames.filter((columnName) => isWritableResultColumn(columnName, effectiveEditLocator)),
           rowKeyField: GONAVI_ROW_KEY,
           createRowKey: (index) => {
               pastedRowSequenceRef.current += 1;
@@ -4108,7 +4149,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setAddedRows(prev => [...prev, ...nextRows]);
       setSelectedRowKeys(nextRows.map(row => row[GONAVI_ROW_KEY]));
       void message.success(`已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务`);
-  }, [copiedRowsForPaste, displayOutputColumnNames]);
+  }, [copiedRowsForPaste, displayOutputColumnNames, effectiveEditLocator]);
 
   const handleDeleteSelected = () => {
       const addedKeysToRemove: string[] = [];
@@ -6151,6 +6192,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                             const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
                             const rowPickerType = getTemporalPickerType(colMeta?.type);
                             const isRowDateTimeField = !!rowPickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
+                            const isWritable = isWritableResultColumn(col, effectiveEditLocator);
 
                             return (
                                 <Form.Item key={col} label={col} style={{ marginBottom: 12 }}>
@@ -6163,6 +6205,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                         format={TEMPORAL_FORMATS[rowPickerType]}
                                                         placeholder={placeholder}
                                                         needConfirm={false}
+                                                        disabled={!isWritable}
                                                     />
                                                 ) : rowPickerType === 'datetime' ? (
                                                     <DatePicker
@@ -6171,6 +6214,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                         format={TEMPORAL_FORMATS[rowPickerType]}
                                                         placeholder={placeholder}
                                                         needConfirm
+                                                        disabled={!isWritable}
                                                     />
                                                 ) : (
                                                     <DatePicker
@@ -6179,6 +6223,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                         picker={rowPickerType as any}
                                                         placeholder={placeholder}
                                                         needConfirm={false}
+                                                        disabled={!isWritable}
                                                     />
                                                 )
                                             ) : useArea ? (
@@ -6186,12 +6231,13 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                     style={{ flex: 1 }}
                                                     autoSize={{ minRows: isJson ? 4 : 1, maxRows: 10 }}
                                                     placeholder={placeholder}
+                                                    disabled={!isWritable}
                                                 />
                                             ) : (
-                                                <Input style={{ flex: 1 }} placeholder={placeholder} />
+                                                <Input style={{ flex: 1 }} placeholder={placeholder} disabled={!isWritable} />
                                             )}
                                         </Form.Item>
-                                        <Button size="small" onClick={() => openRowEditorFieldEditor(col)} title="弹窗编辑">...</Button>
+                                        <Button size="small" onClick={() => openRowEditorFieldEditor(col)} title="弹窗编辑" disabled={!isWritable}>...</Button>
                                     </div>
                                 </Form.Item>
                             );
@@ -6488,7 +6534,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     {dataPanelIsJson && (
                         <Button size="small" onClick={handleDataPanelFormatJson}>格式化 JSON</Button>
                     )}
-                    {canModifyData && focusedCellInfo && (
+                    {focusedCellWritable && (
                         <Button size="small" type="primary" onClick={handleDataPanelSave}>保存</Button>
                     )}
                 </div>
@@ -6512,7 +6558,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                 fontSize: 13,
                                 tabSize: 2,
                                 automaticLayout: true,
-                                readOnly: !canModifyData,
+                                readOnly: !focusedCellWritable,
                                 lineNumbers: 'off',
                                 glyphMargin: false,
                                 folding: false,

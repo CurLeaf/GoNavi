@@ -1297,7 +1297,13 @@ func (r *RedisClientImpl) ExecuteCommand(args []string) (interface{}, error) {
 	return formatCommandResult(result), nil
 }
 
-// formatCommandResult formats the command result for display
+// formatCommandResult formats the command result for display.
+//
+// RESP3 协议（go-redis v9 默认）下，HGETALL / CONFIG GET / XINFO 等命令返回 Map 类型，
+// go-redis 用 map[interface{}]interface{} 承载。encoding/json 不支持非 string-key 的 map，
+// 如果让原值穿透到 Wails RPC，json.Marshal 会失败，Wails runtime 在 Windows 上会直接 panic
+// 让进程退出——用户感知为 GoNavi 闪退（issue: HGETALL 闪退）。
+// 平展成 [k1, v1, k2, v2, ...] 交错形式与 RESP2 array 输出一致，前端按 array 渲染。
 func formatCommandResult(result interface{}) interface{} {
 	switch v := result.(type) {
 	case []interface{}:
@@ -1306,6 +1312,13 @@ func formatCommandResult(result interface{}) interface{} {
 			formatted[i] = formatCommandResult(item)
 		}
 		return formatted
+	case map[interface{}]interface{}:
+		flattened := make([]interface{}, 0, len(v)*2)
+		for key, val := range v {
+			flattened = append(flattened, formatCommandResult(key))
+			flattened = append(flattened, formatCommandResult(val))
+		}
+		return flattened
 	case []byte:
 		return string(v)
 	default:

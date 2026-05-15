@@ -295,11 +295,15 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 	driver := strings.ToLower(strings.TrimSpace(c.driver))
 	isMySQL := strings.Contains(driver, "mysql")
-	isPostgres := strings.Contains(driver, "postgres") || strings.Contains(driver, "kingbase") || strings.Contains(driver, "pg")
+	isKingbase := strings.Contains(driver, "kingbase")
+	isPostgres := strings.Contains(driver, "postgres") || isKingbase || strings.Contains(driver, "pg")
 	isOracle := strings.Contains(driver, "oracle") || strings.Contains(driver, "ora") || strings.Contains(driver, "dm") || strings.Contains(driver, "dameng")
 
 	quoteIdent := func(name string) string {
 		n := strings.TrimSpace(name)
+		if isKingbase {
+			return QuoteKingbaseIdentifier(n)
+		}
 		if isMySQL {
 			n = strings.Trim(n, "`")
 			n = strings.ReplaceAll(n, "`", "``")
@@ -329,7 +333,9 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 
 	schema := ""
 	table := strings.TrimSpace(tableName)
-	if parts := strings.SplitN(table, ".", 2); len(parts) == 2 {
+	if isKingbase {
+		schema, table = SplitKingbaseQualifiedName(table)
+	} else if parts := strings.SplitN(table, ".", 2); len(parts) == 2 {
 		schema = strings.TrimSpace(parts[0])
 		table = strings.TrimSpace(parts[1])
 	}

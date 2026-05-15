@@ -936,6 +936,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
+	dbType := resolveDDLDBType(config)
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	columnTypeMap := map[string]string{}
 	if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
@@ -948,7 +949,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 
 	quotedCols := make([]string, len(columns))
 	for i, c := range columns {
-		quotedCols[i] = quoteIdentByType(runConfig.Type, c)
+		quotedCols[i] = quoteIdentByType(dbType, c)
 	}
 
 	for idx, row := range rows {
@@ -956,11 +957,11 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		for _, col := range columns {
 			val := row[col]
 			colType := columnTypeMap[normalizeColumnName(col)]
-			values = append(values, formatImportSQLValue(runConfig.Type, colType, val))
+			values = append(values, formatImportSQLValue(dbType, colType, val))
 		}
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-			quoteQualifiedIdentByType(runConfig.Type, tableName),
+			quoteQualifiedIdentByType(dbType, tableName),
 			strings.Join(quotedCols, ", "),
 			strings.Join(values, ", "))
 
@@ -1034,7 +1035,8 @@ func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableNa
 		cp = ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
 	} else {
 		// 回退到通用生成，使用 quoteIdentByType 处理标识符转义
-		quoter := func(s string) string { return quoteIdentByType(runConfig.Type, s) }
+		dbType := resolveDDLDBType(config)
+		quoter := func(s string) string { return quoteIdentByType(dbType, s) }
 		deletes, updates, inserts := db.GenerateChangePreview(tableName, changes, quoter)
 		cp = ChangePreview{Deletes: deletes, Updates: updates, Inserts: inserts}
 	}
@@ -1083,7 +1085,8 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 		return connection.QueryResult{Success: true, Message: "导出完成"}
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(runConfig.Type, tableName))
+	dbType := resolveDDLDBType(config)
+	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(dbType, tableName))
 
 	data, columns, err := queryDataForExport(dbInst, runConfig, query)
 	if err != nil {
@@ -1248,7 +1251,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -1381,15 +1384,12 @@ func quoteIdentByType(dbType string, ident string) string {
 		return ident
 	}
 
+	dbType = resolveDDLDBType(connection.ConnectionConfig{Type: dbType})
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "tdengine", "clickhouse":
 		return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 	case "kingbase":
-		cleaned := db.NormalizeKingbaseIdentifier(ident)
-		if cleaned == "" {
-			return `""`
-		}
-		return `"` + strings.ReplaceAll(cleaned, `"`, `""`) + `"`
+		return db.QuoteKingbaseIdentifier(ident)
 	case "sqlserver":
 		escaped := strings.ReplaceAll(ident, "]", "]]")
 		return "[" + escaped + "]"
@@ -1404,6 +1404,7 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 		return raw
 	}
 
+	dbType = resolveDDLDBType(connection.ConnectionConfig{Type: dbType})
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(raw)
 		if table == "" {
@@ -1607,7 +1608,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 	dbType := resolveDDLDBType(config)
 	escapedDbName := escapeSQLLiteral(dbName)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx":
 		queries := []string{
 			fmt.Sprintf(`SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE TABLE_TYPE='VIEW' AND TABLE_SCHEMA='%s' ORDER BY TABLE_NAME`, escapedDbName),
 		}
@@ -1710,7 +1711,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 	escapedDB := escapeSQLLiteral(dbName)
 
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "sphinx":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx":
 		if safeSchema == "" {
 			safeSchema = strings.TrimSpace(dbName)
 		}
@@ -1990,7 +1991,7 @@ func formatSQLValue(dbType string, v interface{}) string {
 		return "'" + val.Format("2006-01-02 15:04:05") + "'"
 	case string:
 		normalizedType := strings.ToLower(strings.TrimSpace(dbType))
-		if (normalizedType == "mysql" || normalizedType == "oceanbase" || normalizedType == "diros") && isMySQLHexLiteral(val) {
+		if (normalizedType == "mysql" || normalizedType == "oceanbase" || normalizedType == "diros" || normalizedType == "starrocks") && isMySQLHexLiteral(val) {
 			return val
 		}
 		escaped := strings.ReplaceAll(val, "'", "''")
@@ -2085,7 +2086,8 @@ func dumpTableSQL(
 	}
 
 	qualified := qualifyTable(schemaName, pureTableName)
-	selectSQL := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.Type, qualified))
+	dbType := resolveDDLDBType(config)
+	selectSQL := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(dbType, qualified))
 	data, columns, err := queryDataForExport(dbInst, config, selectSQL)
 	if err != nil {
 		return err
@@ -2103,14 +2105,14 @@ func dumpTableSQL(
 
 	quotedCols := make([]string, 0, len(columns))
 	for _, c := range columns {
-		quotedCols = append(quotedCols, quoteIdentByType(config.Type, c))
+		quotedCols = append(quotedCols, quoteIdentByType(dbType, c))
 	}
-	quotedTable := quoteQualifiedIdentByType(config.Type, qualified)
+	quotedTable := quoteQualifiedIdentByType(dbType, qualified)
 
 	for _, row := range data {
 		values := make([]string, 0, len(columns))
 		for _, c := range columns {
-			values = append(values, formatImportSQLValue(config.Type, columnTypeMap[normalizeColumnName(c)], row[c]))
+			values = append(values, formatImportSQLValue(dbType, columnTypeMap[normalizeColumnName(c)], row[c]))
 		}
 		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n", quotedTable, strings.Join(quotedCols, ", "), strings.Join(values, ", "))); err != nil {
 			return err
@@ -2179,7 +2181,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	query = sanitizeSQLForPgLike(runConfig.Type, query)
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	if !looksLikeSelectOrWith(query) {
 		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
 	}

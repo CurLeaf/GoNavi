@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
   findReservedConflicts,
   describeConflictContext,
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
+  SHORTCUT_ACTION_META,
 } from './shortcuts';
 import type { ConflictInfo } from './shortcuts';
 
@@ -110,6 +112,34 @@ describe('RESERVED_SHORTCUTS', () => {
       expect(entry.label).toBeTruthy();
       expect(['global', 'monaco', 'datagrid']).toContain(entry.context);
     }
+  });
+});
+
+// ─── shortcut defaults ───────────────────────────────────────────────
+
+describe('shortcut defaults', () => {
+  it('registers select current statement as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.selectCurrentStatement).toEqual({
+      combo: 'Ctrl+E',
+      enabled: true,
+    });
+    expect(SHORTCUT_ACTION_META.selectCurrentStatement).toMatchObject({
+      label: '选择当前语句',
+      scope: 'queryEditor',
+    });
+  });
+
+  // Windows 任务栏恢复后字体异常变大的兜底入口（方案 3）。
+  // 自动 fix 路径（9848b8b2）刻意不再 toggle 以避免可见动画，由该快捷键给用户主动触发的修复入口。
+  it('registers reset window zoom shortcut with default Ctrl+Shift+0', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.resetWindowZoom).toEqual({
+      combo: 'Ctrl+Shift+0',
+      enabled: true,
+    });
+    expect(SHORTCUT_ACTION_META.resetWindowZoom).toMatchObject({
+      label: '重置窗口缩放',
+      allowInEditable: true,
+    });
   });
 });
 

@@ -5,6 +5,7 @@ import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -43,11 +44,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             const driver = String(conn?.config?.driver || '').trim().toLowerCase();
             if (driver === 'diros' || driver === 'doris') return 'mysql';
-            if (driver === 'oceanbase') return 'mysql';
+            if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
             return driver;
         }
-        if (type === 'oceanbase' && String(conn?.config?.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
+        if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
         if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
@@ -119,13 +120,23 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         return `CREATE OR REPLACE MACRO ${qualifiedName}(${parameters}) AS ${macroDefinition};`;
     };
 
-    const buildShowViewQueries = (dialect: string, viewName: string, dbName: string): string[] => {
+    const buildShowViewQueries = (dialect: string, viewName: string, dbName: string, viewKind?: string): string[] => {
         const { schema, name } = parseSchemaAndName(viewName);
         const safeName = escapeSQLLiteral(name);
         const safeDbName = escapeSQLLiteral(dbName);
 
         switch (dialect) {
             case 'mysql':
+            case 'starrocks':
+                if (dialect === 'starrocks' && viewKind === 'materialized') {
+                    const mvRef = schema
+                        ? `\`${schema.replace(/`/g, '``')}\`.\`${name.replace(/`/g, '``')}\``
+                        : `\`${name.replace(/`/g, '``')}\``;
+                    return [
+                        `SHOW CREATE MATERIALIZED VIEW ${mvRef}`,
+                        `SHOW CREATE TABLE ${mvRef}`,
+                    ];
+                }
                 return [
                     `SHOW CREATE VIEW \`${name.replace(/`/g, '``')}\``,
                     safeDbName
@@ -171,6 +182,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
         switch (dialect) {
             case 'mysql':
+            case 'starrocks':
                 return [
                     `SHOW CREATE ${upperType} \`${name.replace(/`/g, '``')}\``,
                     safeDbName
@@ -276,7 +288,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         const row = data[0];
 
         switch (dialect) {
-            case 'mysql': {
+            case 'mysql':
+            case 'starrocks': {
                 const keys = Object.keys(row);
                 const textDefinition = row.view_definition || row.VIEW_DEFINITION;
                 if (textDefinition) return normalizeMySQLViewDDL(textDefinition);
@@ -304,7 +317,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         if (!data || data.length === 0) return '-- 未找到函数/存储过程定义';
 
         switch (dialect) {
-            case 'mysql': {
+            case 'mysql':
+            case 'starrocks': {
                 const row = data[0];
                 const keys = Object.keys(row);
                 if (row.routine_definition || row.ROUTINE_DEFINITION) {
@@ -379,9 +393,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     setLoading(false);
                     return;
                 }
-                queries = buildShowViewQueries(dialect, viewName, dbName);
+                queries = buildShowViewQueries(dialect, viewName, dbName, tab.viewKind);
                 extractFn = extractViewDefinition;
-                objectLabel = '视图';
+                objectLabel = tab.viewKind === 'materialized' ? '物化视图' : '视图';
             } else {
                 const routineName = tab.routineName || '';
                 const routineType = tab.routineType || 'FUNCTION';
@@ -442,9 +456,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         };
 
         loadDefinition();
-    }, [tab.connectionId, tab.dbName, tab.viewName, tab.routineName, tab.routineType, tab.type, connections]);
+    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.routineName, tab.routineType, tab.type, connections]);
 
-    const objectLabel = tab.type === 'view-def' ? '视图' : '函数/存储过程';
+    const objectLabel = tab.type === 'view-def' ? (tab.viewKind === 'materialized' ? '物化视图' : '视图') : '函数/存储过程';
     const objectName = tab.type === 'view-def' ? tab.viewName : tab.routineName;
 
     if (loading) {

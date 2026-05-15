@@ -762,7 +762,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         });
     }, [isLargeKeyspace]);
 
-    const stopTreeTitleEvent = (event: React.MouseEvent<HTMLElement>) => {
+    const stopTreeTitleEvent = (event: React.SyntheticEvent<HTMLElement>) => {
         event.preventDefault();
         event.stopPropagation();
     };
@@ -776,6 +776,20 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             const isExpanded = expandedGroupKeys.includes(groupNodeKey);
             return (
                 <div
+                    role="button"
+                    tabIndex={0}
+                    onMouseDown={stopTreeTitleEvent}
+                    onClick={(event) => {
+                        stopTreeTitleEvent(event);
+                        handleToggleGroupExpand(groupNodeKey);
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') {
+                            return;
+                        }
+                        stopTreeTitleEvent(event);
+                        handleToggleGroupExpand(groupNodeKey);
+                    }}
                     style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -784,6 +798,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         width: '100%',
                         minWidth: 0,
                         padding: '2px 0',
+                        cursor: 'pointer',
                     }}
                 >
                     <Space size={6} style={{ minWidth: 0, overflow: 'hidden' }}>

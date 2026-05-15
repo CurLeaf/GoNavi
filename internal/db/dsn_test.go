@@ -64,7 +64,7 @@ func TestPostgresDSN_MergesConnectionParams(t *testing.T) {
 		User:             "user",
 		Password:         "pass",
 		Database:         "db",
-		ConnectionParams: "application_name=GoNavi&connect_timeout=9",
+		ConnectionParams: "application_name=GoNavi&connect_timeout=9&statement_timeout=3000&allowPublicKeyRetrieval=true",
 	}
 
 	dsn := p.getDSN(cfg)
@@ -78,6 +78,12 @@ func TestPostgresDSN_MergesConnectionParams(t *testing.T) {
 	}
 	if got := query.Get("connect_timeout"); got != "9" {
 		t.Fatalf("connect_timeout = %q, want 9", got)
+	}
+	if got := query.Get("statement_timeout"); got != "3000" {
+		t.Fatalf("statement_timeout = %q, want 3000", got)
+	}
+	if got := query.Get("allowPublicKeyRetrieval"); got != "" {
+		t.Fatalf("unsupported postgres param should be filtered, got %q", got)
 	}
 }
 
@@ -184,11 +190,35 @@ func TestDamengDSN_AppendsSSLCertAndKeyParams(t *testing.T) {
 	}
 
 	dsn := d.getDSN(cfg)
-	if !strings.Contains(dsn, "SSL_CERT_PATH=") {
-		t.Fatalf("dsn 缺少 SSL_CERT_PATH 参数：%s", dsn)
+	if !strings.Contains(dsn, "sslCertPath=") {
+		t.Fatalf("dsn 缺少 sslCertPath 参数：%s", dsn)
 	}
-	if !strings.Contains(dsn, "SSL_KEY_PATH=") {
-		t.Fatalf("dsn 缺少 SSL_KEY_PATH 参数：%s", dsn)
+	if !strings.Contains(dsn, "sslKeyPath=") {
+		t.Fatalf("dsn 缺少 sslKeyPath 参数：%s", dsn)
+	}
+}
+
+func TestDamengDSN_FiltersUnsupportedConnectionParams(t *testing.T) {
+	d := &DamengDB{}
+	cfg := connection.ConnectionConfig{
+		Type:             "dameng",
+		Host:             "127.0.0.1",
+		Port:             5236,
+		User:             "SYSDBA",
+		Password:         "pass",
+		Database:         "DBName",
+		ConnectionParams: "SSL_CERT_PATH=/cert.pem&CONNECT_TIMEOUT=5000&unknown=bad",
+	}
+
+	dsn := d.getDSN(cfg)
+	if !strings.Contains(dsn, "sslCertPath=%2Fcert.pem") {
+		t.Fatalf("dsn 缺少规范化 sslCertPath 参数：%s", dsn)
+	}
+	if !strings.Contains(dsn, "connectTimeout=5000") {
+		t.Fatalf("dsn 缺少规范化 connectTimeout 参数：%s", dsn)
+	}
+	if strings.Contains(dsn, "SSL_CERT_PATH") || strings.Contains(dsn, "unknown=bad") {
+		t.Fatalf("dsn 不应透传达梦未知或非规范参数：%s", dsn)
 	}
 }
 
@@ -218,7 +248,7 @@ func TestKingbaseDSN_MergesConnectionParams(t *testing.T) {
 		User:             "system",
 		Password:         "pass",
 		Database:         "TEST",
-		ConnectionParams: "application_name=GoNavi&connect_timeout=12",
+		ConnectionParams: "application_name=GoNavi&connect_timeout=12&statement_timeout=3000&unknown=bad",
 	}
 
 	dsn := k.getDSN(cfg)
@@ -227,6 +257,12 @@ func TestKingbaseDSN_MergesConnectionParams(t *testing.T) {
 	}
 	if !strings.Contains(dsn, "connect_timeout=12") {
 		t.Fatalf("dsn 缺少自定义 connect_timeout：%s", dsn)
+	}
+	if !strings.Contains(dsn, "statement_timeout=3000") {
+		t.Fatalf("dsn 缺少允许的 runtime 参数：%s", dsn)
+	}
+	if strings.Contains(dsn, "unknown=bad") {
+		t.Fatalf("dsn 不应透传未知 Kingbase 参数：%s", dsn)
 	}
 }
 
@@ -275,12 +311,18 @@ func TestTDengineDSN_MergesConnectionParams(t *testing.T) {
 		User:             "root",
 		Password:         "taosdata",
 		Database:         "power",
-		ConnectionParams: "timezone=Asia%2FShanghai&protocol=wss",
+		ConnectionParams: "timezone=Asia%2FShanghai&protocol=wss&readTimeout=10s&unknown=bad",
 	}
 
 	dsn := td.getDSN(cfg)
-	if !strings.Contains(dsn, "?timezone=Asia%2FShanghai") {
+	if !strings.Contains(dsn, "timezone=Asia%2FShanghai") {
 		t.Fatalf("tdengine dsn 缺少自定义参数或错误透传 protocol：%s", dsn)
+	}
+	if !strings.Contains(dsn, "readTimeout=10s") {
+		t.Fatalf("tdengine dsn 缺少 readTimeout 参数：%s", dsn)
+	}
+	if strings.Contains(dsn, "protocol=wss") || strings.Contains(dsn, "unknown=bad") {
+		t.Fatalf("tdengine dsn 不应透传协议控制项或未知参数：%s", dsn)
 	}
 }
 
@@ -315,7 +357,7 @@ func TestSQLServerDSN_MergesConnectionParams(t *testing.T) {
 		User:             "sa",
 		Password:         "pass",
 		Database:         "master",
-		ConnectionParams: "app name=GoNavi&packet size=32767",
+		ConnectionParams: "Application Name=GoNavi&Initial Catalog=appdb&packet size=32767&unknown=bad",
 	}
 
 	dsn := s.getDSN(cfg)
@@ -327,8 +369,14 @@ func TestSQLServerDSN_MergesConnectionParams(t *testing.T) {
 	if got := query.Get("app name"); got != "GoNavi" {
 		t.Fatalf("app name = %q, want GoNavi", got)
 	}
+	if got := query.Get("database"); got != "appdb" {
+		t.Fatalf("database = %q, want appdb", got)
+	}
 	if got := query.Get("packet size"); got != "32767" {
 		t.Fatalf("packet size = %q, want 32767", got)
+	}
+	if got := query.Get("unknown"); got != "" {
+		t.Fatalf("unknown should be filtered, got %q", got)
 	}
 }
 

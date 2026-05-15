@@ -53,6 +53,7 @@ var _ db.Database = (*fakeCreateDatabaseDB)(nil)
 
 func TestResolveDDLDBType_SQLServerAliases(t *testing.T) {
 	tests := []connection.ConnectionConfig{
+		{Type: "sqlserver"},
 		{Type: "mssql"},
 		{Type: "sql_server"},
 		{Type: "custom", Driver: "mssql"},
@@ -95,7 +96,8 @@ func TestCreateDatabase_SQLServerUsesBracketIdentifiers(t *testing.T) {
 
 	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
 	result := app.CreateDatabase(connection.ConnectionConfig{
-		Type:     "sqlserver",
+		Type:     "custom",
+		Driver:   "mssql",
 		Database: "master",
 	}, "lg")
 

@@ -65,6 +65,13 @@ import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
+  describeUnsupportedOceanBaseProtocol,
+  normalizeOceanBaseProtocol,
+  OCEANBASE_PROTOCOL_PARAM_KEYS,
+  resolveOceanBaseProtocolFromQueryText as resolveOceanBaseProtocolQueryText,
+  type OceanBaseProtocol,
+} from "../utils/oceanBaseProtocol";
+import {
   applyNoAutoCapAttributes,
   noAutoCapInputProps,
 } from "../utils/inputAutoCap";
@@ -98,7 +105,7 @@ type ChoiceCardOption = {
   description?: string;
 };
 type ClickHouseProtocolChoice = "auto" | "http" | "native";
-type OceanBaseProtocolChoice = "mysql" | "oracle";
+type OceanBaseProtocolChoice = OceanBaseProtocol;
 const MAX_URI_LENGTH = 4096;
 const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
@@ -122,15 +129,6 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
-const OCEANBASE_PROTOCOL_PARAM_KEYS = [
-  "protocol",
-  "oceanBaseProtocol",
-  "oceanbaseProtocol",
-  "tenantMode",
-  "compatMode",
-  "mode",
-];
-
 const normalizeClickHouseProtocolValue = (
   value: unknown,
 ): ClickHouseProtocolChoice => {
@@ -144,10 +142,7 @@ const normalizeClickHouseProtocolValue = (
 const normalizeOceanBaseProtocolValue = (
   value: unknown,
 ): OceanBaseProtocolChoice => {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase();
-  return text === "oracle" ? "oracle" : "mysql";
+  return normalizeOceanBaseProtocol(value) || "mysql";
 };
 const resolveOceanBaseProtocolValue = (
   value: unknown,
@@ -156,29 +151,12 @@ const resolveOceanBaseProtocolValue = (
     .trim()
     .toLowerCase();
   if (!text) return undefined;
-  return ["oracle", "oracle-mode", "oracle_mode", "oboracle"].includes(text)
-    ? "oracle"
-    : "mysql";
+  return normalizeOceanBaseProtocol(text);
 };
 const resolveOceanBaseProtocolFromQueryText = (
   value: unknown,
 ): OceanBaseProtocolChoice | undefined => {
-  let text = String(value || "").trim();
-  if (!text) return undefined;
-  const queryIndex = text.indexOf("?");
-  if (queryIndex >= 0) {
-    text = text.slice(queryIndex + 1);
-  }
-  const hashIndex = text.indexOf("#");
-  if (hashIndex >= 0) {
-    text = text.slice(0, hashIndex);
-  }
-  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
-  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
-    const protocol = resolveOceanBaseProtocolValue(params.get(key));
-    if (protocol) return protocol;
-  }
-  return undefined;
+  return resolveOceanBaseProtocolQueryText(value).protocol;
 };
 const resolveOceanBaseProtocolForConfig = (
   config: Partial<ConnectionConfig>,
@@ -224,6 +202,7 @@ const getDefaultPortByType = (type: string) => {
       return 2881;
     case "doris":
     case "diros":
+    case "starrocks":
       return 9030;
     case "sphinx":
       return 9306;
@@ -281,6 +260,7 @@ const sslSupportedTypes = new Set([
   "oceanbase",
   "doris",
   "diros",
+  "starrocks",
   "sphinx",
   "dameng",
   "clickhouse",
@@ -312,6 +292,7 @@ const isMySQLCompatibleType = (type: string) =>
   type === "oceanbase" ||
   type === "doris" ||
   type === "diros" ||
+  type === "starrocks" ||
   type === "sphinx";
 
 const supportsConnectionParamsForType = (type: string) =>
@@ -1179,7 +1160,12 @@ const ConnectionModal: React.FC<{
     rawParams: unknown,
     selectedProtocol: OceanBaseProtocolChoice,
   ) => {
-    const params = new URLSearchParams(normalizeConnectionParamsText(rawParams));
+    const normalizedParamsText = normalizeConnectionParamsText(rawParams);
+    const protocolFromParams = resolveOceanBaseProtocolQueryText(normalizedParamsText);
+    if (protocolFromParams.unsupportedValue) {
+      throw new Error(describeUnsupportedOceanBaseProtocol(protocolFromParams.unsupportedValue));
+    }
+    const params = new URLSearchParams(normalizedParamsText);
     for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
       params.delete(key);
     }
@@ -1376,6 +1362,8 @@ const ConnectionModal: React.FC<{
         parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
         parseMultiHostUri(trimmedUri, "oceanbase") ||
         parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
+        parseMultiHostUri(trimmedUri, "starrocks") ||
+        parseMultiHostUri(trimmedUri, "jdbc:starrocks") ||
         parseMultiHostUri(trimmedUri, "diros") ||
         parseMultiHostUri(trimmedUri, "doris");
       if (!parsed) {
@@ -1799,7 +1787,7 @@ const ConnectionModal: React.FC<{
     if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
       const scheme =
-        dbType === "diros" ? "doris" : dbType === "oceanbase" ? "oceanbase" : "mysql";
+        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : "mysql";
       if (dbType === "oceanbase") {
         return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
       }
@@ -1913,7 +1901,7 @@ const ConnectionModal: React.FC<{
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       const scheme =
-        type === "diros" ? "doris" : type === "oceanbase" ? "oceanbase" : "mysql";
+        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
@@ -2273,6 +2261,7 @@ const ConnectionModal: React.FC<{
           configType === "mariadb" ||
           configType === "oceanbase" ||
           configType === "diros" ||
+          configType === "starrocks" ||
           configType === "sphinx"
             ? normalizedHosts.slice(1)
             : [];
@@ -3649,6 +3638,11 @@ const ConnectionModal: React.FC<{
           icon: getDbIcon("diros", undefined, 36),
         },
         {
+          key: "starrocks",
+          name: "StarRocks",
+          icon: getDbIcon("starrocks", undefined, 36),
+        },
+        {
           key: "sphinx",
           name: "Sphinx",
           icon: getDbIcon("sphinx", undefined, 36),
@@ -4775,7 +4769,13 @@ const ConnectionModal: React.FC<{
                     <Form.Item
                       name="oceanBaseProtocol"
                       label="OceanBase 协议"
-                      help="MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。该选择会同时影响连接测试、浏览表结构和 SQL 方言。"
+                      help={
+                        <span>
+                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。GoNavi 会根据端口自动选择：OB MySQL wire 端口走 OBClient capability 注入（与 Navicat 相同路径），OBProxy Oracle listener 端口走标准 TNS。
+                          <br />
+                          如果 Oracle 租户连接报「Error 1235」或 OBClient 握手失败，可在「连接参数」字段通过 <code>connectionAttributes=key1:value1,key2:value2</code> 覆盖 GoNavi 默认注入的 OBClient capability。
+                        </span>
+                      }
                       style={{ marginBottom: 0 }}
                     >
                       <Select

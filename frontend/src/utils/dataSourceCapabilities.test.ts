@@ -30,9 +30,31 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('keeps StarRocks as an independent SQL datasource capability', () => {
+    expect(getDataSourceCapabilities({ type: 'starrocks' })).toMatchObject({
+      type: 'starrocks',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      preferManualTotalCount: false,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',
+      oceanBaseProtocol: 'oracle',
+    })).toMatchObject({
+      type: 'oracle',
+      preferManualTotalCount: true,
+      supportsApproximateTableCount: true,
+    });
+  });
+
+  it('treats custom OceanBase Oracle driver as Oracle capabilities', () => {
+    expect(getDataSourceCapabilities({
+      type: 'custom',
+      driver: 'oceanbase',
       oceanBaseProtocol: 'oracle',
     })).toMatchObject({
       type: 'oracle',

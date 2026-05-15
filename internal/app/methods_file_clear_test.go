@@ -54,7 +54,20 @@ func TestBuildTableDataClearSQL_KingbaseTruncateNormalizesQuotedQualifiedTable(t
 		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
 	}
 
-	if sql != `TRUNCATE TABLE "Idf_server"."mes_bip_wip_finished"` {
+	if sql != `TRUNCATE TABLE "Idf_server".mes_bip_wip_finished` {
+		t.Fatalf("unexpected kingbase truncate sql: %s", sql)
+	}
+}
+
+func TestBuildTableDataClearSQL_KingbaseTruncateLeavesLowercaseQualifiedTableUnquoted(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "kingbase"}, "ldf_server.andon_events", tableDataClearModeTruncate)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != "TRUNCATE TABLE ldf_server.andon_events" {
 		t.Fatalf("unexpected kingbase truncate sql: %s", sql)
 	}
 }
@@ -67,7 +80,7 @@ func TestBuildTableDataClearSQL_KingbaseClearNormalizesQuotedQualifiedTable(t *t
 		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
 	}
 
-	if sql != `DELETE FROM "Idf_server"."mes_bip_wip_finished"` {
+	if sql != `DELETE FROM "Idf_server".mes_bip_wip_finished` {
 		t.Fatalf("unexpected kingbase clear sql: %s", sql)
 	}
 }

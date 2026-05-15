@@ -44,9 +44,7 @@ func (t *TDengineDB) getDSN(config connection.ConnectionConfig) string {
 
 	netType := resolveTDengineNet(config)
 	params := url.Values{}
-	mergeConnectionParamsFromConfig(params, config, "taos", "taosws", "tdengine")
-	params.Del("protocol")
-	params.Del("skip_verify")
+	mergeConnectionParamsFromConfigWithAllowlist(params, config, tdengineConnectionParamNames, "taos", "taosws", "tdengine")
 	query := params.Encode()
 	dsn := fmt.Sprintf("%s:%s@%s(%s)%s", user, pass, netType, net.JoinHostPort(config.Host, strconv.Itoa(config.Port)), path)
 	if query == "" {

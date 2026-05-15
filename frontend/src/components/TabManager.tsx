@@ -285,6 +285,7 @@ const TabManager: React.FC = () => {
             }
             .main-tabs .ant-tabs-nav {
               flex: 0 0 auto;
+              margin: 0;
             }
             .main-tabs .ant-tabs-content-holder {
               flex: 1 1 auto;

@@ -1,4 +1,8 @@
 import { connection } from '../../wailsjs/go/models';
+import {
+  OCEANBASE_PROTOCOL_PARAM_KEYS,
+  resolveOceanBaseProtocolFromConfig,
+} from './oceanBaseProtocol';
 
 export type RpcConnectionConfig = connection.ConnectionConfig & { id?: string };
 type ConnectionConfigInput = {
@@ -11,15 +15,6 @@ type ConnectionConfigInput = {
 type SSHConfigInput = Record<string, any>;
 type ProxyConfigInput = Record<string, any>;
 type HttpTunnelConfigInput = Record<string, any>;
-type OceanBaseProtocol = 'mysql' | 'oracle';
-const OCEANBASE_PROTOCOL_PARAM_KEYS = [
-  'protocol',
-  'oceanBaseProtocol',
-  'oceanbaseProtocol',
-  'tenantMode',
-  'compatMode',
-  'mode',
-];
 
 const toStringValue = (value: unknown, fallback = ''): string => {
   if (typeof value === 'string') {
@@ -79,59 +74,12 @@ const normalizeHttpTunnelConfig = (value: unknown): connection.HTTPTunnelConfig 
   });
 };
 
-const normalizeOceanBaseProtocol = (value: unknown): OceanBaseProtocol | undefined => {
-  const normalized = toStringValue(value).trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  return normalized === 'oracle' || normalized === 'oracle-mode' || normalized === 'oracle_mode' || normalized === 'oboracle'
-    ? 'oracle'
-    : 'mysql';
-};
-
-const resolveOceanBaseProtocolFromQueryText = (raw: unknown): OceanBaseProtocol | undefined => {
-  let text = toStringValue(raw).trim();
-  if (!text) {
-    return undefined;
-  }
-  const queryStart = text.indexOf('?');
-  if (queryStart >= 0) {
-    text = text.slice(queryStart + 1);
-  }
-  const hashStart = text.indexOf('#');
-  if (hashStart >= 0) {
-    text = text.slice(0, hashStart);
-  }
-  const params = new URLSearchParams(text.replace(/^[?&]+/, ''));
-  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
-    const protocol = normalizeOceanBaseProtocol(params.get(key));
-    if (protocol) {
-      return protocol;
-    }
-  }
-  return undefined;
-};
-
-const resolveOceanBaseProtocol = (config: ConnectionConfigInput): OceanBaseProtocol => {
-  if (Object.prototype.hasOwnProperty.call(config, 'oceanBaseProtocol')) {
-    const explicitProtocol = normalizeOceanBaseProtocol(config.oceanBaseProtocol);
-    if (explicitProtocol) {
-      return explicitProtocol;
-    }
-  }
-  return (
-    resolveOceanBaseProtocolFromQueryText(config.connectionParams) ||
-    resolveOceanBaseProtocolFromQueryText(config.uri) ||
-    'mysql'
-  );
-};
-
 const withOceanBaseProtocolParam = (config: ConnectionConfigInput): ConnectionConfigInput => {
   const type = toStringValue(config.type).trim().toLowerCase();
   if (type !== 'oceanbase') {
     return config;
   }
-  const selectedProtocol = resolveOceanBaseProtocol(config);
+  const selectedProtocol = resolveOceanBaseProtocolFromConfig(config);
   const params = new URLSearchParams(toStringValue(config.connectionParams));
   for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
     params.delete(key);

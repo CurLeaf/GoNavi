@@ -12,6 +12,8 @@ func normalizeMigrationDBType(dbType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
 	case "dm", "dm8":
@@ -43,6 +45,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 		return "sphinx"
 	case "diros", "doris":
 		return "diros"
+	case "starrocks":
+		return "starrocks"
 	case "kingbase", "kingbase8", "kingbasees", "kingbasev8":
 		return "kingbase"
 	case "highgo":
@@ -74,6 +78,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 		return "sphinx"
 	case strings.Contains(driver, "diros"), strings.Contains(driver, "doris"):
 		return "diros"
+	case strings.Contains(driver, "starrocks"):
+		return "starrocks"
 	case strings.Contains(driver, "maria"):
 		return "mariadb"
 	case strings.Contains(driver, "oceanbase"):
@@ -89,7 +95,7 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 
 func isMySQLCoreType(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "mysql", "mariadb", "oceanbase", "diros":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks":
 		return true
 	default:
 		return false

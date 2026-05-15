@@ -48,11 +48,61 @@ func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	q.Set("PREFETCH_ROWS", "10000")
 	// LOB 数据延迟加载，避免大 LOB 列影响普通查询性能
 	q.Set("LOB FETCH", "POST")
-	mergeConnectionParamsFromConfig(q, config, "oracle")
+	timeoutSeconds := strconv.Itoa(getConnectTimeoutSeconds(config))
+	q.Set("CONNECT TIMEOUT", timeoutSeconds)
+	q.Set("READ TIMEOUT", timeoutSeconds)
+	mergeConnectionParamsFromConfigWithAllowlist(q, config, oracleConnectionParamNames, "oracle")
 	if encoded := q.Encode(); encoded != "" {
 		u.RawQuery = encoded
 	}
 	return u.String()
+}
+
+func oracleQueryValue(values url.Values, key string) string {
+	return strings.TrimSpace(values.Get(key))
+}
+
+func oracleQueryValueOrDefault(values url.Values, key string) string {
+	value := oracleQueryValue(values, key)
+	if value == "" {
+		return "未配置"
+	}
+	return value
+}
+
+func oracleDSNLogSummary(config connection.ConnectionConfig, dsn string) string {
+	serviceName := strings.TrimSpace(config.Database)
+	params := url.Values{}
+	if parsed, err := url.Parse(dsn); err == nil && parsed != nil {
+		if pathService, unescapeErr := url.PathUnescape(strings.TrimPrefix(parsed.EscapedPath(), "/")); unescapeErr == nil && strings.TrimSpace(pathService) != "" {
+			serviceName = strings.TrimSpace(pathService)
+		}
+		params = parsed.Query()
+	}
+	if serviceName == "" {
+		serviceName = "(未配置)"
+	}
+	return fmt.Sprintf("服务名=%s CONNECT_TIMEOUT=%s READ_TIMEOUT=%s SSL=%s SSL_VERIFY=%s AUTH_TYPE=%s DBA_PRIVILEGE=%s SID=%s",
+		serviceName,
+		oracleQueryValueOrDefault(params, "CONNECT TIMEOUT"),
+		oracleQueryValueOrDefault(params, "READ TIMEOUT"),
+		oracleQueryValueOrDefault(params, "SSL"),
+		oracleQueryValueOrDefault(params, "SSL VERIFY"),
+		oracleQueryValueOrDefault(params, "AUTH TYPE"),
+		oracleQueryValueOrDefault(params, "DBA PRIVILEGE"),
+		oracleQueryValueOrDefault(params, "SID"),
+	)
+}
+
+func annotateOracleValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "use of closed network connection") {
+		return err
+	}
+	return fmt.Errorf("%w（Oracle 连接在验证阶段被服务端关闭或被驱动超时中断；请检查监听端口是否为 Oracle 协议端口、Service Name 是否正确、认证参数如 DBA_PRIVILEGE/AUTH_TYPE 是否匹配）", err)
 }
 
 func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
@@ -101,6 +151,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 	var failures []string
 	for idx, attempt := range attempts {
 		dsn := o.getDSN(attempt)
+		logger.Infof("Oracle 连接参数摘要：地址=%s:%d 用户=%s %s", attempt.Host, attempt.Port, attempt.User, oracleDSNLogSummary(attempt, dsn))
 		db, err := sql.Open("oracle", dsn)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
@@ -111,7 +162,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 		if err := o.Ping(); err != nil {
 			_ = db.Close()
 			o.conn = nil
-			failures = append(failures, fmt.Sprintf("第%d次连接验证失败: %v", idx+1, err))
+			failures = append(failures, fmt.Sprintf("第%d次连接验证失败: %v", idx+1, annotateOracleValidationError(err)))
 			continue
 		}
 		if idx > 0 {
@@ -217,9 +268,13 @@ func (o *OracleDB) GetDatabases() ([]string, error) {
 
 func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 	// dbName is Schema/Owner
-	query := "SELECT table_name FROM user_tables"
+	// 始终返回 OWNER.TABLE_NAME，避免下游 SQL 缺少 schema 前缀导致 ORA-00942（refs issue #445）
+	// 列别名用双引号包裹强制大写，避免不同驱动版本返回不一致 case 导致 row map 取值失败
+	var query string
 	if dbName != "" {
-		query = fmt.Sprintf("SELECT owner, table_name FROM all_tables WHERE owner = '%s' ORDER BY table_name", strings.ToUpper(dbName))
+		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, strings.ToUpper(dbName))
+	} else {
+		query = `SELECT USER AS "OWNER", table_name AS "TABLE_NAME" FROM user_tables ORDER BY table_name`
 	}
 
 	data, _, err := o.Query(query)
@@ -229,16 +284,14 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 
 	var tables []string
 	for _, row := range data {
-		if dbName != "" {
-			if owner, okOwner := row["OWNER"]; okOwner {
-				if name, okName := row["TABLE_NAME"]; okName {
-					tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
-					continue
-				}
-			}
+		owner, okOwner := row["OWNER"]
+		name, okName := row["TABLE_NAME"]
+		if okOwner && okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
+			continue
 		}
-		if val, ok := row["TABLE_NAME"]; ok {
-			tables = append(tables, fmt.Sprintf("%v", val))
+		if okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v", name))
 		}
 	}
 	return tables, nil
@@ -462,17 +515,16 @@ func splitOracleQualifiedTableName(raw string) (string, string) {
 	return schema, table
 }
 
-func (o *OracleDB) loadColumnTypeMap(tableName string) map[string]string {
+func (o *OracleDB) loadColumnTypeMap(tableName string) (map[string]string, error) {
 	result := map[string]string{}
 	schema, table := splitOracleQualifiedTableName(tableName)
 	if table == "" {
-		return result
+		return result, nil
 	}
 
 	columns, err := o.GetColumns(schema, table)
 	if err != nil {
-		logger.Warnf("加载 Oracle 列元数据失败（不影响提交）：表=%s err=%v", tableName, err)
-		return result
+		return nil, fmt.Errorf("加载列元数据失败（表=%s）：%w；请检查 ALL_TAB_COLUMNS 查询权限与表是否存在", tableName, err)
 	}
 
 	for _, col := range columns {
@@ -482,7 +534,7 @@ func (o *OracleDB) loadColumnTypeMap(tableName string) map[string]string {
 		}
 		result[name] = strings.TrimSpace(col.Type)
 	}
-	return result
+	return result, nil
 }
 
 func normalizeOracleValueForWrite(columnName string, value interface{}, columnTypeMap map[string]string) interface{} {
@@ -561,7 +613,10 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		return fmt.Errorf("连接未打开")
 	}
 
-	columnTypeMap := o.loadColumnTypeMap(tableName)
+	columnTypeMap, err := o.loadColumnTypeMap(tableName)
+	if err != nil {
+		return err
+	}
 
 	tx, err := o.conn.Begin()
 	if err != nil {

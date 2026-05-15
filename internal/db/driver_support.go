@@ -24,6 +24,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"mariadb":    {},
 	"oceanbase":  {},
 	"diros":      {},
+	"starrocks":  {},
 	"sphinx":     {},
 	"sqlserver":  {},
 	"sqlite":     {},
@@ -55,6 +56,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
 	default:
@@ -76,6 +79,8 @@ func driverDisplayName(driverType string) string {
 		return "OceanBase"
 	case "diros":
 		return "Doris"
+	case "starrocks":
+		return "StarRocks"
 	case "sphinx":
 		return "Sphinx"
 	case "postgres":

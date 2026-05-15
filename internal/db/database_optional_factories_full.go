@@ -6,6 +6,7 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("mariadb"), "mariadb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("oceanbase"), "oceanbase")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("diros"), "diros", "doris")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("starrocks"), "starrocks")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("sphinx"), "sphinx")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("sqlserver"), "sqlserver")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("sqlite"), "sqlite")

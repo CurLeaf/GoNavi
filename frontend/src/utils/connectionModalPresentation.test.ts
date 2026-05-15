@@ -71,6 +71,7 @@ describe('connectionModalPresentation', () => {
       'oceanbase',
       'doris',
       'diros',
+      'starrocks',
       'sphinx',
       'clickhouse',
       'postgres',

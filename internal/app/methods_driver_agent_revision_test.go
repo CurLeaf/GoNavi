@@ -79,12 +79,56 @@ func TestVerifyInstalledOptionalDriverAgentRevisionRejectsProbeFailure(t *testin
 	}
 }
 
+func TestVerifyRuntimeOptionalDriverAgentRevisionRejectsStaleOceanBaseAgent(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: "src-stale-agent",
+		}, nil
+	}
+
+	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{Type: "oceanbase"})
+	if err == nil {
+		t.Fatal("expected stale OceanBase agent revision to be rejected")
+	}
+	if !strings.Contains(err.Error(), "revision 不匹配") {
+		t.Fatalf("expected revision mismatch error, got %v", err)
+	}
+}
+
+func TestVerifyRuntimeOptionalDriverAgentRevisionSkipsCustomDriver(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	calls := 0
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		calls++
+		return db.OptionalDriverAgentMetadata{}, nil
+	}
+
+	if err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{
+		Type:   "custom",
+		Driver: "oceanbase",
+	}); err != nil {
+		t.Fatalf("custom driver should skip optional agent runtime revision check: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("custom driver should not probe optional agent metadata, got %d calls", calls)
+	}
+}
+
 func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 	t.Helper()
 	drivers := []string{
 		"mariadb",
 		"oceanbase",
 		"diros",
+		"starrocks",
 		"sphinx",
 		"sqlserver",
 		"sqlite",

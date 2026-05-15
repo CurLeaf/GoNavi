@@ -15,6 +15,7 @@ func TestClassifyMigrationDataModel(t *testing.T) {
 		"kingbase":   MigrationDataModelRelational,
 		"mongodb":    MigrationDataModelDocument,
 		"clickhouse": MigrationDataModelColumnar,
+		"starrocks":  MigrationDataModelColumnar,
 		"tdengine":   MigrationDataModelTimeSeries,
 		"redis":      MigrationDataModelKeyValue,
 		"custom":     MigrationDataModelCustom,

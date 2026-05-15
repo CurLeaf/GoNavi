@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestApplyMongoURI_ExplicitHostDoesNotAdoptURIHosts(t *testing.T) {
@@ -63,5 +65,66 @@ func TestMongoURI_MergesConnectionParamsIntoExistingURI(t *testing.T) {
 
 	if !strings.Contains(uri, "authSource=admin") || !strings.Contains(uri, "retryWrites=true") {
 		t.Fatalf("uri 未合并已有 URI query 与额外参数：%s", uri)
+	}
+}
+
+func TestBuildMongoChangeFilter_ConvertsExplicitOIDToObjectID(t *testing.T) {
+	const oidHex = "507f1f77bcf86cd799439011"
+
+	filter := buildMongoChangeFilter(map[string]interface{}{
+		"_id":  map[string]interface{}{"$oid": oidHex},
+		"name": oidHex,
+	})
+
+	gotID, ok := filter["_id"].(bson.ObjectID)
+	if !ok {
+		t.Fatalf("expected _id to be bson.ObjectID, got %T", filter["_id"])
+	}
+	if gotID.Hex() != oidHex {
+		t.Fatalf("unexpected ObjectID: got=%s want=%s", gotID.Hex(), oidHex)
+	}
+	if filter["name"] != oidHex {
+		t.Fatalf("non-_id 24 hex string should stay string, got %T %v", filter["name"], filter["name"])
+	}
+}
+
+func TestBuildMongoChangeFilter_LeavesIDHexStringUntouched(t *testing.T) {
+	const oidHex = "507f1f77bcf86cd799439011"
+
+	filter := buildMongoChangeFilter(map[string]interface{}{
+		"_id": oidHex,
+	})
+
+	if filter["_id"] != oidHex {
+		t.Fatalf("plain _id string should stay string, got %T %v", filter["_id"], filter["_id"])
+	}
+}
+
+func TestBuildMongoObjectIDLocatorValue_EncodesObjectID(t *testing.T) {
+	const oidHex = "507f1f77bcf86cd799439011"
+	oid, err := bson.ObjectIDFromHex(oidHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locator := buildMongoObjectIDLocatorValue(oid)
+	locatorMap, ok := locator.(bson.M)
+	if !ok {
+		t.Fatalf("expected locator bson.M, got %T", locator)
+	}
+	if locatorMap["$oid"] != oidHex {
+		t.Fatalf("unexpected locator value: %v", locatorMap["$oid"])
+	}
+}
+
+func TestCopyMongoChangeDocument_LeavesInsertIDStringUntouched(t *testing.T) {
+	const oidHex = "507f1f77bcf86cd799439011"
+
+	doc := copyMongoChangeDocument(map[string]interface{}{
+		"_id": oidHex,
+	})
+
+	if doc["_id"] != oidHex {
+		t.Fatalf("insert _id string should stay string, got %T %v", doc["_id"], doc["_id"])
 	}
 }

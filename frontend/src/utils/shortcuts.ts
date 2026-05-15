@@ -2,13 +2,15 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 export type ShortcutAction =
   | 'runQuery'
+  | 'selectCurrentStatement'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
   | 'toggleLogPanel'
   | 'toggleTheme'
   | 'openShortcutManager'
-  | 'toggleMacFullscreen';
+  | 'toggleMacFullscreen'
+  | 'resetWindowZoom';
 
 export interface ShortcutBinding {
   combo: string;
@@ -22,7 +24,7 @@ export interface ShortcutActionMeta {
   description: string;
   allowInEditable?: boolean;
   allowWithoutModifier?: boolean;
-  scope?: 'global' | 'aiComposer';
+  scope?: 'global' | 'aiComposer' | 'queryEditor';
   requiredKey?: string;
   disallowShift?: boolean;
   platformOnly?: 'mac';
@@ -78,6 +80,7 @@ const KEY_ALIASES: Record<string, string> = {
 
 export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
+  'selectCurrentStatement',
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
@@ -85,12 +88,18 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleTheme',
   'openShortcutManager',
   'toggleMacFullscreen',
+  'resetWindowZoom',
 ];
 
 export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = {
   runQuery: {
     label: '执行 SQL',
     description: '在当前查询页执行 SQL',
+  },
+  selectCurrentStatement: {
+    label: '选择当前语句',
+    description: '在查询编辑器中选中光标所在 SQL 语句',
+    scope: 'queryEditor',
   },
   sendAIChatMessage: {
     label: 'AI 聊天发送',
@@ -128,10 +137,16 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     description: 'macOS 原生窗口控制模式下的全屏切换（⌃⌘F）',
     platformOnly: 'mac',
   },
+  resetWindowZoom: {
+    label: '重置窗口缩放',
+    description: 'Windows 任务栏恢复后字体异常变大时主动触发；会切一次最大化让 WebView2 重算字体度量',
+    allowInEditable: true,
+  },
 };
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   runQuery: { combo: 'Ctrl+Shift+R', enabled: true },
+  selectCurrentStatement: { combo: 'Ctrl+E', enabled: true },
   sendAIChatMessage: { combo: 'Enter', enabled: true },
   focusSidebarSearch: { combo: 'Ctrl+F', enabled: true },
   newQueryTab: { combo: 'Ctrl+Shift+N', enabled: true },
@@ -139,6 +154,7 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   toggleTheme: { combo: 'Ctrl+Shift+D', enabled: true },
   openShortcutManager: { combo: 'Ctrl+,', enabled: true },
   toggleMacFullscreen: { combo: 'Ctrl+Meta+F', enabled: true },
+  resetWindowZoom: { combo: 'Ctrl+Shift+0', enabled: true },
 };
 
 const normalizeKeyToken = (value: string): string => {
@@ -487,4 +503,3 @@ export const comboToMonacoKeyBinding = (
   if (keyCode == null) return null;
   return { keyMod, keyCode };
 };
-

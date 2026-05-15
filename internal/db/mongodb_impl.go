@@ -40,6 +40,7 @@ func (d *mongoProxyDialer) DialContext(ctx context.Context, network, address str
 }
 
 const defaultMongoPort = 27017
+const mongoObjectIDLocatorColumn = "__gonavi_mongodb_id_locator__"
 
 func normalizeMongoAddress(host string, port int) string {
 	h := strings.TrimSpace(host)
@@ -922,6 +923,7 @@ func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interf
 	var skip int64
 	var sortDoc interface{}
 	var projection interface{}
+	var includeObjectIDLocator bool
 
 	for _, elem := range cmd {
 		switch elem.Key {
@@ -937,6 +939,10 @@ func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interf
 			sortDoc = elem.Value
 		case "projection":
 			projection = elem.Value
+		case "__gonaviIncludeObjectIDLocator":
+			if enabled, ok := elem.Value.(bool); ok {
+				includeObjectIDLocator = enabled
+			}
 		}
 	}
 
@@ -978,6 +984,10 @@ func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interf
 		}
 		row := make(map[string]interface{})
 		for k, v := range doc {
+			if includeObjectIDLocator && k == "_id" {
+				row[mongoObjectIDLocatorColumn] = buildMongoObjectIDLocatorValue(v)
+				columnSet[mongoObjectIDLocatorColumn] = true
+			}
 			row[k] = convertBsonValue(v)
 			columnSet[k] = true
 		}
@@ -1004,6 +1014,13 @@ func (m *MongoDB) execFind(ctx context.Context, cmd bson.D) ([]map[string]interf
 	}
 
 	return data, columns, nil
+}
+
+func buildMongoObjectIDLocatorValue(v interface{}) interface{} {
+	if oid, ok := v.(bson.ObjectID); ok {
+		return bson.M{"$oid": oid.Hex()}
+	}
+	return convertBsonValue(v)
 }
 
 // execCount 使用原生 Collection.CountDocuments() 执行计数
@@ -1198,6 +1215,57 @@ func (m *MongoDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDef
 	return []connection.TriggerDefinition{}, nil
 }
 
+func copyMongoChangeDocument(row map[string]interface{}) bson.M {
+	doc := bson.M{}
+	for k, v := range row {
+		doc[k] = v
+	}
+	return doc
+}
+
+func buildMongoChangeFilter(row map[string]interface{}) bson.M {
+	filter := bson.M{}
+	for k, v := range row {
+		filter[k] = normalizeMongoChangeFilterValue(k, v)
+	}
+	return filter
+}
+
+func normalizeMongoChangeFilterValue(key string, value interface{}) interface{} {
+	if strings.TrimSpace(key) != "_id" {
+		return value
+	}
+
+	switch val := value.(type) {
+	case map[string]interface{}:
+		if raw, ok := val["$oid"]; ok {
+			if oid, parsed := parseMongoObjectIDHex(fmt.Sprintf("%v", raw)); parsed {
+				return oid
+			}
+		}
+	case bson.M:
+		if raw, ok := val["$oid"]; ok {
+			if oid, parsed := parseMongoObjectIDHex(fmt.Sprintf("%v", raw)); parsed {
+				return oid
+			}
+		}
+	}
+	return value
+}
+
+func parseMongoObjectIDHex(value string) (bson.ObjectID, bool) {
+	text := strings.TrimSpace(value)
+	var zero bson.ObjectID
+	if len(text) != 24 {
+		return zero, false
+	}
+	oid, err := bson.ObjectIDFromHex(text)
+	if err != nil {
+		return zero, false
+	}
+	return oid, true
+}
+
 // ApplyChanges implements batch changes for MongoDB
 func (m *MongoDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if m.client == nil {
@@ -1211,23 +1279,21 @@ func (m *MongoDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 
 	// Process deletes
 	for _, pk := range changes.Deletes {
-		filter := bson.M{}
-		for k, v := range pk {
-			filter[k] = v
-		}
+		filter := buildMongoChangeFilter(pk)
 		if len(filter) > 0 {
-			if _, err := collection.DeleteOne(ctx, filter); err != nil {
+			result, err := collection.DeleteOne(ctx, filter)
+			if err != nil {
 				return fmt.Errorf("删除失败：%v", err)
+			}
+			if result.DeletedCount == 0 {
+				return fmt.Errorf("删除失败：未匹配到文档")
 			}
 		}
 	}
 
 	// Process updates
 	for _, update := range changes.Updates {
-		filter := bson.M{}
-		for k, v := range update.Keys {
-			filter[k] = v
-		}
+		filter := buildMongoChangeFilter(update.Keys)
 		if len(filter) == 0 {
 			return fmt.Errorf("更新操作需要主键条件")
 		}
@@ -1237,17 +1303,18 @@ func (m *MongoDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 			updateDoc["$set"].(bson.M)[k] = v
 		}
 
-		if _, err := collection.UpdateOne(ctx, filter, updateDoc); err != nil {
+		result, err := collection.UpdateOne(ctx, filter, updateDoc)
+		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
+		}
+		if result.MatchedCount == 0 {
+			return fmt.Errorf("更新失败：未匹配到文档")
 		}
 	}
 
 	// Process inserts
 	for _, row := range changes.Inserts {
-		doc := bson.M{}
-		for k, v := range row {
-			doc[k] = v
-		}
+		doc := copyMongoChangeDocument(row)
 		if len(doc) > 0 {
 			if _, err := collection.InsertOne(ctx, doc); err != nil {
 				return fmt.Errorf("插入失败：%v", err)

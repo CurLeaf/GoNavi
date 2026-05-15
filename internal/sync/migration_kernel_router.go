@@ -111,7 +111,7 @@ func classifyMigrationDataModel(dbType string) MigrationDataModel {
 		return MigrationDataModelRelational
 	case "mongodb":
 		return MigrationDataModelDocument
-	case "clickhouse", "diros", "sphinx":
+	case "clickhouse", "diros", "starrocks", "sphinx":
 		return MigrationDataModelColumnar
 	case "tdengine":
 		return MigrationDataModelTimeSeries

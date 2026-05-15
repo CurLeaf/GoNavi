@@ -425,6 +425,29 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
     justify-content: flex-end;
 }
 
+.driver-manager-batch-progress-panel {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border-radius: 8px;
+}
+
+.driver-manager-batch-progress-header,
+.driver-manager-batch-progress-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.driver-manager-batch-progress-header span,
+.driver-manager-batch-progress-meta span {
+    min-width: 0;
+    word-break: break-word;
+}
+
 .driver-manager-list-head {
     display: flex;
     justify-content: space-between;
@@ -553,6 +576,11 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
     }
 
     .driver-manager-card-actions {
+        justify-content: flex-start;
+    }
+
+    .driver-manager-batch-progress-header,
+    .driver-manager-batch-progress-meta {
         justify-content: flex-start;
     }
 }

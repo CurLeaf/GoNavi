@@ -34,6 +34,11 @@ import {
   sanitizeDataGridDisplaySettings,
   type DataGridDisplaySettings,
 } from "./utils/dataGridDisplay";
+import {
+  normalizeOceanBaseProtocol,
+  resolveOceanBaseProtocolFromConfig,
+  resolveOceanBaseProtocolFromQueryText,
+} from "./utils/oceanBaseProtocol";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   enabled: boolean;
@@ -78,68 +83,26 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   password: "",
   hasPassword: false,
 };
-const OCEANBASE_PROTOCOL_PARAM_KEYS = [
-  "protocol",
-  "oceanBaseProtocol",
-  "oceanbaseProtocol",
-  "tenantMode",
-  "compatMode",
-  "mode",
-];
-const normalizeOceanBaseProtocol = (
-  value: unknown,
-): "mysql" | "oracle" | undefined => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  return normalized === "oracle" ||
-    normalized === "oracle-mode" ||
-    normalized === "oracle_mode" ||
-    normalized === "oboracle"
-    ? "oracle"
-    : "mysql";
-};
-const resolveOceanBaseProtocolFromQueryText = (
-  value: unknown,
-): "mysql" | "oracle" | undefined => {
-  let text = String(value ?? "").trim();
-  if (!text) {
-    return undefined;
-  }
-  const queryIndex = text.indexOf("?");
-  if (queryIndex >= 0) {
-    text = text.slice(queryIndex + 1);
-  }
-  const hashIndex = text.indexOf("#");
-  if (hashIndex >= 0) {
-    text = text.slice(0, hashIndex);
-  }
-  const params = new URLSearchParams(text.replace(/^[?&]+/, ""));
-  for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
-    const protocol = normalizeOceanBaseProtocol(params.get(key));
-    if (protocol) {
-      return protocol;
-    }
-  }
-  return undefined;
-};
 const resolveOceanBaseProtocol = (
   raw: Record<string, unknown>,
   normalizedConnectionParams: string,
   normalizedUri: string,
 ): "mysql" | "oracle" => {
-  if (Object.prototype.hasOwnProperty.call(raw, "oceanBaseProtocol")) {
-    const explicitProtocol = normalizeOceanBaseProtocol(raw.oceanBaseProtocol);
-    if (explicitProtocol) {
-      return explicitProtocol;
-    }
+  const normalizedConfig = {
+    ...raw,
+    connectionParams: normalizedConnectionParams,
+    uri: normalizedUri,
+  };
+  try {
+    return resolveOceanBaseProtocolFromConfig(normalizedConfig);
+  } catch {
+    return (
+      normalizeOceanBaseProtocol(raw.oceanBaseProtocol) ||
+      resolveOceanBaseProtocolFromQueryText(normalizedConnectionParams).protocol ||
+      resolveOceanBaseProtocolFromQueryText(normalizedUri).protocol ||
+      "mysql"
+    );
   }
-  return (
-    resolveOceanBaseProtocolFromQueryText(normalizedConnectionParams) ||
-    resolveOceanBaseProtocolFromQueryText(normalizedUri) ||
-    "mysql"
-  );
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
@@ -147,6 +110,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "oceanbase",
   "doris",
   "diros",
+  "starrocks",
   "sphinx",
   "clickhouse",
   "postgres",
@@ -170,6 +134,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mariadb",
   "oceanbase",
   "diros",
+  "starrocks",
   "sphinx",
   "dameng",
   "clickhouse",
@@ -196,6 +161,7 @@ const getDefaultPortByType = (type: string): number => {
       return 2881;
     case "doris":
     case "diros":
+    case "starrocks":
       return 9030;
     case "duckdb":
       return 0;

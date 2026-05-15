@@ -133,6 +133,16 @@ func (a *App) SetMacNativeWindowControls(enabled bool) {
 	setMacNativeWindowControls(enabled)
 }
 
+// ResetWebViewZoom 把 WebView2 zoom factor 强制重置为 1.0，让 WebView2 重算字体度量。
+// 用于 Windows 任务栏恢复后字体异常变大的"零感知"修复：不动窗口、零动画。
+// 仅 Windows 上生效，其他平台返回错误（前端按需忽略）。
+func (a *App) ResetWebViewZoom() connection.QueryResult {
+	if err := resetWebViewZoomFactor(a.ctx, 1.0); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "WebView2 zoom factor reset to 1.0"}
+}
+
 // LogWindowDiagnostic 记录前端采集到的窗口诊断信息，便于排查 macOS 原生全屏异常。
 func (a *App) LogWindowDiagnostic(stage string, payload string) {
 	stage = strings.TrimSpace(stage)
@@ -543,6 +553,9 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
+	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
+	}
 
 	dbInst, err := newDatabaseFunc(effectiveConfig.Type)
 	if err != nil {
@@ -655,6 +668,9 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
 		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
 	}
+	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
+	}
 
 	initialKey := key
 	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
@@ -742,6 +758,32 @@ func formatConnectFailureCooldown(remaining time.Duration) time.Duration {
 		return time.Second
 	}
 	return remaining.Truncate(time.Second)
+}
+
+func verifyRuntimeOptionalDriverAgentRevision(config connection.ConnectionConfig) error {
+	driverType := normalizeDriverType(config.Type)
+	if !db.IsOptionalGoDriver(driverType) {
+		return nil
+	}
+	executablePath, err := db.ResolveOptionalDriverAgentExecutablePath("", driverType)
+	if err != nil {
+		return err
+	}
+	pkg, packageMetaExists := readInstalledDriverPackage("", driverType)
+	selectedVersion := ""
+	if packageMetaExists {
+		selectedVersion = strings.TrimSpace(pkg.Version)
+	}
+	agentRevision, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
+	if err != nil {
+		return err
+	}
+	if expectedRevision := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType)); expectedRevision != "" {
+		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+		logger.Infof("%s driver-agent revision 校验通过：已安装=%s 当前需要=%s version=%s path=%s",
+			displayName, strings.TrimSpace(agentRevision), expectedRevision, selectedVersion, executablePath)
+	}
+	return nil
 }
 
 func shortenCacheKey(key string) string {

@@ -78,6 +78,11 @@ const flushPromises = async () => {
   });
 };
 
+const createRows = (count: number) => Array.from({ length: count }, (_, i) => ({
+  ID: i + 1,
+  NAME: `row-${i + 1}`,
+}));
+
 describe('DataViewer safe editing locator', () => {
   const renderAndReload = async (tab: TabData = createTab()) => {
     let renderer: ReactTestRenderer;
@@ -149,6 +154,70 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('enables MongoDB table preview editing through the _id locator', async () => {
+    storeState.connections[0].config.type = 'mongodb';
+    storeState.connections[0].config.database = 'app';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['_id', '__gonavi_mongodb_id_locator__', 'name', 'age'],
+      data: [{
+        _id: '507f1f77bcf86cd799439011',
+        __gonavi_mongodb_id_locator__: { $oid: '507f1f77bcf86cd799439011' },
+        name: 'old-name',
+        age: 18,
+      }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-mongo', dbName: 'app', tableName: 'users', title: 'users' }));
+
+    expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
+    expect(backendApp.DBGetIndexes).not.toHaveBeenCalled();
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['_id']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['_id'],
+      valueColumns: ['__gonavi_mongodb_id_locator__'],
+      hiddenColumns: ['__gonavi_mongodb_id_locator__'],
+      writableColumns: {
+        name: 'name',
+        age: 'age',
+      },
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    const mongoFindCall = backendApp.DBQuery.mock.calls.find((call: any[]) => String(call[2] || '').includes('"find":"users"'));
+    expect(mongoFindCall).toBeTruthy();
+    expect(JSON.parse(String(mongoFindCall?.[2] || '{}'))).toMatchObject({
+      find: 'users',
+      sort: { _id: 1 },
+      __gonaviIncludeObjectIDLocator: true,
+    });
+    renderer.unmount();
+  });
+
+  it('keeps MongoDB results read-only when _id is missing', async () => {
+    storeState.connections[0].config.type = 'mongodb';
+    storeState.connections[0].config.database = 'app';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['name'],
+      data: [{ name: 'orphan-doc' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-mongo-no-id', dbName: 'app', tableName: 'users', title: 'users' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'none',
+      readOnly: true,
+      reason: 'MongoDB 结果集中缺少 _id，无法安全提交修改。',
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(true);
+    expect(messageApi.warning).toHaveBeenCalledWith('集合 app.users 保持只读：MongoDB 结果集中缺少 _id，无法安全提交修改。');
+    renderer.unmount();
+  });
+
   it('uses hidden Oracle ROWID when no primary or unique key is available', async () => {
     backendApp.DBGetColumns.mockResolvedValue({
       success: true,
@@ -193,6 +262,58 @@ describe('DataViewer safe editing locator', () => {
     expect(tableQueries.every((sql: string) => !/\border\s+by\b/i.test(sql))).toBe(true);
     expect(tableQueries[tableQueries.length - 1]).toContain('LIMIT 101 OFFSET 0');
     renderer.unmount();
+  });
+
+  it('invalidates a stale known total when table data grows after a manual refresh', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+    });
+
+    let pageQueryCount = 0;
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (/count\s*\(/i.test(String(sql))) {
+        return {
+          success: true,
+          fields: ['total'],
+          data: [{ total: 500 }],
+        };
+      }
+      pageQueryCount += 1;
+      return {
+        success: true,
+        fields: ['ID', 'NAME'],
+        data: pageQueryCount === 1 ? createRows(100) : createRows(101),
+      };
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ dbName: 'main', tableName: 'users', title: 'users' })} />);
+    });
+    await flushPromises();
+
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 100,
+      totalKnown: true,
+    });
+
+    await act(async () => {
+      dataGridState.latestProps?.onReload();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery.mock.calls.some((call: any[]) => /count\s*\(/i.test(String(call[2] || '')))).toBe(true);
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      total: 500,
+      totalKnown: true,
+    });
+    expect(dataGridState.latestProps?.data).toHaveLength(100);
+    renderer!.unmount();
   });
 
   it('shows an actionable message for DuckDB timeout interruption errors', async () => {

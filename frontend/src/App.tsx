@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined } from '@ant-design/icons';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -73,7 +73,7 @@ import {
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -635,10 +635,12 @@ function App() {
       let lastFixAt = 0;
       let activationTimer: number | null = null;
       let resizeTimer: number | null = null;
+      let minimisedSeen = false;
+      let hiddenSeen = document.visibilityState === 'hidden';
 
       const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
-      const fixWindowScaleIfNeeded = async (reason: 'activation' | 'ratio-change') => {
+      const fixWindowScaleIfNeeded = async (reason: WindowScaleFixReason) => {
           if (cancelled || inFlight) return;
           const now = Date.now();
           if (now - lastFixAt < 700) return;
@@ -668,6 +670,21 @@ function App() {
 
               if (isMaximised) {
                   if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
+                      // restore + drift（任务栏点击恢复后字体异常变大）的零感知修复路径：
+                      // 调 backend App.ResetWebViewZoom 触发 WebView2 ICoreWebView2Controller::put_ZoomFactor(1.0)，
+                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
+                      // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
+                      // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
+                      if (hasViewportScaleDrift) {
+                          try {
+                              const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+                              if (!res?.success) {
+                                  console.warn('ResetWebViewZoom unavailable in fixWindowScaleIfNeeded:', res?.message);
+                              }
+                          } catch (e) {
+                              console.warn('ResetWebViewZoom call failed in fixWindowScaleIfNeeded', e);
+                          }
+                      }
                       window.dispatchEvent(new Event('resize'));
                       lastFixAt = Date.now();
                       return;
@@ -713,6 +730,22 @@ function App() {
           }
       };
 
+      const rememberMinimisedState = async (): Promise<boolean> => {
+          if (cancelled) return false;
+          const isMinimised = await WindowIsMinimised().catch(() => false);
+          if (isMinimised) {
+              minimisedSeen = true;
+          }
+          return isMinimised;
+      };
+
+      const rememberMinimisedStateSoon = () => {
+          window.setTimeout(() => {
+              if (cancelled) return;
+              void rememberMinimisedState();
+          }, 120);
+      };
+
       const checkDevicePixelRatio = () => {
           if (cancelled) return;
           const currentRatio = Number(window.devicePixelRatio) || 1;
@@ -720,6 +753,10 @@ function App() {
               return;
           }
           lastRatio = currentRatio;
+          if (minimisedSeen || hiddenSeen) {
+              scheduleActivationFix();
+              return;
+          }
           void fixWindowScaleIfNeeded('ratio-change');
       };
 
@@ -746,11 +783,18 @@ function App() {
           if (activationTimer !== null) {
               window.clearTimeout(activationTimer);
           }
-          activationTimer = window.setTimeout(() => {
+          const delayMs = (minimisedSeen || hiddenSeen) ? 260 : 80;
+          activationTimer = window.setTimeout(async () => {
               activationTimer = null;
               if (cancelled) return;
-              void fixWindowScaleIfNeeded('activation');
-          }, 80);
+              if (await rememberMinimisedState()) {
+                  return;
+              }
+              const reason: WindowScaleFixReason = (minimisedSeen || hiddenSeen) ? 'restore' : 'activation';
+              minimisedSeen = false;
+              hiddenSeen = false;
+              void fixWindowScaleIfNeeded(reason);
+          }, delayMs);
       };
 
       const handleWindowFocus = () => {
@@ -759,9 +803,19 @@ function App() {
           scheduleActivationFix();
       };
 
+      const handleWindowBlur = () => {
+          if (cancelled) return;
+          if (document.visibilityState === 'hidden') {
+              hiddenSeen = true;
+          }
+          rememberMinimisedStateSoon();
+      };
+
       const handleVisibilityChange = () => {
           if (cancelled) return;
           if (document.visibilityState !== 'visible') {
+              hiddenSeen = true;
+              rememberMinimisedStateSoon();
               return;
           }
           scheduleDevicePixelRatioCheck('visibilitychange');
@@ -775,12 +829,17 @@ function App() {
       };
 
       const handleWindowResize = () => {
+          rememberMinimisedStateSoon();
           scheduleDevicePixelRatioCheck('resize');
       };
 
-      const pollTimer = window.setInterval(checkDevicePixelRatio, 900);
+      const pollTimer = window.setInterval(() => {
+          void rememberMinimisedState();
+          checkDevicePixelRatio();
+      }, 900);
       window.addEventListener('resize', handleWindowResize);
       window.addEventListener('focus', handleWindowFocus);
+      window.addEventListener('blur', handleWindowBlur);
       window.addEventListener('pageshow', handlePageShow);
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -795,6 +854,7 @@ function App() {
           window.clearInterval(pollTimer);
           window.removeEventListener('resize', handleWindowResize);
           window.removeEventListener('focus', handleWindowFocus);
+          window.removeEventListener('blur', handleWindowBlur);
           window.removeEventListener('pageshow', handlePageShow);
           document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
@@ -2266,6 +2326,57 @@ function App() {
       }
       void handleTitleBarWindowToggle();
   };
+
+  // handleManualResetWindowZoom 由 resetWindowZoom 快捷键（默认 Ctrl+Shift+0）触发，
+  // 作为自动路径失败时的兜底入口。
+  //
+  // 优先调 backend App.ResetWebViewZoom 走 WebView2 zoom reset（零动画零感知）；
+  // 失败时回退到 Unmaximise→Maximise toggle —— 用户主动按了快捷键，预期看见动画。
+  const handleManualResetWindowZoom = React.useCallback(async () => {
+      if (!isWindowsPlatform()) {
+          message.info('该功能仅在 Windows 平台生效');
+          return;
+      }
+      try {
+          const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+          if (res?.success) {
+              window.dispatchEvent(new Event('resize'));
+              message.success('已重置窗口缩放');
+              return;
+          }
+          console.warn('ResetWebViewZoom backend reported failure, falling back to maximise toggle:', res?.message);
+      } catch (e) {
+          console.warn('ResetWebViewZoom backend unavailable, falling back to maximise toggle', e);
+      }
+      try {
+          const isFullscreen = await WindowIsFullscreen().catch(() => false);
+          if (isFullscreen) {
+              message.info('全屏状态下无法重置缩放，请先退出全屏');
+              return;
+          }
+          const isMaximised = await WindowIsMaximised().catch(() => false);
+          if (isMaximised) {
+              WindowUnmaximise();
+              await new Promise((resolve) => window.setTimeout(resolve, 96));
+              WindowMaximise();
+              await new Promise((resolve) => window.setTimeout(resolve, 96));
+          } else {
+              const size = await WindowGetSize().catch(() => null);
+              const width = Math.trunc(Number(size?.w) || 0);
+              const height = Math.trunc(Number(size?.h) || 0);
+              if (width > 0 && height > 0) {
+                  WindowSetSize(getWindowsScaleFixNudgedWidth(width), height);
+                  await new Promise((resolve) => window.setTimeout(resolve, 28));
+                  WindowSetSize(width, height);
+              }
+          }
+          window.dispatchEvent(new Event('resize'));
+          message.success('已重置窗口缩放（回退方案）');
+      } catch (e) {
+          console.warn('重置窗口缩放失败', e);
+          message.error('重置窗口缩放失败');
+      }
+  }, []);
   
   // Sidebar Resizing
   const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
@@ -2525,6 +2636,9 @@ function App() {
                       void handleTitleBarWindowToggle();
                   }
                   break;
+              case 'resetWindowZoom':
+                  void handleManualResetWindowZoom();
+                  break;
           }
       };
 
@@ -2532,7 +2646,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
+  }, [handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -2973,6 +3087,16 @@ function App() {
                   onClick: () => {
                     setIsToolsModalOpen(false);
                     setIsDataRootModalOpen(true);
+                  },
+                },
+                {
+                  key: 'snippet-settings',
+                  icon: <CodeOutlined />,
+                  title: '代码片段管理',
+                  description: '管理 SQL 代码片段和前缀补全。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setIsSnippetModalOpen(true);
                   },
                 },
                 {

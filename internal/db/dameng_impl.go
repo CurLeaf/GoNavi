@@ -37,13 +37,13 @@ func (d *DamengDB) getDSN(config connection.ConnectionConfig) string {
 	}
 	if config.UseSSL {
 		if certPath := strings.TrimSpace(config.SSLCertPath); certPath != "" {
-			q.Set("SSL_CERT_PATH", certPath)
+			q.Set("sslCertPath", certPath)
 		}
 		if keyPath := strings.TrimSpace(config.SSLKeyPath); keyPath != "" {
-			q.Set("SSL_KEY_PATH", keyPath)
+			q.Set("sslKeyPath", keyPath)
 		}
 	}
-	mergeConnectionParamsFromConfig(q, config, "dm", "dameng")
+	mergeConnectionParamsFromConfigWithAllowlist(q, config, damengConnectionParamNames, "dm", "dameng")
 
 	// 当前达梦 Go 驱动使用字符串切分解析 DSN，认证信息不会做 URL 反解码。
 	// 密码保持原样传入，避免 p%40ss 这类转义文本被当作真实密码登录。
@@ -211,9 +211,13 @@ func (d *DamengDB) GetDatabases() ([]string, error) {
 }
 
 func (d *DamengDB) GetTables(dbName string) ([]string, error) {
-	query := fmt.Sprintf("SELECT owner, table_name FROM all_tables WHERE owner = '%s' ORDER BY table_name", strings.ToUpper(dbName))
-	if dbName == "" {
-		query = "SELECT table_name FROM user_tables"
+	// 始终返回 OWNER.TABLE_NAME，与 Oracle 实现对齐，避免下游 SQL 缺少 schema 前缀（refs issue #445）
+	// 列别名用双引号包裹强制大写，避免不同驱动版本返回不一致 case 导致 row map 取值失败
+	var query string
+	if dbName != "" {
+		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, strings.ToUpper(dbName))
+	} else {
+		query = `SELECT USER AS "OWNER", table_name AS "TABLE_NAME" FROM user_tables ORDER BY table_name`
 	}
 
 	data, _, err := d.Query(query)
@@ -223,16 +227,14 @@ func (d *DamengDB) GetTables(dbName string) ([]string, error) {
 
 	var tables []string
 	for _, row := range data {
-		if dbName != "" {
-			if owner, okOwner := row["OWNER"]; okOwner {
-				if name, okName := row["TABLE_NAME"]; okName {
-					tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
-					continue
-				}
-			}
+		owner, okOwner := row["OWNER"]
+		name, okName := row["TABLE_NAME"]
+		if okOwner && okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v.%v", owner, name))
+			continue
 		}
-		if val, ok := row["TABLE_NAME"]; ok {
-			tables = append(tables, fmt.Sprintf("%v", val))
+		if okName && name != nil {
+			tables = append(tables, fmt.Sprintf("%v", name))
 		}
 	}
 	return tables, nil

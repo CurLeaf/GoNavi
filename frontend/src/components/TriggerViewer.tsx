@@ -5,6 +5,7 @@ import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 
 interface TriggerViewerProps {
     tab: TabData;
@@ -29,11 +30,11 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             const driver = String(conn?.config?.driver || '').trim().toLowerCase();
             if (driver === 'diros' || driver === 'doris') return 'mysql';
-            if (driver === 'oceanbase') return 'mysql';
+            if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
             return driver;
         }
-        if (type === 'oceanbase' && String(conn?.config?.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
+        if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
         if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
@@ -52,6 +53,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         const safeDbName = escapeSQLLiteral(dbName);
         switch (dialect) {
             case 'mysql':
+            case 'starrocks':
                 return [
                     `SHOW CREATE TRIGGER \`${triggerName.replace(/`/g, '``')}\``,
                     safeDbName
@@ -160,7 +162,8 @@ LIMIT 1`];
         const row = data[0];
 
         switch (dialect) {
-            case 'mysql': {
+            case 'mysql':
+            case 'starrocks': {
                 // MySQL SHOW CREATE TRIGGER returns: Trigger, sql_mode, SQL Original Statement, ...
                 const keys = Object.keys(row);
                 if (row.trigger_definition || row.TRIGGER_DEFINITION) {

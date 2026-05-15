@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
 )
 
 func normalizeRunConfig(config connection.ConnectionConfig, dbName string) connection.ConnectionConfig {
@@ -19,7 +20,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 		if !isOceanBaseOracleProtocol(config) {
 			runConfig.Database = name
 		}
-	case "mysql", "mariadb", "diros", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "mongodb", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "mongodb", "tdengine", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -55,6 +56,16 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 			targetDB = strings.TrimSpace(config.Database)
 		}
 		return targetDB, rawTable
+	}
+
+	if dbType == "kingbase" {
+		schema, table := db.SplitKingbaseQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "public", table
+		}
 	}
 
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {

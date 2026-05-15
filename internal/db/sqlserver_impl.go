@@ -49,8 +49,8 @@ func (s *SqlServerDB) getDSN(config connection.ConnectionConfig) string {
 	q.Set("connection timeout", strconv.Itoa(getConnectTimeoutSeconds(config)))
 	encrypt, trustServerCertificate := resolveSQLServerTLSSettings(config)
 	q.Set("encrypt", encrypt)
-	q.Set("TrustServerCertificate", trustServerCertificate)
-	mergeConnectionParamsFromConfig(q, config, "sqlserver")
+	q.Set("trustservercertificate", trustServerCertificate)
+	mergeConnectionParamsFromConfigWithAllowlist(q, config, sqlServerConnectionParamNames, "sqlserver")
 	u.RawQuery = q.Encode()
 
 	return u.String()

@@ -17,6 +17,7 @@ import {
     type TableOverviewSortField,
     type TableOverviewSortOrder,
 } from '../utils/tableOverviewFilter';
+import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -57,11 +58,11 @@ const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol
     if (type === 'custom') {
         const d = (driver || '').trim().toLowerCase();
         if (d === 'diros' || d === 'doris') return 'mysql';
-        if (d === 'oceanbase') return 'mysql';
+        if (d === 'oceanbase') return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
         if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
         return d;
     }
-    if (type === 'oceanbase' && String(oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') return 'oracle';
+    if (type === 'oceanbase' && normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle') return 'oracle';
     if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
@@ -71,6 +72,7 @@ const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: strin
         const escapeLiteral = (s: string) => s.replace(/'/g, "''");
         switch (dialect) {
         case 'mysql':
+        case 'starrocks':
             return `
 SELECT
     TABLE_NAME AS table_name,

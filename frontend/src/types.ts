@@ -299,7 +299,7 @@ export interface ConnectionConfig {
   redisDB?: number; // Redis database index (0-15)
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
-  oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant protocol
+  oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant compatibility protocol
   hosts?: string[]; // Multi-host addresses: host:port
   topology?: "single" | "replica" | "cluster";
   mysqlReplicaUser?: string;
@@ -419,6 +419,7 @@ export interface TabData {
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
   viewName?: string; // View name for view definition tabs
+  viewKind?: "view" | "materialized";
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
   savedQueryId?: string; // Saved query identity for quick-save behavior

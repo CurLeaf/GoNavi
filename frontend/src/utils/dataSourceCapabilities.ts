@@ -1,4 +1,5 @@
 import type { ConnectionConfig } from '../types';
+import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
 
 type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver' | 'oceanBaseProtocol'> | null | undefined;
 
@@ -7,6 +8,8 @@ const normalizeDataSourceToken = (raw: string): string => {
   switch (normalized) {
     case 'doris':
       return 'diros';
+    case 'starrocks':
+      return 'starrocks';
     case 'postgresql':
       return 'postgres';
     case 'opengauss':
@@ -25,9 +28,12 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
   const type = normalizeDataSourceToken(String(config.type || ''));
   if (type === 'custom') {
     const driver = normalizeDataSourceToken(String(config.driver || ''));
+    if (driver === 'oceanbase' && normalizeOceanBaseProtocol(config.oceanBaseProtocol) === 'oracle') {
+      return 'oracle';
+    }
     return driver || 'custom';
   }
-  if (type === 'oceanbase' && String(config.oceanBaseProtocol || '').trim().toLowerCase() === 'oracle') {
+  if (type === 'oceanbase' && normalizeOceanBaseProtocol(config.oceanBaseProtocol) === 'oracle') {
     return 'oracle';
   }
   return type;
@@ -38,6 +44,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'mariadb',
   'oceanbase',
   'diros',
+  'starrocks',
   'sphinx',
   'postgres',
   'kingbase',
@@ -58,6 +65,7 @@ const COPY_INSERT_TYPES = new Set([
   'mariadb',
   'oceanbase',
   'diros',
+  'starrocks',
   'sphinx',
   'postgres',
   'kingbase',

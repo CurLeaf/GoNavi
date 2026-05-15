@@ -99,6 +99,77 @@ func normalizeMySQLServerTimezoneParam(raw string) (string, bool) {
 	return "", false
 }
 
+var mysqlSupportedDriverParamNames = map[string]string{
+	"allowallfiles":            "allowAllFiles",
+	"allowcleartextpasswords":  "allowCleartextPasswords",
+	"allowfallbacktoplaintext": "allowFallbackToPlaintext",
+	"allownativepasswords":     "allowNativePasswords",
+	"allowoldpasswords":        "allowOldPasswords",
+	"checkconnliveness":        "checkConnLiveness",
+	"clientfoundrows":          "clientFoundRows",
+	"charset":                  "charset",
+	"collation":                "collation",
+	"columnswithalias":         "columnsWithAlias",
+	"compress":                 "compress",
+	// connectionAttributes 透传 mysql CLIENT_CONNECT_ATTRS（key1:value1,key2:value2 格式）。
+	// OceanBase Oracle 租户 MySQL wire 路径用它注入 OBClient 私有 capability attribute；
+	// 普通 mysql/mariadb 用户也能在此声明 program_name 等元数据。
+	"connectionattributes": "connectionAttributes",
+	"interpolateparams":        "interpolateParams",
+	"loc":                      "loc",
+	"maxallowedpacket":         "maxAllowedPacket",
+	"multistatements":          "multiStatements",
+	"parsetime":                "parseTime",
+	"readtimeout":              "readTimeout",
+	"rejectreadonly":           "rejectReadOnly",
+	"serverpubkey":             "serverPubKey",
+	"sql_mode":                 "sql_mode",
+	"timetruncate":             "timeTruncate",
+	"timeout":                  "timeout",
+	"tls":                      "tls",
+	"writetimeout":             "writeTimeout",
+}
+
+var mysqlBoolDriverParamNames = map[string]struct{}{
+	"allowAllFiles":            {},
+	"allowCleartextPasswords":  {},
+	"allowFallbackToPlaintext": {},
+	"allowNativePasswords":     {},
+	"allowOldPasswords":        {},
+	"checkConnLiveness":        {},
+	"clientFoundRows":          {},
+	"columnsWithAlias":         {},
+	"compress":                 {},
+	"interpolateParams":        {},
+	"multiStatements":          {},
+	"parseTime":                {},
+	"rejectReadOnly":           {},
+}
+
+func canonicalMySQLDriverParamName(name string) (string, bool) {
+	canonical, ok := mysqlSupportedDriverParamNames[strings.ToLower(strings.TrimSpace(name))]
+	return canonical, ok
+}
+
+func setMySQLDriverParam(params url.Values, name string, value string) {
+	switch name {
+	case "charset":
+		if charset := normalizeMySQLCharsetParam(value); charset != "" {
+			params.Set("charset", charset)
+		}
+	case "timeout", "readTimeout", "writeTimeout", "timeTruncate":
+		params.Set(name, normalizeMySQLDurationParam(value, time.Second))
+	default:
+		if _, ok := mysqlBoolDriverParamNames[name]; ok {
+			if enabled, ok := parseMySQLBoolParam(value); ok {
+				params.Set(name, strconv.FormatBool(enabled))
+				return
+			}
+		}
+		params.Set(name, value)
+	}
+}
+
 func mergeMySQLConnectionParam(params url.Values, key string, value string) {
 	name := strings.TrimSpace(key)
 	if name == "" {
@@ -108,12 +179,7 @@ func mergeMySQLConnectionParam(params url.Values, key string, value string) {
 	switch lowerName {
 	case "topology":
 		return
-	case "useunicode", "autoreconnect", "useoldaliasmetadatabehavior":
-		return
-	case "charset":
-		if charset := normalizeMySQLCharsetParam(value); charset != "" {
-			params.Set("charset", charset)
-		}
+	case "useunicode", "autoreconnect", "useoldaliasmetadatabehavior", "allowpublickeyretrieval":
 		return
 	case "characterencoding":
 		if charset := normalizeMySQLCharsetParam(value); charset != "" {
@@ -144,17 +210,41 @@ func mergeMySQLConnectionParam(params url.Values, key string, value string) {
 			params.Set("tls", "skip-verify")
 		}
 		return
+	case "sslmode":
+		switch normalizeSSLModeValue(value) {
+		case sslModeDisable:
+			params.Set("tls", "false")
+		case sslModeRequired:
+			params.Set("tls", "true")
+		case sslModeSkipVerify:
+			params.Set("tls", "skip-verify")
+		default:
+			params.Set("tls", "preferred")
+		}
+		return
 	case "connecttimeout":
 		params.Set("timeout", normalizeMySQLDurationParam(value, time.Millisecond))
 		return
 	case "sockettimeout":
 		params.Set("readTimeout", normalizeMySQLDurationParam(value, time.Millisecond))
 		return
-	case "timeout", "readtimeout", "writetimeout":
-		params.Set(name, normalizeMySQLDurationParam(value, time.Second))
+	case "allowmultiqueries":
+		if enabled, ok := parseMySQLBoolParam(value); ok {
+			params.Set("multiStatements", strconv.FormatBool(enabled))
+		}
+		return
+	case "usecompression":
+		if enabled, ok := parseMySQLBoolParam(value); ok {
+			params.Set("compress", strconv.FormatBool(enabled))
+		}
+		return
+	case "connectioncollation":
+		params.Set("collation", value)
 		return
 	default:
-		params.Set(name, value)
+		if canonical, ok := canonicalMySQLDriverParamName(name); ok {
+			setMySQLDriverParam(params, canonical, value)
+		}
 	}
 }
 

@@ -207,6 +207,8 @@ func defaultPortByType(driverType string) int {
 		return 2881
 	case "diros":
 		return 9030
+	case "starrocks":
+		return 9030
 	case "sphinx":
 		return 9306
 	case "postgres", "vastbase", "opengauss":

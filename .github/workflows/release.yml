@@ -252,7 +252,7 @@ jobs:
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          DRIVERS=(mariadb oceanbase doris sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
+          DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
           DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
@@ -304,6 +304,7 @@ jobs:
                   -o "${OUTPUT_PATH}" \
                   ./cmd/optional-driver-agent
                 cp "$DUCKDB_LIB_DIR/duckdb.dll" "$OUTDIR/duckdb.dll"
+                bash ./tools/compress-driver-artifact.sh "$OUTDIR/duckdb.dll" "$TARGET_PLATFORM" "${{ matrix.os_name }}/duckdb.dll"
               else
                 CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
                   -tags "${BUILD_TAGS}" \
@@ -320,6 +321,7 @@ jobs:
                 -o "${OUTPUT_PATH}" \
                 ./cmd/optional-driver-agent
             fi
+            bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
           done
 
       # macOS Packaging
@@ -575,6 +577,10 @@ jobs:
             "drivers/MacOS/clickhouse-driver-agent-darwin-amd64"
             "drivers/MacOS/clickhouse-driver-agent-darwin-arm64"
             "drivers/Linux/clickhouse-driver-agent-linux-amd64"
+            "drivers/Windows/starrocks-driver-agent-windows-amd64.exe"
+            "drivers/MacOS/starrocks-driver-agent-darwin-amd64"
+            "drivers/MacOS/starrocks-driver-agent-darwin-arm64"
+            "drivers/Linux/starrocks-driver-agent-linux-amd64"
           )
 
           missing=0
@@ -611,27 +617,40 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          import shutil
           import zipfile
           from pathlib import Path
 
           out_name = "GoNavi-DriverAgents.zip"
           index_name = "GoNavi-DriverAgents-Index.json"
           base = Path("drivers")
-          out_path = Path(out_name)
-          index_path = Path(index_name)
+          driver_release_dir = Path("../driver-release-assets")
+          if driver_release_dir.exists():
+              shutil.rmtree(driver_release_dir)
+          driver_release_dir.mkdir(parents=True, exist_ok=True)
+          out_path = driver_release_dir / out_name
+          index_path = driver_release_dir / index_name
           if out_path.exists():
               out_path.unlink()
           if index_path.exists():
               index_path.unlink()
 
           size_index = {}
+          standalone_assets = []
           with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-              for p in base.rglob("*"):
+              for p in sorted(base.rglob("*")):
                   if not p.is_file():
                       continue
                   arcname = p.relative_to(base).as_posix()
+                  if p.name in size_index:
+                      raise RuntimeError(f"driver asset name conflict: {p.name}")
                   zf.write(p, arcname)
                   size_index[p.name] = p.stat().st_size
+                  standalone_path = driver_release_dir / p.name
+                  if standalone_path.exists():
+                      raise RuntimeError(f"release asset already exists: {standalone_path}")
+                  shutil.copy2(p, standalone_path)
+                  standalone_assets.append(standalone_path.name)
 
           index_path.write_text(
               json.dumps({"assets": size_index}, ensure_ascii=False, indent=2),
@@ -640,9 +659,10 @@ jobs:
 
           print(f"created {out_name} size={out_path.stat().st_size} bytes")
           print(f"created {index_name} entries={len(size_index)}")
+          print(f"published standalone driver assets={len(standalone_assets)}")
           PY
 
-          # Release 只发布一个驱动总包，避免大量平铺资产污染 Release 页面
+          # GoNavi 主仓库只保留主程序包；驱动资产发布到独立仓库。
           rm -rf drivers
 
       - name: Generate SHA256SUMS
@@ -661,6 +681,36 @@ jobs:
           else
             sha256sum "${FILES[@]}" > SHA256SUMS
           fi
+
+      - name: Generate Driver SHA256SUMS
+        shell: bash
+        run: |
+          cd driver-release-assets
+          FILES=()
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              FILES+=("$file")
+            fi
+          done < <(find . -maxdepth 1 -type f ! -name SHA256SUMS -exec basename {} \; | sort)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "❌ 未找到驱动发布资产"
+            exit 1
+          fi
+          sha256sum "${FILES[@]}" > SHA256SUMS
+
+      - name: Create Driver Agents Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          repository: Syngnat/GoNavi-DriverAgents
+          tag_name: ${{ github.ref_name }}
+          name: "GoNavi Driver Agents ${{ github.ref_name }}"
+          files: driver-release-assets/*
+          fail_on_unmatched_files: true
+          make_latest: true
+          body: |
+            GoNavi driver-agent assets for `${{ github.ref_name }}`.
+          token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
 
       - name: Checkout code for changelog
         uses: actions/checkout@v4

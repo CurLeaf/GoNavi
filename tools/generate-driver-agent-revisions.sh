@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-DEFAULT_DRIVERS=(mariadb oceanbase diros sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
+DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
 
 usage() {
@@ -27,7 +27,7 @@ normalize_driver() {
     doris|diros) echo "diros" ;;
     oceanbase) echo "oceanbase" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
-    mariadb|diros|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|mongodb|tdengine|clickhouse)
+    mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
     *)
@@ -93,9 +93,12 @@ internal/db/timeout.go)
   case "$driver:$identity" in
     mariadb:internal/db/mariadb_impl.go|\
 oceanbase:internal/db/oceanbase_impl.go|\
+oceanbase:internal/db/oracle_impl.go|\
 oceanbase:internal/db/mysql_impl.go|\
 diros:internal/db/diros_impl.go|\
 diros:internal/db/mysql_impl.go|\
+starrocks:internal/db/starrocks_impl.go|\
+starrocks:internal/db/mysql_impl.go|\
 sphinx:internal/db/sphinx_impl.go|\
 sphinx:internal/db/mysql_impl.go|\
 sqlserver:internal/db/sqlserver_impl.go|\
