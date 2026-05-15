@@ -58,7 +58,7 @@ import {
   type SecurityUpdateRepairSource,
   type SecurityUpdateSettingsFocusTarget,
 } from './utils/securityUpdateRepairFlow';
-import { getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
+import { applyWindowsViewportZoomNudge, getWindowsScaleFixNudgedWidth, hasWindowsViewportScaleDrift } from './utils/windowsScaleFix';
 import {
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
@@ -670,6 +670,12 @@ function App() {
 
               if (isMaximised) {
                   if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
+                      // restore 场景刻意不走 Unmaximise→Maximise（避免可见的重复最大化抖动）。
+                      // 改用 CSS zoom nudge 强制 Chromium 重算 layout，让 viewport drift 后残留的
+                      // 字体度量恢复正确——同样能修字体，且无动画。
+                      if (hasViewportScaleDrift) {
+                          applyWindowsViewportZoomNudge();
+                      }
                       window.dispatchEvent(new Event('resize'));
                       lastFixAt = Date.now();
                       return;
