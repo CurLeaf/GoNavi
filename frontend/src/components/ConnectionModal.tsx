@@ -4758,7 +4758,13 @@ const ConnectionModal: React.FC<{
                     <Form.Item
                       name="oceanBaseProtocol"
                       label="OceanBase 协议"
-                      help="MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。OceanBase 租户兼容模式不包含 Native，该选择会同时影响连接测试、浏览表结构和 SQL 方言。"
+                      help={
+                        <span>
+                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。GoNavi 会根据端口自动选择：OB MySQL wire 端口走 OBClient capability 注入（与 Navicat 相同路径），OBProxy Oracle listener 端口走标准 TNS。
+                          <br />
+                          如果 Oracle 租户连接报「Error 1235」或 OBClient 握手失败，可在「连接参数」字段通过 <code>connectionAttributes=key1:value1,key2:value2</code> 覆盖 GoNavi 默认注入的 OBClient capability。
+                        </span>
+                      }
                       style={{ marginBottom: 0 }}
                     >
                       <Select

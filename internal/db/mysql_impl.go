@@ -111,7 +111,10 @@ var mysqlSupportedDriverParamNames = map[string]string{
 	"collation":                "collation",
 	"columnswithalias":         "columnsWithAlias",
 	"compress":                 "compress",
-	"connectionattributes":     "connectionAttributes",
+	// connectionAttributes 透传 mysql CLIENT_CONNECT_ATTRS（key1:value1,key2:value2 格式）。
+	// OceanBase Oracle 租户 MySQL wire 路径用它注入 OBClient 私有 capability attribute；
+	// 普通 mysql/mariadb 用户也能在此声明 program_name 等元数据。
+	"connectionattributes": "connectionAttributes",
 	"interpolateparams":        "interpolateParams",
 	"loc":                      "loc",
 	"maxallowedpacket":         "maxAllowedPacket",
