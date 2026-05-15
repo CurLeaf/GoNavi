@@ -960,9 +960,127 @@ func normalizeImportTemporalValue(dbType, columnType, raw string) string {
 	return parsed.Format("2006-01-02 15:04:05")
 }
 
+func isPgLikeBooleanDBType(dbType string) bool {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBooleanColumnType(columnType string) bool {
+	typ := strings.ToLower(strings.TrimSpace(columnType))
+	if typ == "" {
+		return false
+	}
+	typ = strings.ReplaceAll(typ, `"`, "")
+	if idx := strings.IndexAny(typ, " ("); idx >= 0 {
+		typ = typ[:idx]
+	}
+	typ = strings.TrimPrefix(typ, "pg_catalog.")
+	return typ == "bool" || typ == "boolean"
+}
+
+func booleanSQLLiteral(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func formatSignedBooleanSQLValue(v int64) (string, bool) {
+	switch v {
+	case 0:
+		return "false", true
+	case 1:
+		return "true", true
+	default:
+		return "", false
+	}
+}
+
+func formatUnsignedBooleanSQLValue(v uint64) (string, bool) {
+	switch v {
+	case 0:
+		return "false", true
+	case 1:
+		return "true", true
+	default:
+		return "", false
+	}
+}
+
+func formatFloatBooleanSQLValue(v float64) (string, bool) {
+	if v == 0 {
+		return "false", true
+	}
+	if v == 1 {
+		return "true", true
+	}
+	return "", false
+}
+
+func formatBooleanStringSQLValue(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "t", "1", "yes", "y", "on":
+		return "true", true
+	case "false", "f", "0", "no", "n", "off":
+		return "false", true
+	default:
+		return "", false
+	}
+}
+
+func formatPostgresBooleanSQLValue(value interface{}) (string, bool) {
+	switch val := value.(type) {
+	case bool:
+		return booleanSQLLiteral(val), true
+	case int:
+		return formatSignedBooleanSQLValue(int64(val))
+	case int8:
+		return formatSignedBooleanSQLValue(int64(val))
+	case int16:
+		return formatSignedBooleanSQLValue(int64(val))
+	case int32:
+		return formatSignedBooleanSQLValue(int64(val))
+	case int64:
+		return formatSignedBooleanSQLValue(val)
+	case uint:
+		return formatUnsignedBooleanSQLValue(uint64(val))
+	case uint8:
+		return formatUnsignedBooleanSQLValue(uint64(val))
+	case uint16:
+		return formatUnsignedBooleanSQLValue(uint64(val))
+	case uint32:
+		return formatUnsignedBooleanSQLValue(uint64(val))
+	case uint64:
+		return formatUnsignedBooleanSQLValue(val)
+	case float32:
+		return formatFloatBooleanSQLValue(float64(val))
+	case float64:
+		return formatFloatBooleanSQLValue(val)
+	case []byte:
+		if len(val) == 1 && (val[0] == 0 || val[0] == 1) {
+			return booleanSQLLiteral(val[0] == 1), true
+		}
+		return formatBooleanStringSQLValue(string(val))
+	case string:
+		return formatBooleanStringSQLValue(val)
+	default:
+		return "", false
+	}
+}
+
 func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 	if value == nil {
 		return "NULL"
+	}
+
+	if isPgLikeBooleanDBType(dbType) && isBooleanColumnType(columnType) {
+		if literal, ok := formatPostgresBooleanSQLValue(value); ok {
+			return literal
+		}
 	}
 
 	if isTemporalColumnType(dbType, columnType) {
