@@ -162,15 +162,17 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 						return
 					}
 				}
-				if strings.TrimSpace(plan.CreateTableSQL) == "" {
-					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("表 %s 自动建表失败：建表 SQL 为空", tableName))
+				if strings.TrimSpace(plan.CreateTableSQL) == "" && len(plan.PreDataSQL) == 0 {
+					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("表 %s 自动建表失败：建表/建集合 SQL 为空", tableName))
 					return
 				}
-				if _, err := targetDB.Exec(plan.CreateTableSQL); err != nil {
-					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("创建目标表失败：表=%s 错误=%v", tableName, err))
-					return
+				if strings.TrimSpace(plan.CreateTableSQL) != "" {
+					if _, err := targetDB.Exec(plan.CreateTableSQL); err != nil {
+						s.appendLog(config.JobID, &result, "error", fmt.Sprintf("创建目标表失败：表=%s 错误=%v", tableName, err))
+						return
+					}
 				}
-				s.appendLog(config.JobID, &result, "info", fmt.Sprintf("目标表创建成功：%s", tableName))
+				s.appendLog(config.JobID, &result, "info", fmt.Sprintf("目标对象创建成功：%s", tableName))
 				targetCols, err = targetDB.GetColumns(plan.TargetSchema, plan.TargetTable)
 				if err != nil {
 					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("创建目标表后获取字段失败：表=%s 错误=%v", tableName, err))

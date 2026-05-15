@@ -9,6 +9,14 @@ import (
 
 type genericLegacyPlanner struct{}
 
+type mysqlToMySQLPlanner struct{}
+
+type pgLikeToPGLikePlanner struct{}
+
+type clickHouseToClickHousePlanner struct{}
+
+type mongoToMongoPlanner struct{}
+
 type mysqlToPGLikePlanner struct{}
 
 type mysqlToClickHousePlanner struct{}
@@ -55,6 +63,10 @@ func buildSchemaMigrationPlan(config SyncConfig, tableName string, sourceDB db.D
 
 func resolveMigrationPlanner(ctx MigrationBuildContext) MigrationPlanner {
 	planners := []MigrationPlanner{
+		mysqlToMySQLPlanner{},
+		pgLikeToPGLikePlanner{},
+		clickHouseToClickHousePlanner{},
+		mongoToMongoPlanner{},
 		mysqlToPGLikePlanner{},
 		mySQLLikeToTDenginePlanner{},
 		pgLikeToTDenginePlanner{},
@@ -131,6 +143,66 @@ func (genericLegacyPlanner) SupportLevel(ctx MigrationBuildContext) MigrationSup
 
 func (genericLegacyPlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	return buildSchemaMigrationPlanLegacy(ctx.Config, ctx.TableName, ctx.SourceDB, ctx.TargetDB)
+}
+
+func (mysqlToMySQLPlanner) Name() string { return "mysql-mysql-planner" }
+
+func (mysqlToMySQLPlanner) SupportLevel(ctx MigrationBuildContext) MigrationSupportLevel {
+	sourceType := resolveMigrationDBType(ctx.Config.SourceConfig)
+	targetType := resolveMigrationDBType(ctx.Config.TargetConfig)
+	if isMySQLRowStoreType(sourceType) && isMySQLRowStoreType(targetType) {
+		return MigrationSupportLevelFull
+	}
+	return MigrationSupportLevelUnsupported
+}
+
+func (mysqlToMySQLPlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	return buildMySQLToMySQLPlan(ctx.Config, ctx.TableName, ctx.SourceDB, ctx.TargetDB)
+}
+
+func (pgLikeToPGLikePlanner) Name() string { return "pglike-pglike-planner" }
+
+func (pgLikeToPGLikePlanner) SupportLevel(ctx MigrationBuildContext) MigrationSupportLevel {
+	sourceType := resolveMigrationDBType(ctx.Config.SourceConfig)
+	targetType := resolveMigrationDBType(ctx.Config.TargetConfig)
+	if isPGLikeSameFamilyDDLType(sourceType) && isPGLikeSameFamilyDDLType(targetType) {
+		return MigrationSupportLevelFull
+	}
+	return MigrationSupportLevelUnsupported
+}
+
+func (pgLikeToPGLikePlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	return buildPGLikeToPGLikePlan(ctx.Config, ctx.TableName, ctx.SourceDB, ctx.TargetDB)
+}
+
+func (clickHouseToClickHousePlanner) Name() string { return "clickhouse-clickhouse-planner" }
+
+func (clickHouseToClickHousePlanner) SupportLevel(ctx MigrationBuildContext) MigrationSupportLevel {
+	sourceType := resolveMigrationDBType(ctx.Config.SourceConfig)
+	targetType := resolveMigrationDBType(ctx.Config.TargetConfig)
+	if sourceType == "clickhouse" && targetType == "clickhouse" {
+		return MigrationSupportLevelFull
+	}
+	return MigrationSupportLevelUnsupported
+}
+
+func (clickHouseToClickHousePlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	return buildClickHouseToClickHousePlan(ctx.Config, ctx.TableName, ctx.SourceDB, ctx.TargetDB)
+}
+
+func (mongoToMongoPlanner) Name() string { return "mongo-mongo-planner" }
+
+func (mongoToMongoPlanner) SupportLevel(ctx MigrationBuildContext) MigrationSupportLevel {
+	sourceType := resolveMigrationDBType(ctx.Config.SourceConfig)
+	targetType := resolveMigrationDBType(ctx.Config.TargetConfig)
+	if sourceType == "mongodb" && targetType == "mongodb" {
+		return MigrationSupportLevelFull
+	}
+	return MigrationSupportLevelUnsupported
+}
+
+func (mongoToMongoPlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	return buildMongoToMongoPlan(ctx.Config, ctx.TableName, ctx.SourceDB, ctx.TargetDB)
 }
 
 func (mysqlToPGLikePlanner) Name() string { return "mysql-pglike-planner" }

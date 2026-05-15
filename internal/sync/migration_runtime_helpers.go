@@ -12,8 +12,14 @@ func supportsAutoAddColumnsForPair(sourceType string, targetType string) bool {
 	if isMySQLLikeWritableTargetType(target) {
 		return isMySQLCoreType(source)
 	}
+	if isPGLikeSameFamilyDDLType(source) && isPGLikeSameFamilyDDLType(target) {
+		return true
+	}
 	if isPGLikeTarget(target) {
 		return isMySQLLikeSourceType(source)
+	}
+	if source == "clickhouse" && target == "clickhouse" {
+		return true
 	}
 	return false
 }
@@ -35,6 +41,20 @@ func buildAddColumnSQLForPair(sourceType string, targetType string, targetQueryT
 			// 对已有目标表补字段时保守处理，不补建自增语义。
 		}
 		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s NULL",
+			quoteQualifiedIdentByType(target, targetQueryTable),
+			quoteIdentByType(target, sourceCol.Name),
+			colType,
+		), nil
+	case isPGLikeSameFamilyDDLType(source) && isPGLikeSameFamilyDDLType(target):
+		colType := sanitizePGLikeColumnType(sourceCol.Type)
+		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s NULL",
+			quoteQualifiedIdentByType(target, targetQueryTable),
+			quoteIdentByType(target, sourceCol.Name),
+			colType,
+		), nil
+	case source == "clickhouse" && target == "clickhouse":
+		colType := sanitizeClickHouseColumnType(sourceCol.Type)
+		return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s",
 			quoteQualifiedIdentByType(target, targetQueryTable),
 			quoteIdentByType(target, sourceCol.Name),
 			colType,
