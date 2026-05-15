@@ -202,7 +202,7 @@ func TestAnnotateOceanBaseOracleConnectErrorClassifies(t *testing.T) {
 		{
 			name: "non-oracle protocol on port (e.g. mysql wire)",
 			raw:  errors.New("TNS: protocol error - got unexpected packet from server"),
-			want: "MySQL 协议端口",
+			want: "MySQL wire 协议端口",
 		},
 		{
 			name: "ora authentication error",
@@ -394,19 +394,36 @@ func TestProbeOceanBaseMySQLWireHandshakeReturnsFalseOnUnreachable(t *testing.T)
 	}
 }
 
-func TestProbeOceanBaseMySQLWireHandshakeIgnoresNonMySQLProtocol(t *testing.T) {
+// probe 放宽 protocol_version 检查后，普通 MySQL/MariaDB（server_version 不含 OB 关键字）
+// 应仍判定为非 OB MySQL wire（由 regular_mysql_is_not_flagged / mariadb_is_not_flagged 子用例
+// 覆盖）。原 IgnoresNonMySQLProtocol 测试因 probe 不再严格区分 mysql vs 非 mysql 而失效，已删除。
+
+// probe 在 payload_length 落在新放宽的 65536 上限内仍能正确读取并提取 server_version。
+// 模拟 OB 4.x 可能携带额外能力位、payload 略大于历史 MySQL handshake 的情况。
+func TestProbeOceanBaseMySQLWireHandshakeAcceptsLargerPayload(t *testing.T) {
 	t.Parallel()
 
-	// 模拟一个 Oracle TNS 端口：返回非 MySQL 协议格式的字节，探测应判定为非 OB MySQL wire
-	host, port, cleanup := startMockHandshakeServer(t, []byte{0x00, 0x20, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00})
+	base := buildMySQLHandshakePacket("5.7.25-OceanBase-v4.2.1.0")
+	// 在 packet 末尾追加 4096 字节伪能力位扩展，重写 header 的 payload_length 字段
+	extra := make([]byte, 4096)
+	for i := range extra {
+		extra[i] = 0x42
+	}
+	originalPayload := base[4:]
+	enlargedPayload := append(append([]byte{}, originalPayload...), extra...)
+	payloadLen := len(enlargedPayload)
+	header := []byte{byte(payloadLen), byte(payloadLen >> 8), byte(payloadLen >> 16), 0}
+	packet := append(header, enlargedPayload...)
+
+	host, port, cleanup := startMockHandshakeServer(t, packet)
 	defer cleanup()
 
 	gotIsOB, probed := probeOceanBaseMySQLWireHandshake(host, port, time.Second)
-	if gotIsOB {
-		t.Fatal("expected non-MySQL packet not flagged as OB")
-	}
 	if !probed {
-		t.Fatal("expected probe to complete the read")
+		t.Fatal("expected probe to read full packet within new 64KB limit")
+	}
+	if !gotIsOB {
+		t.Fatal("expected enlarged OceanBase handshake to be flagged as OB MySQL wire")
 	}
 }
 

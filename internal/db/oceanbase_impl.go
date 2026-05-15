@@ -458,7 +458,7 @@ func annotateOceanBaseOracleConnectError(err error) error {
 		strings.Contains(lower, "unexpected packet"),
 		strings.Contains(lower, "got packets out of order"),
 		strings.Contains(lower, "use of closed network connection"):
-		return fmt.Errorf("%w（OceanBase Oracle 协议握手失败：当前端口可能是 OBServer 的 MySQL 协议端口（OBClient 协议）而非 OBProxy 的 Oracle 协议端口；GoNavi 暂未实现 OBClient 协议，请将连接端口改为 OBProxy 暴露的 Oracle 协议端口）", err)
+		return fmt.Errorf("%w（OceanBase Oracle TNS 路径握手失败：当前端口可能是 OBServer 的 MySQL wire 协议端口而非 OBProxy 的 Oracle listener。GoNavi 已实现 OBClient capability 注入路径，路由层会优先尝试该路径；如这里仍报此错说明 OBClient 路径也未成功，详见随后的 OBClient 错误诊断）", err)
 	case strings.Contains(lower, "ora-"):
 		return fmt.Errorf("%w（OceanBase Oracle 租户认证或服务名失败：请确认服务名（Service Name）、用户名（如 SYS@oracle_tenant#cluster_name）与权限配置）", err)
 	}
@@ -468,18 +468,20 @@ func annotateOceanBaseOracleConnectError(err error) error {
 // probeOceanBaseMySQLWireHandshake 通过读取目标端口的 MySQL initial handshake packet
 // 判断该端口背后是否是 OceanBase 的 MySQL wire 协议端口。
 //
-// 在 Oracle 路径连接前主动探测，是为了避免用户在 mysql wire 协议（OB Error 1235）和
-// Oracle TNS 协议（use of closed network connection）之间反复方向摇摆。
-//
 // 探测过程：
 //  1. TCP 建连（带 timeout）
 //  2. 读 4 字节 packet header（3 字节 payload length + 1 字节 sequence id）
-//  3. 读 payload；payload[0] 为 protocol version（MySQL 历史上 9 或 10）
+//  3. 读 payload；payload[0] 为 protocol version
 //  4. server_version 是从 payload[1] 开始的 null-terminated 字符串
 //  5. server_version 中包含 "oceanbase" / "ob" 关键字时判定为 OB MySQL wire
 //
-// 返回值：(isOBMySQLWire, probeSucceeded)。probeSucceeded=false 表示连建连/读包都失败，
-// 此时让上层正常走 go-ora 路径（不要因为探测失败就阻止真正的尝试）。
+// 返回值：(isOBMySQLWire, probeSucceeded)。probeSucceeded=false 表示建连/读包失败，
+// 上层应该兜底执行真实连接尝试（OBClient 优先于 TNS）。
+//
+// 容忍度设计：
+//   - protocol_version 不严限（OB 自定义版本号也接受）
+//   - payload 上限 64KB（OB 4.x 的 handshake 可能携带额外的能力位信息）
+//   - 短超时（2s）：探测只为方向选择，主流程的真实超时由 Connect 控制
 func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Duration) (bool, bool) {
 	if timeout <= 0 {
 		timeout = 2 * time.Second
@@ -498,8 +500,8 @@ func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Durati
 		return false, false
 	}
 	payloadLen := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
-	// 合理的 MySQL initial handshake payload 长度在几十~几百字节之间，超出范围视为非 MySQL 协议
-	if payloadLen < 1 || payloadLen > 1024 {
+	// 放宽上限：OB 4.x handshake 可能携带额外 capability info。仍要约束以避免读取异常长度
+	if payloadLen < 1 || payloadLen > 65536 {
 		return false, true
 	}
 	payload := make([]byte, payloadLen)
@@ -507,15 +509,10 @@ func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Durati
 		return false, false
 	}
 
-	protocolVersion := payload[0]
-	if protocolVersion != 10 && protocolVersion != 9 {
-		// 不是 MySQL initial handshake 格式（可能是 TNS 或其他协议）
-		return false, true
-	}
-
+	// 不再严格检查 protocol_version。OB 自定义版本号也认作 MySQL wire 候选——
+	// 只要 server_version 字符串含 OceanBase/OBProxy 关键字就足以做方向选择。
 	nullIdx := bytes.IndexByte(payload[1:], 0)
 	if nullIdx < 0 {
-		// 没有 server_version 终止符，格式不符
 		return false, true
 	}
 	serverVersion := strings.ToLower(string(payload[1 : 1+nullIdx]))
@@ -525,8 +522,6 @@ func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Durati
 	if strings.Contains(serverVersion, "oceanbase") || strings.Contains(serverVersion, "obproxy") {
 		return true, true
 	}
-	// MySQL server_version 通常形如 "5.7.25-OceanBase-v4.x" 或 "5.7.25-OB"，
-	// 用 "-ob" 后缀做兜底匹配（社区版有些版本只在 server_version 里加 -OB 后缀）
 	if strings.Contains(serverVersion, "-ob") {
 		return true, true
 	}
@@ -653,15 +648,28 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 		isOBMySQLWire, probed := probeOceanBaseMySQLWireHandshake(runConfig.Host, runConfig.Port, probeTimeout)
 		switch {
 		case probed && isOBMySQLWire:
+			// 明确识别为 OB MySQL wire 端口：直接走 OBClient capability 路径
 			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 是 OB MySQL wire 端口，走 OBClient capability 注入路径连接 Oracle 租户", runConfig.Host, runConfig.Port)
 			return o.connectOracleViaOBClient(runConfig)
 		case probed:
+			// 探测成功但 server_version 不含 OceanBase 标识：可能是真正的 Oracle TNS 端口
 			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 不是 OB MySQL wire，走标准 Oracle TNS 协议（OBProxy Oracle listener）", runConfig.Host, runConfig.Port)
 			return o.connectOracleViaTNS(runConfig)
 		default:
-			// 探测失败（端口不通 / 网络问题）—— 让 go-ora 走一遍把真实错误暴露出来
-			logger.Warnf("OceanBase 协议=Oracle 预探测失败（端口不通或无响应），回退到 Oracle TNS 路径让 go-ora 报告真实错误：%s:%d", runConfig.Host, runConfig.Port)
-			return o.connectOracleViaTNS(runConfig)
+			// 探测失败（建连或读 handshake 失败）：可能是网络不通、防火墙阻断、或某些 OB 版本不主动发 handshake。
+			// 不能盲选 TNS——用户填 60014/2881 这类端口大概率仍是 OB MySQL wire。
+			// 串行尝试两条真实路径：先 OBClient（命中概率更高），失败再 TNS，合并错误信息。
+			logger.Warnf("OceanBase 协议=Oracle 预探测失败：%s:%d，串行尝试 OBClient capability 与 TNS 两条路径", runConfig.Host, runConfig.Port)
+			obclientErr := o.connectOracleViaOBClient(runConfig)
+			if obclientErr == nil {
+				return nil
+			}
+			logger.Warnf("OceanBase Oracle OBClient 路径失败，继续尝试 TNS 路径：%v", obclientErr)
+			tnsErr := o.connectOracleViaTNS(runConfig)
+			if tnsErr == nil {
+				return nil
+			}
+			return fmt.Errorf("OceanBase Oracle 两条连接路径均失败；OBClient 路径错误：%v；TNS 路径错误：%w", obclientErr, tnsErr)
 		}
 	}
 
