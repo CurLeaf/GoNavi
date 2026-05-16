@@ -48,6 +48,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p frontend/dist
+          printf '<!doctype html><title>GoNavi</title>\n' > frontend/dist/index.html
           wails generate module
           node frontend/scripts/wails-frontend-install.mjs
           npm --prefix frontend run build
