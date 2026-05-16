@@ -4,14 +4,16 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const frontendDir = process.cwd();
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const frontendDir = path.resolve(scriptDir, '..');
 const packageJsonPath = path.join(frontendDir, 'package.json');
 const packageLockPath = path.join(frontendDir, 'package-lock.json');
 const nodeModulesPath = path.join(frontendDir, 'node_modules');
 const npmHiddenLockPath = path.join(nodeModulesPath, '.package-lock.json');
 const installStatePath = path.join(nodeModulesPath, '.gonavi-install-state.json');
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmCommand = 'npm';
 const commonArgs = [
   '--prefer-offline',
   '--no-audit',
@@ -20,6 +22,16 @@ const commonArgs = [
   '--fetch-retry-mintimeout=20000',
   '--fetch-retry-maxtimeout=120000',
 ];
+const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+
+const fail = (message) => {
+  console.error(`[gonavi-frontend-install] ${message}`);
+  process.exit(1);
+};
+
+const exitWithStatus = (status) => {
+  process.exit(typeof status === 'number' && status > 0 && status <= 255 ? status : 1);
+};
 
 const hashFile = (filePath) => {
   const hash = createHash('sha256');
@@ -54,20 +66,38 @@ const packageInputsAreOlderThanNpmLock = () => {
 };
 
 const runNpm = (subcommand) => {
-  const result = spawnSync(npmCommand, [subcommand, ...commonArgs], {
+  const args = [subcommand, ...commonArgs];
+  if (isCI) {
+    console.log(
+      `[gonavi-frontend-install] cwd=${process.cwd()} frontend=${frontendDir} node=${process.version} platform=${process.platform}/${process.arch} command=${npmCommand} ${args.join(' ')}`,
+    );
+  }
+
+  const result = spawnSync(npmCommand, args, {
     cwd: frontendDir,
     env: process.env,
     stdio: 'inherit',
+    shell: process.platform === 'win32',
   });
+  if (result.error) {
+    fail(`failed to start npm: ${result.error.message}`);
+  }
+  if (result.signal) {
+    fail(`npm was terminated by signal ${result.signal}`);
+  }
   if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+    console.error(`[gonavi-frontend-install] npm exited with status ${result.status ?? 'unknown'}`);
+    exitWithStatus(result.status);
   }
 };
+
+if (!existsSync(packageJsonPath)) {
+  fail(`package.json not found at ${packageJsonPath}; cwd=${process.cwd()}`);
+}
 
 const state = currentState();
 const installedState = readInstalledState();
 const forceInstall = process.env.GONAVI_FORCE_FRONTEND_INSTALL === '1';
-const isCI = process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
 if (!forceInstall && existsSync(nodeModulesPath)) {
   if (
