@@ -1,7 +1,7 @@
 {
   "name": "GoNavi",
   "outputfilename": "GoNavi",
-  "frontend:install": "npm ci --prefer-offline --no-audit --fund=false --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-maxtimeout=120000",
+  "frontend:install": "node scripts/wails-frontend-install.mjs",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "http://localhost:5173",

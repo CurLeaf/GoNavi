@@ -133,7 +133,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 - [Go](https://go.dev/dl/) 1.21+
 - [Node.js](https://nodejs.org/) 18+
 - [Wails CLI](https://wails.io/docs/gettingstarted/installation):
-  `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+  `go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0`
 
 ### Development Mode
 
@@ -144,6 +144,12 @@ cd GoNavi
 
 # Start development with hot reload
 wails dev
+
+# Faster local startup when exported Go method signatures are unchanged
+node tools/wails-fast-dev.mjs
+
+# Refresh Wails JS bindings after changing exported Go method signatures
+node tools/wails-fast-dev.mjs --refresh-bindings
 ```
 
 ### Build
