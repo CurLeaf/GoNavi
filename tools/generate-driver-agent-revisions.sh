@@ -65,6 +65,16 @@ hash_file() {
   exit 1
 }
 
+files_equal() {
+  local left="$1"
+  local right="$2"
+  if command -v cmp >/dev/null 2>&1; then
+    cmp -s "$left" "$right"
+    return
+  fi
+  [[ "$(hash_file "$left")" == "$(hash_file "$right")" ]]
+}
+
 should_include_internal_db_file() {
   local driver="$1"
   local identity="$2"
@@ -208,6 +218,33 @@ existing_revision_for() {
   return 1
 }
 
+detect_revision_jobs() {
+  local configured="${GONAVI_DRIVER_REVISION_JOBS:-}"
+  local detected
+
+  if [[ "$configured" =~ ^[0-9]+$ && "$configured" -gt 0 ]]; then
+    echo "$configured"
+    return
+  fi
+
+  if command -v nproc >/dev/null 2>&1; then
+    detected="$(nproc)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    detected="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  else
+    detected=""
+  fi
+
+  if ! [[ "$detected" =~ ^[0-9]+$ && "$detected" -gt 0 ]]; then
+    detected=4
+  fi
+
+  if [[ "$detected" -gt 4 ]]; then
+    detected=4
+  fi
+  echo "$detected"
+}
+
 declare -a output_drivers=()
 if [[ -n "$driver_csv" ]]; then
   output_drivers=("${DEFAULT_DRIVERS[@]}")
@@ -267,6 +304,65 @@ fingerprint_driver() {
   printf 'src-%s' "$revision"
 }
 
+revision_jobs="$(detect_revision_jobs)"
+revision_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-agent-revisions.XXXXXX")"
+cleanup_revision_tmp_dir() {
+  rm -rf "$revision_tmp_dir"
+}
+trap cleanup_revision_tmp_dir EXIT
+
+declare -a revision_pids=()
+declare -a revision_pid_drivers=()
+revision_failed=0
+
+wait_for_oldest_revision_job() {
+  local pid driver
+  pid="${revision_pids[0]}"
+  driver="${revision_pid_drivers[0]}"
+
+  if ! wait "$pid"; then
+    echo "❌ 生成 driver-agent revision 失败：$driver ($goos/$goarch)" >&2
+    revision_failed=1
+  fi
+
+  if [[ ${#revision_pids[@]} -le 1 ]]; then
+    revision_pids=()
+    revision_pid_drivers=()
+  else
+    revision_pids=("${revision_pids[@]:1}")
+    revision_pid_drivers=("${revision_pid_drivers[@]:1}")
+  fi
+}
+
+start_revision_job() {
+  local driver="$1"
+  {
+    fingerprint_driver "$driver" >"$revision_tmp_dir/$driver.revision"
+  } &
+  revision_pids+=("$!")
+  revision_pid_drivers+=("$driver")
+}
+
+for driver in "${output_drivers[@]}"; do
+  if [[ -n "$driver_csv" && "$selected_driver_set" != *"|$driver|"* ]] && revision="$(existing_revision_for "$driver")"; then
+    printf '%s\n' "$revision" >"$revision_tmp_dir/$driver.revision"
+    continue
+  fi
+
+  while [[ ${#revision_pids[@]} -ge "$revision_jobs" ]]; do
+    wait_for_oldest_revision_job
+  done
+  start_revision_job "$driver"
+done
+
+while [[ ${#revision_pids[@]} -gt 0 ]]; do
+  wait_for_oldest_revision_job
+done
+
+if [[ "$revision_failed" -ne 0 ]]; then
+  exit 1
+fi
+
 tmp_output="$(mktemp "${TMPDIR:-/tmp}/gonavi-agent-revisions-go.XXXXXX")"
 {
   cat <<'EOF'
@@ -278,11 +374,7 @@ func init() {
 	optionalDriverAgentRevisions = map[string]string{
 EOF
   for driver in "${output_drivers[@]}"; do
-    if [[ -n "$driver_csv" && "$selected_driver_set" != *"|$driver|"* ]] && revision="$(existing_revision_for "$driver")"; then
-      :
-    else
-      revision="$(fingerprint_driver "$driver")"
-    fi
+    revision="$(<"$revision_tmp_dir/$driver.revision")"
     printf '\t\t"%s": "%s",\n' "$driver" "$revision"
   done
   cat <<'EOF'
@@ -293,7 +385,7 @@ EOF
 
 gofmt -w "$tmp_output"
 
-if [[ -f "$OUTPUT_FILE" ]] && cmp -s "$tmp_output" "$OUTPUT_FILE"; then
+if [[ -f "$OUTPUT_FILE" ]] && files_equal "$tmp_output" "$OUTPUT_FILE"; then
   rm -f "$tmp_output"
 else
   mv "$tmp_output" "$OUTPUT_FILE"
