@@ -28,6 +28,16 @@ type fakeFrontend struct {
 	chromium *fakeChromium
 }
 
+type panicChromium struct{}
+
+func (p *panicChromium) PutZoomFactor(float64) {
+	panic("webview2 zoom reset failed")
+}
+
+type panicFrontend struct {
+	chromium *panicChromium
+}
+
 // 测试必须用 wails 一致的 string key "frontend" 作为 context.WithValue 的 key，
 // 否则反射拿不到。go vet 会警告 string key，用本地 stringContextKey 帮助函数封装来抑制。
 // 这层封装等价于直接传字符串字面量，行为完全一致。
@@ -83,5 +93,17 @@ func TestResetWebViewZoomFactorErrorsWhenFrontendMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "frontend") {
 		t.Fatalf("expected error to mention frontend, got %v", err)
+	}
+}
+
+func TestResetWebViewZoomFactorRecoversFromPutZoomFactorPanic(t *testing.T) {
+	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &panicFrontend{chromium: &panicChromium{}})
+
+	err := resetWebViewZoomFactor(ctx, 1.0)
+	if err == nil {
+		t.Fatal("expected panic to be converted to error, got nil")
+	}
+	if !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("expected error to mention panic, got %v", err)
 	}
 }

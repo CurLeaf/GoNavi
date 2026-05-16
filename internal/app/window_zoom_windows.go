@@ -26,7 +26,12 @@ import (
 //
 // **依赖 wails v2.11/v2.12 内部实现细节**：如果 wails 升级改名了 frontend.chromium 字段或
 // edge.Chromium.PutZoomFactor 方法名，此函数会返回 error。CI 中应该有跨版本兼容性测试。
-func resetWebViewZoomFactor(ctx context.Context, factor float64) error {
+func resetWebViewZoomFactor(ctx context.Context, factor float64) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("reset WebView2 zoom panic: %v", recovered)
+		}
+	}()
 	if ctx == nil {
 		return fmt.Errorf("ctx is nil")
 	}

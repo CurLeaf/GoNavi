@@ -72,7 +72,7 @@ import {
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -676,7 +676,7 @@ function App() {
                       // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
                       // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
                       // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
-                      if (hasViewportScaleDrift) {
+                      if (shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)) {
                           try {
                               const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
                               if (!res?.success) {

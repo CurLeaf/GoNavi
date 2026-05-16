@@ -64,6 +64,7 @@ func TestBuildWindowsScriptWin10Fixes(t *testing.T) {
 		{"exponential backoff tier 2", `if !RETRY! GEQ 6 set /a WAIT=3`},
 		{"exponential backoff tier 3", `if !RETRY! GEQ 9 set /a WAIT=5`},
 		{"retry limit 15", `if !RETRY! LSS 15`},
+		{"host exit wait timeout", `if !WAIT_PID_SECONDS! GEQ 90 (`},
 		{"cleanup old file", `del /F /Q "%TARGET_OLD%"`},
 	}
 	for _, fix := range win10Fixes {
@@ -110,7 +111,7 @@ func TestBuildWindowsScriptUsesDelayedErrorlevelInsideBlocks(t *testing.T) {
 	}
 }
 
-func TestBuildWindowsLaunchCommandUsesDirectCall(t *testing.T) {
+func TestBuildWindowsLaunchCommandUsesDirectHiddenCall(t *testing.T) {
 	cmd := buildWindowsLaunchCommand(`C:\tmp\gonavi-update\update.cmd`)
 
 	if !strings.EqualFold(cmd.Args[0], cmd.Path) && !strings.HasSuffix(strings.ToLower(cmd.Path), `\cmd.exe`) {
