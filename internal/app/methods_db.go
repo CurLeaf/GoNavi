@@ -269,6 +269,27 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 	}
 }
 
+func resolveCreateStatementTargets(config connection.ConnectionConfig, dbType string, dbName string, tableName string) (string, string, string, string) {
+	if dbType == "sqlserver" {
+		metadataDB := strings.TrimSpace(dbName)
+		if metadataDB == "" {
+			metadataDB = strings.TrimSpace(config.Database)
+		}
+		rawTable := strings.TrimSpace(tableName)
+		schema, table := db.SplitSQLQualifiedName(rawTable)
+		if table == "" {
+			table = rawTable
+		}
+		if schema == "" {
+			schema = "dbo"
+		}
+		return metadataDB, rawTable, schema, table
+	}
+
+	schema, table := normalizeSchemaAndTableByType(dbType, dbName, tableName)
+	return schema, table, schema, table
+}
+
 func quoteTableIdentByType(dbType string, schema string, table string) string {
 	s := strings.TrimSpace(schema)
 	t := strings.TrimSpace(table)
@@ -1001,18 +1022,18 @@ func (a *App) DBShowCreateTable(config connection.ConnectionConfig, dbName strin
 
 func resolveCreateStatementWithFallback(dbInst db.Database, config connection.ConnectionConfig, dbName string, tableName string) (string, error) {
 	dbType := resolveDDLDBType(config)
-	schemaName, pureTableName := normalizeSchemaAndTableByType(dbType, dbName, tableName)
-	if pureTableName == "" {
+	metadataSchemaName, metadataTableName, ddlSchemaName, ddlTableName := resolveCreateStatementTargets(config, dbType, dbName, tableName)
+	if metadataTableName == "" || ddlTableName == "" {
 		return "", fmt.Errorf("表名不能为空")
 	}
 
-	sqlStr, sourceErr := dbInst.GetCreateStatement(schemaName, pureTableName)
+	sqlStr, sourceErr := dbInst.GetCreateStatement(metadataSchemaName, metadataTableName)
 	if sourceErr == nil && !shouldFallbackCreateStatement(dbType, sqlStr) {
 		return sqlStr, nil
 	}
 
 	if supportsViewCreateStatementLookup(dbType) {
-		if viewDDL, ok := tryGetViewCreateStatement(dbInst, config, dbName, schemaName, pureTableName); ok {
+		if viewDDL, ok := tryGetViewCreateStatement(dbInst, config, dbName, ddlSchemaName, ddlTableName); ok {
 			return viewDDL, nil
 		}
 	}
@@ -1024,7 +1045,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 		return sqlStr, nil
 	}
 
-	columns, colErr := dbInst.GetColumns(schemaName, pureTableName)
+	columns, colErr := dbInst.GetColumns(metadataSchemaName, metadataTableName)
 	if colErr != nil {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -1032,7 +1053,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 		return "", colErr
 	}
 
-	fallbackDDL, buildErr := buildFallbackCreateStatement(dbType, schemaName, pureTableName, columns)
+	fallbackDDL, buildErr := buildFallbackCreateStatement(dbType, ddlSchemaName, ddlTableName, columns)
 	if buildErr != nil {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -1044,7 +1065,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 
 func supportsCreateStatementFallback(dbType string) bool {
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver":
 		return true
 	default:
 		return false
@@ -1127,6 +1148,9 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 		colName := quoteIdentByType(dbType, colNameRaw)
 		defParts := []string{fmt.Sprintf("%s %s", colName, colType)}
 
+		if dbType == "sqlserver" && strings.Contains(strings.ToLower(strings.TrimSpace(col.Extra)), "auto_increment") {
+			defParts = append(defParts, "IDENTITY(1,1)")
+		}
 		if strings.EqualFold(strings.TrimSpace(col.Nullable), "NO") {
 			defParts = append(defParts, "NOT NULL")
 		}
@@ -1138,7 +1162,7 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 		}
 
 		columnLines = append(columnLines, "  "+strings.Join(defParts, " "))
-		if commentSQL := buildFallbackColumnCommentStatement(dbType, qualifiedTable, colNameRaw, col.Comment); commentSQL != "" {
+		if commentSQL := buildFallbackColumnCommentStatement(dbType, schemaName, table, qualifiedTable, colNameRaw, col.Comment); commentSQL != "" {
 			columnCommentLines = append(columnCommentLines, commentSQL)
 		}
 		if strings.EqualFold(strings.TrimSpace(col.Key), "PRI") {
@@ -1166,11 +1190,24 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 	return ddl.String(), nil
 }
 
-func buildFallbackColumnCommentStatement(dbType string, qualifiedTable string, columnName string, comment string) string {
+func buildFallbackColumnCommentStatement(dbType string, schemaName string, tableName string, qualifiedTable string, columnName string, comment string) string {
 	colName := strings.TrimSpace(columnName)
 	commentText := strings.TrimSpace(comment)
 	if colName == "" || commentText == "" {
 		return ""
+	}
+	if dbType == "sqlserver" {
+		schema := strings.TrimSpace(schemaName)
+		if schema == "" {
+			schema = "dbo"
+		}
+		return fmt.Sprintf(
+			"EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'%s', @level0type = N'SCHEMA', @level0name = N'%s', @level1type = N'TABLE', @level1name = N'%s', @level2type = N'COLUMN', @level2name = N'%s';",
+			strings.ReplaceAll(commentText, "'", "''"),
+			strings.ReplaceAll(schema, "'", "''"),
+			strings.ReplaceAll(strings.TrimSpace(tableName), "'", "''"),
+			strings.ReplaceAll(colName, "'", "''"),
+		)
 	}
 	columnRef := fmt.Sprintf("%s.%s", qualifiedTable, quoteIdentByType(dbType, colName))
 	return fmt.Sprintf("COMMENT ON COLUMN %s IS '%s';", columnRef, strings.ReplaceAll(commentText, "'", "''"))

@@ -124,6 +124,16 @@ describe('TableDesignerSqlPreview', () => {
     ]);
   });
 
+  it('detects CREATE INDEX preview lines as create changes', () => {
+    const highlights = resolveSqlChangeHighlights(
+      'CREATE UNIQUE NONCLUSTERED INDEX [IX_Users_Email] ON [dbo].[Users] ([email]);',
+    );
+
+    expect(highlights).toEqual([
+      expect.objectContaining({ kind: 'create', lineNumber: 1, label: '新建索引' }),
+    ]);
+  });
+
   it('adds Monaco decorations to changed SQL lines only', () => {
     renderToStaticMarkup(
       <TableDesignerSqlPreview

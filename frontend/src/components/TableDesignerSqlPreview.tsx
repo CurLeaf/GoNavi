@@ -37,6 +37,7 @@ const CHANGE_LINE_RULES: Array<{
   { kind: 'modify', label: '字段属性变更', pattern: /\b(MODIFY\s+COLUMN|ALTER\s+COLUMN|SET\s+DATA\s+TYPE|SET\s+DEFAULT|DROP\s+DEFAULT|SET\s+NOT\s+NULL|DROP\s+NOT\s+NULL)\b/i },
   { kind: 'constraint', label: '约束变更', pattern: /\b(ADD\s+CONSTRAINT|DROP\s+CONSTRAINT)\b/i },
   { kind: 'comment', label: '备注变更', pattern: /\b(COMMENT\s+ON\s+COLUMN|COMMENT\s+ON\s+TABLE)\b/i },
+  { kind: 'create', label: '新建索引', pattern: /\bCREATE\s+(UNIQUE\s+)?((CLUSTERED|NONCLUSTERED)\s+)?INDEX\b/i },
 ];
 
 const CREATE_TABLE_PATTERN = /^\s*CREATE\s+TABLE\b/i;

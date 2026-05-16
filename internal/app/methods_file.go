@@ -1910,9 +1910,9 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 		if schema == "" {
 			schema = "dbo"
 		}
-		safeDBName := strings.TrimSpace(config.Database)
+		safeDBName := strings.TrimSpace(dbName)
 		if safeDBName == "" {
-			safeDBName = strings.TrimSpace(dbName)
+			safeDBName = strings.TrimSpace(config.Database)
 		}
 		if safeDBName == "" {
 			return nil
