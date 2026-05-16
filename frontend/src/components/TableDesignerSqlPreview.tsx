@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import Editor, { type BeforeMount, type OnMount } from '@monaco-editor/react';
+import Editor, { type BeforeMount, type OnMount } from './MonacoEditor';
 
 interface TableDesignerSqlPreviewProps {
   sql: string;

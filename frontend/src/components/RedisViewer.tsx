@@ -5,7 +5,7 @@ import type { RadioChangeEvent } from 'antd';
 import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
-import Editor from '@monaco-editor/react';
+import Editor from './MonacoEditor';
 import type { DataNode } from 'antd/es/tree';
 import {
     blurToFilter,

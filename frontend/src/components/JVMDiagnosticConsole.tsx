@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import Editor, { type BeforeMount, type OnMount } from "./MonacoEditor";
 import {
   Alert,
   Button,

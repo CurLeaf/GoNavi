@@ -5,7 +5,7 @@ import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, S
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
 import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
-import Editor from '@monaco-editor/react';
+import Editor from './MonacoEditor';
 import { 
     DndContext, 
     DragEndEvent, 

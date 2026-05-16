@@ -4,7 +4,7 @@ import { ReloadOutlined, SaveOutlined, PlusOutlined, DeleteOutlined, MenuOutline
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import Editor, { loader } from '@monaco-editor/react';
+import Editor from './MonacoEditor';
 import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, TriggerDefinition } from '../types';
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
@@ -460,7 +460,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       setCommentEditorValue('');
   }, []);
 
-  // 透明 Monaco Editor 主题已在 main.tsx 全局注册（含 stickyScroll 不透明背景）
+  // 透明 Monaco Editor 主题由 MonacoEditor 包装组件按需注册（含 stickyScroll 不透明背景）
 
   // 监听字段 Tab 容器高度，为所有 Tab 内表格计算 scroll.y
   // 当 Tab 切换时，字段 Tab 被 display:none 导致 height=0，跳过该次更新保持有效值

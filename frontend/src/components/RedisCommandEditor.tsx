@@ -3,7 +3,7 @@ import { Button, Space, message } from 'antd';
 import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor, { type OnMount } from './MonacoEditor';
 
 interface RedisCommandEditorProps {
     connectionId: string;

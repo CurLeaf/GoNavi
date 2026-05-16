@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor, { type OnMount } from './MonacoEditor';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
 import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
@@ -924,7 +924,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       editorRef.current = editor;
       monacoRef.current = monaco;
 
-      // 应用透明主题（主题已在 main.tsx 全局注册）
+      // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
 
       // 注册 AI 右键菜单操作

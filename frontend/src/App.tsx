@@ -11,7 +11,6 @@ import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswo
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
-import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
@@ -84,6 +83,8 @@ import {
 } from './utils/aiEntryLayout';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
+
+const AIChatPanel = React.lazy(() => import('./components/AIChatPanel'));
 
 const { Sider, Content } = Layout;
 const MIN_UI_SCALE = 0.8;
@@ -3007,9 +3008,11 @@ function App() {
                               {renderAIEdgeHandle()}
                           </div>
                       )}
-                      <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                        handleOpenAISettings();
-                      }} overlayTheme={overlayTheme} />
+                      <React.Suspense fallback={<div style={{ width: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
+                          <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                            handleOpenAISettings();
+                          }} overlayTheme={overlayTheme} />
+                      </React.Suspense>
                   </div>
                )}
              </div>

@@ -137,7 +137,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 
 ### Development Mode
 
-```bash
+```shell
 # Clone
 git clone https://github.com/Syngnat/GoNavi.git
 cd GoNavi
@@ -150,6 +150,9 @@ node tools/wails-fast-dev.mjs
 
 # Refresh Wails JS bindings after changing exported Go method signatures
 node tools/wails-fast-dev.mjs --refresh-bindings
+
+# Windows PowerShell low-memory visual mode: disables transparent WebView/Acrylic backdrop
+$env:GONAVI_LOW_MEMORY_MODE="1"; node tools/wails-fast-dev.mjs
 ```
 
 ### Build
