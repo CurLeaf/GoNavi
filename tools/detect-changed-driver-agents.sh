@@ -135,6 +135,227 @@ add_forced_driver() {
   forced_driver_seen="${forced_driver_seen}${driver}|"
 }
 
+driver_tokens_from_text() {
+  local text
+  local emitted_seen
+  text="${1,,}"
+  emitted_seen="|"
+
+  case "$text" in *mariadb*) emit_driver_token mariadb ;; esac
+  case "$text" in *oceanbase*) emit_driver_token oceanbase ;; esac
+  case "$text" in *doris*|*diros*) emit_driver_token doris ;; esac
+  case "$text" in *starrocks*) emit_driver_token starrocks ;; esac
+  case "$text" in *sphinx*) emit_driver_token sphinx ;; esac
+  case "$text" in *sqlserver*) emit_driver_token sqlserver ;; esac
+  case "$text" in *sqlite*) emit_driver_token sqlite ;; esac
+  case "$text" in *duckdb*) emit_driver_token duckdb ;; esac
+  case "$text" in *dameng*) emit_driver_token dameng ;; esac
+  case "$text" in *kingbase*) emit_driver_token kingbase ;; esac
+  case "$text" in *highgo*) emit_driver_token highgo ;; esac
+  case "$text" in *vastbase*) emit_driver_token vastbase ;; esac
+  case "$text" in *opengauss*) emit_driver_token opengauss ;; esac
+  case "$text" in *iris*) emit_driver_token iris ;; esac
+  case "$text" in *mongodb*) emit_driver_token mongodb ;; esac
+  case "$text" in *tdengine*) emit_driver_token tdengine ;; esac
+  case "$text" in *clickhouse*) emit_driver_token clickhouse ;; esac
+
+  case "$text" in
+    *github.com/go-sql-driver/mysql*)
+      emit_driver_token mariadb
+      emit_driver_token oceanbase
+      emit_driver_token doris
+      emit_driver_token starrocks
+      emit_driver_token sphinx
+      ;;
+  esac
+  case "$text" in *github.com/microsoft/go-mssqldb*) emit_driver_token sqlserver ;; esac
+  case "$text" in *modernc.org/sqlite*) emit_driver_token sqlite ;; esac
+  case "$text" in *github.com/duckdb/duckdb-go/v2*|*github.com/duckdb/duckdb-go-bindings*) emit_driver_token duckdb ;; esac
+  case "$text" in *gitee.com/chunanyong/dm*) emit_driver_token dameng ;; esac
+  case "$text" in *gitea.com/kingbase/gokb*) emit_driver_token kingbase ;; esac
+  case "$text" in *github.com/highgo/pq-sm3*|*third_party/highgo-pq*) emit_driver_token highgo ;; esac
+  case "$text" in
+    *github.com/lib/pq*)
+      emit_driver_token vastbase
+      emit_driver_token opengauss
+      ;;
+  esac
+  case "$text" in *github.com/caretdev/go-irisnative*|*third_party/go-irisnative*) emit_driver_token iris ;; esac
+  case "$text" in *go.mongodb.org/mongo-driver*|*go.mongodb.org/mongo-driver/v2*) emit_driver_token mongodb ;; esac
+  case "$text" in *github.com/taosdata/driver-go/v3*) emit_driver_token tdengine ;; esac
+  case "$text" in *github.com/clickhouse/clickhouse-go/v2*|*github.com/clickhouse/ch-go*) emit_driver_token clickhouse ;; esac
+}
+
+emit_driver_token() {
+  local driver
+  driver="$(normalize_driver "$1")" || return 0
+  if [[ "$emitted_seen" == *"|$driver|"* ]]; then
+    return 0
+  fi
+  printf '%s\n' "$driver"
+  emitted_seen="${emitted_seen}${driver}|"
+}
+
+shared_file_driver_delta() {
+  local file="$1"
+  local line text tokens token added_seen removed_seen
+  local touched_seen emitted_seen
+  local saw_unattributed_change=false
+  added_seen="|"
+  removed_seen="|"
+  touched_seen="|"
+
+  while IFS= read -r line; do
+    case "$line" in
+      +++*|---*|@@*)
+        continue
+        ;;
+      +*|-*)
+        text="${line:1}"
+        case "$text" in
+          *[![:space:]]*) ;;
+          *) continue ;;
+        esac
+        tokens="$(driver_tokens_from_text "$text")"
+        if [[ -z "$tokens" ]]; then
+          saw_unattributed_change=true
+          continue
+        fi
+        while IFS= read -r token; do
+          [[ -n "$token" ]] || continue
+          touched_seen="${touched_seen}${token}|"
+          case "$line" in
+            +*) added_seen="${added_seen}${token}|" ;;
+            -*) removed_seen="${removed_seen}${token}|" ;;
+          esac
+        done <<<"$tokens"
+        ;;
+    esac
+  done < <(git diff --unified=0 "$base_commit" "$head_commit" -- "$file")
+
+  if [[ "$saw_unattributed_change" == "true" ]]; then
+    return 1
+  fi
+
+  if [[ "$file" == "go.mod" || "$file" == "go.sum" ]]; then
+    emitted_seen="|"
+    for driver in "${DEFAULT_DRIVERS[@]}"; do
+      if [[ "$touched_seen" == *"|$driver|"* && "$emitted_seen" != *"|$driver|"* ]]; then
+        printf '%s\n' "$driver"
+        emitted_seen="${emitted_seen}${driver}|"
+      fi
+    done
+    return 0
+  fi
+
+  emitted_seen="|"
+  for driver in "${DEFAULT_DRIVERS[@]}"; do
+    if [[ "$added_seen" == *"|$driver|"* && "$removed_seen" != *"|$driver|"* ]]; then
+      printf '%s\n' "$driver"
+      emitted_seen="${emitted_seen}${driver}|"
+      continue
+    fi
+    if [[ "$removed_seen" == *"|$driver|"* && "$added_seen" != *"|$driver|"* ]]; then
+      printf '%s\n' "$driver"
+      emitted_seen="${emitted_seen}${driver}|"
+    fi
+  done
+  if [[ "$emitted_seen" != "|" ]]; then
+    return 0
+  fi
+
+  for driver in "${DEFAULT_DRIVERS[@]}"; do
+    if [[ "$touched_seen" == *"|$driver|"* ]]; then
+      printf '%s\n' "$driver"
+    fi
+  done
+}
+
+source_file_driver_tokens() {
+  local file="$1"
+  local line text tokens token touched_seen emitted_seen
+  touched_seen="|"
+
+  while IFS= read -r line; do
+    case "$line" in
+      +++*|---*|@@*)
+        continue
+        ;;
+      +*|-*)
+        text="${line:1}"
+        tokens="$(driver_tokens_from_text "$text")"
+        while IFS= read -r token; do
+          [[ -n "$token" ]] || continue
+          touched_seen="${touched_seen}${token}|"
+        done <<<"$tokens"
+        ;;
+    esac
+  done < <(git diff --unified=0 "$base_commit" "$head_commit" -- "$file")
+
+  emitted_seen="|"
+  for driver in "${DEFAULT_DRIVERS[@]}"; do
+    if [[ "$touched_seen" == *"|$driver|"* && "$emitted_seen" != *"|$driver|"* ]]; then
+      printf '%s\n' "$driver"
+      emitted_seen="${emitted_seen}${driver}|"
+    fi
+  done
+}
+
+add_forced_drivers_from_tokens() {
+  local tokens="$1"
+  local driver
+  while IFS= read -r driver; do
+    [[ -n "$driver" ]] || continue
+    add_forced_driver "$driver"
+  done <<<"$tokens"
+}
+
+add_all_forced_drivers() {
+  local driver
+  for driver in "${DEFAULT_DRIVERS[@]}"; do
+    add_forced_driver "$driver"
+  done
+}
+
+is_ignored_driver_agent_source_file() {
+  case "$1" in
+    *_test.go|frontend/*|internal/app/*|internal/db/driver_agent_revisions_gen.go)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+attribute_source_file_change() {
+  local file="$1"
+  local tokens
+
+  if is_ignored_driver_agent_source_file "$file"; then
+    return 0
+  fi
+
+  tokens="$(driver_tokens_from_text "$file")"
+  if [[ -n "$tokens" ]]; then
+    add_forced_drivers_from_tokens "$tokens"
+    return 0
+  fi
+
+  tokens="$(source_file_driver_tokens "$file")"
+  if [[ -n "$tokens" ]]; then
+    add_forced_drivers_from_tokens "$tokens"
+    return 0
+  fi
+
+  case "$file" in
+    cmd/optional-driver-agent/*.go|internal/db/*.go)
+      add_all_forced_drivers
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 list_dependency_files() {
   local tags="$1"
   local cgo_enabled="$2"
@@ -145,7 +366,7 @@ list_dependency_files() {
   CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" GOTOOLCHAIN=auto \
     go list -deps \
       -tags "$tags" \
-      -f '{{if and (not .Standard) .Module.Main}}{{range .GoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CgoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CXXFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .MFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .HFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .SFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .SysoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}' \
+      -f '{{if not .Standard}}{{range .GoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CgoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .CXXFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .MFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .HFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .SFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{range .SysoFiles}}{{$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}' \
       ./cmd/optional-driver-agent | sort -u >"$output"
 }
 
@@ -241,17 +462,33 @@ if [[ ${#changed_file_set[@]} -eq 0 ]]; then
   exit 0
 fi
 
+declare -a forced_changed_drivers=()
+forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
   case "$file" in
-    go.mod|go.sum|build-driver-agents.sh|tools/compress-driver-artifact.sh|tools/generate-driver-agent-revisions.sh|tools/detect-changed-driver-agents.sh)
+    go.mod|go.sum|build-driver-agents.sh|tools/generate-driver-agent-revisions.sh)
+      set +e
+      shared_delta="$(shared_file_driver_delta "$file")"
+      shared_status=$?
+      set -e
+      if [[ "$shared_status" -ne 0 ]]; then
+        echo "检测到共享 driver-agent 输入存在无法归因的变更；保守构建全部 driver-agent：$file" >&2
+        all_drivers_csv
+        exit 0
+      fi
+      add_forced_drivers_from_tokens "$shared_delta"
+      ;;
+    tools/compress-driver-artifact.sh)
+      echo "检测到 driver-agent 压缩脚本变更；保守构建全部 driver-agent：$file" >&2
       all_drivers_csv
       exit 0
+      ;;
+    tools/detect-changed-driver-agents.sh)
+      # This script only selects CI work; it is not embedded in driver-agent binaries.
       ;;
   esac
 done
 
-declare -a forced_changed_drivers=()
-forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
   case "$file" in
     internal/db/duckdb_*.go)
@@ -260,22 +497,28 @@ for file in "${!changed_file_set[@]}"; do
   esac
 done
 
-has_source_candidate=false
+has_unattributed_source_candidate=false
 for file in "${!changed_file_set[@]}"; do
   if is_dependency_source_file "$file"; then
-    has_source_candidate=true
+    if attribute_source_file_change "$file"; then
+      continue
+    fi
+    has_unattributed_source_candidate=true
     break
   fi
 done
 
-if [[ "$has_source_candidate" != "true" ]]; then
-  echo ""
+if [[ "$has_unattributed_source_candidate" != "true" ]]; then
+  join_drivers "${forced_changed_drivers[@]}"
   exit 0
 fi
 
 while IFS= read -r -d '' file; do
   file="$(relative_repo_path "$file")"
   if is_dependency_source_file "$file"; then
+    if attribute_source_file_change "$file"; then
+      continue
+    fi
     echo "检测到源码依赖候选文件被删除；保守构建全部 driver-agent：$file" >&2
     all_drivers_csv
     exit 0
