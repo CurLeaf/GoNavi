@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
+DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine clickhouse)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
 
 usage() {
@@ -27,7 +27,7 @@ normalize_driver() {
     doris|diros) echo "diros" ;;
     oceanbase) echo "oceanbase" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
-    mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|mongodb|tdengine|clickhouse)
+    mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
     *)
@@ -125,6 +125,7 @@ highgo:internal/db/highgo_impl.go|\
 vastbase:internal/db/vastbase_impl.go|\
 opengauss:internal/db/opengauss_impl.go|\
 opengauss:internal/db/postgres_impl.go|\
+iris:internal/db/iris_impl.go|\
 mongodb:internal/db/mongodb_impl.go|\
 mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\

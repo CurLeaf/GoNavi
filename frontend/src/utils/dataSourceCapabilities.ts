@@ -18,6 +18,11 @@ const normalizeDataSourceToken = (raw: string): string => {
       return 'opengauss';
     case 'dm':
       return 'dameng';
+    case 'intersystems':
+    case 'intersystemsiris':
+    case 'inter-systems':
+    case 'inter-systems-iris':
+      return 'iris';
     default:
       return normalized;
   }
@@ -52,6 +57,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'vastbase',
   'opengauss',
   'sqlserver',
+  'iris',
   'sqlite',
   'duckdb',
   'oracle',
@@ -73,6 +79,7 @@ const COPY_INSERT_TYPES = new Set([
   'vastbase',
   'opengauss',
   'sqlserver',
+  'iris',
   'sqlite',
   'duckdb',
   'oracle',

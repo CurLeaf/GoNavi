@@ -224,6 +224,8 @@ const getDefaultPortByType = (type: string) => {
       return 54321;
     case "sqlserver":
       return 1433;
+    case "iris":
+      return 1972;
     case "mongodb":
       return 27017;
     case "highgo":
@@ -247,6 +249,7 @@ const singleHostUriSchemesByType: Record<string, string[]> = {
   clickhouse: ["clickhouse"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
+  iris: ["iris", "intersystems"],
   redis: ["redis"],
   tdengine: ["tdengine"],
   dameng: ["dameng", "dm"],
@@ -368,6 +371,7 @@ const supportsConnectionParamsForType = (type: string) =>
   type === "opengauss" ||
   type === "oracle" ||
   type === "sqlserver" ||
+  type === "iris" ||
   type === "clickhouse" ||
   type === "mongodb" ||
   type === "dameng" ||
@@ -390,6 +394,13 @@ const normalizeDriverType = (value: string): string => {
     .toLowerCase();
   if (normalized === "postgresql") return "postgres";
   if (normalized === "doris") return "diros";
+  if (
+    normalized === "intersystems" ||
+    normalized === "intersystemsiris" ||
+    normalized === "inter-systems-iris" ||
+    normalized === "inter-systems"
+  )
+    return "iris";
   if (
     normalized === "open_gauss" ||
     normalized === "open-gauss" ||
@@ -1980,6 +1991,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
     }
+    if (dbType === "iris") {
+      return "iris://user:pass@127.0.0.1:1972/USER";
+    }
     if (dbType === "opengauss") {
       return "opengauss://user:pass@127.0.0.1:5432/db_name";
     }
@@ -2006,6 +2020,8 @@ const ConnectionModal: React.FC<{
         return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
       case "sqlserver":
         return "app name=GoNavi&packet size=32767";
+      case "iris":
+        return "timeout=30";
       case "clickhouse":
         return "max_execution_time=60&compress=lz4";
       case "mongodb":
@@ -3868,6 +3884,11 @@ const ConnectionModal: React.FC<{
           key: "sqlserver",
           name: "SQL Server",
           icon: getDbIcon("sqlserver", undefined, 36),
+        },
+        {
+          key: "iris",
+          name: "InterSystems IRIS",
+          icon: getDbIcon("iris", undefined, 36),
         },
         {
           key: "sqlite",

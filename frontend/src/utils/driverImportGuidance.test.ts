@@ -19,6 +19,8 @@ describe('driver import guidance', () => {
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('pgx');
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('open_gauss');
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('oceanbase');
+    expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('Go database/sql');
+    expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('ODBC/JDBC');
     expect(CUSTOM_CONNECTION_DRIVER_HELP).toContain('JDBC Jar');
   });
 });

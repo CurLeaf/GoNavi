@@ -138,6 +138,7 @@ func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 		"highgo",
 		"vastbase",
 		"opengauss",
+		"iris",
 		"mongodb",
 		"tdengine",
 		"clickhouse",

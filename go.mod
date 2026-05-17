@@ -6,6 +6,7 @@ require (
 	gitea.com/kingbase/gokb v0.0.0-20201021123113-29bd62a876c3
 	gitee.com/chunanyong/dm v1.8.22
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
+	github.com/caretdev/go-irisnative v0.2.1
 	github.com/duckdb/duckdb-go/v2 v2.5.5
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
@@ -122,3 +123,5 @@ require (
 )
 
 replace github.com/highgo/pq-sm3 => ./third_party/highgo-pq
+
+replace github.com/caretdev/go-irisnative => ./third_party/go-irisnative

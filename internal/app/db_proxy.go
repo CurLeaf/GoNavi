@@ -231,6 +231,8 @@ func defaultPortByType(driverType string) int {
 		return 9000
 	case "highgo":
 		return 5866
+	case "iris":
+		return 1972
 	default:
 		return 0
 	}

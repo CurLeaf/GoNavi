@@ -72,6 +72,7 @@ func TestResolveDDLDBType_CustomDriverAlias(t *testing.T) {
 		{name: "kingbase contains alias", driver: "kingbasees", want: "kingbase"},
 		{name: "dm alias", driver: "dm8", want: "dameng"},
 		{name: "sqlite alias", driver: "sqlite3", want: "sqlite"},
+		{name: "iris alias", driver: "InterSystems IRIS", want: "iris"},
 	}
 
 	for _, tc := range testCases {
@@ -103,6 +104,14 @@ func TestResolveDDLDBType_KingbaseTypeAlias(t *testing.T) {
 
 	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "kingbase8"}); got != "kingbase" {
 		t.Fatalf("expected kingbase8 type alias to resolve to kingbase, got %q", got)
+	}
+}
+
+func TestResolveDDLDBType_IRISTypeAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "InterSystemsIRIS"}); got != "iris" {
+		t.Fatalf("expected InterSystemsIRIS type alias to resolve to iris, got %q", got)
 	}
 }
 

@@ -19,6 +19,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('doris')).toBe('diros');
     expect(resolveSqlDialect('StarRocks')).toBe('starrocks');
     expect(resolveSqlDialect('dameng')).toBe('dameng');
+    expect(resolveSqlDialect('InterSystems IRIS')).toBe('iris');
+    expect(resolveSqlDialect('custom', 'intersystemsiris')).toBe('iris');
     expect(resolveSqlDialect('custom', 'kingbase8')).toBe('kingbase');
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'mariadb')).toBe('mariadb');
@@ -43,6 +45,7 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('starrocks'))).toContain('PERCENTILE');
     expect(values(resolveColumnTypeOptions('sphinx'))).toContain('text');
     expect(values(resolveColumnTypeOptions('clickhouse'))).toContain('DateTime64(3)');
+    expect(values(resolveColumnTypeOptions('iris'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('tdengine'))).toContain('TIMESTAMP');
     expect(values(resolveColumnTypeOptions('duckdb'))).toContain('STRUCT');
   });

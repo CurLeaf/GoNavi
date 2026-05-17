@@ -212,6 +212,36 @@ func TestBuiltinActivatePinnedVersionDoesNotRestrictBundleFallback(t *testing.T)
 	}
 }
 
+func TestIRISDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("iris")
+	if !ok {
+		t.Fatal("expected iris driver definition")
+	}
+	if definition.Name != "InterSystems IRIS" {
+		t.Fatalf("unexpected iris driver name: %q", definition.Name)
+	}
+	if driverGoModulePathMap["iris"] != "github.com/caretdev/go-irisnative" {
+		t.Fatalf("unexpected iris go module path: %q", driverGoModulePathMap["iris"])
+	}
+	if definition.PinnedVersion != "0.2.1" {
+		t.Fatalf("unexpected iris definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/iris" {
+		t.Fatalf("unexpected iris default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["iris"] != "0.2.1" {
+		t.Fatalf("unexpected iris pinned version: %q", latestDriverVersionMap["iris"])
+	}
+
+	tags, err := optionalDriverBuildTags("iris", "")
+	if err != nil {
+		t.Fatalf("resolve iris build tags failed: %v", err)
+	}
+	if tags != "gonavi_iris_driver" {
+		t.Fatalf("unexpected iris build tag: %q", tags)
+	}
+}
+
 func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
 	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, false, 1, 2)
 	if !strings.Contains(message, "先尝试 1 个预编译直链") {

@@ -27,6 +27,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     vastbase:   '#0066CC',
     opengauss:  '#2446A8',
     highgo:     '#00A86B',
+    iris:       '#1F6FEB',
     tdengine:   '#2962FF',
     diros:      '#0050B3',
     starrocks:  '#00A6A6',
@@ -146,6 +147,9 @@ const OpenGaussIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const HighGoIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.highgo} label="HG" />
 );
+const IrisIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.iris} label="IR" />
+);
 const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.tdengine} label="TD" />
 );
@@ -195,6 +199,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     vastbase: VastBaseIcon,
     opengauss: OpenGaussIcon,
     highgo: HighGoIcon,
+    iris: IrisIcon,
     tdengine: TDengineIcon,
     custom: CustomIcon,
 };
@@ -203,7 +208,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 export const DB_ICON_TYPES: string[] = [
     'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
-    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'tdengine', 'custom',
+    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'custom',
 ];
 
 /** 该类型是否有品牌 SVG 文件 */
@@ -225,7 +230,7 @@ export const getDbIconLabel = (type: string): string => {
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
-        vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', tdengine: 'TDengine',
+        vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine',
         custom: '自定义',
     };
     return labels[type?.toLowerCase()] || type;

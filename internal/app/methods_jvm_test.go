@@ -1602,7 +1602,8 @@ func TestJVMApplyChangeFailedAuditFailureMessageIncludesUnderlyingError(t *testi
 	if !strings.Contains(res.Message, "失败审计写入失败") {
 		t.Fatalf("expected failed audit failure marker, got %q", res.Message)
 	}
-	if !strings.Contains(strings.ToLower(res.Message), "not a directory") {
+	lowerMessage := strings.ToLower(res.Message)
+	if !strings.Contains(lowerMessage, "not a directory") && !strings.Contains(lowerMessage, "system cannot find the path specified") {
 		t.Fatalf("expected underlying audit failure detail in message, got %q", res.Message)
 	}
 }

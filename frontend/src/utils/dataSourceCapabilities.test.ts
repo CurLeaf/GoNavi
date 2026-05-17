@@ -40,6 +40,20 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('keeps InterSystems IRIS as an editable SQL datasource capability', () => {
+    expect(getDataSourceCapabilities({ type: 'iris' })).toMatchObject({
+      type: 'iris',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'intersystemsiris' })).toMatchObject({
+      type: 'iris',
+      supportsQueryEditor: true,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

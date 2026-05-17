@@ -163,6 +163,9 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
 		return "kingbase"
 	}
+	if dbType == "intersystems" || dbType == "intersystemsiris" || dbType == "inter-systems" || dbType == "inter-systems-iris" {
+		return "iris"
+	}
 	if dbType == "oceanbase" && isOceanBaseOracleProtocol(config) {
 		return "oracle"
 	}
@@ -194,6 +197,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "highgo"
 	case "vastbase":
 		return "vastbase"
+	case "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris":
+		return "iris"
 	case "oceanbase":
 		return "oceanbase"
 	}
@@ -209,6 +214,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "highgo"
 	case strings.Contains(driver, "vastbase"):
 		return "vastbase"
+	case strings.Contains(driver, "iris"), strings.Contains(driver, "intersystems"):
+		return "iris"
 	case strings.Contains(driver, "sqlite"):
 		return "sqlite"
 	case strings.Contains(driver, "sphinx"):
@@ -250,6 +257,16 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 		if table != "" {
 			return "public", table
+		}
+	}
+
+	if dbType == "iris" {
+		schema, table := db.SplitSQLQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "", table
 		}
 	}
 

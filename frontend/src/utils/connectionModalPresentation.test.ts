@@ -84,6 +84,7 @@ describe('connectionModalPresentation', () => {
       'highgo',
       'vastbase',
       'opengauss',
+      'iris',
       'mongodb',
       'redis',
       'tdengine',
@@ -138,6 +139,13 @@ describe('connectionModalPresentation', () => {
       'identity',
       'customDriver',
       'customDsn',
+    ]);
+    expect(resolveConnectionConfigLayout('iris').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'credentials',
+      'databaseScope',
     ]);
   });
 
