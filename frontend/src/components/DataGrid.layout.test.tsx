@@ -2,7 +2,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import DataGrid, { formatCellDisplayText, resolveContextMenuFieldName } from './DataGrid';
+import DataGrid, {
+  formatCellDisplayText,
+  resolveContextMenuFieldName,
+  resolveDefaultGridFilterOperator,
+  resolveNextGridFilterOperatorForColumnChange,
+} from './DataGrid';
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -97,6 +102,38 @@ describe('DataGrid layout', () => {
   it('resolves the field name copied from the cell context menu', () => {
     expect(resolveContextMenuFieldName('created_at', '创建时间')).toBe('created_at');
     expect(resolveContextMenuFieldName('', 'fallback_name')).toBe('fallback_name');
+  });
+
+  it('uses contains as the default filter operator for string-like columns', () => {
+    expect(resolveDefaultGridFilterOperator('varchar(255)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('character varying(64)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('nvarchar(max)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('Nullable(LowCardinality(String))')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('text')).toBe('CONTAINS');
+
+    expect(resolveDefaultGridFilterOperator('int')).toBe('=');
+    expect(resolveDefaultGridFilterOperator('decimal(10,2)')).toBe('=');
+    expect(resolveDefaultGridFilterOperator('datetime')).toBe('=');
+  });
+
+  it('updates only untouched default filter operators when the column changes', () => {
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: '=',
+      previousColumnType: 'int',
+      nextColumnType: 'varchar(64)',
+    })).toBe('CONTAINS');
+
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: 'CONTAINS',
+      previousColumnType: 'varchar(64)',
+      nextColumnType: 'bigint',
+    })).toBe('=');
+
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: 'STARTS_WITH',
+      previousColumnType: 'varchar(64)',
+      nextColumnType: 'bigint',
+    })).toBe('STARTS_WITH');
   });
 
   it('renders a DDL action for table data pages only', () => {

@@ -1040,6 +1040,68 @@ type ColumnMeta = {
     comment: string;
 };
 
+const EXACT_GRID_FILTER_OPERATOR = '=';
+const CONTAINS_GRID_FILTER_OPERATOR = 'CONTAINS';
+const STRING_LIKE_GRID_FILTER_TYPES = new Set([
+    'bpchar',
+    'char',
+    'character',
+    'character varying',
+    'citext',
+    'clob',
+    'fixedstring',
+    'long nvarchar',
+    'long varchar',
+    'longtext',
+    'mediumtext',
+    'nchar',
+    'nclob',
+    'ntext',
+    'nvarchar',
+    'nvarchar2',
+    'string',
+    'text',
+    'tinytext',
+    'varchar',
+    'varchar2',
+]);
+
+const normalizeGridFilterColumnType = (columnType: unknown): string => {
+    let normalized = String(columnType ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    for (let i = 0; i < 4; i += 1) {
+        const wrapped = normalized.match(/^(?:nullable|lowcardinality)\((.+)\)$/);
+        if (!wrapped) break;
+        normalized = wrapped[1].trim().replace(/\s+/g, ' ');
+    }
+    return normalized;
+};
+
+export const isStringLikeGridFilterColumnType = (columnType: unknown): boolean => {
+    const normalized = normalizeGridFilterColumnType(columnType);
+    if (!normalized) return false;
+    const baseType = normalized.replace(/\(.*/, '').trim();
+    return STRING_LIKE_GRID_FILTER_TYPES.has(baseType);
+};
+
+export const resolveDefaultGridFilterOperator = (columnType: unknown): string => (
+    isStringLikeGridFilterColumnType(columnType) ? CONTAINS_GRID_FILTER_OPERATOR : EXACT_GRID_FILTER_OPERATOR
+);
+
+export const resolveNextGridFilterOperatorForColumnChange = ({
+    currentOperator,
+    previousColumnType,
+    nextColumnType,
+}: {
+    currentOperator: unknown;
+    previousColumnType: unknown;
+    nextColumnType: unknown;
+}): string => {
+    const current = String(currentOperator || '').trim();
+    if (!current) return resolveDefaultGridFilterOperator(nextColumnType);
+    const previousDefault = resolveDefaultGridFilterOperator(previousColumnType);
+    return current === previousDefault ? resolveDefaultGridFilterOperator(nextColumnType) : current;
+};
+
 type NormalizeCommitCellValue = (columnName: string, value: any, mode: 'insert' | 'update') => any;
 
 type DataGridCommitChangeSet = {
@@ -1754,6 +1816,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
       return next;
   }, [columnMetaMapByLowerName]);
+
+  const getColumnFilterType = useCallback((columnName: string): string => {
+      const normalizedName = String(columnName || '').trim();
+      if (!normalizedName) return '';
+      return (columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()])?.type || '';
+  }, [columnMetaMap, columnMetaMapByLowerName]);
 
   const allTableColumnNames = useMemo(() => {
       const metaColumns = Object.keys(columnMetaMap);
@@ -2514,7 +2582,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return conditions.map((cond, index) => {
           const fallbackId = index + 1;
           const nextId = Number.isFinite(Number(cond?.id)) ? Number(cond?.id) : fallbackId;
-          const op = String(cond?.op || '=');
+          const op = String(cond?.op || EXACT_GRID_FILTER_OPERATOR);
           const rawColumn = String(cond?.column || '');
           return {
               id: nextId,
@@ -2534,9 +2602,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [quickWhereDraft, setQuickWhereDraft] = useState(() => normalizeQuickWhereCondition(quickWhereCondition));
   const [quickWhereSuggestionsOpen, setQuickWhereSuggestionsOpen] = useState(false);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
+  const autoDefaultFilterIdsRef = useRef<Set<number>>(new Set());
 
   useEffect(() => {
       const nextConditions = normalizeGridFilterConditions(appliedFilterConditions);
+      autoDefaultFilterIdsRef.current.clear();
       setFilterConditions(nextConditions);
       const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
       setNextFilterId(Math.max(1, maxId + 1));
@@ -2545,6 +2615,23 @@ const DataGrid: React.FC<DataGridProps> = ({
   useEffect(() => {
       setQuickWhereDraft(normalizeQuickWhereCondition(quickWhereCondition));
   }, [quickWhereCondition]);
+
+  useEffect(() => {
+      if (Object.keys(columnMetaMap).length === 0) return;
+      setFilterConditions(prev => {
+          let changed = false;
+          const nextConditions = prev.map((cond) => {
+              if (!autoDefaultFilterIdsRef.current.has(cond.id)) {
+                  return cond;
+              }
+              const nextOp = resolveDefaultGridFilterOperator(getColumnFilterType(cond.column));
+              if (nextOp === cond.op) return cond;
+              changed = true;
+              return { ...cond, op: nextOp };
+          });
+          return changed ? nextConditions : prev;
+      });
+  }, [columnMetaMap, getColumnFilterType]);
 
   const quickWhereSuggestionOptions = useMemo(() => {
       const columnSuggestionSource = allTableColumnNames.length > 0 ? allTableColumnNames : displayColumnNames;
@@ -5007,14 +5094,17 @@ const DataGrid: React.FC<DataGridProps> = ({
   const isListOp = useCallback((op: string) => op === 'IN' || op === 'NOT_IN', []);
 
   const addFilter = () => {
+      const column = displayColumnNames[0] || '';
+      const id = nextFilterId;
+      autoDefaultFilterIdsRef.current.add(id);
       setFilterConditions([
           ...filterConditions,
           {
-              id: nextFilterId,
+              id,
               enabled: true,
               logic: 'AND',
-              column: displayColumnNames[0] || '',
-              op: '=',
+              column,
+              op: resolveDefaultGridFilterOperator(getColumnFilterType(column)),
               value: '',
               value2: '',
           }
@@ -5025,7 +5115,21 @@ const DataGrid: React.FC<DataGridProps> = ({
       setFilterConditions(prev => prev.map(c => {
           if (c.id !== id) return c;
           const next: GridFilterCondition = { ...c, [field]: val } as GridFilterCondition;
+          if (field === 'column') {
+              next.op = resolveNextGridFilterOperatorForColumnChange({
+                  currentOperator: c.op,
+                  previousColumnType: getColumnFilterType(c.column),
+                  nextColumnType: getColumnFilterType(String(val)),
+              });
+              if (isNoValueOp(next.op)) {
+                  next.value = '';
+                  next.value2 = '';
+              } else if (!isBetweenOp(next.op)) {
+                  next.value2 = '';
+              }
+          }
           if (field === 'op') {
+              autoDefaultFilterIdsRef.current.delete(id);
               const nextOp = String(val);
               if (isNoValueOp(nextOp)) {
                   next.value = '';
@@ -5040,6 +5144,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }));
   };
   const removeFilter = (id: number) => {
+      autoDefaultFilterIdsRef.current.delete(id);
       setFilterConditions(prev => prev.filter(c => c.id !== id));
   };
   const applyQuickWhereCondition = useCallback((condition: string = quickWhereDraft): boolean => {
