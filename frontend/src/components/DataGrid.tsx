@@ -150,6 +150,7 @@ export const GONAVI_ROW_KEY = '__gonavi_row_key__';
 // Cell key helpers for batch selection/fill.
 // Use a control character separator to avoid collisions with rowKey/columnName contents (e.g. `new-123`).
 const CELL_KEY_SEP = '\u0001';
+const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
 const normalizedDateTimeCache = new Map<string, string>();
@@ -1499,6 +1500,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     dataIndex: '',
     title: '',
   });
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const tableContainerRef = useRef<HTMLDivElement | null>(null);
   const tableScrollTargetsRef = useRef<HTMLElement[]>([]);
@@ -1525,6 +1527,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   const cellSelectionScrollRafRef = useRef<number | null>(null);
   const cellSelectionAutoScrollRafRef = useRef<number | null>(null);
   const cellSelectionPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingCellSelectionStartRef = useRef<{ rowKey: string; colName: string; x: number; y: number } | null>(null);
+  const suppressCellSelectionClickRef = useRef(false);
+  const cellEditModeRef = useRef(false);
   const isDraggingRef = useRef(false);
 
   // 导入预览 Modal 状态
@@ -2022,8 +2027,8 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-tbody .ant-table-row.row-modified:hover > .ant-table-cell { background-color: ${rowModHover} !important; }
                 .${gridId} .ant-table-tbody > tr.row-deleted:hover > td,
                 .${gridId} .ant-table-tbody .ant-table-row.row-deleted:hover > .ant-table-cell { background-color: ${darkMode ? '#2a2a2a' : '#e8e8e8'} !important; }
-                .${gridId} .ant-table-tbody > tr > td[data-col-name],
-                .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
+                .${gridId}.cell-edit-mode .ant-table-tbody > tr > td[data-col-name],
+                .${gridId}.cell-edit-mode .ant-table-tbody .ant-table-row > .ant-table-cell[data-col-name] { user-select: none; -webkit-user-select: none; cursor: crosshair; }
                 .${gridId} .ant-table-tbody > tr > td[data-cell-selected="true"],
                 .${gridId} .ant-table-tbody .ant-table-row > .ant-table-cell[data-cell-selected="true"],
                 .${gridId} [data-cell-selected="true"] {
@@ -2624,6 +2629,10 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const rowKeyStr = useCallback((k: React.Key) => String(k), []);
 
+  useEffect(() => {
+      cellEditModeRef.current = cellEditMode;
+  }, [cellEditMode]);
+
   const columnIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     displayColumnNames.forEach((name: string, idx: number) => map.set(name, idx));
@@ -2650,6 +2659,37 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
     });
   }, []);
+
+  const resetCellSelection = useCallback((clearState: boolean = true) => {
+    if (clearState) {
+      setSelectedCells(new Set());
+    }
+    currentSelectionRef.current = new Set();
+    selectionStartRef.current = null;
+    pendingCellSelectionStartRef.current = null;
+    isDraggingRef.current = false;
+    cellSelectionPointerRef.current = null;
+    if (cellSelectionRafRef.current !== null) {
+      cancelAnimationFrame(cellSelectionRafRef.current);
+      cellSelectionRafRef.current = null;
+    }
+    if (cellSelectionScrollRafRef.current !== null) {
+      cancelAnimationFrame(cellSelectionScrollRafRef.current);
+      cellSelectionScrollRafRef.current = null;
+    }
+    if (cellSelectionAutoScrollRafRef.current !== null) {
+      cancelAnimationFrame(cellSelectionAutoScrollRafRef.current);
+      cellSelectionAutoScrollRafRef.current = null;
+    }
+    updateCellSelection(new Set());
+  }, [updateCellSelection]);
+
+  const closeCellEditMode = useCallback(() => {
+    setCellEditMode(false);
+    cellEditModeRef.current = false;
+    setBatchEditModalOpen(false);
+    resetCellSelection();
+  }, [resetCellSelection]);
 
   // 批量填充选中的单元格
   const handleBatchFillCells = useCallback(() => {
@@ -2752,19 +2792,31 @@ const DataGrid: React.FC<DataGridProps> = ({
     updateCellSelection(new Set());
   }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection]);
 
-  // 事件委托：在容器级别处理批量编辑模式的鼠标事件
+  // 事件委托：在容器级别处理单元格拖选；未开启模式时，拖拽超过阈值会自动进入单元格编辑模式。
   useEffect(() => {
-    if (!cellEditMode) return;
-
     const container = containerRef.current;
+    if (!canModifyData || viewMode !== 'table') return;
     if (!container) return;
     const EDGE_THRESHOLD_PX = 28;
     const MIN_SCROLL_STEP = 8;
     const MAX_SCROLL_STEP = 24;
 
-    const getCellInfo = (target: HTMLElement | null): { rowKey: string; colName: string } | null => {
+    const isInteractiveTarget = (target: HTMLElement | null): boolean => {
+      if (!target) return false;
+      return !!target.closest('input, textarea, button, select, [contenteditable="true"], .ant-checkbox, .ant-picker, .ant-select, .ant-dropdown, .ant-modal');
+    };
+
+    const getCellElement = (target: HTMLElement | null): HTMLElement | null => {
       if (!target) return null;
       const cell = target.closest('[data-row-key][data-col-name]') as HTMLElement;
+      if (!cell || !container.contains(cell)) return null;
+      const colName = cell.getAttribute('data-col-name');
+      if (!colName || !isWritableResultColumn(colName, effectiveEditLocator)) return null;
+      return cell;
+    };
+
+    const getCellInfo = (target: HTMLElement | null): { rowKey: string; colName: string } | null => {
+      const cell = getCellElement(target);
       if (!cell) return null;
       const rowKey = cell.getAttribute('data-row-key');
       const colName = cell.getAttribute('data-col-name');
@@ -2777,6 +2829,38 @@ const DataGrid: React.FC<DataGridProps> = ({
       return getCellInfo(target);
     };
 
+    const applySelectionUpdate = (cellInfo: { rowKey: string; colName: string }) => {
+      const start = selectionStartRef.current;
+      if (!start) return;
+
+      const currentData = displayDataRef.current;
+      const rowIndexMap = rowIndexMapRef.current;
+      const startRowIndex = start.rowIndex;
+      const endRowIndex = rowIndexMap.get(cellInfo.rowKey) ?? -1;
+      if (startRowIndex === -1 || endRowIndex === -1) return;
+
+      const startColIndex = start.colIndex;
+      const endColIndex = columnIndexMap.get(cellInfo.colName) ?? -1;
+      if (startColIndex === -1 || endColIndex === -1) return;
+
+      const minRowIndex = Math.min(startRowIndex, endRowIndex);
+      const maxRowIndex = Math.max(startRowIndex, endRowIndex);
+      const minColIndex = Math.min(startColIndex, endColIndex);
+      const maxColIndex = Math.max(startColIndex, endColIndex);
+
+      const newSelectedCells = new Set<string>();
+      for (let i = minRowIndex; i <= maxRowIndex; i++) {
+        const row = currentData[i];
+        const rKey = String(row?.[GONAVI_ROW_KEY]);
+        for (let j = minColIndex; j <= maxColIndex; j++) {
+          newSelectedCells.add(makeCellKey(rKey, displayColumnNames[j]));
+        }
+      }
+
+      currentSelectionRef.current = newSelectedCells;
+      updateCellSelection(newSelectedCells);
+    };
+
     const scheduleSelectionUpdate = (cellInfo: { rowKey: string; colName: string }) => {
       if (cellSelectionRafRef.current !== null) {
         cancelAnimationFrame(cellSelectionRafRef.current);
@@ -2784,35 +2868,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       cellSelectionRafRef.current = requestAnimationFrame(() => {
         cellSelectionRafRef.current = null;
-        const start = selectionStartRef.current;
-        if (!start) return;
-
-        const currentData = displayDataRef.current;
-        const rowIndexMap = rowIndexMapRef.current;
-        const startRowIndex = start.rowIndex;
-        const endRowIndex = rowIndexMap.get(cellInfo.rowKey) ?? -1;
-        if (startRowIndex === -1 || endRowIndex === -1) return;
-
-        const startColIndex = start.colIndex;
-        const endColIndex = columnIndexMap.get(cellInfo.colName) ?? -1;
-        if (startColIndex === -1 || endColIndex === -1) return;
-
-        const minRowIndex = Math.min(startRowIndex, endRowIndex);
-        const maxRowIndex = Math.max(startRowIndex, endRowIndex);
-        const minColIndex = Math.min(startColIndex, endColIndex);
-        const maxColIndex = Math.max(startColIndex, endColIndex);
-
-        const newSelectedCells = new Set<string>();
-        for (let i = minRowIndex; i <= maxRowIndex; i++) {
-          const row = currentData[i];
-          const rKey = String(row?.[GONAVI_ROW_KEY]);
-          for (let j = minColIndex; j <= maxColIndex; j++) {
-            newSelectedCells.add(makeCellKey(rKey, displayColumnNames[j]));
-          }
-        }
-
-        currentSelectionRef.current = newSelectedCells;
-        updateCellSelection(newSelectedCells);
+        applySelectionUpdate(cellInfo);
       });
     };
 
@@ -2893,14 +2949,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellSelectionAutoScrollRafRef.current = requestAnimationFrame(autoScrollTick);
     };
 
-    const onMouseDown = (e: MouseEvent) => {
-      const target = e.target instanceof HTMLElement ? e.target : null;
-      const cellInfo = getCellInfo(target);
-      if (!cellInfo) return;
-
-      e.preventDefault();
+    const beginCellSelection = (cellInfo: { rowKey: string; colName: string }, x: number, y: number) => {
+      if (!cellEditModeRef.current) {
+        cellEditModeRef.current = true;
+        setCellEditMode(true);
+      }
+      suppressCellSelectionClickRef.current = true;
+      pendingCellSelectionStartRef.current = null;
       isDraggingRef.current = true;
-      cellSelectionPointerRef.current = { x: e.clientX, y: e.clientY };
+      cellSelectionPointerRef.current = { x, y };
+
       const currentData = displayDataRef.current;
       const nextRowIndexMap = new Map<string, number>();
       currentData.forEach((r, idx) => {
@@ -2918,8 +2976,39 @@ const DataGrid: React.FC<DataGridProps> = ({
       ensureAutoScroll();
     };
 
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (isInteractiveTarget(target)) return;
+      const cellInfo = getCellInfo(target);
+      if (!cellInfo) return;
+
+      if (cellEditModeRef.current) {
+        e.preventDefault();
+        beginCellSelection(cellInfo, e.clientX, e.clientY);
+        return;
+      }
+
+      pendingCellSelectionStartRef.current = { ...cellInfo, x: e.clientX, y: e.clientY };
+    };
+
     const onMouseMove = (e: MouseEvent) => {
+      const pendingStart = pendingCellSelectionStartRef.current;
+      if (!isDraggingRef.current && pendingStart) {
+        const dx = e.clientX - pendingStart.x;
+        const dy = e.clientY - pendingStart.y;
+        if (Math.hypot(dx, dy) < CELL_SELECTION_DRAG_THRESHOLD_PX) return;
+
+        e.preventDefault();
+        beginCellSelection(
+          { rowKey: pendingStart.rowKey, colName: pendingStart.colName },
+          e.clientX,
+          e.clientY,
+        );
+      }
+
       if (!isDraggingRef.current || !selectionStartRef.current) return;
+      e.preventDefault();
       cellSelectionPointerRef.current = { x: e.clientX, y: e.clientY };
       ensureAutoScroll();
 
@@ -2929,7 +3018,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       scheduleSelectionUpdate(cellInfo);
     };
 
-    const onMouseUp = () => {
+    const onMouseUp = (e: MouseEvent) => {
+      pendingCellSelectionStartRef.current = null;
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
       cellSelectionPointerRef.current = null;
@@ -2940,9 +3030,20 @@ const DataGrid: React.FC<DataGridProps> = ({
         cellSelectionRafRef.current = null;
       }
 
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const cellInfo = getCellInfo(target) || getCellInfoFromPoint(e.clientX, e.clientY);
+      if (cellInfo) applySelectionUpdate(cellInfo);
+
       if (currentSelectionRef.current.size > 0) {
         setSelectedCells(new Set(currentSelectionRef.current));
       }
+    };
+
+    const onClickCapture = (e: MouseEvent) => {
+      if (!suppressCellSelectionClickRef.current) return;
+      suppressCellSelectionClickRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
     };
 
     const onScroll = () => {
@@ -2958,12 +3059,14 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     container.addEventListener('mousedown', onMouseDown);
     container.addEventListener('mousemove', onMouseMove);
+    container.addEventListener('click', onClickCapture, true);
     container.addEventListener('scroll', onScroll, true);
     document.addEventListener('mouseup', onMouseUp);
 
     return () => {
       container.removeEventListener('mousedown', onMouseDown);
       container.removeEventListener('mousemove', onMouseMove);
+      container.removeEventListener('click', onClickCapture, true);
       container.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('mouseup', onMouseUp);
       if (cellSelectionRafRef.current !== null) {
@@ -2975,10 +3078,11 @@ const DataGrid: React.FC<DataGridProps> = ({
         cellSelectionScrollRafRef.current = null;
       }
       stopAutoScroll();
+      pendingCellSelectionStartRef.current = null;
       cellSelectionPointerRef.current = null;
       isDraggingRef.current = false;
     };
-  }, [cellEditMode, displayColumnNames, columnIndexMap, updateCellSelection]);
+  }, [canModifyData, viewMode, displayColumnNames, columnIndexMap, effectiveEditLocator, updateCellSelection]);
 
   const handleCopySelectedColumnsFromRow = useCallback(() => {
     const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
@@ -3743,25 +3847,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleViewModeChange = useCallback((nextMode: GridViewMode) => {
       if (nextMode === 'json' && cellEditMode) {
-          setCellEditMode(false);
-          setSelectedCells(new Set());
-          currentSelectionRef.current = new Set();
-          selectionStartRef.current = null;
-          isDraggingRef.current = false;
-          cellSelectionPointerRef.current = null;
-          if (cellSelectionRafRef.current !== null) {
-              cancelAnimationFrame(cellSelectionRafRef.current);
-              cellSelectionRafRef.current = null;
-          }
-          if (cellSelectionScrollRafRef.current !== null) {
-              cancelAnimationFrame(cellSelectionScrollRafRef.current);
-              cellSelectionScrollRafRef.current = null;
-          }
-          if (cellSelectionAutoScrollRafRef.current !== null) {
-              cancelAnimationFrame(cellSelectionAutoScrollRafRef.current);
-              cellSelectionAutoScrollRafRef.current = null;
-          }
-          updateCellSelection(new Set());
+          closeCellEditMode();
       }
 
       if (nextMode === 'text') {
@@ -3775,7 +3861,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
 
       setViewMode(nextMode);
-  }, [cellEditMode, mergedDisplayData, selectedRowKeys, rowKeyStr, updateCellSelection]);
+  }, [cellEditMode, mergedDisplayData, selectedRowKeys, rowKeyStr, closeCellEditMode]);
 
   const handleOpenContextMenuRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4491,6 +4577,24 @@ const DataGrid: React.FC<DataGridProps> = ({
       window.addEventListener('keydown', onKeyDown);
       return () => window.removeEventListener('keydown', onKeyDown);
   }, [cellEditMode, selectedCells, handleCopySelectedCellsToClipboard]);
+
+  useEffect(() => {
+      if (!cellEditMode) return;
+
+      const onPointerDown = (event: MouseEvent) => {
+          const root = rootRef.current;
+          const target = event.target instanceof Node ? event.target : null;
+          if (!root || !target || root.contains(target)) return;
+          if (target instanceof HTMLElement
+              && target.closest('.ant-modal, .ant-dropdown, .ant-select-dropdown, .ant-picker-dropdown, .ant-popover')) {
+              return;
+          }
+          closeCellEditMode();
+      };
+
+      document.addEventListener('mousedown', onPointerDown);
+      return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [cellEditMode, closeCellEditMode]);
   
   const getTargets = useCallback((clickedRecord: any) => {
       const selKeys = selectedRowKeysRef.current;
@@ -5700,7 +5804,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [pagination, onPageChange]);
 
   return (
-    <div className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root`} style={{ '--gonavi-header-min-height': `${headerCellMinHeight}px`, flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' } as React.CSSProperties}>
+    <div ref={rootRef} className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root`} style={{ '--gonavi-header-min-height': `${headerCellMinHeight}px`, flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' } as React.CSSProperties}>
 		       {/* Toolbar + Filter Panel */}
            <div style={{ margin: `${panelOuterGap}px 0 ${panelOuterGap}px 0`, border: `1px solid ${panelFrameColor}`, borderRadius: `${panelRadius}px`, background: bgFilter, overflow: 'hidden', boxSizing: 'border-box' }}>
 		        <div className="data-grid-toolbar-scroll" data-grid-primary-actions="true" style={{ padding: showFilter ? `${panelPaddingY}px ${panelPaddingX}px ${toolbarBottomPadding}px ${panelPaddingX}px` : `${panelPaddingY}px ${panelPaddingX}px`, border: 'none', borderRadius: 0, background: 'transparent', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap', minWidth: 0, overflowX: 'auto', overflowY: 'hidden', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch', boxSizing: 'border-box' }}>
@@ -5750,30 +5854,18 @@ const DataGrid: React.FC<DataGridProps> = ({
 	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
 	                   <div style={{ width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }} />
 	                   <Button
+                            data-grid-cell-editor-action="true"
                             icon={<EditOutlined />}
                             type={cellEditMode ? 'primary' : 'default'}
                             onClick={() => {
                                 const next = !cellEditMode;
-                                setCellEditMode(next);
-                                setSelectedCells(new Set());
-                                currentSelectionRef.current = new Set();
-                                selectionStartRef.current = null;
-                                isDraggingRef.current = false;
-                                cellSelectionPointerRef.current = null;
-                                if (cellSelectionRafRef.current !== null) {
-                                    cancelAnimationFrame(cellSelectionRafRef.current);
-                                    cellSelectionRafRef.current = null;
+                                if (!next) {
+                                    closeCellEditMode();
+                                } else {
+                                    cellEditModeRef.current = true;
+                                    setCellEditMode(true);
+                                    resetCellSelection();
                                 }
-                                if (cellSelectionScrollRafRef.current !== null) {
-                                    cancelAnimationFrame(cellSelectionScrollRafRef.current);
-                                    cellSelectionScrollRafRef.current = null;
-                                }
-                                if (cellSelectionAutoScrollRafRef.current !== null) {
-                                    cancelAnimationFrame(cellSelectionAutoScrollRafRef.current);
-                                    cellSelectionAutoScrollRafRef.current = null;
-                                }
-                                updateCellSelection(new Set());
-                                if (!next) setBatchEditModalOpen(false);
                                 void message.info(next ? '已进入单元格编辑模式，可拖拽选择多个单元格' : '已退出单元格编辑模式').then();
                             }}
                         >
