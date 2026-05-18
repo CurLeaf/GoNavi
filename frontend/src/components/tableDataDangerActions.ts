@@ -41,6 +41,8 @@ const resolveCustomDriverDialect = (driver: string): string => {
     case 'iris':
     case 'intersystems':
     case 'intersystemsiris':
+    case 'inter-systems':
+    case 'inter-systems-iris':
       return 'iris';
     default:
       break;
@@ -53,6 +55,7 @@ const resolveCustomDriverDialect = (driver: string): string => {
   if (normalized.includes('highgo')) return 'highgo';
   if (normalized.includes('vastbase')) return 'vastbase';
   if (normalized.includes('sqlite')) return 'sqlite';
+  if (normalized.includes('iris') || normalized.includes('intersystems')) return 'iris';
   if (normalized.includes('sphinx')) return 'sphinx';
   if (normalized.includes('diros') || normalized.includes('doris')) return 'diros';
   if (normalized.includes('starrocks')) return 'starrocks';
@@ -79,6 +82,7 @@ export const supportsTableTruncateAction = (type: string, driver?: string): bool
     case 'vastbase':
     case 'opengauss':
     case 'sqlserver':
+    case 'iris':
     case 'oracle':
     case 'dameng':
     case 'clickhouse':

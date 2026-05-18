@@ -1424,7 +1424,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false

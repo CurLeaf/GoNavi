@@ -262,6 +262,62 @@ describe('store appearance persistence', () => {
     expect(config?.port).toBe(9030);
   });
 
+  it('keeps InterSystems IRIS saved connections as independent datasource type', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'iris-user',
+        name: 'IRIS USER',
+        config: {
+          id: 'iris-user',
+          type: 'iris',
+          host: 'iris.local',
+          port: 1972,
+          user: '_SYSTEM',
+          database: 'USER',
+        },
+      },
+      {
+        id: 'iris-alias',
+        name: 'IRIS Alias',
+        config: {
+          id: 'iris-alias',
+          type: 'InterSystemsIRIS',
+          host: 'iris-alias.local',
+          port: 1972,
+          user: '_SYSTEM',
+          database: 'USER',
+        },
+      },
+    ]);
+
+    const connections = useStore.getState().connections;
+    expect(connections[0]?.config.type).toBe('iris');
+    expect(connections[0]?.config.port).toBe(1972);
+    expect(connections[1]?.config.type).toBe('iris');
+  });
+
+  it('normalizes saved connection type aliases without falling back to mysql', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      { id: 'pg', name: 'Postgres', config: { id: 'pg', type: 'PostgreSQL', host: 'pg.local', port: 5432, user: 'postgres' } },
+      { id: 'mssql', name: 'MSSQL', config: { id: 'mssql', type: 'mssql', host: 'sql.local', port: 1433, user: 'sa' } },
+      { id: 'kingbase', name: 'Kingbase', config: { id: 'kingbase', type: 'kingbase8', host: 'kingbase.local', port: 54321, user: 'system' } },
+      { id: 'dm', name: 'Dameng', config: { id: 'dm', type: 'dm8', host: 'dm.local', port: 5236, user: 'SYSDBA' } },
+      { id: 'sqlite', name: 'SQLite', config: { id: 'sqlite', type: 'sqlite3', host: 'D:/db/app.sqlite', port: 0, user: '' } },
+    ]);
+
+    expect(useStore.getState().connections.map((conn) => conn.config.type)).toEqual([
+      'postgres',
+      'sqlserver',
+      'kingbase',
+      'dameng',
+      'sqlite',
+    ]);
+  });
+
   it('preserves SSL certificate paths for SSL-capable saved connections', async () => {
     const { useStore } = await importStore();
 

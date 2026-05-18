@@ -120,6 +120,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "dameng",
   "kingbase",
   "sqlserver",
+  "iris",
   "mongodb",
   "highgo",
   "vastbase",
@@ -185,6 +186,8 @@ const getDefaultPortByType = (type: string): number => {
       return 54321;
     case "sqlserver":
       return 1433;
+    case "iris":
+      return 1972;
     case "mongodb":
       return 27017;
     case "highgo":
@@ -311,12 +314,40 @@ const normalizeConnectionType = (value: unknown): string => {
   if (type === "doris") {
     return "diros";
   }
+  if (type === "postgresql") {
+    return "postgres";
+  }
+  if (type === "mssql" || type === "sql_server" || type === "sql-server") {
+    return "sqlserver";
+  }
+  if (type === "kingbase8" || type === "kingbasees" || type === "kingbasev8") {
+    return "kingbase";
+  }
+  if (type === "dm" || type === "dm8") {
+    return "dameng";
+  }
+  if (type === "sqlite3") {
+    return "sqlite";
+  }
+  if (type === "sphinxql") {
+    return "sphinx";
+  }
   if (
     type === "open_gauss" ||
     type === "open-gauss" ||
     type === "opengauss"
   ) {
     return "opengauss";
+  }
+  if (
+    type === "inter-systems" ||
+    type === "inter-systems-iris" ||
+    type === "intersystems" ||
+    type === "intersystems iris" ||
+    type === "intersystemsiris" ||
+    type.includes("iris")
+  ) {
+    return "iris";
   }
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };
