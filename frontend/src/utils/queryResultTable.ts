@@ -16,18 +16,41 @@ const stripIdentifierQuotes = (part: string): string => {
   return text;
 };
 
-const normalizeQualifiedName = (raw: string): string => (
-  String(raw || '')
-    .split('.')
-    .map((part) => stripIdentifierQuotes(part.trim()))
-    .filter(Boolean)
-    .join('.')
-);
-
 const isOracleLikeDialect = (dialect: string): boolean => {
   const normalized = String(dialect || '').trim().toLowerCase();
   return normalized === 'oracle' || normalized === 'dameng' || normalized === 'dm' || normalized === 'dm8';
 };
+
+const isQuotedIdentifier = (part: string): boolean => {
+  const text = String(part || '').trim();
+  if (!text) return false;
+  return (text.startsWith('`') && text.endsWith('`'))
+    || (text.startsWith('"') && text.endsWith('"'))
+    || (text.startsWith('[') && text.endsWith(']'));
+};
+
+const normalizeIdentifierPart = (part: string, dialect: string): string => {
+  const text = String(part || '').trim();
+  const value = stripIdentifierQuotes(text);
+  if (!value) return '';
+  if (isOracleLikeDialect(dialect) && !isQuotedIdentifier(text)) {
+    return value.toUpperCase();
+  }
+  return value;
+};
+
+const normalizeCurrentDbName = (currentDb: string, dialect: string): string => {
+  const value = String(currentDb || '').trim();
+  if (!value) return '';
+  return isOracleLikeDialect(dialect) ? value.toUpperCase() : value;
+};
+
+const normalizeQualifiedNameParts = (raw: string, dialect: string): string[] => (
+  String(raw || '')
+    .split('.')
+    .map((part) => normalizeIdentifierPart(part, dialect))
+    .filter(Boolean)
+);
 
 export const extractQueryResultTableRef = (
   sql: string,
@@ -43,15 +66,13 @@ export const extractQueryResultTableRef = (
   const tableMatch = text.match(/^\s*SELECT\s+.+?\s+FROM\s+((?:[`"\[]?\w+[`"\]]?)(?:\s*\.\s*(?:[`"\[]?\w+[`"\]]?)){0,2})\s*(?:$|[\s;])/im);
   if (!tableMatch) return undefined;
 
-  const qualifiedName = normalizeQualifiedName(tableMatch[1]);
-  if (!qualifiedName) return undefined;
-
-  const parts = qualifiedName.split('.').filter(Boolean);
+  const parts = normalizeQualifiedNameParts(tableMatch[1], dialect);
+  if (parts.length === 0) return undefined;
   const metadataTableName = parts[parts.length - 1] || '';
   if (!metadataTableName) return undefined;
 
   const owner = parts.length >= 2 ? parts[parts.length - 2] : '';
-  const metadataDbName = owner || currentDb || '';
+  const metadataDbName = owner || normalizeCurrentDbName(currentDb, dialect);
   const tableName = isOracleLikeDialect(dialect) && owner
     ? `${owner}.${metadataTableName}`
     : metadataTableName;

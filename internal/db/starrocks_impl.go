@@ -126,6 +126,81 @@ func collectStarRocksAddresses(config connection.ConnectionConfig) []string {
 	return result
 }
 
+func starRocksMetadataLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func buildStarRocksColumnsQuery(dbName, tableName string) string {
+	schemaPredicate := "TABLE_SCHEMA = DATABASE()"
+	if strings.TrimSpace(dbName) != "" {
+		schemaPredicate = fmt.Sprintf("TABLE_SCHEMA = %s", starRocksMetadataLiteral(strings.TrimSpace(dbName)))
+	}
+
+	return fmt.Sprintf(`SELECT
+	COLUMN_NAME,
+	COLUMN_TYPE,
+	IS_NULLABLE,
+	COLUMN_KEY,
+	COLUMN_DEFAULT,
+	EXTRA,
+	COLUMN_COMMENT
+FROM information_schema.columns
+WHERE %s AND TABLE_NAME = %s
+ORDER BY ORDINAL_POSITION`, schemaPredicate, starRocksMetadataLiteral(strings.TrimSpace(tableName)))
+}
+
+func getStarRocksRowValue(row map[string]interface{}, keys ...string) (interface{}, bool) {
+	if len(row) == 0 {
+		return nil, false
+	}
+	for _, key := range keys {
+		for k, v := range row {
+			if !strings.EqualFold(strings.TrimSpace(k), strings.TrimSpace(key)) {
+				continue
+			}
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func getStarRocksRowString(row map[string]interface{}, keys ...string) string {
+	v, ok := getStarRocksRowValue(row, keys...)
+	if !ok || v == nil {
+		return ""
+	}
+	text := strings.TrimSpace(fmt.Sprintf("%v", v))
+	if text == "" || strings.EqualFold(text, "<nil>") {
+		return ""
+	}
+	return text
+}
+
+func buildStarRocksColumnDefinitions(data []map[string]interface{}) []connection.ColumnDefinition {
+	columns := make([]connection.ColumnDefinition, 0, len(data))
+	for _, row := range data {
+		col := connection.ColumnDefinition{
+			Name:     getStarRocksRowString(row, "Field", "COLUMN_NAME"),
+			Type:     getStarRocksRowString(row, "Type", "COLUMN_TYPE"),
+			Nullable: getStarRocksRowString(row, "Null", "IS_NULLABLE"),
+			Key:      strings.ToUpper(getStarRocksRowString(row, "Key", "COLUMN_KEY")),
+			Extra:    getStarRocksRowString(row, "Extra", "EXTRA"),
+			Comment:  getStarRocksRowString(row, "Comment", "COLUMN_COMMENT"),
+		}
+
+		if rawDefault, ok := getStarRocksRowValue(row, "Default", "COLUMN_DEFAULT"); ok && rawDefault != nil {
+			def := fmt.Sprintf("%v", rawDefault)
+			if strings.EqualFold(def, "<nil>") {
+				def = ""
+			}
+			col.Default = &def
+		}
+
+		columns = append(columns, col)
+	}
+	return columns
+}
+
 func (s *StarRocksDB) getDSN(config connection.ConnectionConfig) (string, error) {
 	database := config.Database
 	protocol := "tcp"
@@ -139,7 +214,7 @@ func (s *StarRocksDB) getDSN(config connection.ConnectionConfig) (string, error)
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func resolveStarRocksCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {
@@ -157,6 +232,14 @@ func resolveStarRocksCredential(config connection.ConnectionConfig, addressIndex
 	}
 
 	return config.User, primaryPassword
+}
+
+func (s *StarRocksDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+	data, _, err := s.Query(buildStarRocksColumnsQuery(dbName, tableName))
+	if err != nil {
+		return nil, err
+	}
+	return buildStarRocksColumnDefinitions(data), nil
 }
 
 func (s *StarRocksDB) Connect(config connection.ConnectionConfig) error {

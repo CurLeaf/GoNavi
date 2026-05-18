@@ -1,10 +1,13 @@
 package db
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/tlsconfig"
 )
 
 const (
@@ -61,15 +64,37 @@ func resolveMySQLTLSMode(config connection.ConnectionConfig) string {
 	}
 }
 
+func hasTLSCertificatePaths(config connection.ConnectionConfig) bool {
+	return strings.TrimSpace(config.SSLCAPath) != "" ||
+		strings.TrimSpace(config.SSLCertPath) != "" ||
+		strings.TrimSpace(config.SSLKeyPath) != ""
+}
+
+func mysqlTLSConfigName(config connection.ConnectionConfig) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		normalizedSSLMode(config),
+		strings.TrimSpace(config.SSLCAPath),
+		strings.TrimSpace(config.SSLCertPath),
+		strings.TrimSpace(config.SSLKeyPath),
+	}, "\x00")))
+	return "gonavi-" + hex.EncodeToString(sum[:8])
+}
+
 func resolvePostgresSSLMode(config connection.ConnectionConfig) string {
 	switch normalizedSSLMode(config) {
 	case sslModeDisable:
 		return "disable"
 	case sslModeRequired:
+		if strings.TrimSpace(config.SSLCAPath) != "" {
+			return "verify-ca"
+		}
 		return "require"
 	case sslModeSkipVerify:
 		return "require"
 	default:
+		if strings.TrimSpace(config.SSLCAPath) != "" {
+			return "verify-ca"
+		}
 		return "require"
 	}
 }
@@ -87,17 +112,47 @@ func resolveSQLServerTLSSettings(config connection.ConnectionConfig) (encrypt st
 	}
 }
 
-func resolveGenericTLSConfig(config connection.ConnectionConfig) *tls.Config {
+func applyPostgresSSLPathParams(params interface{ Set(string, string) }, config connection.ConnectionConfig) {
+	mode := normalizedSSLMode(config)
+	if mode != sslModeDisable && mode != sslModeSkipVerify && strings.TrimSpace(config.SSLCAPath) != "" {
+		params.Set("sslrootcert", strings.TrimSpace(config.SSLCAPath))
+	}
+	if mode != sslModeDisable && strings.TrimSpace(config.SSLCertPath) != "" {
+		params.Set("sslcert", strings.TrimSpace(config.SSLCertPath))
+	}
+	if mode != sslModeDisable && strings.TrimSpace(config.SSLKeyPath) != "" {
+		params.Set("sslkey", strings.TrimSpace(config.SSLKeyPath))
+	}
+}
+
+func resolveGenericTLSConfig(config connection.ConnectionConfig) (*tls.Config, error) {
 	switch normalizedSSLMode(config) {
 	case sslModeDisable:
-		return nil
+		return nil, nil
 	case sslModeRequired:
-		return &tls.Config{MinVersion: tls.VersionTLS12}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:  true,
+			CAPath:   config.SSLCAPath,
+			CertPath: config.SSLCertPath,
+			KeyPath:  config.SSLKeyPath,
+		})
 	case sslModeSkipVerify:
-		return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:            true,
+			InsecureSkipVerify: true,
+			CAPath:             config.SSLCAPath,
+			CertPath:           config.SSLCertPath,
+			KeyPath:            config.SSLKeyPath,
+		})
 	default:
 		// Preferred: 先尝试 TLS（为提升兼容性默认跳过证书校验），失败时由调用方按需回退明文。
-		return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:            true,
+			InsecureSkipVerify: true,
+			CAPath:             config.SSLCAPath,
+			CertPath:           config.SSLCertPath,
+			KeyPath:            config.SSLKeyPath,
+		})
 	}
 }
 

@@ -12,6 +12,24 @@ describe('extractQueryResultTableRef', () => {
       });
   });
 
+  it('normalizes unquoted Oracle identifiers to their folded uppercase names', () => {
+    expect(extractQueryResultTableRef('select * from mycimled.edc_log fetch first 500 rows only', 'oracle', 'anonymous'))
+      .toEqual({
+        tableName: 'MYCIMLED.EDC_LOG',
+        metadataDbName: 'MYCIMLED',
+        metadataTableName: 'EDC_LOG',
+      });
+  });
+
+  it('preserves quoted Oracle identifier case', () => {
+    expect(extractQueryResultTableRef('SELECT * FROM "mycimled"."edc_log"', 'oracle', 'ANONYMOUS'))
+      .toEqual({
+        tableName: 'mycimled.edc_log',
+        metadataDbName: 'mycimled',
+        metadataTableName: 'edc_log',
+      });
+  });
+
   it('uses current schema for unqualified Oracle tables', () => {
     expect(extractQueryResultTableRef('SELECT * FROM EDC_LOG', 'oracle', 'MYCIMLED'))
       .toEqual({

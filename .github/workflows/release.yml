@@ -12,9 +12,100 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache frontend node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node20-frontend-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Wails
+        run: go install -v github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+
+      - name: Build frontend dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/dist
+          printf '<!doctype html><title>GoNavi</title>\n' > frontend/dist/index.html
+          wails generate module
+          node frontend/scripts/wails-frontend-install.mjs
+          npm --prefix frontend run build
+
+      - name: Pack frontend dist
+        shell: bash
+        run: tar -cf frontend-dist.tar -C frontend/dist .
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  driver_agents:
+    name: Detect changed driver agents
+    runs-on: ubuntu-latest
+    outputs:
+      drivers: ${{ steps.detect.outputs.drivers }}
+      has_changes: ${{ steps.detect.outputs.has_changes }}
+      release_source: ${{ steps.detect.outputs.release_source }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed driver agents
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags
+          PREV_TAG="$(git describe --tags --match 'v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          if [ -n "$PREV_TAG" ]; then
+            BASE_REF="$PREV_TAG"
+            RELEASE_SOURCE="$PREV_TAG"
+          else
+            BASE_REF="all"
+            RELEASE_SOURCE="all"
+          fi
+          DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
+          echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
+          echo "release_source=${RELEASE_SOURCE}" >> "$GITHUB_OUTPUT"
+          if [ -n "$DRIVERS" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "🧭 Changed driver agents since ${BASE_REF}: $DRIVERS"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "🧭 No driver-agent changes since ${BASE_REF}"
+          fi
+
   # Phase 1: Build in parallel and output artifacts
   build:
     name: Build ${{ matrix.platform }}
+    needs:
+      - frontend
+      - driver_agents
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -84,15 +175,23 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-          check-latest: true
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
         with:
-          node-version: '20'
+          name: frontend-dist
+          path: .
+
+      - name: Extract frontend dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/dist
+          tar -xf frontend-dist.tar -C frontend/dist
+          test -s frontend/dist/index.html
 
       - name: Install UPX (Windows)
-        if: contains(matrix.platform, 'windows')
+        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: |
           $UPX_VERSION = "4.2.4"
@@ -155,11 +254,11 @@ jobs:
           fi
 
       - name: Install Wails
-        run: go install -v github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install -v github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
       - name: Setup MSYS2 Toolchain For DuckDB (Windows AMD64)
         id: msys2_duckdb
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
         continue-on-error: true
         uses: msys2/setup-msys2@v2
         with:
@@ -169,7 +268,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
 
       - name: Configure DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
         shell: pwsh
         run: |
           function Find-MingwBin([string[]]$candidates) {
@@ -227,7 +326,7 @@ jobs:
           Write-Host "✅ 已配置 DuckDB cgo 编译器: gcc=$gcc g++=$gxx"
 
       - name: Verify DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' }}
+        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
         shell: pwsh
         run: |
           & "$env:CC" --version
@@ -235,24 +334,32 @@ jobs:
 
       - name: Build
         shell: bash
+        env:
+          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
         run: |
           set -euo pipefail
-          ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}"
-          if [ -n "${{ matrix.wails_tags }}" ]; then
-            wails build -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -tags "${{ matrix.wails_tags }}" -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
+          if [ -n "$CHANGED_DRIVER_AGENTS" ]; then
+            ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}" --drivers "$CHANGED_DRIVER_AGENTS"
           else
-            wails build -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
+            echo "🧭 No driver-agent changes; keeping committed driver revisions"
+          fi
+          if [ -n "${{ matrix.wails_tags }}" ]; then
+            wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -tags "${{ matrix.wails_tags }}" -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
+          else
+            wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
           fi
 
       - name: Build Optional Driver Agents
-        if: ${{ matrix.build_optional_agents }}
+        if: ${{ matrix.build_optional_agents && needs.driver_agents.outputs.has_changes == 'true' }}
         shell: bash
+        env:
+          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
         run: |
           set -euo pipefail
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss mongodb tdengine clickhouse)
+          IFS=',' read -r -a DRIVERS <<< "$CHANGED_DRIVER_AGENTS"
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
           DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
@@ -548,9 +655,14 @@ jobs:
   # Phase 2: Collect all artifacts and Publish Release (Single Job)
   release:
     name: Publish Release
-    needs: build
+    needs:
+      - build
+      - driver_agents
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -561,36 +673,48 @@ jobs:
       - name: List Assets
         run: ls -R release-assets
 
+      - name: Complete Driver Agent Assets
+        if: needs.driver_agents.outputs.has_changes == 'true' && needs.driver_agents.outputs.release_source != 'all'
+        env:
+          DRIVER_RELEASE_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        run: |
+          python3 tools/complete-driver-release-assets.py \
+            --assets-dir release-assets \
+            --source "${{ needs.driver_agents.outputs.release_source }}" \
+            --require-complete
+
       - name: Verify Optional Driver Assets
+        if: needs.driver_agents.outputs.has_changes == 'true'
         shell: bash
+        env:
+          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
         run: |
           set -euo pipefail
           cd release-assets
 
-          REQUIRED_FILES=(
-            "drivers/Windows/duckdb-driver-agent-windows-amd64.exe"
-            "drivers/Windows/duckdb.dll"
-            "drivers/MacOS/duckdb-driver-agent-darwin-amd64"
-            "drivers/MacOS/duckdb-driver-agent-darwin-arm64"
-            "drivers/Linux/duckdb-driver-agent-linux-amd64"
-            "drivers/Windows/clickhouse-driver-agent-windows-amd64.exe"
-            "drivers/MacOS/clickhouse-driver-agent-darwin-amd64"
-            "drivers/MacOS/clickhouse-driver-agent-darwin-arm64"
-            "drivers/Linux/clickhouse-driver-agent-linux-amd64"
-            "drivers/Windows/starrocks-driver-agent-windows-amd64.exe"
-            "drivers/MacOS/starrocks-driver-agent-darwin-amd64"
-            "drivers/MacOS/starrocks-driver-agent-darwin-arm64"
-            "drivers/Linux/starrocks-driver-agent-linux-amd64"
-          )
-
           missing=0
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "❌ 缺少驱动资产：$file"
-              missing=1
+          IFS=',' read -r -a DRIVERS <<< "$CHANGED_DRIVER_AGENTS"
+          for driver in "${DRIVERS[@]}"; do
+            REQUIRED_FILES=(
+              "drivers/Windows/${driver}-driver-agent-windows-amd64.exe"
+              "drivers/MacOS/${driver}-driver-agent-darwin-amd64"
+              "drivers/MacOS/${driver}-driver-agent-darwin-arm64"
+              "drivers/Linux/${driver}-driver-agent-linux-amd64"
+            )
+            if [ "$driver" != "duckdb" ]; then
+              REQUIRED_FILES+=("drivers/Windows/${driver}-driver-agent-windows-arm64.exe")
             else
-              echo "✅ 已找到驱动资产：$file"
+              REQUIRED_FILES+=("drivers/Windows/duckdb.dll")
             fi
+
+            for file in "${REQUIRED_FILES[@]}"; do
+              if [ ! -f "$file" ]; then
+                echo "❌ 缺少驱动资产：$file"
+                missing=1
+              else
+                echo "✅ 已找到驱动资产：$file"
+              fi
+            done
           done
 
           if [ "$missing" -ne 0 ]; then
@@ -599,17 +723,20 @@ jobs:
           fi
 
       - name: Package Driver Agents Bundle
+        id: driver_assets
         shell: bash
         run: |
           set -euo pipefail
           cd release-assets
           if [ ! -d drivers ]; then
             echo "⚠️ 未找到 drivers 目录，跳过驱动总包打包"
+            echo "has_driver_assets=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$(find drivers -type f 2>/dev/null | head -n 1)" ]; then
             echo "⚠️ drivers 目录为空，跳过驱动总包打包"
             rm -rf drivers
+            echo "has_driver_assets=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -664,6 +791,7 @@ jobs:
 
           # GoNavi 主仓库只保留主程序包；驱动资产发布到独立仓库。
           rm -rf drivers
+          echo "has_driver_assets=true" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA256SUMS
         shell: bash
@@ -683,6 +811,7 @@ jobs:
           fi
 
       - name: Generate Driver SHA256SUMS
+        if: steps.driver_assets.outputs.has_driver_assets == 'true'
         shell: bash
         run: |
           cd driver-release-assets
@@ -700,7 +829,7 @@ jobs:
 
       - name: Create Driver Agents Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && steps.driver_assets.outputs.has_driver_assets == 'true'
         with:
           repository: Syngnat/GoNavi-DriverAgents
           tag_name: ${{ github.ref_name }}

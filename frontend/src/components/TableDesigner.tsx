@@ -4,11 +4,12 @@ import { ReloadOutlined, SaveOutlined, PlusOutlined, DeleteOutlined, MenuOutline
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import Editor, { loader } from '@monaco-editor/react';
+import Editor from './MonacoEditor';
 import { TabData, ColumnDefinition, IndexDefinition, ForeignKeyDefinition, TriggerDefinition } from '../types';
 import { useStore } from '../store';
 import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
+import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
 import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -459,7 +460,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       setCommentEditorValue('');
   }, []);
 
-  // 透明 Monaco Editor 主题已在 main.tsx 全局注册（含 stickyScroll 不透明背景）
+  // 透明 Monaco Editor 主题由 MonacoEditor 包装组件按需注册（含 stickyScroll 不透明背景）
 
   // 监听字段 Tab 容器高度，为所有 Tab 内表格计算 scroll.y
   // 当 Tab 切换时，字段 Tab 被 display:none 导致 height=0，跳过该次更新保持有效值
@@ -1771,83 +1772,44 @@ END;`;
       setIsIndexModalOpen(true);
   };
 
-  const buildIndexCreateSql = (form: IndexFormState): string | null => {
+  const getIndexCreateSqlResult = (form: IndexFormState) => {
       const tableInfo = resolveTableInfo();
-      const dbType = tableInfo.dbType;
-      const kind: IndexKind = form.kind || 'NORMAL';
-      const indexName = String(form.name || '').trim();
-      const cleanedCols = form.columnNames.map(col => String(col || '').trim()).filter(Boolean);
-      if (cleanedCols.length === 0) {
-          message.error('请至少选择一个字段');
-          return null;
-      }
-      const colSql = cleanedCols
-          .map(col => quoteIdentifierPartByDialect(col, dbType))
-          .join(', ');
-
-      if (isMysqlLikeDialect(dbType)) {
-          if (kind === 'PRIMARY') {
-              return `ALTER TABLE ${tableInfo.tableRef}\nADD PRIMARY KEY (${colSql});`;
-          }
-
-          if (!indexName) {
-              message.error('请输入索引名');
-              return null;
-          }
-
-          const indexRef = quoteIdentifierPartByDialect(indexName, dbType);
-          if (kind === 'FULLTEXT') {
-              return `ALTER TABLE ${tableInfo.tableRef}\nADD FULLTEXT INDEX ${indexRef} (${colSql});`;
-          }
-          if (kind === 'SPATIAL') {
-              return `ALTER TABLE ${tableInfo.tableRef}\nADD SPATIAL INDEX ${indexRef} (${colSql});`;
-          }
-
-          const normalizedType = String(form.indexType || '').trim().toUpperCase() || 'DEFAULT';
-          if (normalizedType === 'FULLTEXT' || normalizedType === 'SPATIAL') {
-              message.error(`请将“索引类别”切换为 ${normalizedType} 索引`);
-              return null;
-          }
-          const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
-          const prefix = kind === 'UNIQUE' ? 'ADD UNIQUE INDEX' : 'ADD INDEX';
-          return `ALTER TABLE ${tableInfo.tableRef}\n${prefix} ${indexRef}${usingSql} (${colSql});`;
-      }
-
-      if (kind === 'PRIMARY' || kind === 'FULLTEXT' || kind === 'SPATIAL') {
-          message.warning('当前数据库仅支持普通索引与唯一索引维护');
-          return null;
-      }
-      if (!indexName) {
-          message.error('请输入索引名');
-          return null;
-      }
-
-      const indexRef = quoteIdentifierPartByDialect(indexName, dbType);
-      const normalizedType = String(form.indexType || '').trim().toUpperCase() || 'DEFAULT';
-      const uniquePrefix = kind === 'UNIQUE' ? 'UNIQUE ' : '';
-
-      if (isPgLikeDialect(dbType)) {
-          const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
-          return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef}${usingSql} (${colSql});`;
-      }
-
-      if (isSqlServerDialect(dbType)) {
-          const methodSql = normalizedType === 'CLUSTERED' || normalizedType === 'NONCLUSTERED'
-              ? `${normalizedType} `
-              : '';
-          return `CREATE ${uniquePrefix}${methodSql}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
-      }
-
-      if (isOracleLikeDialect(dbType) || dbType === 'sqlite') {
-          return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
-      }
-
-      if (isNonRelationalDialect(dbType)) {
-          message.warning('当前数据源不支持关系型索引维护');
-          return null;
-      }
-      return `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${tableInfo.tableRef} (${colSql});`;
+      return buildIndexCreateSqlPreview({
+          dbType: tableInfo.dbType,
+          tableRef: tableInfo.tableRef,
+          name: form.name,
+          columnNames: form.columnNames,
+          kind: form.kind,
+          indexType: form.indexType,
+      });
   };
+
+  const buildIndexCreateSql = (form: IndexFormState): string | null => {
+      const result = getIndexCreateSqlResult(form);
+      if (!result.sql) {
+          if (result.severity === 'warning') {
+              message.warning(result.message || '无法生成索引创建语句');
+          } else {
+              message.error(result.message || '无法生成索引创建语句');
+          }
+          return null;
+      }
+      return result.sql;
+  };
+
+  const indexCreatePreviewSql = useMemo(() => {
+      if (!isIndexModalOpen) return '';
+      const result = getIndexCreateSqlResult(indexForm);
+      return result.sql || `-- ${result.message || '填写索引信息后生成创建语句'}`;
+  }, [connections, indexForm, isIndexModalOpen, tab.connectionId, tab.dbName, tab.tableName]);
+
+  const selectedIndexCreateSql = useMemo(() => {
+      if (!selectedIndex || selectedIndexKeys.length !== 1) return '';
+      const result = getIndexCreateSqlResult(buildIndexFormFromRow(selectedIndex));
+      return result.sql || `-- ${result.message || '无法生成索引创建语句'}`;
+  }, [connections, selectedIndex, selectedIndexKeys.length, tab.connectionId, tab.dbName, tab.tableName]);
+
+  const indexTableHeight = selectedIndexCreateSql ? Math.max(180, tableHeight - 220) : tableHeight;
 
   const buildIndexDropSql = (indexName: string): string | null => {
       const tableInfo = resolveTableInfo();
@@ -2813,7 +2775,7 @@ END;`;
                                     size="small"
                                     pagination={false}
                                     loading={loading}
-                                    scroll={{ x: 960, y: tableHeight }}
+                                    scroll={{ x: 960, y: indexTableHeight }}
                                     components={{
                                         header: { cell: ResizableTitle },
                                     }}
@@ -2824,6 +2786,14 @@ END;`;
                                         style: { cursor: 'pointer' }
                                     })}
                                 />
+                                {selectedIndexCreateSql && selectedIndex && (
+                                    <div style={{ width: '100%' }}>
+                                        <div style={{ color: '#666', fontSize: 12, marginBottom: 6 }}>
+                                            创建语句：{selectedIndex.name}
+                                        </div>
+                                        <TableDesignerSqlPreview sql={selectedIndexCreateSql} darkMode={darkMode} height="160px" />
+                                    </div>
+                                )}
                             </div>
                         )
                     },
@@ -3136,6 +3106,10 @@ END;`;
                 </Space>
                 <div style={{ color: '#888', fontSize: 12 }}>
                     修改索引时若新索引创建失败，系统会尝试自动恢复原索引。
+                </div>
+                <div style={{ width: '100%' }}>
+                    <div style={{ color: '#666', fontSize: 12, marginBottom: 6 }}>创建语句</div>
+                    <TableDesignerSqlPreview sql={indexCreatePreviewSql} darkMode={darkMode} height="180px" />
                 </div>
             </Space>
         </Modal>

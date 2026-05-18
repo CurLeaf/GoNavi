@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/tlsconfig"
 )
 
 func normalizeRedisSSLMode(raw string) string {
@@ -41,15 +42,32 @@ func withRedisSSLDisabled(config connection.ConnectionConfig) connection.Connect
 	return next
 }
 
-func resolveRedisTLSConfig(config connection.ConnectionConfig) *tls.Config {
+func resolveRedisTLSConfig(config connection.ConnectionConfig) (*tls.Config, error) {
 	switch redisSSLMode(config) {
 	case "disable":
-		return nil
+		return nil, nil
 	case "required":
-		return &tls.Config{MinVersion: tls.VersionTLS12}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:  true,
+			CAPath:   config.SSLCAPath,
+			CertPath: config.SSLCertPath,
+			KeyPath:  config.SSLKeyPath,
+		})
 	case "skip-verify":
-		return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:            true,
+			InsecureSkipVerify: true,
+			CAPath:             config.SSLCAPath,
+			CertPath:           config.SSLCertPath,
+			KeyPath:            config.SSLKeyPath,
+		})
 	default:
-		return &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+		return tlsconfig.BuildClientConfig(tlsconfig.ClientConfigOptions{
+			Enabled:            true,
+			InsecureSkipVerify: true,
+			CAPath:             config.SSLCAPath,
+			CertPath:           config.SSLCertPath,
+			KeyPath:            config.SSLKeyPath,
+		})
 	}
 }

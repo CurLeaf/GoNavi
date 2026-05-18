@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,6 +17,7 @@ type fakeExportQueryDB struct {
 	data []map[string]interface{}
 	cols []string
 	err  error
+	defs []connection.ColumnDefinition
 
 	lastQuery          string
 	lastContextTimeout time.Duration
@@ -46,7 +48,7 @@ func (f *fakeExportQueryDB) GetCreateStatement(dbName, tableName string) (string
 	return "", nil
 }
 func (f *fakeExportQueryDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
-	return nil, nil
+	return f.defs, nil
 }
 func (f *fakeExportQueryDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	return nil, nil
@@ -362,5 +364,70 @@ func TestFormatImportSQLValue_LeavesTextLiteralUntouched(t *testing.T) {
 	got := formatImportSQLValue("postgres", "text", "2026-01-21T18:32:26+08:00")
 	if got != "'2026-01-21T18:32:26+08:00'" {
 		t.Fatalf("文本字段不应被归一化，want=%q got=%q", "'2026-01-21T18:32:26+08:00'", got)
+	}
+}
+
+func TestFormatImportSQLValue_PostgresBooleanColumnUsesBooleanLiteral(t *testing.T) {
+	cases := []struct {
+		name       string
+		dbType     string
+		columnType string
+		value      interface{}
+		want       string
+	}{
+		{name: "postgres bool true", dbType: "postgres", columnType: "boolean", value: true, want: "true"},
+		{name: "postgres bool false", dbType: "postgres", columnType: "bool", value: false, want: "false"},
+		{name: "pg catalog bool string", dbType: "postgres", columnType: "pg_catalog.bool", value: "t", want: "true"},
+		{name: "highgo boolean bytes", dbType: "highgo", columnType: "boolean", value: []byte("0"), want: "false"},
+		{name: "mysql keeps numeric bool", dbType: "mysql", columnType: "tinyint(1)", value: true, want: "1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatImportSQLValue(tc.dbType, tc.columnType, tc.value)
+			if got != tc.want {
+				t.Fatalf("布尔字面量异常，want=%q got=%q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestDumpTableSQL_PostgresBooleanBackupUsesBooleanLiterals(t *testing.T) {
+	fake := &fakeExportQueryDB{
+		data: []map[string]interface{}{
+			{"active": true, "archived": false},
+		},
+		cols: []string{"active", "archived"},
+		defs: []connection.ColumnDefinition{
+			{Name: "active", Type: "boolean"},
+			{Name: "archived", Type: "bool"},
+		},
+	}
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+
+	err := dumpTableSQL(
+		writer,
+		fake,
+		connection.ConnectionConfig{Type: "postgres"},
+		"public",
+		"orders",
+		false,
+		true,
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatalf("dumpTableSQL 返回错误: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush 导出 SQL 失败: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `INSERT INTO "public"."orders" ("active", "archived") VALUES (true, false);`) {
+		t.Fatalf("PostgreSQL bool 备份应使用 true/false 字面量，content=%s", content)
+	}
+	if strings.Contains(content, "VALUES (1, 0)") {
+		t.Fatalf("PostgreSQL bool 备份不应输出数字布尔值，content=%s", content)
 	}
 }

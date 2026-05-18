@@ -975,7 +975,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                       )}
                       <Form.Item>
                           <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)} disabled={isSourceQueryMode}>
-                              自动补齐目标表缺失字段（当前支持 MySQL 目标及 MySQL → Kingbase；SQL 结果集模式暂不支持）
+                              自动补齐目标表缺失字段（按源/目标数据源选择可兼容规划器；SQL 结果集模式暂不支持）
                           </Checkbox>
                       </Form.Item>
                       <Form.Item>
@@ -987,7 +987,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                           <Alert
                               type="info"
                               showIcon
-                              message="自动建表模式首期仅支持 MySQL → Kingbase；将迁移字段、主键、普通/唯一/联合索引，并显式跳过全文、空间、前缀、函数类索引。"
+                              message="自动建表模式会按源/目标数据模型选择可用规划器；当前覆盖 MySQL/PG-like/ClickHouse/TDengine/MongoDB 的可映射库对，不兼容索引和表级语义会显式提示或跳过。"
                               style={{ marginBottom: 12 }}
                           />
                       )}

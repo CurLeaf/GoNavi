@@ -243,6 +243,104 @@ func buildClickHouseToPGLikePlan(config SyncConfig, tableName string, sourceDB d
 	}
 }
 
+func buildClickHouseToClickHousePlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	plan := SchemaMigrationPlan{}
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	targetType := resolveMigrationDBType(config.TargetConfig)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
+	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
+	plan.PlannedAction = "使用已有目标表导入"
+
+	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
+	if err != nil {
+		return plan, nil, nil, fmt.Errorf("获取源表字段失败: %w", err)
+	}
+	if !sourceExists {
+		return plan, nil, nil, fmt.Errorf("源表不存在或无列定义: %s", tableName)
+	}
+
+	targetCols, targetExists, err := inspectTableColumns(targetDB, plan.TargetSchema, plan.TargetTable)
+	if err != nil {
+		return plan, sourceCols, nil, fmt.Errorf("获取目标表字段失败: %w", err)
+	}
+	plan.TargetTableExists = targetExists
+
+	strategy := normalizeTargetTableStrategy(config.TargetTableStrategy)
+	if targetExists {
+		missing := diffMissingColumnNames(sourceCols, targetCols)
+		if len(missing) > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("目标表缺失字段 %d 个：%s", len(missing), strings.Join(missing, ", ")))
+		}
+		if len(missing) == 0 {
+			plan.PlannedAction = "表结构已一致"
+		} else if config.AutoAddColumns {
+			addSQL, addWarnings := buildClickHouseToClickHouseAddColumnSQL(plan.TargetQueryTable, sourceCols, targetCols)
+			plan.PreDataSQL = append(plan.PreDataSQL, addSQL...)
+			plan.Warnings = append(plan.Warnings, addWarnings...)
+			if len(addSQL) > 0 {
+				plan.PlannedAction = fmt.Sprintf("补齐缺失字段(%d)后导入", len(addSQL))
+			}
+		} else {
+			plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，未开启自动补齐", len(missing))
+		}
+		if strategy != "existing_only" {
+			plan.Warnings = append(plan.Warnings, "目标表已存在，当前仅执行数据导入；不会自动重建 ClickHouse ORDER BY/PARTITION/TTL 等表级语义")
+		}
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+
+	switch strategy {
+	case "existing_only":
+		plan.PlannedAction = "目标表不存在，需先手工创建"
+		plan.Warnings = append(plan.Warnings, "当前策略要求目标表已存在，执行时不会自动建表")
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	case "smart", "auto_create_if_missing":
+		plan.AutoCreate = true
+		plan.PlannedAction = "目标表不存在，将自动建表后导入"
+		createSQL, warnings, unsupported := buildClickHouseToClickHouseCreateTableSQL(plan.TargetQueryTable, sourceCols)
+		plan.CreateTableSQL = createSQL
+		plan.Warnings = append(plan.Warnings, warnings...)
+		plan.UnsupportedObjects = append(plan.UnsupportedObjects, unsupported...)
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	default:
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+}
+
+func buildClickHouseToClickHouseAddColumnSQL(targetQueryTable string, sourceCols, targetCols []connection.ColumnDefinition) ([]string, []string) {
+	targetSet := make(map[string]struct{}, len(targetCols))
+	for _, col := range targetCols {
+		key := strings.ToLower(strings.TrimSpace(col.Name))
+		if key == "" {
+			continue
+		}
+		targetSet[key] = struct{}{}
+	}
+	var sqlList []string
+	var warnings []string
+	for _, col := range sourceCols {
+		key := strings.ToLower(strings.TrimSpace(col.Name))
+		if key == "" {
+			continue
+		}
+		if _, ok := targetSet[key]; ok {
+			continue
+		}
+		colType := sanitizeClickHouseColumnType(col.Type)
+		sqlList = append(sqlList, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s",
+			quoteQualifiedIdentByType("clickhouse", targetQueryTable),
+			quoteIdentByType("clickhouse", col.Name),
+			colType,
+		))
+		if strings.TrimSpace(col.Type) != colType {
+			warnings = append(warnings, fmt.Sprintf("字段 %s 类型为空或包含不安全字符，已降级为 %s", col.Name, colType))
+		}
+	}
+	return sqlList, dedupeStrings(warnings)
+}
+
 func buildPGLikeToClickHouseAddColumnSQL(targetQueryTable string, sourceCols, targetCols []connection.ColumnDefinition) ([]string, []string) {
 	targetSet := make(map[string]struct{}, len(targetCols))
 	for _, col := range targetCols {
@@ -452,6 +550,64 @@ func buildClickHouseToMySQLCreateTableSQL(targetQueryTable string, sourceCols []
 	}
 	createSQL := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoteQualifiedIdentByType("mysql", targetQueryTable), strings.Join(columnDefs, ",\n  "))
 	return createSQL, dedupeStrings(warnings)
+}
+
+func buildClickHouseToClickHouseCreateTableSQL(targetQueryTable string, sourceCols []connection.ColumnDefinition) (string, []string, []string) {
+	columnDefs := make([]string, 0, len(sourceCols))
+	warnings := make([]string, 0)
+	unsupported := []string{"ClickHouse 同库迁移当前按列元数据重建基础 MergeTree 表；PARTITION BY/TTL/Projection/物化视图/表设置不会自动迁移"}
+	orderByCols := make([]string, 0)
+	for _, col := range sourceCols {
+		def, colWarnings := buildClickHouseToClickHouseColumnDefinition(col)
+		warnings = append(warnings, colWarnings...)
+		columnDefs = append(columnDefs, fmt.Sprintf("%s %s", quoteIdentByType("clickhouse", col.Name), def))
+		if col.Key == "PRI" || col.Key == "PK" || col.Key == "MUL" {
+			orderByCols = append(orderByCols, quoteIdentByType("clickhouse", col.Name))
+		}
+	}
+	orderExpr := "tuple()"
+	if len(orderByCols) > 0 {
+		orderExpr = "(" + strings.Join(orderByCols, ", ") + ")"
+	} else {
+		warnings = append(warnings, "源表未返回排序键，ClickHouse 将使用 ORDER BY tuple() 建表")
+	}
+	createSQL := fmt.Sprintf("CREATE TABLE %s (\n  %s\n) ENGINE = MergeTree() ORDER BY %s", quoteQualifiedIdentByType("clickhouse", targetQueryTable), strings.Join(columnDefs, ",\n  "), orderExpr)
+	return createSQL, dedupeStrings(warnings), dedupeStrings(unsupported)
+}
+
+func buildClickHouseToClickHouseColumnDefinition(col connection.ColumnDefinition) (string, []string) {
+	targetType := sanitizeClickHouseColumnType(col.Type)
+	parts := []string{targetType}
+	warnings := make([]string, 0)
+	if strings.TrimSpace(col.Type) != targetType {
+		warnings = append(warnings, fmt.Sprintf("字段 %s 类型为空或包含不安全字符，已降级为 %s", col.Name, targetType))
+	}
+	extra := strings.ToUpper(strings.TrimSpace(col.Extra))
+	if extra == "MATERIALIZED" || extra == "ALIAS" {
+		warnings = append(warnings, fmt.Sprintf("字段 %s 为 %s 表达式列，当前仅迁移字段类型，不内联表达式", col.Name, extra))
+	} else if col.Default != nil {
+		rawDefault := strings.TrimSpace(*col.Default)
+		if rawDefault != "" && !strings.ContainsAny(rawDefault, ";\n\r") {
+			parts = append(parts, "DEFAULT "+rawDefault)
+		} else if rawDefault != "" {
+			warnings = append(warnings, fmt.Sprintf("字段 %s 的默认值包含不安全字符，当前未自动迁移", col.Name))
+		}
+	}
+	if comment := strings.TrimSpace(col.Comment); comment != "" {
+		parts = append(parts, "COMMENT '"+escapeMySQLStringLiteral(comment)+"'")
+	}
+	return strings.Join(parts, " "), dedupeStrings(warnings)
+}
+
+func sanitizeClickHouseColumnType(t string) string {
+	tt := strings.TrimSpace(t)
+	if tt == "" {
+		return "String"
+	}
+	if strings.ContainsAny(tt, "`;\n\r") {
+		return "String"
+	}
+	return tt
 }
 
 func buildPGLikeToClickHouseColumnDefinition(col connection.ColumnDefinition) (string, []string) {

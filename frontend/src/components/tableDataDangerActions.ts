@@ -38,6 +38,10 @@ const resolveCustomDriverDialect = (driver: string): string => {
       return 'highgo';
     case 'vastbase':
       return 'vastbase';
+    case 'iris':
+    case 'intersystems':
+    case 'intersystemsiris':
+      return 'iris';
     default:
       break;
   }

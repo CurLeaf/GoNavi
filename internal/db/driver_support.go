@@ -34,6 +34,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"highgo":     {},
 	"vastbase":   {},
 	"opengauss":  {},
+	"iris":       {},
 	"mongodb":    {},
 	"tdengine":   {},
 	"clickhouse": {},
@@ -60,6 +61,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
+		return "iris"
 	default:
 		return normalized
 	}
@@ -101,6 +104,8 @@ func driverDisplayName(driverType string) string {
 		return "Vastbase"
 	case "opengauss":
 		return "OpenGauss"
+	case "iris":
+		return "InterSystems IRIS"
 	case "mongodb":
 		return "MongoDB"
 	case "tdengine":

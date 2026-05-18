@@ -127,17 +127,26 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 - [Go](https://go.dev/dl/) 1.21+
 - [Node.js](https://nodejs.org/) 18+
 - [Wails CLI](https://wails.io/docs/gettingstarted/installation):
-  `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+  `go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0`
 
 ### 开发模式
 
-```bash
+```shell
 # 克隆项目
 git clone https://github.com/Syngnat/GoNavi.git
 cd GoNavi
 
 # 启动开发（热重载）
 wails dev
+
+# 本地快速启动：未修改 Go 导出方法签名时使用
+node tools/wails-fast-dev.mjs
+
+# 修改 Go 导出方法签名后刷新 Wails JS 绑定
+node tools/wails-fast-dev.mjs --refresh-bindings
+
+# Windows PowerShell 低内存视觉模式：关闭透明 WebView 和 Acrylic 背景
+$env:GONAVI_LOW_MEMORY_MODE="1"; node tools/wails-fast-dev.mjs
 ```
 
 ### 编译构建

@@ -131,6 +131,12 @@ const normalizeDriverType = (value: string): string => {
     normalized === 'open-gauss' ||
     normalized === 'opengauss'
   ) return 'opengauss';
+  if (
+    normalized === 'intersystems' ||
+    normalized === 'intersystemsiris' ||
+    normalized === 'inter-systems' ||
+    normalized === 'inter-systems-iris'
+  ) return 'iris';
   return normalized;
 };
 
@@ -648,6 +654,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       'open_gauss',
       'open-gauss',
       'sqlserver',
+      'iris',
       'oracle',
       'dameng',
   ]);
@@ -661,6 +668,7 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
       'open_gauss',
       'open-gauss',
       'sqlserver',
+      'iris',
       'oracle',
       'dm',
   ]);
@@ -3829,6 +3837,13 @@ const Sidebar: React.FC<{ onEditConnection?: (conn: SavedConnection) => void }> 
         const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
 
         return [
+            {
+                key: 'new-table',
+                label: '新建表',
+                icon: <TableOutlined />,
+                onClick: () => openNewTableDesign(node)
+            },
+            { type: 'divider' },
             {
                 key: 'sort-by-name',
                 label: '按名称排序',

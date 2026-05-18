@@ -1,7 +1,7 @@
 {
   "name": "GoNavi",
   "outputfilename": "GoNavi",
-  "frontend:install": "npm install",
+  "frontend:install": "node scripts/wails-frontend-install.mjs",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "http://localhost:5173",

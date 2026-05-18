@@ -17,7 +17,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
-	_ "github.com/go-sql-driver/mysql"
+	mysql "github.com/go-sql-driver/mysql"
 )
 
 type MySQLDB struct {
@@ -115,19 +115,19 @@ var mysqlSupportedDriverParamNames = map[string]string{
 	// OceanBase Oracle 租户 MySQL wire 路径用它注入 OBClient 私有 capability attribute；
 	// 普通 mysql/mariadb 用户也能在此声明 program_name 等元数据。
 	"connectionattributes": "connectionAttributes",
-	"interpolateparams":        "interpolateParams",
-	"loc":                      "loc",
-	"maxallowedpacket":         "maxAllowedPacket",
-	"multistatements":          "multiStatements",
-	"parsetime":                "parseTime",
-	"readtimeout":              "readTimeout",
-	"rejectreadonly":           "rejectReadOnly",
-	"serverpubkey":             "serverPubKey",
-	"sql_mode":                 "sql_mode",
-	"timetruncate":             "timeTruncate",
-	"timeout":                  "timeout",
-	"tls":                      "tls",
-	"writetimeout":             "writeTimeout",
+	"interpolateparams":    "interpolateParams",
+	"loc":                  "loc",
+	"maxallowedpacket":     "maxAllowedPacket",
+	"multistatements":      "multiStatements",
+	"parsetime":            "parseTime",
+	"readtimeout":          "readTimeout",
+	"rejectreadonly":       "rejectReadOnly",
+	"serverpubkey":         "serverPubKey",
+	"sql_mode":             "sql_mode",
+	"timetruncate":         "timeTruncate",
+	"timeout":              "timeout",
+	"tls":                  "tls",
+	"writetimeout":         "writeTimeout",
 }
 
 var mysqlBoolDriverParamNames = map[string]struct{}{
@@ -274,15 +274,40 @@ func mergeMySQLConnectionParams(params url.Values, values url.Values) {
 	}
 }
 
-func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) string {
+func resolveMySQLTLSParam(config connection.ConnectionConfig) (string, bool, error) {
+	mode := resolveMySQLTLSMode(config)
+	if mode == "false" || !hasTLSCertificatePaths(config) {
+		return mode, false, nil
+	}
+	tlsConfig, err := resolveGenericTLSConfig(config)
+	if err != nil {
+		return "", false, err
+	}
+	if tlsConfig == nil {
+		return mode, false, nil
+	}
+	name := mysqlTLSConfigName(config)
+	if err := mysql.RegisterTLSConfig(name, tlsConfig); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already registered") {
+		return "", false, fmt.Errorf("注册 MySQL TLS 证书配置失败：%w", err)
+	}
+	return name, normalizeSSLModeValue(config.SSLMode) == sslModePreferred, nil
+}
+
+func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) (string, error) {
 	timeout := getConnectTimeoutSeconds(config)
-	tlsMode := resolveMySQLTLSMode(config)
+	tlsMode, allowFallbackToPlaintext, err := resolveMySQLTLSParam(config)
+	if err != nil {
+		return "", err
+	}
 	params := url.Values{}
 	params.Set("charset", "utf8mb4")
 	params.Set("parseTime", "True")
 	params.Set("loc", "Local")
 	params.Set("timeout", fmt.Sprintf("%ds", timeout))
 	params.Set("tls", tlsMode)
+	if allowFallbackToPlaintext {
+		params.Set("allowFallbackToPlaintext", "true")
+	}
 	params.Set("multiStatements", "true")
 	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros", "oceanbase"); ok {
 		mergeMySQLConnectionParams(params, parsed.Query())
@@ -291,7 +316,7 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 	return fmt.Sprintf(
 		"%s:%s@%s(%s)/%s?%s",
 		config.User, config.Password, protocol, address, database, params.Encode(),
-	)
+	), nil
 }
 
 func parseHostPortWithDefault(raw string, defaultPort int) (string, int, bool) {
@@ -502,7 +527,7 @@ func (m *MySQLDB) getDSN(config connection.ConnectionConfig) (string, error) {
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database), nil
+	return buildMySQLCompatibleDSN(config, protocol, address, database)
 }
 
 func resolveMySQLCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {

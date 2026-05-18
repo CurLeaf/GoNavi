@@ -16,6 +16,7 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("highgo"), "highgo")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("vastbase"), "vastbase")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("opengauss"), "opengauss", "open_gauss", "open-gauss")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("iris"), "iris", "intersystems")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("mongodb"), "mongodb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("tdengine"), "tdengine")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("clickhouse"), "clickhouse")

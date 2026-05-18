@@ -167,7 +167,7 @@ func defaultClickHousePortForScheme(scheme string) int {
 	}
 }
 
-func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig) *clickhouse.Options {
+func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig) (*clickhouse.Options, error) {
 	connectTimeout := getConnectTimeout(config)
 	readTimeout := connectTimeout
 	if readTimeout < minClickHouseReadTimeout {
@@ -187,11 +187,15 @@ func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig
 		DialTimeout: connectTimeout,
 		ReadTimeout: readTimeout,
 	}
-	if tlsConfig := resolveGenericTLSConfig(config); tlsConfig != nil {
+	tlsConfig, err := resolveGenericTLSConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig != nil {
 		opts.TLS = tlsConfig
 	}
 	applyClickHouseConnectionParams(opts, config)
-	return opts
+	return opts, nil
 }
 
 func parseClickHouseDurationParam(raw string) (time.Duration, bool) {
@@ -549,7 +553,14 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 			protocolConfig := withClickHouseProtocol(attempt, protocol)
 			logger.Infof("ClickHouse 连接尝试：第%d组/%d 协议=%s 地址=%s:%d SSL=%t",
 				idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL)
-			c.conn = clickhouse.OpenDB(c.buildClickHouseOptions(protocolConfig))
+			opts, err := c.buildClickHouseOptions(protocolConfig)
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败(protocol=%s): %v", idx+1, protocol.String(), err))
+				logger.Warnf("ClickHouse TLS 配置失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t 原因=%v",
+					idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, err)
+				continue
+			}
+			c.conn = clickhouse.OpenDB(opts)
 			if err := c.Ping(); err != nil {
 				failureMessage := clickHouseAttemptFailureMessage(protocol, err)
 				failures = append(failures, fmt.Sprintf("第%d次连接验证失败(protocol=%s): %s", idx+1, protocol.String(), failureMessage))

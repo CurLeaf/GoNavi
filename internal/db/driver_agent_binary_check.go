@@ -1,8 +1,10 @@
 package db
 
 import (
-	"debug/pe"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"runtime"
 	"strings"
 )
@@ -11,6 +13,11 @@ const (
 	peMachineI386  uint16 = 0x014c
 	peMachineAmd64 uint16 = 0x8664
 	peMachineArm64 uint16 = 0xaa64
+
+	peDOSHeaderMinSize = 0x40
+	peHeaderOffsetAddr = 0x3c
+	peSignatureSize    = 4
+	peCOFFHeaderSize   = 20
 )
 
 func windowsMachineLabel(machine uint16) string {
@@ -40,21 +47,87 @@ func expectedWindowsMachineForGoArch(goarch string) (uint16, string, bool) {
 }
 
 func validateWindowsExecutableMachine(pathText string) error {
-	file, err := pe.Open(pathText)
+	return validateWindowsExecutableMachineForArch(pathText, runtime.GOARCH)
+}
+
+func validateWindowsExecutableMachineForArch(pathText string, goarch string) error {
+	machine, err := readWindowsExecutableMachine(pathText)
 	if err != nil {
 		return fmt.Errorf("无法识别为有效的 Windows 可执行文件：%w", err)
 	}
-	defer file.Close()
 
-	expectedMachine, expectedLabel, ok := expectedWindowsMachineForGoArch(runtime.GOARCH)
+	expectedMachine, expectedLabel, ok := expectedWindowsMachineForGoArch(goarch)
 	if !ok {
 		return nil
 	}
-	actualMachine := file.FileHeader.Machine
-	if actualMachine != expectedMachine {
-		return fmt.Errorf("可执行文件架构不兼容（文件=%s，当前进程=%s）", windowsMachineLabel(actualMachine), expectedLabel)
+	if machine != expectedMachine {
+		return fmt.Errorf("可执行文件架构不兼容（文件=%s，当前进程=%s）", windowsMachineLabel(machine), expectedLabel)
 	}
 	return nil
+}
+
+func readWindowsExecutableMachine(pathText string) (uint16, error) {
+	file, err := os.Open(pathText)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	info, statErr := file.Stat()
+	if statErr != nil {
+		return 0, statErr
+	}
+	if info.IsDir() {
+		return 0, fmt.Errorf("路径是目录")
+	}
+	if info.Size() < peDOSHeaderMinSize {
+		return 0, fmt.Errorf("文件头不完整")
+	}
+
+	var dosMagic [2]byte
+	if err := readWindowsPEBytes(file, 0, dosMagic[:]); err != nil {
+		return 0, fmt.Errorf("读取 DOS 头失败：%w", err)
+	}
+	if dosMagic[0] != 'M' || dosMagic[1] != 'Z' {
+		return 0, fmt.Errorf("缺少 MZ 头")
+	}
+
+	var offsetBytes [4]byte
+	if err := readWindowsPEBytes(file, peHeaderOffsetAddr, offsetBytes[:]); err != nil {
+		return 0, fmt.Errorf("读取 PE 头偏移失败：%w", err)
+	}
+	peOffset := int64(binary.LittleEndian.Uint32(offsetBytes[:]))
+	if peOffset < peDOSHeaderMinSize {
+		return 0, fmt.Errorf("PE 头偏移异常")
+	}
+	if peOffset+peSignatureSize+peCOFFHeaderSize > info.Size() {
+		return 0, fmt.Errorf("PE 头不完整")
+	}
+
+	var signature [4]byte
+	if err := readWindowsPEBytes(file, peOffset, signature[:]); err != nil {
+		return 0, fmt.Errorf("读取 PE 签名失败：%w", err)
+	}
+	if signature[0] != 'P' || signature[1] != 'E' || signature[2] != 0 || signature[3] != 0 {
+		return 0, fmt.Errorf("缺少 PE 签名")
+	}
+
+	var machineBytes [2]byte
+	if err := readWindowsPEBytes(file, peOffset+peSignatureSize, machineBytes[:]); err != nil {
+		return 0, fmt.Errorf("读取 PE 架构失败：%w", err)
+	}
+	return binary.LittleEndian.Uint16(machineBytes[:]), nil
+}
+
+func readWindowsPEBytes(reader io.ReaderAt, offset int64, target []byte) error {
+	if len(target) == 0 {
+		return nil
+	}
+	_, err := reader.ReadAt(target, offset)
+	if err == io.EOF {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 // ValidateOptionalDriverAgentExecutable 校验可选驱动代理二进制是否可在当前进程中执行。

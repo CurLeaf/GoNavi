@@ -20,6 +20,11 @@ export const shouldToggleMaximisedWindowForScaleFix = (
   hasViewportScaleDrift: boolean,
 ): boolean => reason === 'ratio-change' && hasViewportScaleDrift;
 
+export const shouldResetWebViewZoomForScaleFix = (
+  reason: WindowScaleFixReason,
+  hasViewportScaleDrift: boolean,
+): boolean => reason === 'restore' && hasViewportScaleDrift;
+
 export const resolveWindowsScaleCheckDelayMs = (trigger: WindowsScaleCheckTrigger): number =>
   trigger === 'resize' ? 240 : 0;
 

@@ -102,6 +102,15 @@ func isMySQLCoreType(dbType string) bool {
 	}
 }
 
+func isMySQLRowStoreType(dbType string) bool {
+	switch normalizeMigrationDBType(dbType) {
+	case "mysql", "mariadb", "oceanbase":
+		return true
+	default:
+		return false
+	}
+}
+
 func isMySQLLikeSourceType(dbType string) bool {
 	if isMySQLCoreType(dbType) {
 		return true

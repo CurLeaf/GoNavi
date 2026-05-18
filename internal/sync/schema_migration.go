@@ -179,7 +179,7 @@ func buildSchemaMigrationPlanLegacy(config SyncConfig, tableName string, sourceD
 	case "smart", "auto_create_if_missing":
 		if !supportsAutoCreateMigration(config.SourceConfig.Type, config.TargetConfig.Type) {
 			plan.PlannedAction = "当前库对暂不支持自动建表"
-			plan.Warnings = append(plan.Warnings, fmt.Sprintf("当前仅支持 MySQL -> Kingbase 自动建表，当前组合=%s -> %s", config.SourceConfig.Type, config.TargetConfig.Type))
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("当前组合未接入专用自动建表规划器：%s -> %s", config.SourceConfig.Type, config.TargetConfig.Type))
 			return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
 		}
 		plan.AutoCreate = true
@@ -543,6 +543,18 @@ func groupIndexDefinitions(indexes []connection.IndexDefinition) []groupedIndex 
 	return grouped
 }
 
+func sameColumnNameList(a, b []string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(strings.TrimSpace(a[i]), strings.TrimSpace(b[i])) {
+			return false
+		}
+	}
+	return true
+}
+
 func intFromAny(v interface{}) int {
 	switch typed := v.(type) {
 	case int:
@@ -566,6 +578,500 @@ func isPGLikeSource(dbType string) bool {
 	default:
 		return false
 	}
+}
+
+func isPGLikeSameFamilyDDLType(dbType string) bool {
+	switch normalizeMigrationDBType(dbType) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildMySQLToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	plan := SchemaMigrationPlan{}
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	targetType := resolveMigrationDBType(config.TargetConfig)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
+	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
+	plan.PlannedAction = "使用已有目标表导入"
+
+	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
+	if err != nil {
+		return plan, nil, nil, fmt.Errorf("获取源表字段失败: %w", err)
+	}
+	if !sourceExists {
+		return plan, nil, nil, fmt.Errorf("源表不存在或无列定义: %s", tableName)
+	}
+
+	targetCols, targetExists, err := inspectTableColumns(targetDB, plan.TargetSchema, plan.TargetTable)
+	if err != nil {
+		return plan, sourceCols, nil, fmt.Errorf("获取目标表字段失败: %w", err)
+	}
+	plan.TargetTableExists = targetExists
+
+	strategy := normalizeTargetTableStrategy(config.TargetTableStrategy)
+	if targetExists {
+		missing := diffMissingColumnNames(sourceCols, targetCols)
+		if len(missing) > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("目标表缺失字段 %d 个：%s", len(missing), strings.Join(missing, ", ")))
+		}
+		if len(missing) == 0 {
+			plan.PlannedAction = "表结构已一致"
+		} else if config.AutoAddColumns {
+			targetSet := make(map[string]struct{}, len(targetCols))
+			for _, col := range targetCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				targetSet[key] = struct{}{}
+			}
+			for _, col := range sourceCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				if _, ok := targetSet[key]; ok {
+					continue
+				}
+				addSQL, err := buildAddColumnSQLForPair(sourceType, targetType, plan.TargetQueryTable, col)
+				if err != nil {
+					plan.Warnings = append(plan.Warnings, fmt.Sprintf("字段 %s 自动补齐 SQL 生成失败：%v", col.Name, err))
+					continue
+				}
+				plan.PreDataSQL = append(plan.PreDataSQL, addSQL)
+			}
+			if len(plan.PreDataSQL) > 0 {
+				plan.PlannedAction = fmt.Sprintf("补齐缺失字段(%d)后导入", len(plan.PreDataSQL))
+			} else {
+				plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，但未生成可执行补齐 SQL", len(missing))
+			}
+		} else {
+			plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，未开启自动补齐", len(missing))
+		}
+		if strategy != "existing_only" {
+			plan.Warnings = append(plan.Warnings, "目标表已存在，当前仅执行数据导入；不会自动重建已有索引/约束")
+		}
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+
+	switch strategy {
+	case "existing_only":
+		plan.PlannedAction = "目标表不存在，需先手工创建"
+		plan.Warnings = append(plan.Warnings, "当前策略要求目标表已存在，执行时不会自动建表")
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	case "smart", "auto_create_if_missing":
+		plan.AutoCreate = true
+		plan.PlannedAction = "目标表不存在，将自动建表后导入"
+		createSQL, postSQL, warnings, unsupported, idxCreate, idxSkip, err := buildMySQLToMySQLCreateTablePlan(targetType, config, plan.TargetQueryTable, sourceCols, sourceDB, plan.SourceSchema, plan.SourceTable)
+		if err != nil {
+			return plan, sourceCols, targetCols, err
+		}
+		plan.CreateTableSQL = createSQL
+		plan.PostDataSQL = append(plan.PostDataSQL, postSQL...)
+		plan.Warnings = append(plan.Warnings, warnings...)
+		plan.UnsupportedObjects = append(plan.UnsupportedObjects, unsupported...)
+		plan.IndexesToCreate = idxCreate
+		plan.IndexesSkipped = idxSkip
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	default:
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+}
+
+func buildMySQLToMySQLCreateTablePlan(targetType string, config SyncConfig, targetQueryTable string, sourceCols []connection.ColumnDefinition, sourceDB db.Database, sourceSchema, sourceTable string) (string, []string, []string, []string, int, int, error) {
+	columnDefs := make([]string, 0, len(sourceCols)+1)
+	warnings := make([]string, 0)
+	unsupported := make([]string, 0)
+	pkCols := make([]string, 0, 2)
+	for _, col := range sourceCols {
+		def, colWarnings := buildMySQLToMySQLColumnDefinition(col)
+		warnings = append(warnings, colWarnings...)
+		columnDefs = append(columnDefs, fmt.Sprintf("%s %s", quoteIdentByType(targetType, col.Name), def))
+		if strings.EqualFold(col.Key, "PRI") || strings.EqualFold(col.Key, "PK") {
+			pkCols = append(pkCols, quoteIdentByType(targetType, col.Name))
+		}
+	}
+	if len(pkCols) > 0 {
+		columnDefs = append(columnDefs, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
+	}
+	createSQL := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoteQualifiedIdentByType(targetType, targetQueryTable), strings.Join(columnDefs, ",\n  "))
+	if !config.CreateIndexes {
+		return createSQL, nil, dedupeStrings(warnings), dedupeStrings(unsupported), 0, 0, nil
+	}
+	indexes, err := sourceDB.GetIndexes(sourceSchema, sourceTable)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("读取源表索引失败，已跳过索引迁移：%v", err))
+		return createSQL, nil, dedupeStrings(warnings), dedupeStrings(unsupported), 0, 0, nil
+	}
+	grouped := groupIndexDefinitions(indexes)
+	postSQL := make([]string, 0, len(grouped))
+	created := 0
+	skipped := 0
+	for _, idx := range grouped {
+		name := strings.TrimSpace(idx.Name)
+		if name == "" || strings.EqualFold(name, "primary") {
+			continue
+		}
+		if len(idx.Columns) == 0 {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 缺少列定义，已跳过", name))
+			continue
+		}
+		kind := strings.ToLower(strings.TrimSpace(idx.IndexType))
+		if idx.SubPart > 0 {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 使用前缀长度，当前暂不支持迁移", name))
+			continue
+		}
+		if kind != "" && kind != "btree" {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 类型=%s，当前暂不支持自动迁移", name, idx.IndexType))
+			continue
+		}
+		quotedCols := make([]string, 0, len(idx.Columns))
+		for _, col := range idx.Columns {
+			quotedCols = append(quotedCols, quoteIdentByType(targetType, col))
+		}
+		prefix := "CREATE INDEX"
+		if idx.Unique {
+			prefix = "CREATE UNIQUE INDEX"
+		}
+		postSQL = append(postSQL, fmt.Sprintf("%s %s ON %s (%s)", prefix, quoteIdentByType(targetType, name), quoteQualifiedIdentByType(targetType, targetQueryTable), strings.Join(quotedCols, ", ")))
+		created++
+	}
+	return createSQL, postSQL, dedupeStrings(warnings), dedupeStrings(unsupported), created, skipped, nil
+}
+
+func buildMySQLToMySQLColumnDefinition(col connection.ColumnDefinition) (string, []string) {
+	targetType := sanitizeMySQLColumnType(col.Type)
+	parts := []string{targetType}
+	warnings := make([]string, 0)
+	if strings.EqualFold(strings.TrimSpace(col.Nullable), "NO") {
+		parts = append(parts, "NOT NULL")
+	} else {
+		parts = append(parts, "NULL")
+	}
+	isAutoIncrement := strings.Contains(strings.ToLower(strings.TrimSpace(col.Extra)), "auto_increment")
+	if isAutoIncrement {
+		if canUseMySQLAutoIncrement(targetType) {
+			parts = append(parts, "AUTO_INCREMENT")
+		} else {
+			warnings = append(warnings, fmt.Sprintf("字段 %s 的类型 %s 不适合保留 AUTO_INCREMENT，已跳过", col.Name, targetType))
+		}
+	} else if defaultSQL, ok, warningText := mapMySQLDefaultToMySQL(col, targetType); warningText != "" {
+		warnings = append(warnings, warningText)
+	} else if ok {
+		parts = append(parts, "DEFAULT "+defaultSQL)
+	}
+	extra := strings.ToLower(strings.TrimSpace(col.Extra))
+	if strings.Contains(extra, "on update current_timestamp") {
+		parts = append(parts, "ON UPDATE CURRENT_TIMESTAMP")
+	}
+	if comment := strings.TrimSpace(col.Comment); comment != "" {
+		parts = append(parts, "COMMENT '"+escapeMySQLStringLiteral(comment)+"'")
+	}
+	return strings.Join(parts, " "), dedupeStrings(warnings)
+}
+
+func mapMySQLDefaultToMySQL(col connection.ColumnDefinition, targetType string) (string, bool, string) {
+	if col.Default == nil {
+		return "", false, ""
+	}
+	raw := strings.TrimSpace(*col.Default)
+	if raw == "" {
+		if isMySQLStringLikeTargetType(targetType) {
+			return "''", true, ""
+		}
+		return "", false, fmt.Sprintf("字段 %s 的空字符串默认值未保留", col.Name)
+	}
+	lower := strings.ToLower(raw)
+	if lower == "null" {
+		return "", false, ""
+	}
+	if strings.ContainsAny(raw, ";\n\r") {
+		return "", false, fmt.Sprintf("字段 %s 的默认值包含不安全字符，当前未自动迁移", col.Name)
+	}
+	switch {
+	case strings.HasPrefix(lower, "current_timestamp"):
+		return "CURRENT_TIMESTAMP", true, ""
+	case lower == "current_date":
+		return "CURRENT_DATE", true, ""
+	case lower == "current_time":
+		return "CURRENT_TIME", true, ""
+	}
+	if numericPattern.MatchString(raw) && !isMySQLStringLikeTargetType(targetType) {
+		return raw, true, ""
+	}
+	if strings.ContainsAny(raw, "()") && !strings.HasPrefix(lower, "current_timestamp") {
+		return "", false, fmt.Sprintf("字段 %s 的默认值 %s 包含表达式，当前未自动迁移", col.Name, raw)
+	}
+	return "'" + escapeMySQLStringLiteral(raw) + "'", true, ""
+}
+
+func isMySQLStringLikeTargetType(targetType string) bool {
+	text := strings.ToLower(strings.TrimSpace(targetType))
+	return strings.Contains(text, "char") ||
+		strings.Contains(text, "text") ||
+		strings.Contains(text, "json") ||
+		strings.Contains(text, "blob") ||
+		strings.Contains(text, "binary") ||
+		strings.Contains(text, "enum") ||
+		strings.Contains(text, "set")
+}
+
+func escapeMySQLStringLiteral(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func buildPGLikeToPGLikePlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	plan := SchemaMigrationPlan{}
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	targetType := resolveMigrationDBType(config.TargetConfig)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
+	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
+	plan.PlannedAction = "使用已有目标表导入"
+
+	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
+	if err != nil {
+		return plan, nil, nil, fmt.Errorf("获取源表字段失败: %w", err)
+	}
+	if !sourceExists {
+		return plan, nil, nil, fmt.Errorf("源表不存在或无列定义: %s", tableName)
+	}
+
+	targetCols, targetExists, err := inspectTableColumns(targetDB, plan.TargetSchema, plan.TargetTable)
+	if err != nil {
+		return plan, sourceCols, nil, fmt.Errorf("获取目标表字段失败: %w", err)
+	}
+	plan.TargetTableExists = targetExists
+
+	strategy := normalizeTargetTableStrategy(config.TargetTableStrategy)
+	if targetExists {
+		missing := diffMissingColumnNames(sourceCols, targetCols)
+		if len(missing) > 0 {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("目标表缺失字段 %d 个：%s", len(missing), strings.Join(missing, ", ")))
+		}
+		if len(missing) == 0 {
+			plan.PlannedAction = "表结构已一致"
+		} else if config.AutoAddColumns {
+			targetSet := make(map[string]struct{}, len(targetCols))
+			for _, col := range targetCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				targetSet[key] = struct{}{}
+			}
+			for _, col := range sourceCols {
+				key := strings.ToLower(strings.TrimSpace(col.Name))
+				if key == "" {
+					continue
+				}
+				if _, ok := targetSet[key]; ok {
+					continue
+				}
+				addSQL, err := buildAddColumnSQLForPair(sourceType, targetType, plan.TargetQueryTable, col)
+				if err != nil {
+					plan.Warnings = append(plan.Warnings, fmt.Sprintf("字段 %s 自动补齐 SQL 生成失败：%v", col.Name, err))
+					continue
+				}
+				plan.PreDataSQL = append(plan.PreDataSQL, addSQL)
+			}
+			if len(plan.PreDataSQL) > 0 {
+				plan.PlannedAction = fmt.Sprintf("补齐缺失字段(%d)后导入", len(plan.PreDataSQL))
+			} else {
+				plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，但未生成可执行补齐 SQL", len(missing))
+			}
+		} else {
+			plan.PlannedAction = fmt.Sprintf("目标表缺失字段(%d)，未开启自动补齐", len(missing))
+		}
+		if strategy != "existing_only" {
+			plan.Warnings = append(plan.Warnings, "目标表已存在，当前仅执行数据导入；不会自动重建已有索引/约束")
+		}
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+
+	switch strategy {
+	case "existing_only":
+		plan.PlannedAction = "目标表不存在，需先手工创建"
+		plan.Warnings = append(plan.Warnings, "当前策略要求目标表已存在，执行时不会自动建表")
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	case "smart", "auto_create_if_missing":
+		plan.AutoCreate = true
+		plan.PlannedAction = "目标表不存在，将自动建表后导入"
+		createSQL, postSQL, warnings, unsupported, idxCreate, idxSkip, err := buildPGLikeToPGLikeCreateTablePlan(targetType, config, plan.TargetQueryTable, sourceCols, sourceDB, plan.SourceSchema, plan.SourceTable)
+		if err != nil {
+			return plan, sourceCols, targetCols, err
+		}
+		plan.CreateTableSQL = createSQL
+		plan.PostDataSQL = append(plan.PostDataSQL, postSQL...)
+		plan.Warnings = append(plan.Warnings, warnings...)
+		plan.UnsupportedObjects = append(plan.UnsupportedObjects, unsupported...)
+		plan.IndexesToCreate = idxCreate
+		plan.IndexesSkipped = idxSkip
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	default:
+		return dedupeSchemaMigrationPlan(plan), sourceCols, targetCols, nil
+	}
+}
+
+func buildPGLikeToPGLikeCreateTablePlan(targetType string, config SyncConfig, targetQueryTable string, sourceCols []connection.ColumnDefinition, sourceDB db.Database, sourceSchema, sourceTable string) (string, []string, []string, []string, int, int, error) {
+	columnDefs := make([]string, 0, len(sourceCols)+1)
+	warnings := make([]string, 0)
+	unsupported := make([]string, 0)
+	pkCols := make([]string, 0, 2)
+	pkColNames := make([]string, 0, 2)
+	for _, col := range sourceCols {
+		def, colWarnings := buildPGLikeToPGLikeColumnDefinition(col)
+		warnings = append(warnings, colWarnings...)
+		columnDefs = append(columnDefs, fmt.Sprintf("%s %s", quoteIdentByType(targetType, col.Name), def))
+		if strings.EqualFold(col.Key, "PRI") || strings.EqualFold(col.Key, "PK") {
+			pkCols = append(pkCols, quoteIdentByType(targetType, col.Name))
+			pkColNames = append(pkColNames, col.Name)
+		}
+	}
+	if len(pkCols) > 0 {
+		columnDefs = append(columnDefs, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(pkCols, ", ")))
+	}
+	createSQL := fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoteQualifiedIdentByType(targetType, targetQueryTable), strings.Join(columnDefs, ",\n  "))
+	if !config.CreateIndexes {
+		return createSQL, nil, dedupeStrings(warnings), dedupeStrings(unsupported), 0, 0, nil
+	}
+	indexes, err := sourceDB.GetIndexes(sourceSchema, sourceTable)
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("读取源表索引失败，已跳过索引迁移：%v", err))
+		return createSQL, nil, dedupeStrings(warnings), dedupeStrings(unsupported), 0, 0, nil
+	}
+	grouped := groupIndexDefinitions(indexes)
+	postSQL := make([]string, 0, len(grouped))
+	created := 0
+	skipped := 0
+	for _, idx := range grouped {
+		name := strings.TrimSpace(idx.Name)
+		if name == "" || strings.EqualFold(name, "primary") {
+			continue
+		}
+		if idx.Unique && sameColumnNameList(idx.Columns, pkColNames) {
+			continue
+		}
+		if len(idx.Columns) == 0 {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 缺少列定义，已跳过", name))
+			continue
+		}
+		kind := strings.ToLower(strings.TrimSpace(idx.IndexType))
+		if idx.SubPart > 0 {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 使用前缀长度，当前暂不支持迁移", name))
+			continue
+		}
+		if kind != "" && kind != "btree" {
+			skipped++
+			unsupported = append(unsupported, fmt.Sprintf("索引 %s 类型=%s，当前暂不支持自动迁移", name, idx.IndexType))
+			continue
+		}
+		quotedCols := make([]string, 0, len(idx.Columns))
+		for _, col := range idx.Columns {
+			quotedCols = append(quotedCols, quoteIdentByType(targetType, col))
+		}
+		prefix := "CREATE INDEX"
+		if idx.Unique {
+			prefix = "CREATE UNIQUE INDEX"
+		}
+		postSQL = append(postSQL, fmt.Sprintf("%s %s ON %s (%s)", prefix, quoteIdentByType(targetType, name), quoteQualifiedIdentByType(targetType, targetQueryTable), strings.Join(quotedCols, ", ")))
+		created++
+	}
+	return createSQL, postSQL, dedupeStrings(warnings), dedupeStrings(unsupported), created, skipped, nil
+}
+
+func buildPGLikeToPGLikeColumnDefinition(col connection.ColumnDefinition) (string, []string) {
+	targetType := sanitizePGLikeColumnType(col.Type)
+	parts := []string{targetType}
+	warnings := make([]string, 0)
+	if strings.Contains(strings.ToLower(strings.TrimSpace(col.Extra)), "auto_increment") {
+		if canUsePGLikeIdentity(targetType) {
+			parts = append(parts, "GENERATED BY DEFAULT AS IDENTITY")
+		} else {
+			warnings = append(warnings, fmt.Sprintf("字段 %s 的类型 %s 不适合保留 identity/sequence 语义，已跳过", col.Name, targetType))
+		}
+	} else if defaultSQL, ok, warningText := mapPGLikeDefaultToPGLike(col, targetType); warningText != "" {
+		warnings = append(warnings, warningText)
+	} else if ok {
+		parts = append(parts, "DEFAULT "+defaultSQL)
+	}
+	if strings.EqualFold(strings.TrimSpace(col.Nullable), "NO") {
+		parts = append(parts, "NOT NULL")
+	}
+	if comment := strings.TrimSpace(col.Comment); comment != "" {
+		warnings = append(warnings, fmt.Sprintf("字段 %s 注释未内联到 CREATE TABLE，请按需使用 COMMENT ON COLUMN 补充", col.Name))
+	}
+	return strings.Join(parts, " "), dedupeStrings(warnings)
+}
+
+func sanitizePGLikeColumnType(t string) string {
+	tt := strings.TrimSpace(t)
+	if tt == "" {
+		return "text"
+	}
+	if strings.ContainsAny(tt, "\";\n\r") {
+		return "text"
+	}
+	return tt
+}
+
+func canUsePGLikeIdentity(targetType string) bool {
+	text := strings.ToLower(strings.TrimSpace(targetType))
+	switch {
+	case strings.HasPrefix(text, "smallint"), strings.HasPrefix(text, "integer"), strings.HasPrefix(text, "int"), strings.HasPrefix(text, "bigint"):
+		return true
+	default:
+		return false
+	}
+}
+
+func mapPGLikeDefaultToPGLike(col connection.ColumnDefinition, targetType string) (string, bool, string) {
+	if col.Default == nil {
+		return "", false, ""
+	}
+	raw := strings.TrimSpace(*col.Default)
+	if raw == "" || strings.EqualFold(raw, "null") {
+		return "", false, ""
+	}
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "nextval(") {
+		return "", false, ""
+	}
+	if strings.ContainsAny(raw, ";\n\r") {
+		return "", false, fmt.Sprintf("字段 %s 的默认值包含不安全字符，当前未自动迁移", col.Name)
+	}
+	if strings.Contains(lower, "current_timestamp") || strings.Contains(lower, "now()") {
+		return "CURRENT_TIMESTAMP", true, ""
+	}
+	if lower == "current_date" {
+		return "CURRENT_DATE", true, ""
+	}
+	if lower == "current_time" {
+		return "CURRENT_TIME", true, ""
+	}
+	if targetType == "boolean" {
+		switch lower {
+		case "true", "1":
+			return "TRUE", true, ""
+		case "false", "0":
+			return "FALSE", true, ""
+		}
+	}
+	if numericPattern.MatchString(raw) && !isStringLikeTargetType(targetType) {
+		return raw, true, ""
+	}
+	return raw, true, ""
 }
 
 func buildPGLikeToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {

@@ -18,24 +18,47 @@ type CustomDB struct {
 }
 
 func (c *CustomDB) Connect(config connection.ConnectionConfig) error {
-	if config.Driver == "" || config.DSN == "" {
+	driver := strings.TrimSpace(config.Driver)
+	dsn := strings.TrimSpace(config.DSN)
+	if driver == "" || dsn == "" {
 		return fmt.Errorf("driver and dsn are required for custom connection")
 	}
 
 	// Verify driver is registered (implicit check by sql.Open)
 	// We might not need explicit check, sql.Open will fail or Ping will fail if driver not found.
 
-	db, err := sql.Open(config.Driver, config.DSN)
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return formatCustomDriverOpenError(driver, err)
 	}
 	c.conn = db
-	c.driver = config.Driver
+	c.driver = driver
 	c.pingTimeout = getConnectTimeout(config)
 	if err := c.Ping(); err != nil {
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	return nil
+}
+
+func formatCustomDriverOpenError(driver string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "unknown driver") {
+		if isLikelySystemODBCDriverName(driver) {
+			return fmt.Errorf("打开数据库连接失败：自定义连接不支持直接填写系统 ODBC/JDBC 驱动名 %q；请填写 GoNavi 已注册的 Go database/sql 驱动名。当前版本未注册通用 ODBC 驱动，因此暂不支持通过 %q 连接 InterSystems IRIS：%w", driver, driver, err)
+		}
+		return fmt.Errorf("打开数据库连接失败：自定义连接驱动 %q 未在 GoNavi 中注册；请填写已注册的 Go database/sql 驱动名，不能填写系统 ODBC/JDBC 驱动名：%w", driver, err)
+	}
+	return fmt.Errorf("打开数据库连接失败：%w", err)
+}
+
+func isLikelySystemODBCDriverName(driver string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(driver))
+	return strings.Contains(normalized, "odbc") ||
+		strings.Contains(normalized, "jdbc") ||
+		strings.Contains(normalized, "intersystems") ||
+		strings.Contains(normalized, "iris")
 }
 
 func (c *CustomDB) Close() error {

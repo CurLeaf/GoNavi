@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor from './MonacoEditor';
 import { Spin, Alert } from 'antd';
 import { TabData } from '../types';
 import { useStore } from '../store';

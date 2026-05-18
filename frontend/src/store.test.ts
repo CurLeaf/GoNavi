@@ -262,6 +262,34 @@ describe('store appearance persistence', () => {
     expect(config?.port).toBe(9030);
   });
 
+  it('preserves SSL certificate paths for SSL-capable saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'postgres-ssl',
+        name: 'Postgres SSL',
+        config: {
+          id: 'postgres-ssl',
+          type: 'postgres',
+          host: 'db.local',
+          port: 5432,
+          user: 'postgres',
+          useSSL: true,
+          sslMode: 'required',
+          sslCAPath: 'C:/certs/ca.pem',
+          sslCertPath: 'C:/certs/client-cert.pem',
+          sslKeyPath: 'C:/certs/client-key.pem',
+        },
+      },
+    ]);
+
+    const config = useStore.getState().connections[0]?.config;
+    expect(config?.sslCAPath).toBe('C:/certs/ca.pem');
+    expect(config?.sslCertPath).toBe('C:/certs/client-cert.pem');
+    expect(config?.sslKeyPath).toBe('C:/certs/client-key.pem');
+  });
+
   it('normalizes OceanBase protocol override when replacing saved connections', async () => {
     const { useStore } = await importStore();
 

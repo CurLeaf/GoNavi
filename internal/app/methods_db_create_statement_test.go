@@ -72,6 +72,7 @@ func TestResolveDDLDBType_CustomDriverAlias(t *testing.T) {
 		{name: "kingbase contains alias", driver: "kingbasees", want: "kingbase"},
 		{name: "dm alias", driver: "dm8", want: "dameng"},
 		{name: "sqlite alias", driver: "sqlite3", want: "sqlite"},
+		{name: "iris alias", driver: "InterSystems IRIS", want: "iris"},
 	}
 
 	for _, tc := range testCases {
@@ -103,6 +104,14 @@ func TestResolveDDLDBType_KingbaseTypeAlias(t *testing.T) {
 
 	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "kingbase8"}); got != "kingbase" {
 		t.Fatalf("expected kingbase8 type alias to resolve to kingbase, got %q", got)
+	}
+}
+
+func TestResolveDDLDBType_IRISTypeAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "InterSystemsIRIS"}); got != "iris" {
+		t.Fatalf("expected InterSystemsIRIS type alias to resolve to iris, got %q", got)
 	}
 }
 
@@ -363,6 +372,67 @@ func TestResolveCreateStatementWithFallback_NoFallbackForMySQL(t *testing.T) {
 	}
 	if dbInst.colsTable != "" {
 		t.Fatalf("mysql path should not call GetColumns, got table=%q", dbInst.colsTable)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_SQLServerBuildsFallbackDDL(t *testing.T) {
+	t.Parallel()
+
+	defaultValue := "((0))"
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "-- SHOW CREATE TABLE not supported for SQL Server in this version.",
+		columns: []connection.ColumnDefinition{
+			{Name: "id", Type: "int", Nullable: "NO", Key: "PRI", Extra: "auto_increment", Comment: "主键"},
+			{Name: "display_name", Type: "nvarchar(128)", Nullable: "YES", Default: &defaultValue, Comment: "显示名's"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type:     "sqlserver",
+		Database: "default_db",
+	}, "appdb", "dbo.Users")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if dbInst.createSchema != "appdb" || dbInst.createTable != "dbo.Users" {
+		t.Fatalf("expected SQL Server create lookup to use database and raw table, got %q.%q", dbInst.createSchema, dbInst.createTable)
+	}
+	if dbInst.colsSchema != "appdb" || dbInst.colsTable != "dbo.Users" {
+		t.Fatalf("expected SQL Server column lookup to use database and raw table, got %q.%q", dbInst.colsSchema, dbInst.colsTable)
+	}
+	for _, want := range []string{
+		`CREATE TABLE [dbo].[Users]`,
+		`[id] int IDENTITY(1,1) NOT NULL`,
+		`[display_name] nvarchar(128) DEFAULT ((0))`,
+		`PRIMARY KEY ([id])`,
+		`EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'主键', @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'Users', @level2type = N'COLUMN', @level2name = N'id';`,
+		`@value = N'显示名''s'`,
+	} {
+		if !strings.Contains(ddl, want) {
+			t.Fatalf("expected SQL Server fallback DDL to contain %q, got: %s", want, ddl)
+		}
+	}
+	if strings.Contains(ddl, "SHOW CREATE TABLE not supported") {
+		t.Fatalf("expected fallback DDL instead of unsupported placeholder, got: %s", ddl)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_SQLServerDefaultsToDboSchema(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "-- SHOW CREATE TABLE not supported for SQL Server in this version.",
+		columns: []connection.ColumnDefinition{
+			{Name: "id", Type: "int", Nullable: "NO"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{Type: "sqlserver"}, "appdb", "Users")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE [dbo].[Users]`) {
+		t.Fatalf("expected SQL Server fallback DDL to default to dbo schema, got: %s", ddl)
 	}
 }
 

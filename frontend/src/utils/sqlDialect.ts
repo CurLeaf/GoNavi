@@ -22,6 +22,7 @@ export type SqlDialect =
   | 'oracle'
   | 'dameng'
   | 'sqlserver'
+  | 'iris'
   | 'sqlite'
   | 'duckdb'
   | 'clickhouse'
@@ -68,6 +69,12 @@ export const resolveSqlDialect = (
     case 'sql_server':
     case 'sql-server':
       return 'sqlserver';
+    case 'intersystems':
+    case 'intersystemsiris':
+    case 'inter-systems':
+    case 'inter-systems-iris':
+    case 'iris':
+      return 'iris';
     case 'doris':
     case 'diros':
       return 'diros';
@@ -122,6 +129,7 @@ export const resolveSqlDialect = (
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
+  if (source.includes('iris') || source.includes('intersystems')) return 'iris';
 
   return source;
 };
@@ -479,6 +487,7 @@ export const resolveColumnTypeOptions = (dbType: string): ColumnTypeOption[] => 
   if (dialect === 'oracle') return ORACLE_TYPES;
   if (dialect === 'dameng') return DAMENG_TYPES;
   if (dialect === 'sqlserver') return SQLSERVER_TYPES;
+  if (dialect === 'iris') return COMMON_TYPES;
   if (dialect === 'sqlite') return SQLITE_TYPES;
   if (dialect === 'duckdb') return DUCKDB_TYPES;
   if (dialect === 'clickhouse') return CLICKHOUSE_TYPES;

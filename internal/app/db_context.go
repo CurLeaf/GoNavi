@@ -20,7 +20,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 		if !isOceanBaseOracleProtocol(config) {
 			runConfig.Database = name
 		}
-	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "mongodb", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -65,6 +65,16 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 		}
 		if table != "" {
 			return "public", table
+		}
+	}
+
+	if dbType == "iris" {
+		schema, table := db.SplitSQLQualifiedName(rawTable)
+		if schema != "" && table != "" {
+			return schema, table
+		}
+		if table != "" {
+			return "", table
 		}
 	}
 

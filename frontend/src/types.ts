@@ -284,6 +284,7 @@ export interface ConnectionConfig {
   database?: string;
   useSSL?: boolean;
   sslMode?: "preferred" | "required" | "skip-verify" | "disable";
+  sslCAPath?: string;
   sslCertPath?: string;
   sslKeyPath?: string;
   useSSH?: boolean;

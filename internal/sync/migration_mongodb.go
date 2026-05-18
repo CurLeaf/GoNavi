@@ -87,6 +87,71 @@ func buildTabularToMongoPlan(config SyncConfig, tableName string, sourceDB db.Da
 	}
 }
 
+func buildMongoToMongoPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
+	plan := SchemaMigrationPlan{}
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	targetType := resolveMigrationDBType(config.TargetConfig)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
+	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
+	plan.PlannedAction = "使用已有目标集合导入"
+
+	sourceCols, warnings, err := inferMongoCollectionColumns(sourceDB, plan.SourceTable)
+	if err != nil {
+		return plan, nil, nil, err
+	}
+	plan.Warnings = append(plan.Warnings, warnings...)
+	if len(sourceCols) == 0 {
+		return plan, nil, nil, fmt.Errorf("源集合未推断出可迁移字段: %s", tableName)
+	}
+
+	targetExists, err := inspectMongoCollection(targetDB, plan.TargetSchema, plan.TargetTable)
+	if err != nil {
+		return plan, sourceCols, nil, fmt.Errorf("检查目标集合失败: %w", err)
+	}
+	plan.TargetTableExists = targetExists
+
+	strategy := normalizeTargetTableStrategy(config.TargetTableStrategy)
+	if targetExists {
+		plan.Warnings = append(plan.Warnings, "MongoDB 为弱 schema 目标，字段结构以写入文档为准，不执行目标列校验")
+		if strategy != "existing_only" {
+			plan.Warnings = append(plan.Warnings, "目标集合已存在，当前仅执行数据导入；不会自动重建已有索引")
+		}
+		return dedupeSchemaMigrationPlan(plan), sourceCols, nil, nil
+	}
+
+	switch strategy {
+	case "existing_only":
+		plan.PlannedAction = "目标集合不存在，需先手工创建"
+		plan.Warnings = append(plan.Warnings, "当前策略要求目标集合已存在，执行时不会自动创建")
+		return dedupeSchemaMigrationPlan(plan), sourceCols, nil, nil
+	case "smart", "auto_create_if_missing":
+		plan.AutoCreate = true
+		plan.PlannedAction = "目标集合不存在，将自动创建集合后导入"
+		createCmd, err := buildMongoCreateCollectionCommand(plan.TargetTable)
+		if err != nil {
+			return plan, sourceCols, nil, err
+		}
+		plan.PreDataSQL = append(plan.PreDataSQL, createCmd)
+		if config.CreateIndexes {
+			indexCmds, indexWarnings, unsupported, created, skipped, err := buildMongoIndexCommands(sourceDB, plan.SourceSchema, plan.SourceTable, plan.TargetTable)
+			if err != nil {
+				plan.Warnings = append(plan.Warnings, fmt.Sprintf("读取源集合索引失败，已跳过索引迁移：%v", err))
+			} else {
+				plan.PostDataSQL = append(plan.PostDataSQL, indexCmds...)
+				plan.Warnings = append(plan.Warnings, indexWarnings...)
+				plan.UnsupportedObjects = append(plan.UnsupportedObjects, unsupported...)
+				plan.IndexesToCreate = created
+				plan.IndexesSkipped = skipped
+			}
+		}
+		return dedupeSchemaMigrationPlan(plan), sourceCols, nil, nil
+	default:
+		return dedupeSchemaMigrationPlan(plan), sourceCols, nil, nil
+	}
+}
+
 func buildMongoToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	plan := SchemaMigrationPlan{}
 	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)

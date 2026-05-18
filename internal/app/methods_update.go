@@ -947,7 +947,15 @@ func launchWindowsUpdate(staged *stagedUpdate, targetExe string, pid int) error 
 
 	logger.Infof("启动 Windows 更新脚本：target=%s script=%s log=%s", targetExe, scriptPath, logPath)
 	cmd := buildWindowsLaunchCommand(scriptPath)
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process != nil {
+		if err := cmd.Process.Release(); err != nil {
+			logger.Warnf("释放 Windows 更新脚本进程句柄失败：%v", err)
+		}
+	}
+	return nil
 }
 
 func launchMacUpdate(staged *stagedUpdate, targetExe string, pid int) error {
@@ -993,6 +1001,7 @@ set "TARGET_OLD=%TARGET%.old"
 set "STAGED=__GONAVI_UPDATE_STAGED__"
 set "LOG_FILE=__GONAVI_UPDATE_LOG__"
 set PID=__GONAVI_UPDATE_PID__
+set /a WAIT_PID_SECONDS=0
 
 call :log updater started
 if not exist "%SOURCE%" (
@@ -1035,7 +1044,12 @@ if /I "%SOURCE_EXT%"==".zip" (
 :waitloop
 tasklist /FI "PID eq %PID%" | find "%PID%" >nul
 if %ERRORLEVEL%==0 (
+  if !WAIT_PID_SECONDS! GEQ 90 (
+    call :log host process still running after !WAIT_PID_SECONDS! seconds, aborting update
+    exit /b 1
+  )
   timeout /t 1 /nobreak >nul
+  set /a WAIT_PID_SECONDS+=1
   goto waitloop
 )
 call :log host process exited
@@ -1108,7 +1122,9 @@ exit /b 0
 }
 
 func buildWindowsLaunchCommand(scriptPath string) *exec.Cmd {
-	return exec.Command("cmd.exe", "/D", "/C", "call", scriptPath)
+	cmd := exec.Command("cmd.exe", "/D", "/C", "call", scriptPath)
+	configureWindowsUpdateCommand(cmd)
+	return cmd
 }
 
 func buildMacScript(dmgPath, targetApp, stagedDir, mountDir, logPath string, pid int) string {

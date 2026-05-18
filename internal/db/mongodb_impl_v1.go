@@ -4,7 +4,6 @@ package db
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"net/url"
@@ -415,12 +414,15 @@ func (m *MongoDBV1) Connect(config connection.ConnectionConfig) error {
 			}
 			uri := m.getURI(attemptConfig)
 			clientOpts := options.Client().ApplyURI(uri)
-			tlsEnabled, tlsInsecure := resolveMongoTLSSettings(attemptConfig)
-			if tlsEnabled {
-				clientOpts.SetTLSConfig(&tls.Config{
-					MinVersion:         tls.VersionTLS12,
-					InsecureSkipVerify: tlsInsecure,
-				})
+			tlsConfig, tlsErr := resolveGenericTLSConfig(attemptConfig)
+			if tlsErr != nil {
+				detail := fmt.Sprintf("%s %sTLS 配置失败: %v", sslLabel, authLabel, tlsErr)
+				errorDetails = append(errorDetails, detail)
+				logger.Warnf("MongoDB TLS 配置失败：%d/%d 模式=%s 凭据=%s 错误=%v", attemptNo, totalAttempts, sslLabel, authLabel, tlsErr)
+				continue
+			}
+			if tlsConfig != nil {
+				clientOpts.SetTLSConfig(tlsConfig)
 			}
 			if attemptConfig.UseProxy {
 				clientOpts.SetDialer(&mongoProxyDialer{proxyConfig: attemptConfig.Proxy})

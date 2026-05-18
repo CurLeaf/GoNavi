@@ -474,6 +474,10 @@ export function RenameView(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RenameView'](arg1, arg2, arg3, arg4);
 }
 
+export function ResetWebViewZoom() {
+  return window['go']['app']['App']['ResetWebViewZoom']();
+}
+
 export function ResolveDriverDownloadDirectory(arg1) {
   return window['go']['app']['App']['ResolveDriverDownloadDirectory'](arg1);
 }
@@ -500,6 +504,10 @@ export function SaveConnection(arg1) {
 
 export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
+}
+
+export function SelectCertificateFile(arg1, arg2) {
+  return window['go']['app']['App']['SelectCertificateFile'](arg1, arg2);
 }
 
 export function SelectDataRootDirectory(arg1) {

@@ -148,6 +148,27 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.connectionParams).toBe('characterEncoding=utf8&useSSL=false');
   });
 
+  it('preserves SSL certificate path fields for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-postgres-ssl',
+      type: 'postgres',
+      host: 'db.local',
+      port: 5432,
+      user: 'postgres',
+      useSSL: true,
+      sslMode: 'required',
+      sslCAPath: 'C:/certs/ca.pem',
+      sslCertPath: 'C:/certs/client-cert.pem',
+      sslKeyPath: 'C:/certs/client-key.pem',
+    } as any);
+
+    expect(result.useSSL).toBe(true);
+    expect(result.sslMode).toBe('required');
+    expect(result.sslCAPath).toBe('C:/certs/ca.pem');
+    expect(result.sslCertPath).toBe('C:/certs/client-cert.pem');
+    expect(result.sslKeyPath).toBe('C:/certs/client-key.pem');
+  });
+
   it('fills default nested config blocks needed by RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-redis',

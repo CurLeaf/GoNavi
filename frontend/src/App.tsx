@@ -11,7 +11,6 @@ import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswo
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
-import AIChatPanel from './components/AIChatPanel';
 import AISettingsModal from './components/AISettingsModal';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
@@ -73,7 +72,7 @@ import {
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
-import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
+import { resolveTitleBarToggleIconKey, resolveWindowsScaleCheckDelayMs, shouldApplyWindowsScaleFix, shouldResetWebViewZoomForScaleFix, shouldToggleMaximisedWindowForScaleFix, type WindowScaleFixReason, type WindowsScaleCheckTrigger } from './utils/windowStateUi';
 import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
@@ -84,6 +83,8 @@ import {
 } from './utils/aiEntryLayout';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
+
+const AIChatPanel = React.lazy(() => import('./components/AIChatPanel'));
 
 const { Sider, Content } = Layout;
 const MIN_UI_SCALE = 0.8;
@@ -675,7 +676,7 @@ function App() {
                       // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
                       // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
                       // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
-                      if (hasViewportScaleDrift) {
+                      if (shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)) {
                           try {
                               const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
                               if (!res?.success) {
@@ -3007,9 +3008,11 @@ function App() {
                               {renderAIEdgeHandle()}
                           </div>
                       )}
-                      <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                        handleOpenAISettings();
-                      }} overlayTheme={overlayTheme} />
+                      <React.Suspense fallback={<div style={{ width: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
+                          <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                            handleOpenAISettings();
+                          }} overlayTheme={overlayTheme} />
+                      </React.Suspense>
                   </div>
                )}
              </div>

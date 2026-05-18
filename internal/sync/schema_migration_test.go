@@ -11,6 +11,7 @@ import (
 type fakeMigrationDB struct {
 	columns   map[string][]connection.ColumnDefinition
 	indexes   map[string][]connection.IndexDefinition
+	tables    map[string][]string
 	queryData map[string][]map[string]interface{}
 	queryCols map[string][]string
 }
@@ -27,6 +28,9 @@ func (f *fakeMigrationDB) Query(query string) ([]map[string]interface{}, []strin
 func (f *fakeMigrationDB) Exec(query string) (int64, error) { return 0, nil }
 func (f *fakeMigrationDB) GetDatabases() ([]string, error)  { return nil, nil }
 func (f *fakeMigrationDB) GetTables(dbName string) ([]string, error) {
+	if rows, ok := f.tables[dbName]; ok {
+		return rows, nil
+	}
 	return nil, nil
 }
 func (f *fakeMigrationDB) GetCreateStatement(dbName, tableName string) (string, error) {
@@ -311,6 +315,204 @@ func TestBuildSchemaMigrationPlan_MySQLToMySQLAddsMissingColumnsForExistingTarge
 	}
 	if !strings.Contains(plan.PlannedAction, "补齐缺失字段(1)") {
 		t.Fatalf("unexpected planned action: %s", plan.PlannedAction)
+	}
+}
+
+func TestBuildSchemaMigrationPlan_MySQLToMySQLAutoCreatesMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"shop.users": {
+				{Name: "id", Type: "bigint", Nullable: "NO", Key: "PRI", Extra: "auto_increment"},
+				{Name: "name", Type: "varchar(128)", Nullable: "YES", Default: stringPtr("")},
+			},
+		},
+		indexes: map[string][]connection.IndexDefinition{
+			"shop.users": {
+				{Name: "idx_users_name", ColumnName: "name", NonUnique: 1, SeqInIndex: 1, IndexType: "BTREE"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{columns: map[string][]connection.ColumnDefinition{}}
+	cfg := SyncConfig{
+		SourceConfig:        connection.ConnectionConfig{Type: "mysql", Database: "shop"},
+		TargetConfig:        connection.ConnectionConfig{Type: "mysql", Database: "app"},
+		TargetTableStrategy: "smart",
+		CreateIndexes:       true,
+	}
+
+	plan, sourceCols, targetCols, err := buildSchemaMigrationPlan(cfg, "users", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	if len(sourceCols) != 2 || len(targetCols) != 0 {
+		t.Fatalf("unexpected columns lengths: source=%d target=%d", len(sourceCols), len(targetCols))
+	}
+	if plan.TargetTableExists {
+		t.Fatalf("expected target table missing")
+	}
+	if !plan.AutoCreate {
+		t.Fatalf("expected mysql->mysql auto create enabled, plan=%+v", plan)
+	}
+	if strings.Contains(strings.Join(plan.Warnings, " "), "MySQL -> Kingbase") {
+		t.Fatalf("mysql->mysql should not warn with old mysql->kingbase-only message: %v", plan.Warnings)
+	}
+	if !strings.Contains(plan.PlannedAction, "自动建表") {
+		t.Fatalf("unexpected planned action: %s", plan.PlannedAction)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "CREATE TABLE `app`.`users`") {
+		t.Fatalf("unexpected create table SQL: %s", plan.CreateTableSQL)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "`id` bigint NOT NULL AUTO_INCREMENT") {
+		t.Fatalf("unexpected id definition: %s", plan.CreateTableSQL)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "PRIMARY KEY (`id`)") {
+		t.Fatalf("missing primary key: %s", plan.CreateTableSQL)
+	}
+	if len(plan.PostDataSQL) != 1 || !strings.Contains(plan.PostDataSQL[0], "CREATE INDEX `idx_users_name`") {
+		t.Fatalf("unexpected index SQL: %v", plan.PostDataSQL)
+	}
+}
+
+func TestBuildSchemaMigrationPlan_PGLikeToPGLikeAutoCreatesMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"public.accounts": {
+				{Name: "id", Type: "integer", Nullable: "NO", Key: "PRI", Extra: "auto_increment"},
+				{Name: "email", Type: "character varying(128)", Nullable: "NO"},
+				{Name: "status", Type: "text", Nullable: "NO", Default: stringPtr("'active'::text")},
+			},
+		},
+		indexes: map[string][]connection.IndexDefinition{
+			"public.accounts": {
+				{Name: "accounts_pkey", ColumnName: "id", NonUnique: 0, SeqInIndex: 1, IndexType: "btree"},
+				{Name: "accounts_email_key", ColumnName: "email", NonUnique: 0, SeqInIndex: 1, IndexType: "btree"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{columns: map[string][]connection.ColumnDefinition{}}
+	cfg := SyncConfig{
+		SourceConfig:        connection.ConnectionConfig{Type: "postgres", Database: "public"},
+		TargetConfig:        connection.ConnectionConfig{Type: "kingbase", Database: "app"},
+		TargetTableStrategy: "smart",
+		CreateIndexes:       true,
+	}
+
+	plan, sourceCols, targetCols, err := buildSchemaMigrationPlan(cfg, "accounts", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	if len(sourceCols) != 3 || len(targetCols) != 0 {
+		t.Fatalf("unexpected columns lengths: source=%d target=%d", len(sourceCols), len(targetCols))
+	}
+	if !plan.AutoCreate {
+		t.Fatalf("expected pglike->pglike auto create enabled, plan=%+v", plan)
+	}
+	if strings.Contains(strings.Join(plan.Warnings, " "), "MySQL -> Kingbase") {
+		t.Fatalf("pglike->pglike should not warn with old mysql->kingbase-only message: %v", plan.Warnings)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "CREATE TABLE public.accounts") {
+		t.Fatalf("unexpected create table SQL: %s", plan.CreateTableSQL)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "id integer GENERATED BY DEFAULT AS IDENTITY NOT NULL") {
+		t.Fatalf("unexpected id definition: %s", plan.CreateTableSQL)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "status text DEFAULT 'active'::text NOT NULL") {
+		t.Fatalf("unexpected default definition: %s", plan.CreateTableSQL)
+	}
+	if strings.Contains(plan.CreateTableSQL, "'''active''::text'") {
+		t.Fatalf("default expression should not be quoted as a string literal: %s", plan.CreateTableSQL)
+	}
+	if len(plan.PostDataSQL) != 1 || !strings.Contains(plan.PostDataSQL[0], "CREATE UNIQUE INDEX accounts_email_key") {
+		t.Fatalf("unexpected index SQL: %v", plan.PostDataSQL)
+	}
+	if strings.Contains(strings.Join(plan.PostDataSQL, "\n"), "accounts_pkey") {
+		t.Fatalf("primary key index should not be recreated: %v", plan.PostDataSQL)
+	}
+}
+
+func TestBuildSchemaMigrationPlan_ClickHouseToClickHouseAutoCreatesMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"analytics.events": {
+				{Name: "ts", Type: "DateTime", Nullable: "NO", Key: "PRI"},
+				{Name: "user_id", Type: "UInt64", Nullable: "NO"},
+				{Name: "payload", Type: "String", Nullable: "YES"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{columns: map[string][]connection.ColumnDefinition{}}
+	cfg := SyncConfig{
+		SourceConfig:        connection.ConnectionConfig{Type: "clickhouse", Database: "analytics"},
+		TargetConfig:        connection.ConnectionConfig{Type: "clickhouse", Database: "archive"},
+		TargetTableStrategy: "smart",
+	}
+
+	plan, sourceCols, targetCols, err := buildSchemaMigrationPlan(cfg, "events", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	if len(sourceCols) != 3 || len(targetCols) != 0 {
+		t.Fatalf("unexpected columns lengths: source=%d target=%d", len(sourceCols), len(targetCols))
+	}
+	if !plan.AutoCreate {
+		t.Fatalf("expected clickhouse->clickhouse auto create enabled, plan=%+v", plan)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "CREATE TABLE `archive`.`events`") {
+		t.Fatalf("unexpected create table SQL: %s", plan.CreateTableSQL)
+	}
+	if !strings.Contains(plan.CreateTableSQL, "ENGINE = MergeTree() ORDER BY (`ts`)") {
+		t.Fatalf("unexpected order by: %s", plan.CreateTableSQL)
+	}
+}
+
+func TestBuildSchemaMigrationPlan_MongoToMongoAutoCreatesMissingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceQuery := `{"find":"users","filter":{},"limit":200}`
+	sourceDB := &fakeMigrationDB{
+		queryData: map[string][]map[string]interface{}{
+			sourceQuery: {
+				{"_id": "u1", "name": "Ada", "age": 37},
+			},
+		},
+		indexes: map[string][]connection.IndexDefinition{
+			"app.users": {
+				{Name: "idx_users_name", ColumnName: "name", NonUnique: 1, SeqInIndex: 1, IndexType: "BTREE"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{tables: map[string][]string{"archive": []string{}}}
+	cfg := SyncConfig{
+		SourceConfig:        connection.ConnectionConfig{Type: "mongodb", Database: "app"},
+		TargetConfig:        connection.ConnectionConfig{Type: "mongodb", Database: "archive"},
+		TargetTableStrategy: "smart",
+		CreateIndexes:       true,
+	}
+
+	plan, sourceCols, targetCols, err := buildSchemaMigrationPlan(cfg, "users", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	if len(sourceCols) == 0 || len(targetCols) != 0 {
+		t.Fatalf("unexpected columns lengths: source=%d target=%d", len(sourceCols), len(targetCols))
+	}
+	if !plan.AutoCreate {
+		t.Fatalf("expected mongo->mongo auto create enabled, plan=%+v", plan)
+	}
+	if strings.TrimSpace(plan.CreateTableSQL) != "" {
+		t.Fatalf("mongo create should be pre-data command only: %s", plan.CreateTableSQL)
+	}
+	if len(plan.PreDataSQL) != 1 || !strings.Contains(plan.PreDataSQL[0], `"create":"users"`) {
+		t.Fatalf("unexpected create collection command: %v", plan.PreDataSQL)
+	}
+	if len(plan.PostDataSQL) != 1 || !strings.Contains(plan.PostDataSQL[0], `"createIndexes":"users"`) {
+		t.Fatalf("unexpected index command: %v", plan.PostDataSQL)
 	}
 }
 

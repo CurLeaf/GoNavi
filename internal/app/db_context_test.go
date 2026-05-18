@@ -90,6 +90,43 @@ func TestNormalizeRunConfig_StarRocksUsesDatabaseFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_IRISUsesNamespaceFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "iris",
+		Database: "USER",
+	}, "APP")
+
+	if runConfig.Database != "APP" {
+		t.Fatalf("expected IRIS namespace from tree, got %q", runConfig.Database)
+	}
+}
+
+func TestNormalizeSchemaAndTable_IRISDoesNotTreatNamespaceAsSchema(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "iris",
+	}, "USER", "Person")
+
+	if schema != "" || table != "Person" {
+		t.Fatalf("expected IRIS pure table to omit schema, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_IRISSplitsQualifiedTable(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "iris",
+	}, "USER", `"Sample.Schema"."Person.Table"`)
+
+	if schema != "Sample.Schema" || table != "Person.Table" {
+		t.Fatalf("expected IRIS qualified table split, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *testing.T) {
 	t.Parallel()
 

@@ -292,6 +292,20 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         }
     }, [buildConfig, tab.dbName]);
 
+    const handleCopyTableName = useCallback(async (tableName: string) => {
+        const name = String(tableName || '').trim();
+        if (!name) {
+            message.warning('表名为空，无法复制');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(name);
+            message.success('表名已复制到剪贴板');
+        } catch (e: any) {
+            message.error('复制表名失败: ' + (e?.message || String(e)));
+        }
+    }, []);
+
     const handleExport = useCallback(async (tableName: string, format: string) => {
         const config = buildConfig();
         if (!config) return;
@@ -538,6 +552,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                         }},
                                         { type: 'divider' },
                                         { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
+                                        { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(t.name) },
                                         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
                                         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                         { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
@@ -624,6 +639,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                             }},
                                             { type: 'divider' },
                                             { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
+                                            { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(t.name) },
                                             { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
                                             { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
                                             { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },

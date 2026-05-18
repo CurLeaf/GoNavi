@@ -4,6 +4,7 @@ import {
   resolveTitleBarToggleIconKey,
   resolveWindowsScaleCheckDelayMs,
   shouldApplyWindowsScaleFix,
+  shouldResetWebViewZoomForScaleFix,
   shouldToggleMaximisedWindowForScaleFix,
 } from './windowStateUi';
 
@@ -24,6 +25,13 @@ describe('windowStateUi', () => {
     // 任务栏恢复的真实交互里会被用户肉眼看见为"重复最大化"动画，比偶发字体变大更糟。
     // 这是 9848b8b2 已有的取舍，禁止再次被"修复"成 true。
     expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(false);
+  });
+
+  it('only calls the backend WebView2 zoom reset after a real restore drift', () => {
+    expect(shouldResetWebViewZoomForScaleFix('restore', true)).toBe(true);
+    expect(shouldResetWebViewZoomForScaleFix('restore', false)).toBe(false);
+    expect(shouldResetWebViewZoomForScaleFix('activation', true)).toBe(false);
+    expect(shouldResetWebViewZoomForScaleFix('ratio-change', true)).toBe(false);
   });
 
   it('debounces resize-triggered Windows scale checks until window transitions settle', () => {
