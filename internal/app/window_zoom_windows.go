@@ -6,8 +6,11 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 	"unsafe"
 )
+
+const resetWebViewZoomInvokeTimeout = 2 * time.Second
 
 // resetWebViewZoomFactor 通过 WebView2 ICoreWebView2Controller::put_ZoomFactor 把 WebView2
 // 内部 zoom factor 重置为 1.0。这是 Windows 任务栏恢复后字体度量异常变大的根因解：
@@ -17,9 +20,10 @@ import (
 // 实现路径：
 //  1. Wails 在 ctx 里以 key "frontend" 注入了 *desktop/windows.Frontend
 //  2. Frontend.chromium 是 unexported 字段 *edge.Chromium
-//  3. Chromium.PutZoomFactor(float64) 是 exported 方法（封装了 controller.put_ZoomFactor）
+//  3. Frontend.mainWindow 是 unexported 字段 *windows.Window，可用 Invoke 切回窗口线程
+//  4. Chromium.PutZoomFactor(float64) 是 exported 方法（封装了 controller.put_ZoomFactor）
 //
-// 用反射 + unsafe.Pointer 解锁 unexported 字段后 MethodByName("PutZoomFactor").Call。
+// 用反射 + unsafe.Pointer 解锁 unexported 字段后，通过 mainWindow.Invoke 调 PutZoomFactor。
 // 不需要 import wails 内部包，也不需要 fork wails。
 //
 // 失败时返回错误（不 panic），让调用方决定是否回退到 toggle 路径。
@@ -35,38 +39,112 @@ func resetWebViewZoomFactor(ctx context.Context, factor float64) (err error) {
 	if ctx == nil {
 		return fmt.Errorf("ctx is nil")
 	}
+	frontendValue, err := resolveWailsFrontendValue(ctx)
+	if err != nil {
+		return err
+	}
+	chromiumValue, err := accessibleWailsFrontendField(frontendValue, "chromium")
+	if err != nil {
+		return err
+	}
+	mainWindowValue, err := accessibleWailsFrontendField(frontendValue, "mainWindow")
+	if err != nil {
+		return err
+	}
+
+	putZoomFactor := chromiumValue.MethodByName("PutZoomFactor")
+	if !putZoomFactor.IsValid() {
+		return fmt.Errorf("PutZoomFactor method not found on chromium (go-webview2 version may have changed)")
+	}
+	if putZoomFactor.Type().NumIn() != 1 || putZoomFactor.Type().In(0).Kind() != reflect.Float64 || putZoomFactor.Type().NumOut() != 0 {
+		return fmt.Errorf("PutZoomFactor signature changed: expected func(float64), got %v", putZoomFactor.Type())
+	}
+
+	invoke := mainWindowValue.MethodByName("Invoke")
+	if !invoke.IsValid() {
+		return fmt.Errorf("mainWindow.Invoke method not found (wails version may have changed)")
+	}
+	if invoke.Type().NumIn() != 1 || invoke.Type().In(0).Kind() != reflect.Func || invoke.Type().In(0).NumIn() != 0 || invoke.Type().In(0).NumOut() != 0 || invoke.Type().NumOut() != 0 {
+		return fmt.Errorf("mainWindow.Invoke signature changed: expected func(func()), got %v", invoke.Type())
+	}
+
+	done := make(chan error, 1)
+	if err := safeCallInvoke(invoke, func() {
+		done <- safeCallPutZoomFactor(putZoomFactor, factor)
+	}); err != nil {
+		return err
+	}
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(resetWebViewZoomInvokeTimeout):
+		return fmt.Errorf("timed out waiting for mainWindow.Invoke to reset WebView2 zoom factor")
+	}
+}
+
+func resolveWailsFrontendValue(ctx context.Context) (reflect.Value, error) {
 	frontendIface := ctx.Value("frontend")
 	if frontendIface == nil {
-		return fmt.Errorf("wails frontend not found in ctx (key=\"frontend\")")
+		return reflect.Value{}, fmt.Errorf("wails frontend not found in ctx (key=\"frontend\")")
 	}
 
 	frontendValue := reflect.ValueOf(frontendIface)
 	if frontendValue.Kind() == reflect.Ptr {
+		if frontendValue.IsNil() {
+			return reflect.Value{}, fmt.Errorf("wails frontend is nil")
+		}
 		frontendValue = frontendValue.Elem()
 	}
 	if !frontendValue.IsValid() || frontendValue.Kind() != reflect.Struct {
-		return fmt.Errorf("wails frontend has unexpected kind %v", frontendValue.Kind())
+		return reflect.Value{}, fmt.Errorf("wails frontend has unexpected kind %v", frontendValue.Kind())
+	}
+	if !frontendValue.CanAddr() {
+		return reflect.Value{}, fmt.Errorf("wails frontend is not addressable")
+	}
+	return frontendValue, nil
+}
+
+func accessibleWailsFrontendField(frontendValue reflect.Value, fieldName string) (reflect.Value, error) {
+	field := frontendValue.FieldByName(fieldName)
+	if !field.IsValid() {
+		return reflect.Value{}, fmt.Errorf("wails Frontend.%s field not found (wails version may have changed)", fieldName)
+	}
+	if !field.CanAddr() {
+		return reflect.Value{}, fmt.Errorf("wails Frontend.%s field is not addressable", fieldName)
+	}
+	if isNilReflectValue(field) {
+		return reflect.Value{}, fmt.Errorf("wails Frontend.%s is nil (WebView2 not yet initialised)", fieldName)
 	}
 
-	chromiumField := frontendValue.FieldByName("chromium")
-	if !chromiumField.IsValid() {
-		return fmt.Errorf("wails Frontend.chromium field not found (wails version may have changed)")
-	}
-	if chromiumField.IsNil() {
-		return fmt.Errorf("wails Frontend.chromium is nil (WebView2 not yet initialised)")
-	}
+	return reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem(), nil
+}
 
-	// 用 NewAt + unsafe.Pointer 解锁 unexported 字段访问限制
-	accessible := reflect.NewAt(chromiumField.Type(), unsafe.Pointer(chromiumField.UnsafeAddr())).Elem()
-	method := accessible.MethodByName("PutZoomFactor")
-	if !method.IsValid() {
-		return fmt.Errorf("PutZoomFactor method not found on chromium (go-webview2 version may have changed)")
+func isNilReflectValue(value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
-	if method.Type().NumIn() != 1 || method.Type().In(0).Kind() != reflect.Float64 {
-		return fmt.Errorf("PutZoomFactor signature changed: expected func(float64), got %v", method.Type())
-	}
+}
 
-	// PutZoomFactor 内部已经 swallow error 并通过 errorCallback 报告——这里不会 panic
-	method.Call([]reflect.Value{reflect.ValueOf(factor)})
+func safeCallInvoke(invoke reflect.Value, fn func()) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("mainWindow.Invoke panicked while resetting WebView2 zoom factor: %v", value)
+		}
+	}()
+	invoke.Call([]reflect.Value{reflect.ValueOf(fn)})
+	return nil
+}
+
+func safeCallPutZoomFactor(putZoomFactor reflect.Value, factor float64) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("PutZoomFactor panicked while resetting WebView2 zoom factor: %v", value)
+		}
+	}()
+	putZoomFactor.Call([]reflect.Value{reflect.ValueOf(factor)})
 	return nil
 }

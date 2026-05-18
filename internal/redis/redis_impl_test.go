@@ -3,6 +3,8 @@ package redis
 import (
 	"encoding/json"
 	"errors"
+	"math"
+	"math/big"
 	"sort"
 	"testing"
 )
@@ -80,6 +82,67 @@ func TestFormatCommandResultPreservesScalarAndByteSlice(t *testing.T) {
 	}
 	if got := formatCommandResult(int64(42)); got != int64(42) {
 		t.Fatalf("int64 scalar should pass through, got %v", got)
+	}
+}
+
+func TestFormatCommandResultRecursivelyFormatsStringKeyMapValues(t *testing.T) {
+	input := map[string]interface{}{
+		"nestedMap": map[interface{}]interface{}{"k": "v"},
+		"bytes":     []byte("ok"),
+	}
+
+	got := formatCommandResult(input)
+	formatted, ok := got.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T (%#v)", got, got)
+	}
+	if formatted["bytes"] != "ok" {
+		t.Fatalf("expected []byte value converted to string, got %#v", formatted["bytes"])
+	}
+	if _, ok := formatted["nestedMap"].([]interface{}); !ok {
+		t.Fatalf("expected nested RESP3 map to be flattened, got %T", formatted["nestedMap"])
+	}
+	if _, err := json.Marshal(formatted); err != nil {
+		t.Fatalf("formatted string-key map must be JSON-marshalable, got error: %v", err)
+	}
+}
+
+func TestFormatCommandResultFormatsJSONUnsupportedScalars(t *testing.T) {
+	input := []interface{}{
+		math.Inf(1),
+		math.Inf(-1),
+		math.NaN(),
+		big.NewInt(1234567890123456789),
+		errors.New("redis nested error"),
+	}
+
+	got := formatCommandResult(input)
+	arr, ok := got.([]interface{})
+	if !ok || len(arr) != len(input) {
+		t.Fatalf("expected formatted array of length %d, got %#v", len(input), got)
+	}
+	for i, item := range arr {
+		if _, ok := item.(string); !ok {
+			t.Fatalf("expected item %d to be string after formatting, got %T (%#v)", i, item, item)
+		}
+	}
+	if _, err := json.Marshal(arr); err != nil {
+		t.Fatalf("formatted unsupported scalars must be JSON-marshalable, got error: %v", err)
+	}
+}
+
+func TestFormatCommandResultFormatsGenericMapsAndSlices(t *testing.T) {
+	input := map[int][]byte{
+		1: []byte("one"),
+	}
+
+	got := formatCommandResult(input)
+	arr, ok := got.([]interface{})
+	if !ok || len(arr) != 2 {
+		t.Fatalf("expected generic non-string map to be flattened into 2 elements, got %#v", got)
+	}
+	if _, err := json.Marshal(arr); err != nil {
+		t.Fatalf("formatted generic map must be JSON-marshalable, got error: %v", err)
 	}
 }
 

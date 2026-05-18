@@ -5,8 +5,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
 	"net"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1310,6 +1313,9 @@ func (r *RedisClientImpl) ExecuteCommand(args []string) (interface{}, error) {
 // 如果让原值穿透到 Wails RPC，json.Marshal 会失败，Wails runtime 在 Windows 上会直接 panic
 // 让进程退出——用户感知为 GoNavi 闪退（issue: HGETALL 闪退）。
 // 平展成 [k1, v1, k2, v2, ...] 交错形式与 RESP2 array 输出一致，前端按 array 渲染。
+//
+// 这里同时把 RESP3 的 NaN/Inf 浮点、大整数、error 以及其他 map/slice 形态统一收敛为
+// JSON-safe 结构，避免 Redis 命令面板再把不可序列化的值透传给 Wails。
 func formatCommandResult(result interface{}) interface{} {
 	switch v := result.(type) {
 	case []interface{}:
@@ -1325,10 +1331,67 @@ func formatCommandResult(result interface{}) interface{} {
 			flattened = append(flattened, formatCommandResult(val))
 		}
 		return flattened
+	case map[string]interface{}:
+		formatted := make(map[string]interface{}, len(v))
+		for key, val := range v {
+			formatted[key] = formatCommandResult(val)
+		}
+		return formatted
 	case []byte:
 		return string(v)
-	default:
+	case error:
+		return v.Error()
+	case *big.Int:
+		if v == nil {
+			return nil
+		}
+		return v.String()
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Sprint(v)
+		}
 		return v
+	case float32:
+		f := float64(v)
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return fmt.Sprint(v)
+		}
+		return v
+	default:
+		return formatCommandResultByReflection(v)
+	}
+}
+
+func formatCommandResultByReflection(result interface{}) interface{} {
+	value := reflect.ValueOf(result)
+	if !value.IsValid() {
+		return nil
+	}
+	switch value.Kind() {
+	case reflect.Map:
+		if value.Type().Key().Kind() == reflect.String {
+			formatted := make(map[string]interface{}, value.Len())
+			iter := value.MapRange()
+			for iter.Next() {
+				formatted[iter.Key().String()] = formatCommandResult(iter.Value().Interface())
+			}
+			return formatted
+		}
+		flattened := make([]interface{}, 0, value.Len()*2)
+		iter := value.MapRange()
+		for iter.Next() {
+			flattened = append(flattened, formatCommandResult(iter.Key().Interface()))
+			flattened = append(flattened, formatCommandResult(iter.Value().Interface()))
+		}
+		return flattened
+	case reflect.Slice, reflect.Array:
+		formatted := make([]interface{}, value.Len())
+		for i := 0; i < value.Len(); i++ {
+			formatted[i] = formatCommandResult(value.Index(i).Interface())
+		}
+		return formatted
+	default:
+		return result
 	}
 }
 

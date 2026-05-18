@@ -21,11 +21,21 @@ func (f *fakeChromium) PutZoomFactor(factor float64) {
 	f.last.Store(factor)
 }
 
+type fakeWindow struct {
+	invoked atomic.Int32
+}
+
+func (f *fakeWindow) Invoke(fn func()) {
+	f.invoked.Add(1)
+	fn()
+}
+
 // fakeFrontend 模仿 wails 的 internal/frontend/desktop/windows.Frontend：
-// unexported 字段 chromium 是 *fakeChromium 类型（exported method PutZoomFactor）。
+// unexported 字段 chromium/mainWindow 分别模仿 *edge.Chromium 和 *windows.Window。
 // 反射代码不依赖具体类型名，只检查 method signature。
 type fakeFrontend struct {
-	chromium *fakeChromium
+	chromium   *fakeChromium
+	mainWindow *fakeWindow
 }
 
 type panicChromium struct{}
@@ -48,10 +58,14 @@ func stringContextKey(key string) any {
 
 func TestResetWebViewZoomFactorCallsPutZoomFactor(t *testing.T) {
 	chromium := &fakeChromium{}
-	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &fakeFrontend{chromium: chromium})
+	window := &fakeWindow{}
+	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &fakeFrontend{chromium: chromium, mainWindow: window})
 
 	if err := resetWebViewZoomFactor(ctx, 1.0); err != nil {
 		t.Fatalf("expected reset to succeed against fake frontend, got %v", err)
+	}
+	if got := window.invoked.Load(); got != 1 {
+		t.Fatalf("expected reset to run through mainWindow.Invoke exactly once, got %d", got)
 	}
 	if got := chromium.called.Load(); got != 1 {
 		t.Fatalf("expected PutZoomFactor called exactly once, got %d", got)
@@ -76,13 +90,24 @@ func TestResetWebViewZoomFactorErrorsWhenChromiumFieldMissing(t *testing.T) {
 }
 
 func TestResetWebViewZoomFactorErrorsWhenChromiumNil(t *testing.T) {
-	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &fakeFrontend{chromium: nil})
+	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &fakeFrontend{chromium: nil, mainWindow: &fakeWindow{}})
 	err := resetWebViewZoomFactor(ctx, 1.0)
 	if err == nil {
 		t.Fatal("expected error when chromium is nil, got nil")
 	}
 	if !strings.Contains(err.Error(), "nil") {
 		t.Fatalf("expected error to mention nil, got %v", err)
+	}
+}
+
+func TestResetWebViewZoomFactorErrorsWhenMainWindowNil(t *testing.T) {
+	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &fakeFrontend{chromium: &fakeChromium{}, mainWindow: nil})
+	err := resetWebViewZoomFactor(ctx, 1.0)
+	if err == nil {
+		t.Fatal("expected error when mainWindow is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "mainWindow") {
+		t.Fatalf("expected error to mention mainWindow, got %v", err)
 	}
 }
 
