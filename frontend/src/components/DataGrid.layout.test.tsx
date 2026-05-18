@@ -87,6 +87,13 @@ describe('DataGrid layout', () => {
     expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
   });
 
+  it('renders bit column hex values as decimal flags', () => {
+    expect(formatCellDisplayText('0x00', 'bit(1)')).toBe('0');
+    expect(formatCellDisplayText('0x01', 'bit(1)')).toBe('1');
+    expect(formatCellDisplayText('0x02', 'bit varying(8)')).toBe('2');
+    expect(formatCellDisplayText('0x01', 'bytea')).toBe('0x01');
+  });
+
   it('resolves the field name copied from the cell context menu', () => {
     expect(resolveContextMenuFieldName('created_at', '创建时间')).toBe('created_at');
     expect(resolveContextMenuFieldName('', 'fallback_name')).toBe('fallback_name');

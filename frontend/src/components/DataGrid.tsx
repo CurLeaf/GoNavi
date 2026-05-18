@@ -219,9 +219,27 @@ const normalizeDateTimeString = (val: string) => {
 };
 
 // --- Helper: Format Value ---
-export const formatCellDisplayText = (val: any): string => {
+const normalizeBitHexDisplayText = (val: any, columnType?: string): string | null => {
+    const typeText = String(columnType || '').trim().toLowerCase();
+    if (!/^varbit(?:\s*\(\s*\d+\s*\))?$/.test(typeText)
+        && !/^bit(?:\s+varying)?(?:\s*\(\s*\d+\s*\))?$/.test(typeText)) {
+        return null;
+    }
+    if (typeof val !== 'string') return null;
+    const raw = val.trim();
+    if (!/^0x[0-9a-f]+$/i.test(raw)) return null;
+    try {
+        return BigInt(raw).toString(10);
+    } catch {
+        return null;
+    }
+};
+
+export const formatCellDisplayText = (val: any, columnType?: string): string => {
     try {
         if (val === null) return 'NULL';
+        const bitText = normalizeBitHexDisplayText(val, columnType);
+        if (bitText !== null) return bitText;
         if (typeof val === 'object') {
             if (!Array.isArray(val) && !isPlainObject(val)) {
                 return String(val);
@@ -279,8 +297,8 @@ const renderHighlightedCellText = (text: string, query: string): React.ReactNode
     return <>{nodes}</>;
 };
 
-const renderCellDisplayValue = (val: any, query: string): React.ReactNode => {
-    const text = formatCellDisplayText(val);
+const renderCellDisplayValue = (val: any, query: string, columnType?: string): React.ReactNode => {
+    const text = formatCellDisplayText(val, columnType);
     const content = renderHighlightedCellText(text, query);
     if (val === null) return <span style={{ color: '#ccc' }}>{content}</span>;
     return content;
@@ -3572,16 +3590,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       mergedDisplayData,
       displayColumnNames,
       normalizedPageFindText,
-      (value) => formatCellDisplayText(value),
+      (value, _row, columnName) => formatCellDisplayText(value, (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type),
       (row, rowIndex) => String(row?.[GONAVI_ROW_KEY] ?? `row-${rowIndex}`),
-  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText]);
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName]);
 
   const pageFindSummary = useMemo(() => summarizeDataGridFindMatches(
       mergedDisplayData,
       displayColumnNames,
       normalizedPageFindText,
-      (value) => formatCellDisplayText(value),
-  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText]);
+      (value, _row, columnName) => formatCellDisplayText(value, (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type),
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName]);
 
   useEffect(() => {
       setActivePageFindMatchIndex(-1);
@@ -3630,7 +3648,12 @@ const DataGrid: React.FC<DataGridProps> = ({
       return textViewRows[textRecordIndex] || null;
   }, [viewMode, textViewRows, textRecordIndex]);
 
-  const formatTextViewValue = useCallback((val: any): string => {
+  const formatTextViewValue = useCallback((val: any, columnName?: string): string => {
+      const columnType = columnName
+          ? (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type
+          : undefined;
+      const bitText = normalizeBitHexDisplayText(val, columnType);
+      if (bitText !== null) return bitText;
       if (val === null) return 'NULL';
       if (val === undefined) return '';
       if (typeof val === 'string') return normalizeDateTimeString(val);
@@ -3642,7 +3665,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           }
       }
       return String(val);
-  }, []);
+  }, [columnMetaMap, columnMetaMapByLowerName]);
 
   const closeRowEditor = useCallback(() => {
       setRowEditorOpen(false);
@@ -3956,7 +3979,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           editable: canModifyData && isWritableResultColumn(key, effectiveEditLocator),
           render: (text: any) => (
               <div style={CELL_ELLIPSIS_STYLE}>
-                  {renderCellDisplayValue(text, normalizedPageFindText)}
+                  {renderCellDisplayValue(text, normalizedPageFindText, (columnMetaMap[key] || columnMetaMapByLowerName[key.toLowerCase()])?.type)}
               </div>
           ),
           shouldCellUpdate: (record: Item, prevRecord: Item) => {
@@ -3993,7 +4016,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, canModifyData, onSort, renderColumnTitle, dataTableDensity, normalizedPageFindText]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, canModifyData, onSort, renderColumnTitle, dataTableDensity, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -6492,7 +6515,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                 {col} :
                             </div>
                             <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: darkMode ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.88)' }}>
-                                {formatTextViewValue((currentTextRow as any)[col])}
+                                {formatTextViewValue((currentTextRow as any)[col], col)}
                             </div>
                         </div>
                     )) : (
