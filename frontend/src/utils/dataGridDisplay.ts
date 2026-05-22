@@ -3,12 +3,24 @@ export type DataTableDensity = 'comfortable' | 'standard' | 'compact';
 export interface DataGridDisplaySettings {
   showDataTableVerticalBorders: boolean;
   dataTableDensity: DataTableDensity;
+  dataTableFontSize: number | null;
+  dataTableFontSizeFollowGlobal: boolean;
+  sidebarTreeFontSize: number | null;
+  sidebarTreeFontSizeFollowGlobal: boolean;
 }
 
 export const DEFAULT_DATA_GRID_DISPLAY_SETTINGS: DataGridDisplaySettings = {
   showDataTableVerticalBorders: false,
   dataTableDensity: 'comfortable',
+  dataTableFontSize: null,
+  dataTableFontSizeFollowGlobal: true,
+  sidebarTreeFontSize: null,
+  sidebarTreeFontSizeFollowGlobal: true,
 };
+export const MIN_DATA_TABLE_FONT_SIZE = 10;
+export const MAX_DATA_TABLE_FONT_SIZE = 18;
+export const MIN_SIDEBAR_TREE_FONT_SIZE = 10;
+export const MAX_SIDEBAR_TREE_FONT_SIZE = 18;
 
 interface DensityParams {
   defaultColumnWidth: number;
@@ -57,6 +69,25 @@ export const sanitizeDataTableDensity = (value: unknown): DataTableDensity => {
   return 'comfortable';
 };
 
+const sanitizeOptionalIntegerInRange = (
+  value: unknown,
+  min: number,
+  max: number,
+): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+};
+
+export const sanitizeDataTableFontSize = (value: unknown): number | null => (
+  sanitizeOptionalIntegerInRange(value, MIN_DATA_TABLE_FONT_SIZE, MAX_DATA_TABLE_FONT_SIZE)
+);
+
+export const sanitizeSidebarTreeFontSize = (value: unknown): number | null => (
+  sanitizeOptionalIntegerInRange(value, MIN_SIDEBAR_TREE_FONT_SIZE, MAX_SIDEBAR_TREE_FONT_SIZE)
+);
+
 export const getDensityParams = (density: DataTableDensity): DensityParams => {
   return DENSITY_PARAMS[density] || DENSITY_PARAMS.comfortable;
 };
@@ -68,9 +99,20 @@ export const sanitizeDataGridDisplaySettings = (
     return { ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS };
   }
 
+  const dataTableFontSize = sanitizeDataTableFontSize(value.dataTableFontSize);
+  const sidebarTreeFontSize = sanitizeSidebarTreeFontSize(value.sidebarTreeFontSize);
+
   return {
     showDataTableVerticalBorders: value.showDataTableVerticalBorders === true,
     dataTableDensity: sanitizeDataTableDensity(value.dataTableDensity),
+    dataTableFontSize,
+    dataTableFontSizeFollowGlobal: typeof value.dataTableFontSizeFollowGlobal === 'boolean'
+      ? value.dataTableFontSizeFollowGlobal
+      : dataTableFontSize === null,
+    sidebarTreeFontSize,
+    sidebarTreeFontSizeFollowGlobal: typeof value.sidebarTreeFontSizeFollowGlobal === 'boolean'
+      ? value.sidebarTreeFontSizeFollowGlobal
+      : sidebarTreeFontSize === null,
   };
 };
 

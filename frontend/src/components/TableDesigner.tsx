@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext, useMemo, useRef, useCallback } from 'react';
 import { Table, Tabs, Button, message, Input, Checkbox, Modal, AutoComplete, Tooltip, Select, Empty, Space, Tag, Radio } from 'antd';
-import { ReloadOutlined, SaveOutlined, PlusOutlined, DeleteOutlined, MenuOutlined, FileTextOutlined, EyeOutlined, EditOutlined, ExclamationCircleOutlined, CopyOutlined } from '@ant-design/icons';
+import { ReloadOutlined, SaveOutlined, PlusOutlined, DeleteOutlined, MenuOutlined, FileTextOutlined, EyeOutlined, EditOutlined, ExclamationCircleOutlined, CopyOutlined, TableOutlined } from '@ant-design/icons';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -428,9 +428,14 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   
   const connections = useStore(state => state.connections);
   const theme = useStore(state => state.theme);
+  const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
+  const isV2Ui = appearance.uiVersion === 'v2';
   const resizeGuideColor = darkMode ? '#f6c453' : '#1890ff';
   const readOnly = !!tab.readOnly;
+  const designerTableTitle = tab.tableName || newTableName || '未命名表';
+  const designerDbTitle = tab.dbName || '默认库';
+  const designerColumnSummary = `${columns.length} 字段`;
   const panelRadius = 10;
   const panelFrameColor = darkMode ? 'rgba(0, 0, 0, 0.18)' : 'rgba(0, 0, 0, 0.12)';
   const panelToolbarBorder = darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
@@ -2495,7 +2500,7 @@ END;`;
   const columnsTabContent = (
       <div
           ref={containerRef}
-          className="table-designer-wrapper"
+          className={`table-designer-wrapper${isV2Ui ? ' gn-v2-designer-table-shell' : ''}`}
           style={{
               height: '100%',
               overflow: 'hidden',
@@ -2553,7 +2558,7 @@ END;`;
   );
 
   return (
-    <div ref={shellRef} className="table-designer-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: '6px 0', position: 'relative' }}>
+    <div ref={shellRef} className={`table-designer-shell${isV2Ui ? ' gn-v2-table-designer' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: '6px 0', position: 'relative' }}>
         <style>{`
             .table-designer-shell .ant-table,
             .table-designer-shell .ant-table-wrapper,
@@ -2644,7 +2649,21 @@ END;`;
             willChange: 'transform',
           }}
         />
+        {isV2Ui && (
+            <div className="gn-v2-designer-header">
+                <div className="gn-v2-designer-title">
+                    <span>SCHEMA DESIGNER</span>
+                    <strong>{designerTableTitle}</strong>
+                </div>
+                <div className="gn-v2-designer-meta">
+                    <span><TableOutlined /> {designerDbTitle}</span>
+                    <span>{designerColumnSummary}</span>
+                    {readOnly && <span>只读</span>}
+                </div>
+            </div>
+        )}
         <div
+            className={isV2Ui ? 'gn-v2-designer-toolbar' : undefined}
             style={{
                 padding: '10px 12px 8px 12px',
                 borderBottom: `1px solid ${panelToolbarBorder}`,
@@ -2716,6 +2735,7 @@ END;`;
             <div style={{ flex: 1 }} />
         </div>
         <Tabs 
+            className={isV2Ui ? 'gn-v2-designer-tabs' : undefined}
             activeKey={activeKey}
             onChange={(key) => React.startTransition(() => setActiveKey(key))}
             style={{
@@ -2747,9 +2767,9 @@ END;`;
                         key: 'indexes',
                         label: '索引',
                         children: (
-                            <div className="index-table-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className={`index-table-wrap${isV2Ui ? ' gn-v2-designer-tab-content' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
-                                    <div style={{ display: 'flex', gap: 8 }}>
+                                    <div className={isV2Ui ? 'gn-v2-designer-actionbar' : undefined} style={{ display: 'flex', gap: 8 }}>
                                         <Button size="small" icon={<PlusOutlined />} disabled={!supportsIndexSchemaOps()} onClick={openCreateIndexModal}>新增</Button>
                                         <Button size="small" icon={<EditOutlined />} disabled={!supportsIndexSchemaOps() || selectedIndexKeys.length !== 1} onClick={openEditIndexModal}>修改</Button>
                                         <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsIndexSchemaOps() || selectedIndexKeys.length === 0} onClick={handleDeleteIndex}>删除</Button>
@@ -2765,7 +2785,7 @@ END;`;
                                         )}
                                     </div>
                                 )}
-                                <div style={{ color: '#888', fontSize: 12 }}>
+                                <div className={isV2Ui ? 'gn-v2-designer-section-note' : undefined} style={{ color: '#888', fontSize: 12 }}>
                                     索引数：{groupedIndexes.length}，索引字段：{groupedIndexFieldCount}
                                 </div>
                                 <Table
@@ -2801,9 +2821,9 @@ END;`;
                         key: 'foreignKeys',
                         label: '外键',
                         children: (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className={isV2Ui ? 'gn-v2-designer-tab-content' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
-                                    <div style={{ display: 'flex', gap: 8 }}>
+                                    <div className={isV2Ui ? 'gn-v2-designer-actionbar' : undefined} style={{ display: 'flex', gap: 8 }}>
                                         <Button size="small" icon={<PlusOutlined />} disabled={!supportsForeignKeySchemaOps()} onClick={openCreateForeignKeyModal}>新增</Button>
                                         <Button size="small" icon={<EditOutlined />} disabled={!supportsForeignKeySchemaOps() || !selectedForeignKey} onClick={openEditForeignKeyModal}>修改</Button>
                                         <Button size="small" icon={<DeleteOutlined />} danger disabled={!supportsForeignKeySchemaOps() || !selectedForeignKey} onClick={handleDeleteForeignKey}>删除</Button>
@@ -2865,8 +2885,8 @@ END;`;
                         key: 'triggers',
                         label: '触发器',
                         children: (
-                            <div>
-                                <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
+                            <div className={isV2Ui ? 'gn-v2-designer-tab-content' : undefined}>
+                                <div className={isV2Ui ? 'gn-v2-designer-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
                                     <Button
                                         size="small"
                                         icon={<EyeOutlined />}
@@ -2929,7 +2949,7 @@ END;`;
                     label: 'DDL',
                     icon: <FileTextOutlined />,
                     children: (
-                        <div style={{ height: 'calc(100vh - 200px)', border: `1px solid ${panelFrameColor}`, borderRadius: panelRadius, background: panelBodyBg }}>
+                        <div className={isV2Ui ? 'gn-v2-designer-ddl-shell' : undefined} style={{ height: 'calc(100vh - 200px)', border: `1px solid ${panelFrameColor}`, borderRadius: panelRadius, background: panelBodyBg }}>
                             <Editor
                                 height="100%"
                                 language="sql"

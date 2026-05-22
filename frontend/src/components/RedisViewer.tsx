@@ -156,12 +156,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const connection = connections.find(c => c.id === connectionId);
     const workbenchTheme = useMemo(
         () => buildRedisWorkbenchTheme({ darkMode, opacity, blur, disableBackdropFilter: disableLocalBackdropFilter }),
-        [blur, darkMode, disableLocalBackdropFilter, opacity],
+        [blur, darkMode, disableLocalBackdropFilter, opacity, appearance.uiVersion],
     );
     const workbenchBackdropFilter = useMemo(
         () => resolveTextInputSafeBackdropFilter(blurToFilter(blur), disableLocalBackdropFilter),
         [blur, disableLocalBackdropFilter],
     );
+    const isV2Ui = appearance.uiVersion === 'v2';
     const keyAccentColor = workbenchTheme.accent;
     const jsonAccentColor = darkMode ? '#f6c453' : '#1890ff';
     const valueToolbarBg = workbenchTheme.panelBgStrong;
@@ -975,6 +976,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         if (!keyValue || !selectedKey) {
             return (
                 <div
+                    className={isV2Ui ? 'gn-v2-redis-empty-value' : undefined}
                     style={{
                         ...workbenchCardStyle,
                         height: '100%',
@@ -997,7 +999,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
             return (
                 <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{
+                    <div className={isV2Ui ? 'gn-v2-redis-value-subtoolbar' : undefined} style={{
                         padding: '4px 8px',
                         background: valueToolbarBg,
                         borderBottom: valueToolbarBorder,
@@ -1090,8 +1092,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             };
 
             return (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
                                 title: '添加字段',
@@ -1228,8 +1230,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             };
 
             return (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Space>
                             <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                                 Modal.confirm({
@@ -1375,8 +1377,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             };
 
             return (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
                                 title: '添加成员',
@@ -1489,8 +1491,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             };
 
             return (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
                                 title: '添加成员',
@@ -1671,8 +1673,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             };
 
             return (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                    <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-data-section' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
                                 title: '添加 Stream 消息',
@@ -1772,8 +1774,8 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
 
         return (
-            <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ ...workbenchCardStyle, padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexShrink: 0 }}>
+            <div className={isV2Ui ? 'gn-v2-redis-value-layout' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className={isV2Ui ? 'gn-v2-redis-value-header' : undefined} style={{ ...workbenchCardStyle, padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexShrink: 0 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
                         <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>
                             Active Key
@@ -1804,7 +1806,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             {keyValue.length > 0 && <Tag style={mutedPillTagStyle}>长度: {keyValue.length}</Tag>}
                         </div>
                     </div>
-                    <div style={{ ...workbenchSubCardStyle, padding: 4, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-value-actions' : undefined} style={{ ...workbenchSubCardStyle, padding: 4, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <Button size="small" style={actionButtonStyle} onClick={() => {
                             ttlForm.setFieldsValue({ ttl: keyValue.ttl > 0 ? keyValue.ttl : -1 });
                             setTtlModalOpen(true);
@@ -1815,7 +1817,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         </Popconfirm>
                     </div>
                 </div>
-                <div style={{ ...workbenchSubCardStyle, padding: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                <div className={isV2Ui ? 'gn-v2-redis-view-mode' : undefined} style={{ ...workbenchSubCardStyle, padding: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                     <span style={{ paddingInline: 10, fontSize: 12, color: workbenchTheme.textMuted }}>查看模式</span>
                     <Radio.Group size="small" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
                         <Radio.Button value="auto">自动</Radio.Button>
@@ -1824,7 +1826,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <Radio.Button value="hex">十六进制</Radio.Button>
                     </Radio.Group>
                 </div>
-                <div style={{ ...workbenchCardStyle, padding: 14, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                <div className={isV2Ui ? 'gn-v2-redis-value-card' : undefined} style={{ ...workbenchCardStyle, padding: 14, flex: 1, minHeight: 0, overflow: 'hidden' }}>
                     <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', height: '100%' }}>
                         {keyValue.type === 'string' && renderStringValue()}
                         {keyValue.type === 'hash' && renderHashValue()}
@@ -1843,10 +1845,10 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     }
 
     return (
-        <div className="redis-viewer-workbench" style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: workbenchBackdropFilter, WebkitBackdropFilter: workbenchBackdropFilter }}>
+        <div className={`redis-viewer-workbench${isV2Ui ? ' gn-v2-redis-workbench' : ''}`} style={{ display: 'flex', height: '100%', gap: 12, padding: 12, background: workbenchTheme.appBg, backdropFilter: workbenchBackdropFilter, WebkitBackdropFilter: workbenchBackdropFilter }}>
             {/* Left: Key List */}
-            <div ref={leftPanelRef} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
-                <div style={{ ...workbenchCardStyle, padding: 12 }}>
+            <div ref={leftPanelRef} className={isV2Ui ? 'gn-v2-redis-sidebar' : undefined} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
+                <div className={isV2Ui ? 'gn-v2-redis-header' : undefined} style={{ ...workbenchCardStyle, padding: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
                         <div>
                             <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>Key Explorer</div>
@@ -1875,7 +1877,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             enterButton={<SearchOutlined />}
                         />
                     </Space.Compact>
-                    <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <div className={isV2Ui ? 'gn-v2-redis-toolbar' : undefined} style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                         <Space wrap size={8}>
                             <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
                             <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => setNewKeyModalOpen(true)}>新建</Button>
@@ -1893,7 +1895,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         </Popconfirm>
                     </div>
                 </div>
-                <div style={{ ...workbenchCardStyle, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 10 }}>
+                <div className={isV2Ui ? 'gn-v2-redis-tree-card' : undefined} style={{ ...workbenchCardStyle, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 10 }}>
                     {isLargeKeyspace && (
                         <div style={{ padding: '8px 10px', fontSize: 12, color: workbenchTheme.textMuted, marginBottom: 8, borderRadius: 12, background: workbenchTheme.panelBgSubtle, border: workbenchTheme.panelBorder }}>
                             已启用大数据量性能模式（简化节点渲染，最多保留 {REDIS_LARGE_KEYSPACE_MAX_EXPANDED_GROUPS} 个展开分组）
@@ -1903,7 +1905,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <span>命名空间 / Key</span>
                         <span>类型 / TTL</span>
                     </div>
-                    <div ref={treeContainerRef} style={{ ...workbenchSubCardStyle, flex: 1, minHeight: 0, overflow: 'hidden', padding: 6 }}>
+                    <div ref={treeContainerRef} className={isV2Ui ? 'gn-v2-redis-tree-shell' : undefined} style={{ ...workbenchSubCardStyle, flex: 1, minHeight: 0, overflow: 'hidden', padding: 6 }}>
                         <Spin spinning={loading} size="small" style={{ width: '100%' }}>
                             <Tree
                                 blockNode
@@ -1939,7 +1941,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             <ResizableDivider targetRef={leftPanelRef} onResizeEnd={setLeftPanelWidth} />
 
             {/* Right: Value Viewer */}
-            <div style={{ flex: 1, overflow: 'hidden', minWidth: 300 }}>
+            <div className={isV2Ui ? 'gn-v2-redis-value-pane' : undefined} style={{ flex: 1, overflow: 'hidden', minWidth: 300 }}>
                 {valueLoading ? (
                     <div style={{ ...workbenchCardStyle, padding: 20, textAlign: 'center', color: workbenchTheme.textMuted }}>加载中...</div>
                 ) : (
@@ -2066,6 +2068,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             </Modal>
             {treeContextMenu && typeof document !== 'undefined' && createPortal((
                 <div
+                    className={isV2Ui ? 'gn-v2-context-menu gn-v2-redis-context-menu' : undefined}
                     style={{
                         position: 'fixed',
                         left: typeof window !== 'undefined' ? Math.min(treeContextMenu.x + 4, Math.max(16, window.innerWidth - 220)) : treeContextMenu.x,

@@ -6,16 +6,22 @@ export type ShortcutAction =
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
+  | 'newConnection'
+  | 'toggleAIPanel'
   | 'toggleLogPanel'
   | 'toggleTheme'
   | 'openShortcutManager'
   | 'toggleMacFullscreen'
   | 'resetWindowZoom';
 
-export interface ShortcutBinding {
+export type ShortcutPlatform = 'mac' | 'windows';
+
+export interface ShortcutPlatformBinding {
   combo: string;
   enabled: boolean;
 }
+
+export type ShortcutBinding = Record<ShortcutPlatform, ShortcutPlatformBinding>;
 
 export type ShortcutOptions = Record<ShortcutAction, ShortcutBinding>;
 
@@ -84,6 +90,8 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
+  'newConnection',
+  'toggleAIPanel',
   'toggleLogPanel',
   'toggleTheme',
   'openShortcutManager',
@@ -119,6 +127,15 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     label: '新建查询页',
     description: '创建一个新的 SQL 查询标签页',
   },
+  newConnection: {
+    label: '新建数据源',
+    description: '创建新的数据库、运行时或其他数据源连接',
+  },
+  toggleAIPanel: {
+    label: '打开 AI 数据洞察',
+    description: '打开右侧 AI 数据洞察面板',
+    allowInEditable: true,
+  },
   toggleLogPanel: {
     label: '切换日志面板',
     description: '打开或关闭 SQL 执行日志面板',
@@ -145,16 +162,54 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
 };
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
-  runQuery: { combo: 'Ctrl+Shift+R', enabled: true },
-  selectCurrentStatement: { combo: 'Ctrl+E', enabled: true },
-  sendAIChatMessage: { combo: 'Enter', enabled: true },
-  focusSidebarSearch: { combo: 'Ctrl+F', enabled: true },
-  newQueryTab: { combo: 'Ctrl+Shift+N', enabled: true },
-  toggleLogPanel: { combo: 'Ctrl+Shift+L', enabled: true },
-  toggleTheme: { combo: 'Ctrl+Shift+D', enabled: true },
-  openShortcutManager: { combo: 'Ctrl+,', enabled: true },
-  toggleMacFullscreen: { combo: 'Ctrl+Meta+F', enabled: true },
-  resetWindowZoom: { combo: 'Ctrl+Shift+0', enabled: true },
+  runQuery: {
+    mac: { combo: 'Meta+R', enabled: true },
+    windows: { combo: 'Ctrl+R', enabled: true },
+  },
+  selectCurrentStatement: {
+    mac: { combo: 'Meta+E', enabled: true },
+    windows: { combo: 'Ctrl+E', enabled: true },
+  },
+  sendAIChatMessage: {
+    mac: { combo: 'Enter', enabled: true },
+    windows: { combo: 'Enter', enabled: true },
+  },
+  focusSidebarSearch: {
+    mac: { combo: 'Meta+K', enabled: true },
+    windows: { combo: 'Ctrl+K', enabled: true },
+  },
+  newQueryTab: {
+    mac: { combo: 'Meta+Y', enabled: true },
+    windows: { combo: 'Ctrl+Q', enabled: true },
+  },
+  newConnection: {
+    mac: { combo: 'Meta+N', enabled: true },
+    windows: { combo: 'Ctrl+N', enabled: true },
+  },
+  toggleAIPanel: {
+    mac: { combo: 'Meta+J', enabled: true },
+    windows: { combo: 'Ctrl+J', enabled: true },
+  },
+  toggleLogPanel: {
+    mac: { combo: 'Meta+Shift+H', enabled: true },
+    windows: { combo: 'Ctrl+H', enabled: true },
+  },
+  toggleTheme: {
+    mac: { combo: 'Meta+Shift+D', enabled: true },
+    windows: { combo: 'Ctrl+Shift+D', enabled: true },
+  },
+  openShortcutManager: {
+    mac: { combo: 'Meta+,', enabled: true },
+    windows: { combo: 'Ctrl+,', enabled: true },
+  },
+  toggleMacFullscreen: {
+    mac: { combo: 'Ctrl+Meta+F', enabled: true },
+    windows: { combo: '', enabled: false },
+  },
+  resetWindowZoom: {
+    mac: { combo: '', enabled: false },
+    windows: { combo: 'Ctrl+Shift+0', enabled: true },
+  },
 };
 
 const normalizeKeyToken = (value: string): string => {
@@ -239,6 +294,10 @@ export const isShortcutMatch = (event: KeyboardEvent | ReactKeyboardEvent, combo
   return actual === expected;
 };
 
+export const getShortcutPlatform = (isMacRuntime?: boolean): ShortcutPlatform => (
+  isMacRuntime ? 'mac' : 'windows'
+);
+
 export const hasModifierKey = (combo: string): boolean => {
   const normalized = normalizeShortcutCombo(combo);
   if (!normalized) return false;
@@ -276,14 +335,49 @@ export const canRecordShortcutForAction = (action: ShortcutAction, combo: string
   return hasModifierKey(normalized);
 };
 
+const cloneShortcutPlatformBinding = (
+  action: ShortcutAction,
+  platform: ShortcutPlatform,
+  value?: Partial<ShortcutPlatformBinding> | null,
+): ShortcutPlatformBinding => {
+  const fallback = DEFAULT_SHORTCUT_OPTIONS[action]?.[platform] ?? { combo: '', enabled: false };
+  const normalized = normalizeShortcutCombo(value?.combo || fallback.combo);
+  return {
+    combo: normalized && canRecordShortcutForAction(action, normalized) ? normalized : fallback.combo,
+    enabled: value?.enabled === false ? false : fallback.enabled !== false,
+  };
+};
+
 export const cloneShortcutOptions = (value: ShortcutOptions): ShortcutOptions => {
   return SHORTCUT_ACTION_ORDER.reduce((acc, action) => {
     acc[action] = {
-      combo: normalizeShortcutCombo(value[action]?.combo || DEFAULT_SHORTCUT_OPTIONS[action].combo),
-      enabled: value[action]?.enabled !== false,
+      mac: cloneShortcutPlatformBinding(action, 'mac', value[action]?.mac),
+      windows: cloneShortcutPlatformBinding(action, 'windows', value[action]?.windows),
     };
     return acc;
   }, {} as ShortcutOptions);
+};
+
+const isLegacyShortcutBinding = (value: Record<string, unknown>): boolean => (
+  Object.prototype.hasOwnProperty.call(value, 'combo')
+  || Object.prototype.hasOwnProperty.call(value, 'enabled')
+);
+
+const sanitizeShortcutPlatformBinding = (
+  action: ShortcutAction,
+  platform: ShortcutPlatform,
+  value: unknown,
+  fallback: ShortcutPlatformBinding,
+): ShortcutPlatformBinding => {
+  if (!value || typeof value !== 'object') {
+    return { ...fallback };
+  }
+  const binding = value as Record<string, unknown>;
+  const combo = normalizeShortcutCombo(String(binding.combo || fallback.combo));
+  return {
+    combo: combo && canRecordShortcutForAction(action, combo) ? combo : fallback.combo,
+    enabled: binding.enabled === false ? false : true,
+  };
 };
 
 export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
@@ -296,14 +390,30 @@ export const sanitizeShortcutOptions = (value: unknown): ShortcutOptions => {
       return;
     }
     const binding = actionRaw as Record<string, unknown>;
-    const combo = normalizeShortcutCombo(String(binding.combo || defaults[action].combo));
+    if (isLegacyShortcutBinding(binding)) {
+      defaults[action] = {
+        mac: sanitizeShortcutPlatformBinding(action, 'mac', binding, defaults[action].mac),
+        windows: sanitizeShortcutPlatformBinding(action, 'windows', binding, defaults[action].windows),
+      };
+      return;
+    }
     defaults[action] = {
-      combo: combo && canRecordShortcutForAction(action, combo) ? combo : defaults[action].combo,
-      enabled: binding.enabled === false ? false : true,
+      mac: sanitizeShortcutPlatformBinding(action, 'mac', binding.mac, defaults[action].mac),
+      windows: sanitizeShortcutPlatformBinding(action, 'windows', binding.windows, defaults[action].windows),
     };
   });
 
   return defaults;
+};
+
+export const resolveShortcutBinding = (
+  options: Partial<ShortcutOptions> | null | undefined,
+  action: ShortcutAction,
+  platform: ShortcutPlatform,
+): ShortcutPlatformBinding => {
+  const defaults = DEFAULT_SHORTCUT_OPTIONS[action];
+  const binding = options?.[action];
+  return cloneShortcutPlatformBinding(action, platform, binding?.[platform] ?? defaults[platform]);
 };
 
 export const isEditableElement = (target: EventTarget | null): boolean => {
@@ -326,6 +436,44 @@ export const isEditableElement = (target: EventTarget | null): boolean => {
 export const getShortcutDisplay = (combo: string): string => {
   const normalized = normalizeShortcutCombo(combo);
   return normalized || '-';
+};
+
+const DISPLAY_SYMBOLS: Record<string, string> = {
+  Ctrl: '⌃',
+  Meta: '⌘',
+  Alt: '⌥',
+  Shift: '⇧',
+  Enter: '↵',
+  Esc: 'Esc',
+  Space: 'Space',
+  Up: '↑',
+  Down: '↓',
+  Left: '←',
+  Right: '→',
+};
+
+export const getShortcutDisplayLabel = (
+  combo: string,
+  platform: ShortcutPlatform,
+): string => {
+  const normalized = normalizeShortcutCombo(combo);
+  if (!normalized) return '-';
+  if (platform !== 'mac') return normalized;
+  return normalized
+    .split('+')
+    .filter(Boolean)
+    .map((part) => DISPLAY_SYMBOLS[part] || part)
+    .join('');
+};
+
+export const resolveShortcutDisplay = (
+  options: Partial<ShortcutOptions> | null | undefined,
+  action: ShortcutAction,
+  platform: ShortcutPlatform,
+): string => {
+  const binding = resolveShortcutBinding(options, action, platform);
+  if (!binding.enabled) return '-';
+  return getShortcutDisplayLabel(binding.combo, platform);
 };
 
 export type ConflictContext = 'global' | 'monaco' | 'datagrid';

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
@@ -10,7 +10,7 @@ import { DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDat
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
-import { getShortcutDisplay, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding } from "../utils/shortcuts";
+import { getShortcutDisplayLabel, getShortcutPlatform, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
@@ -18,6 +18,7 @@ import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart } from '../utils/sql';
 import { resolveCurrentSqlStatementRange } from '../utils/sqlStatementSelection';
+import { isMacLikePlatform } from '../utils/appearance';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 
@@ -669,12 +670,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
   const theme = useStore(state => state.theme);
+  const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
+  const isV2Ui = appearance.uiVersion === 'v2';
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const shortcutOptions = useStore(state => state.shortcutOptions);
+  const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+  const runQueryShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'runQuery', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+  const selectCurrentStatementShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'selectCurrentStatement', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
   const activeTabId = useStore(state => state.activeTabId);
   const autoFetchVisible = useAutoFetchVisibility();
 
@@ -689,6 +701,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
       return savedQueries.find((item) => item.id === tabId) || null;
   }, [savedQueries, tab.id, tab.savedQueryId]);
+  const activeConnectionName = useMemo(
+      () => connections.find(c => c.id === currentConnectionId)?.name || '未选择连接',
+      [connections, currentConnectionId],
+  );
+  const queryResultSummary = useMemo(() => {
+      if (loading) return '执行中';
+      if (resultSets.length === 0) return executionError ? '执行失败' : '未执行';
+      const totalRows = resultSets.reduce((sum, rs) => sum + (Array.isArray(rs.rows) ? rs.rows.length : 0), 0);
+      return `${resultSets.length} 组结果 / ${totalRows.toLocaleString()} 行`;
+  }, [executionError, loading, resultSets]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -960,7 +982,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
 
       // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding
-      const runBinding = shortcutOptions.runQuery;
+      const runBinding = runQueryShortcutBinding;
       if (runBinding?.enabled && runBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
               runBinding.combo, monaco.KeyMod, monaco.KeyCode
@@ -977,7 +999,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       }
 
-      const selectStatementBinding = shortcutOptions.selectCurrentStatement;
+      const selectStatementBinding = selectCurrentStatementShortcutBinding;
       if (selectStatementBinding?.enabled && selectStatementBinding.combo) {
           const keyBinding = comboToMonacoKeyBinding(
               selectStatementBinding.combo, monaco.KeyMod, monaco.KeyCode
@@ -2215,7 +2237,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [activeTabId, tab.id]);
 
   useEffect(() => {
-      const binding = shortcutOptions.runQuery;
+      const binding = runQueryShortcutBinding;
       if (!binding?.enabled || !binding.combo) {
           return;
       }
@@ -2240,7 +2262,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return () => {
           window.removeEventListener('keydown', handleRunShortcut, true);
       };
-  }, [activeTabId, tab.id, shortcutOptions.runQuery, handleRun]);
+  }, [activeTabId, tab.id, runQueryShortcutBinding, handleRun]);
 
   // Re-register Monaco internal keybinding when runQuery shortcut changes
   useEffect(() => {
@@ -2253,7 +2275,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
 
-      const binding = shortcutOptions.runQuery;
+      const binding = runQueryShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
       const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
@@ -2274,7 +2296,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               runQueryActionRef.current = null;
           }
       };
-  }, [shortcutOptions.runQuery]);
+  }, [runQueryShortcutBinding]);
 
   useEffect(() => {
       if (selectCurrentStatementActionRef.current) {
@@ -2286,7 +2308,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
 
-      const binding = shortcutOptions.selectCurrentStatement;
+      const binding = selectCurrentStatementShortcutBinding;
       if (!binding?.enabled || !binding.combo) return;
 
       const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
@@ -2305,7 +2327,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               selectCurrentStatementActionRef.current = null;
           }
       };
-  }, [shortcutOptions.selectCurrentStatement]);
+  }, [selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
@@ -2505,7 +2527,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   return (
-    <div ref={queryEditorRootRef} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <style>{`
         .query-result-tabs {
           flex: 1 1 auto;
@@ -2549,8 +2571,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           transition: none !important;
         }
       `}</style>
-      <div ref={editorPaneRef}>
-      <div style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+      <div ref={editorPaneRef} className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}>
+      {isV2Ui && (
+        <div className="gn-v2-query-header">
+          <div className="gn-v2-query-title">
+            <span>SQL WORKSPACE</span>
+            <strong>{currentDb || '未选择数据库'}</strong>
+          </div>
+          <div className="gn-v2-query-context">
+            <span><DatabaseOutlined /> {activeConnectionName}</span>
+            <span>{queryResultSummary}</span>
+          </div>
+        </div>
+      )}
+      <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
             placeholder="选择连接"
@@ -2587,9 +2621,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         <Button.Group>
           <Tooltip
               title={
-                  shortcutOptions.runQuery?.enabled && shortcutOptions.runQuery?.combo
-                      ? `运行（${getShortcutDisplay(shortcutOptions.runQuery.combo)}）`
-                      : '运行'
+	                  runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
+	                      ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
+	                      : '运行'
               }
           >
               <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={loading}>
@@ -2626,7 +2660,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         </Dropdown>
       </div>
       
-      <div style={{ height: editorHeight, minHeight: '100px' }}>
+      <div className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined} style={{ height: editorHeight, minHeight: '100px' }}>
         <Editor 
           height="100%" 
           defaultLanguage="sql" 
@@ -2644,6 +2678,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       </div>
 
       <div 
+        className={isV2Ui ? 'gn-v2-query-resizer' : undefined}
         onMouseDown={handleMouseDown}
         style={{ 
             height: '5px', 
@@ -2656,7 +2691,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       />
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className={isV2Ui ? 'gn-v2-query-results' : undefined} style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
         {resultSets.length > 0 ? (
           <Tabs
               className="query-result-tabs"
@@ -2695,7 +2730,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       if (isAffectedResult) {
                           const affected = Number(rs.rows[0]?.affectedRows ?? 0);
                           return (
-                              <div style={{
+                              <div className={isV2Ui ? 'gn-v2-query-success' : undefined} style={{
                                   flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                                   flexDirection: 'column', gap: 8, color: '#666', userSelect: 'text',
                               }}>
@@ -2727,7 +2762,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }))}
           />
         ) : executionError ? (
-          <div style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
+          <div className={isV2Ui ? 'gn-v2-query-error' : undefined} style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
               <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <CloseOutlined />
                   <span>执行失败</span>
@@ -2756,7 +2791,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               </div>
           </div>
         ) : (
-          <div style={{ flex: 1, minHeight: 0 }} />
+          <div className={isV2Ui ? 'gn-v2-query-empty' : undefined} style={{ flex: 1, minHeight: 0 }}>
+            {isV2Ui && (
+              <div>
+                <strong>等待执行 SQL</strong>
+                <span>运行查询后，结果会在下方以新版数据网格展示。</span>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

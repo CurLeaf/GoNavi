@@ -17,7 +17,37 @@ vi.mock('../../../wailsjs/go/app/App', () => ({
   DBGetTables: vi.fn(),
   DBShowCreateTable: vi.fn(),
   DBGetDatabases: vi.fn(),
+  DBGetColumns: vi.fn(),
 }));
+
+const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChatInput>> = {}) => renderToStaticMarkup(
+  <AIChatInput
+    input=""
+    setInput={() => {}}
+    draftImages={[]}
+    setDraftImages={() => {}}
+    sending={false}
+    onSend={() => {}}
+    onStop={() => {}}
+    handleKeyDown={() => {}}
+    activeConnName=""
+    activeContext={null}
+    activeProvider={{ model: '', models: [] }}
+    dynamicModels={[]}
+    loadingModels={false}
+    sendShortcutBinding={{ combo: 'Enter', enabled: true }}
+    composerNotice={null}
+    onModelChange={() => {}}
+    onFetchModels={() => {}}
+    textareaRef={React.createRef<HTMLTextAreaElement>()}
+    darkMode={false}
+    textColor="#162033"
+    mutedColor="rgba(16,24,40,0.55)"
+    overlayTheme={buildOverlayWorkbenchTheme(false)}
+    isV2Ui
+    {...overrides}
+  />
+);
 
 describe('AIChatInput notice layout', () => {
   it('renders the composer notice above the input editor', () => {
@@ -49,6 +79,7 @@ describe('AIChatInput notice layout', () => {
         textColor="#162033"
         mutedColor="rgba(16,24,40,0.55)"
         overlayTheme={buildOverlayWorkbenchTheme(false)}
+        isV2Ui
       />
     );
 
@@ -77,6 +108,7 @@ describe('AIChatInput notice layout', () => {
         dynamicModels={[]}
         loadingModels={false}
         sendShortcutBinding={{ combo: 'Meta+Enter', enabled: true }}
+        shortcutPlatform="mac"
         composerNotice={null}
         onModelChange={() => {}}
         onFetchModels={() => {}}
@@ -85,9 +117,63 @@ describe('AIChatInput notice layout', () => {
         textColor="#162033"
         mutedColor="rgba(16,24,40,0.55)"
         overlayTheme={buildOverlayWorkbenchTheme(false)}
+        isV2Ui
       />
     );
 
-    expect(markup).toContain('Meta+Enter 发送');
+    expect(markup).toContain('⌘↵ 发送');
+  });
+
+  it('renders the model selector without the filled select variant', () => {
+    const markup = renderToStaticMarkup(
+      <AIChatInput
+        input=""
+        setInput={() => {}}
+        draftImages={[]}
+        setDraftImages={() => {}}
+        sending={false}
+        onSend={() => {}}
+        onStop={() => {}}
+        handleKeyDown={() => {}}
+        activeConnName=""
+        activeContext={null}
+        activeProvider={{ model: 'gpt-5.5', models: ['gpt-5.5'] }}
+        dynamicModels={[]}
+        loadingModels={false}
+        sendShortcutBinding={{ combo: 'Enter', enabled: true }}
+        composerNotice={null}
+        onModelChange={() => {}}
+        onFetchModels={() => {}}
+        textareaRef={React.createRef<HTMLTextAreaElement>()}
+        darkMode={false}
+        textColor="#162033"
+        mutedColor="rgba(16,24,40,0.55)"
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        isV2Ui
+      />
+    );
+
+    expect(markup).toContain('gn-v2-ai-model-select');
+    expect(markup).not.toContain('ant-select-filled');
+    expect(markup).not.toContain('ant-select-show-search');
+  });
+
+  it('renders an enabled type-safe send button when text is present', () => {
+    const markup = renderAIChatInput({ input: 'select 1' });
+    const sendButton = markup.match(/<button[^>]*class="ai-chat-send-btn gn-v2-ai-send"[^>]*>/)?.[0] || '';
+
+    expect(sendButton).toContain('type="button"');
+    expect(sendButton).toContain('title="发送"');
+    expect(sendButton).not.toContain('disabled');
+  });
+
+  it('keeps the legacy composer free of v2-only layout classes by default', () => {
+    const markup = renderAIChatInput({ isV2Ui: false, input: 'select 1' });
+
+    expect(markup).toContain('class="ai-chat-input-area"');
+    expect(markup).toContain('class="ai-chat-send-btn"');
+    expect(markup).not.toContain('gn-v2-ai-composer');
+    expect(markup).not.toContain('gn-v2-ai-model-select');
+    expect(markup).not.toContain('gn-v2-ai-send');
   });
 });

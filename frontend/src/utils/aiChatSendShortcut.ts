@@ -1,4 +1,4 @@
-import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplay, isShortcutMatch, type ShortcutBinding } from './shortcuts';
+import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplayLabel, isShortcutMatch, type ShortcutPlatform, type ShortcutPlatformBinding } from './shortcuts';
 
 export interface AIChatSendShortcutKeyEventLike {
   key?: string;
@@ -18,16 +18,19 @@ export interface AIChatSendShortcutKeyEventLike {
   stopPropagation?: () => void;
 }
 
-export const getAIChatSendShortcutLabel = (binding: ShortcutBinding | undefined): string => {
+export const getAIChatSendShortcutLabel = (
+  binding: ShortcutPlatformBinding | undefined,
+  platform: ShortcutPlatform = 'windows',
+): string => {
   if (binding?.enabled === false) {
     return '快捷键发送已关闭';
   }
-  const combo = binding?.combo || DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage.combo;
-  return `${getShortcutDisplay(combo)} 发送`;
+  const combo = binding?.combo || DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage.windows.combo;
+  return `${getShortcutDisplayLabel(combo, platform)} 发送`;
 };
 
 export const shouldSendAIChatOnKeyDown = (
-  binding: ShortcutBinding | undefined,
+  binding: ShortcutPlatformBinding | undefined,
   event: AIChatSendShortcutKeyEventLike,
 ): boolean => {
   if (!binding?.enabled) {
@@ -45,7 +48,7 @@ export const shouldSendAIChatOnKeyDown = (
 };
 
 export const consumeAIChatSendShortcutOnKeyDown = (
-  binding: ShortcutBinding | undefined,
+  binding: ShortcutPlatformBinding | undefined,
   event: AIChatSendShortcutKeyEventLike,
   onSend: () => void,
 ): boolean => {

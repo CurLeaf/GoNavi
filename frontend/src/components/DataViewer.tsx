@@ -255,6 +255,7 @@ type ViewerScrollSnapshot = {
 };
 
 const viewerFilterSnapshotsByTab = new Map<string, ViewerFilterSnapshot>();
+const VIEWER_SCROLL_SNAPSHOT_PERSIST_DELAY_MS = 160;
 
 const normalizeViewerFilterConditions = (conditions: FilterCondition[] | undefined): FilterCondition[] => {
   if (!Array.isArray(conditions)) return [];
@@ -289,7 +290,7 @@ const getViewerFilterSnapshot = (tabId: string): ViewerFilterSnapshot => {
   };
 };
 
-const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
+const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({ tab, isActive = true }) => {
   const initialViewerSnapshot = useMemo(() => getViewerFilterSnapshot(tab.id), [tab.id]);
   const [data, setData] = useState<any[]>([]);
   const [columnNames, setColumnNames] = useState<string[]>([]);
@@ -298,6 +299,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   const [loading, setLoading] = useState(false);
   const connections = useStore(state => state.connections);
   const addSqlLog = useStore(state => state.addSqlLog);
+  const appearance = useStore(state => state.appearance);
+  const isV2Ui = appearance?.uiVersion === 'v2';
   const fetchSeqRef = useRef(0);
   const countSeqRef = useRef(0);
   const countKeyRef = useRef<string>('');
@@ -318,6 +321,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
     top: initialViewerSnapshot.scrollTop,
     left: initialViewerSnapshot.scrollLeft,
   });
+  const pendingScrollSnapshotPersistRef = useRef<ViewerScrollSnapshot | null>(null);
+  const scrollSnapshotPersistTimerRef = useRef<number | null>(null);
   const initialLoadRef = useRef(false);
   const skipNextAutoFetchRef = useRef(false);
 
@@ -375,7 +380,16 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
   useEffect(() => {
     return () => {
-      persistViewerSnapshot(tab.id);
+      if (scrollSnapshotPersistTimerRef.current !== null) {
+        window.clearTimeout(scrollSnapshotPersistTimerRef.current);
+        scrollSnapshotPersistTimerRef.current = null;
+      }
+      const pendingScrollSnapshot = pendingScrollSnapshotPersistRef.current;
+      pendingScrollSnapshotPersistRef.current = null;
+      persistViewerSnapshot(tab.id, pendingScrollSnapshot ? {
+        scrollTop: pendingScrollSnapshot.top,
+        scrollLeft: pendingScrollSnapshot.left,
+      } : undefined);
     };
   }, [tab.id, persistViewerSnapshot]);
 
@@ -412,10 +426,18 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
 
   const handleTableScrollSnapshotChange = useCallback((snapshot: ViewerScrollSnapshot) => {
     scrollSnapshotRef.current = snapshot;
-    persistViewerSnapshot(tab.id, {
-      scrollTop: snapshot.top,
-      scrollLeft: snapshot.left,
-    });
+    pendingScrollSnapshotPersistRef.current = snapshot;
+    if (scrollSnapshotPersistTimerRef.current !== null) return;
+    scrollSnapshotPersistTimerRef.current = window.setTimeout(() => {
+      scrollSnapshotPersistTimerRef.current = null;
+      const pendingScrollSnapshot = pendingScrollSnapshotPersistRef.current;
+      pendingScrollSnapshotPersistRef.current = null;
+      if (!pendingScrollSnapshot) return;
+      persistViewerSnapshot(tab.id, {
+        scrollTop: pendingScrollSnapshot.top,
+        scrollLeft: pendingScrollSnapshot.left,
+      });
+    }, VIEWER_SCROLL_SNAPSHOT_PERSIST_DELAY_MS);
   }, [tab.id, persistViewerSnapshot]);
 
   const handleManualTotalCount = useCallback(async () => {
@@ -1092,7 +1114,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
   }, [tab.id, tab.connectionId, tab.dbName, tab.tableName, sortInfo, filterConditions, quickWhereCondition]); // Initial load and re-load on sort/filter
 
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, minWidth: 0, height: '100%', width: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div className={isV2Ui ? 'gn-v2-data-viewer' : undefined} style={{ flex: '1 1 auto', minHeight: 0, minWidth: 0, height: '100%', width: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <DataGrid
           data={data}
           columnNames={columnNames}
@@ -1123,6 +1145,6 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAct
       />
     </div>
   );
-};
+});
 
 export default DataViewer;

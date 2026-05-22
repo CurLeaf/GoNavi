@@ -26,12 +26,20 @@ const storeState = vi.hoisted(() => ({
   savedQueries: [] as SavedQuery[],
   saveQuery: vi.fn(),
   theme: 'light',
+  appearance: { uiVersion: 'legacy' as const },
   sqlFormatOptions: { keywordCase: 'upper' as const },
   setSqlFormatOptions: vi.fn(),
   queryOptions: { maxRows: 5000 },
   setQueryOptions: vi.fn(),
   shortcutOptions: {
-    runQuery: { enabled: false, combo: '' },
+    runQuery: {
+      mac: { enabled: false, combo: '' },
+      windows: { enabled: false, combo: '' },
+    },
+    selectCurrentStatement: {
+      mac: { enabled: false, combo: '' },
+      windows: { enabled: false, combo: '' },
+    },
   },
   activeTabId: 'tab-1',
   aiPanelVisible: false,

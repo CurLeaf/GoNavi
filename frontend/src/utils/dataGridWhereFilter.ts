@@ -42,6 +42,10 @@ const WHERE_OPERATORS = [
   'IS NOT NULL',
 ];
 
+const WHERE_CONTINUATION_KEYWORDS = ['AND', 'OR'];
+const WHERE_OPERATOR_CONTEXT_PATTERN = /\bNOT\s+LIKE\b|\bIS\s+NOT\s+NULL\b|\bIS\s+NULL\b|\bIS\s+NOT\b|\bBETWEEN\b|\bLIKE\b|\bIN\b|>=|<=|<>|!=|=|>|</gi;
+const WHERE_COMPLETE_SUFFIX_OPERATOR_PATTERN = /\bIS\s+(?:NOT\s+)?NULL\s*$/i;
+
 const toTrimmedString = (value: unknown): string => {
   if (typeof value === 'string') {
     return value.trim();
@@ -88,6 +92,35 @@ const normalizeSuggestionPrefix = (value: string): string => {
 
 const shouldSuggestOperators = (input: string): boolean => {
   return /\s$/.test(input) && /(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+"|`[^`]+`)\s$/.test(input);
+};
+
+const isLogicalConnectorCursor = (value: string): boolean => {
+  return /(?:^|[\s(])(?:AND|OR|NOT)\s*$/i.test(String(value || ''));
+};
+
+const getLastWhereOperatorMatch = (value: string): RegExpMatchArray | null => {
+  const matches = [...String(value || '').matchAll(WHERE_OPERATOR_CONTEXT_PATTERN)];
+  return matches.length > 0 ? matches[matches.length - 1] : null;
+};
+
+const isAwaitingValueAfterOperator = (value: string): boolean => {
+  const text = String(value || '');
+  if (isLogicalConnectorCursor(text)) return false;
+  const operatorMatch = getLastWhereOperatorMatch(text);
+  if (!operatorMatch || operatorMatch.index === undefined) return false;
+  const afterOperator = text.slice(operatorMatch.index + operatorMatch[0].length);
+  return !/\S/.test(afterOperator);
+};
+
+const hasCompletedPredicateBeforeCursor = (value: string): boolean => {
+  const text = String(value || '');
+  if (isLogicalConnectorCursor(text)) return false;
+  if (WHERE_COMPLETE_SUFFIX_OPERATOR_PATTERN.test(text)) return true;
+
+  const operatorMatch = getLastWhereOperatorMatch(text);
+  if (!operatorMatch || operatorMatch.index === undefined) return false;
+  const afterOperator = text.slice(operatorMatch.index + operatorMatch[0].length);
+  return /\S/.test(afterOperator);
 };
 
 const toOperatorInsertText = (operator: string): string => {
@@ -212,10 +245,12 @@ export const resolveWhereConditionSuggestions = ({
   dbType: string;
 }): WhereConditionSuggestion[] => {
   const text = String(input || '');
-  const prefix = normalizeSuggestionPrefix(text).replace(/^["`]/, '').toLowerCase();
+  const rawPrefix = normalizeSuggestionPrefix(text);
+  const prefix = rawPrefix.replace(/^["`]/, '').toLowerCase();
+  const textBeforePrefix = rawPrefix ? text.slice(0, text.length - rawPrefix.length) : text;
   const options: WhereConditionSuggestion[] = [];
 
-  if (shouldSuggestOperators(text)) {
+  if (!isLogicalConnectorCursor(text) && shouldSuggestOperators(text)) {
     WHERE_OPERATORS.forEach((operator) => {
       const insertText = toOperatorInsertText(operator);
       options.push({
@@ -226,6 +261,29 @@ export const resolveWhereConditionSuggestions = ({
         kind: 'operator',
       });
     });
+    return options;
+  }
+
+  if (isAwaitingValueAfterOperator(textBeforePrefix)) {
+    return options;
+  }
+
+  if (hasCompletedPredicateBeforeCursor(textBeforePrefix)) {
+    if (!prefix && !/\s$/.test(text)) {
+      return options;
+    }
+    WHERE_CONTINUATION_KEYWORDS
+      .filter((keyword) => !prefix || keyword.toLowerCase().startsWith(prefix))
+      .forEach((keyword) => {
+        const insertText = `${keyword} `;
+        options.push({
+          label: keyword,
+          insertText,
+          value: applyWhereConditionSuggestion(text, insertText),
+          detail: '关键字',
+          kind: 'keyword',
+        });
+      });
     return options;
   }
 

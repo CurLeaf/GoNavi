@@ -26,6 +26,7 @@ const storeState = vi.hoisted(() => ({
     enabled: true,
     opacity: 1,
     blur: 0,
+    uiVersion: 'v2',
     showDataTableVerticalBorders: false,
     dataTableDensity: 'comfortable',
   },
@@ -74,7 +75,16 @@ vi.mock('../store', () => ({
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
 
 vi.mock('@monaco-editor/react', () => ({
-  default: ({ value }: { value?: string }) => <pre>{value}</pre>,
+  default: (props: { value?: string; language?: string; theme?: string; options?: Record<string, unknown> }) => (
+    <div
+      data-monaco-editor="true"
+      data-language={props.language}
+      data-theme={props.theme}
+      data-read-only={String(Boolean(props.options?.readOnly))}
+    >
+      {props.value}
+    </div>
+  ),
 }));
 
 vi.mock('./ImportPreviewModal', () => ({
@@ -83,6 +93,7 @@ vi.mock('./ImportPreviewModal', () => ({
 
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
+
   return {
     ReloadOutlined: Icon,
     ImportOutlined: Icon,
@@ -104,6 +115,10 @@ vi.mock('@ant-design/icons', () => {
     RightOutlined: Icon,
     RobotOutlined: Icon,
     SearchOutlined: Icon,
+    TableOutlined: Icon,
+    DatabaseOutlined: Icon,
+    NodeIndexOutlined: Icon,
+    ThunderboltOutlined: Icon,
   };
 });
 
@@ -181,6 +196,20 @@ vi.mock('antd', () => {
   Modal.useModal = () => [{ info: vi.fn(() => ({ destroy: vi.fn() })) }, null];
 
   const passthrough = ({ children }: any) => <>{children}</>;
+  const Segmented = ({ value, options, onChange }: any) => (
+    <div data-segmented-value={value}>
+      {(options || []).map((option: any) => (
+        <button
+          key={option.value}
+          type="button"
+          data-segmented-option={option.value}
+          onClick={() => onChange?.(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return {
     Table: () => <table />,
@@ -193,7 +222,7 @@ vi.mock('antd', () => {
     Select: () => null,
     Modal,
     Checkbox: ({ checked, onChange }: any) => <input type="checkbox" checked={checked} onChange={onChange} />,
-    Segmented: () => null,
+    Segmented,
     Tooltip: passthrough,
     Popover: passthrough,
     DatePicker: () => null,
@@ -517,5 +546,233 @@ describe('DataGrid DDL interactions', () => {
 
     expect(textContent(renderer!.root)).not.toContain('CREATE TABLE users');
     expect(renderer!.root.findAll((node) => node.props['data-modal-title'] === 'DDL - orders')).toHaveLength(0);
+  });
+
+  it('switches the v2 footer field tab into the main fields view', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '字段信息').props.onClick();
+    });
+
+    const content = textContent(renderer!.root);
+    expect(content).toContain('FIELDS');
+    expect(content).toContain('2 个字段');
+    expect(content).toContain('id');
+    expect(content).toContain('name');
+  });
+
+  it('returns to the legacy table view when v2-only footer views are active during UI switch', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '字段信息').props.onClick();
+    });
+    expect(textContent(renderer!.root)).toContain('FIELDS');
+
+    storeState.appearance.uiVersion = 'legacy';
+    await act(async () => {
+      renderer!.update(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const content = textContent(renderer!.root);
+    expect(content).not.toContain('FIELDS');
+    expect(content).not.toContain('gn-v2-data-grid-fields-view');
+    expect(content).toContain('数据预览');
+    expect(content).toContain('结果视图');
+    expect(content).toContain('字段信息');
+  });
+
+  it('renders the v2 footer DDL view with the Monaco SQL editor', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBShowCreateTable.mockResolvedValueOnce({
+      success: true,
+      data: 'CREATE TABLE users (`id` bigint)',
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+
+    const editors = renderer!.root.findAll((node) => node.props['data-monaco-editor'] === 'true');
+    expect(editors).toHaveLength(1);
+    expect(editors[0].props['data-language']).toBe('sql');
+    expect(editors[0].props['data-read-only']).toBe('true');
+    expect(textContent(editors[0])).toContain('CREATE TABLE users');
+    expect(renderer!.root.findAll((node) => node.type === 'pre' && textContent(node).includes('CREATE TABLE users'))).toHaveLength(0);
+  });
+
+  it('opens the v2 DDL view as a right sidebar while keeping the table visible', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBShowCreateTable.mockResolvedValueOnce({
+      success: true,
+      data: 'CREATE TABLE users (`id` bigint)',
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-segmented-option': 'side' }).props.onClick();
+    });
+
+    const sideWorkspace = renderer!.root.findByProps({ 'data-grid-ddl-layout': 'side' });
+    expect(sideWorkspace.props.className).toBe('gn-v2-data-grid-split-workspace');
+    expect(renderer!.root.findByProps({ 'aria-label': '表 DDL 侧栏' }).props.className).toBe('gn-v2-data-grid-ddl-sidebar');
+    expect(renderer!.root.findByProps({ 'data-grid-ddl-view': 'side' }).props.className).toContain('is-side');
+    expect(renderer!.root.findAllByType('table')).toHaveLength(1);
+    expect(sideWorkspace.props.style.gridTemplateColumns).toBe('minmax(0, 1fr) 8px 420px');
+    expect(sideWorkspace.props.style['--gn-v2-ddl-sidebar-width']).toBe('420px');
+    expect(renderer!.root.findByProps({ 'data-grid-ddl-resizer': 'true' }).props['aria-valuenow']).toBe(420);
+
+    const editors = renderer!.root.findAll((node) => node.props['data-monaco-editor'] === 'true');
+    expect(editors).toHaveLength(1);
+    expect(editors[0].props['data-language']).toBe('sql');
+    expect(textContent(editors[0])).toContain('CREATE TABLE users');
+  });
+
+  it('previews and commits the v2 DDL sidebar width after dragging the separator', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBShowCreateTable.mockResolvedValueOnce({
+      success: true,
+      data: 'CREATE TABLE users (`id` bigint)',
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByProps({ 'data-segmented-option': 'side' }).props.onClick();
+    });
+
+    const container = renderer!.root.findByProps({ 'data-grid-ddl-layout': 'side' });
+    expect(container.props.style.gridTemplateColumns).toBe('minmax(0, 1fr) 8px 420px');
+    expect(renderer!.root.findByProps({ 'data-grid-ddl-resize-preview': 'true' }).props.className).toBe('gn-v2-data-grid-ddl-resize-preview');
+
+    const addEventListenerMock = vi.mocked(document.addEventListener);
+    const removeEventListenerMock = vi.mocked(document.removeEventListener);
+    const resizer = renderer!.root.findByProps({ 'data-grid-ddl-resizer': 'true' });
+    await act(async () => {
+      resizer.props.onMouseDown({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 900,
+      });
+    });
+
+    const mouseMoveHandler = addEventListenerMock.mock.calls.find(([eventName]) => eventName === 'mousemove')?.[1] as ((event: MouseEvent) => void) | undefined;
+    const mouseUpHandler = addEventListenerMock.mock.calls.find(([eventName]) => eventName === 'mouseup')?.[1] as (() => void) | undefined;
+    expect(mouseMoveHandler).toBeTypeOf('function');
+    expect(mouseUpHandler).toBeTypeOf('function');
+
+    await act(async () => {
+      mouseMoveHandler?.({ clientX: 780 } as MouseEvent);
+    });
+
+    const movingContainer = renderer!.root.findByProps({ 'data-grid-ddl-layout': 'side' });
+    expect(movingContainer.props.style.gridTemplateColumns).toBe('minmax(0, 1fr) 8px 420px');
+    expect(movingContainer.props.style['--gn-v2-ddl-sidebar-width']).toBe('420px');
+    expect(renderer!.root.findByProps({ 'data-grid-ddl-resizer': 'true' }).props['aria-valuenow']).toBe(420);
+
+    await act(async () => {
+      mouseUpHandler?.();
+    });
+
+    const resizedContainer = renderer!.root.findByProps({ 'data-grid-ddl-layout': 'side' });
+    expect(resizedContainer.props.style.gridTemplateColumns).toBe('minmax(0, 1fr) 8px 540px');
+    expect(resizedContainer.props.style['--gn-v2-ddl-sidebar-width']).toBe('540px');
+    expect(renderer!.root.findByProps({ 'data-grid-ddl-resizer': 'true' }).props['aria-valuenow']).toBe(540);
+    expect(removeEventListenerMock).toHaveBeenCalledWith('mousemove', mouseMoveHandler);
+    expect(removeEventListenerMock).toHaveBeenCalledWith('mouseup', mouseUpHandler);
   });
 });

@@ -10,7 +10,7 @@ import type {
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
 } from '../types';
-import { DownOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, DownOutlined, HistoryOutlined, TableOutlined, WarningOutlined } from '@ant-design/icons';
 import './AIChatPanel.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
@@ -29,6 +29,8 @@ import { buildAIReadonlyPreviewSQL } from '../utils/aiSqlLimit';
 import { resolveAITableSchemaToolResult } from '../utils/aiTableSchemaTool';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
+import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts';
+import { isMacLikePlatform } from '../utils/appearance';
 
 interface AIChatPanelProps {
     width?: number;
@@ -230,6 +232,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const [panelWidth, setPanelWidth] = useState(width);
     const [isResizing, setIsResizing] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
+    const [activePanelMode, setActivePanelMode] = useState<'chat' | 'insights' | 'history'>('chat');
     
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -245,6 +248,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
+    const appearance = useStore(state => state.appearance);
     const createNewAISession = useStore(state => state.createNewAISession);
     const addAIChatMessage = useStore(state => state.addAIChatMessage);
     const updateAIChatMessage = useStore(state => state.updateAIChatMessage);
@@ -257,8 +261,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const connections = useStore(state => state.connections);
     const tabs = useStore(state => state.tabs);
     const activeTabId = useStore(state => state.activeTabId);
+    const sqlLogs = useStore(state => state.sqlLogs);
+    const aiChatSessions = useStore(state => state.aiChatSessions);
+    const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
-    const aiChatSendShortcutBinding = useStore(state => state.shortcutOptions.sendAIChatMessage);
+    const isV2Ui = appearance.uiVersion === 'v2';
+    const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+    const aiChatSendShortcutBinding = useStore(state => resolveShortcutBinding(
+        state.shortcutOptions,
+        'sendAIChatMessage',
+        activeShortcutPlatform,
+    ));
 
     const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
         const state = useStore.getState();
@@ -476,6 +489,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }, []);
 
     useEffect(() => {
+        if (messages.length === 0) return;
         messagesEndRef.current?.scrollIntoView({ behavior: sending ? 'auto' : 'smooth', block: 'end' });
     }, [messages.length, sending]);
 
@@ -1516,7 +1530,9 @@ SELECT * FROM users WHERE status = 1;
             }
             animationFrameId = requestAnimationFrame(() => {
                 const delta = resizeStartX.current - e.clientX;
-                const newWidth = Math.min(Math.max(resizeStartWidth.current + delta, 280), 700);
+                const minWidth = isV2Ui ? 300 : 280;
+                const maxWidth = isV2Ui ? 520 : 700;
+                const newWidth = Math.min(Math.max(resizeStartWidth.current + delta, minWidth), maxWidth);
                 dragWidthRef.current = newWidth;
                 
                 // 仅更新 ghost 虚线位置，通过绝对定位规避重排
@@ -1552,7 +1568,7 @@ SELECT * FROM users WHERE status = 1;
             document.body.style.userSelect = '';
             document.body.style.pointerEvents = '';
         };
-    }, [isResizing, onWidthChange]);
+    }, [isResizing, isV2Ui, onWidthChange]);
 
     // 回推幽灵上下文：基于 get_tables 记录进行表级精确匹配（useMemo 缓存，避免每帧重算）
     const { inferredConnectionId, inferredDbName } = useMemo(() => {
@@ -1595,9 +1611,67 @@ SELECT * FROM users WHERE status = 1;
         const ck = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
         return (aiContexts[ck] || []).map(c => `${c.dbName}.${c.tableName}`);
     }, [activeContext?.connectionId, activeContext?.dbName, aiContexts]);
+    const aiInsights = useMemo(() => {
+        const recentLogs = sqlLogs.slice(0, 24);
+        const slowest = recentLogs
+            .filter((log) => log.status === 'success')
+            .sort((a, b) => b.duration - a.duration)[0];
+        const errors = recentLogs.filter((log) => log.status === 'error');
+        const writeCount = recentLogs.filter((log) => /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(log.sql)).length;
+        const contextCount = contextTableNames.length;
+        return [
+            {
+                tone: 'info',
+                title: contextCount > 0 ? `已关联 ${contextCount} 张表` : '尚未关联表结构',
+                body: contextCount > 0
+                    ? `当前对话会带上 ${contextTableNames.slice(0, 3).join('、')}${contextCount > 3 ? ' 等表' : ''} 的结构上下文。`
+                    : '在表页打开 AI 后会自动关联当前表，也可以在输入框上方手动添加上下文。',
+            },
+            {
+                tone: slowest && slowest.duration > 1000 ? 'warn' : 'accent',
+                title: slowest ? `最近最慢查询 ${Math.round(slowest.duration).toLocaleString()}ms` : '暂无查询耗时样本',
+                body: slowest ? slowest.sql.slice(0, 140) : '执行查询后这里会显示可用于优化分析的 SQL 线索。',
+            },
+            {
+                tone: errors.length > 0 ? 'warn' : 'info',
+                title: errors.length > 0 ? `${errors.length} 条最近查询失败` : '最近查询状态正常',
+                body: errors[0]?.message || (recentLogs.length > 0 ? `已记录 ${recentLogs.length} 条最近 SQL，可直接让 AI 解释或优化。` : '暂无 SQL 日志。'),
+            },
+            {
+                tone: writeCount > 0 ? 'warn' : 'accent',
+                title: writeCount > 0 ? `检测到 ${writeCount} 条写操作` : '当前以只读分析为主',
+                body: writeCount > 0 ? '涉及写入的 SQL 建议先生成预览与回滚语句，再执行提交。' : 'AI 默认优先解释、生成 SELECT、分析 Schema 与优化索引。',
+            },
+        ];
+    }, [contextTableNames, sqlLogs]);
+
+    const renderPanelHistoryList = () => {
+        const sessions = aiChatSessions.slice(0, 8);
+        if (sessions.length === 0) {
+            return <div className="gn-v2-ai-empty-note">暂无历史会话</div>;
+        }
+        return sessions.map((session) => (
+            <button
+                key={session.id}
+                type="button"
+                className={`gn-v2-ai-history-card${session.id === sid ? ' is-active' : ''}`}
+                onClick={() => {
+                    setAIActiveSessionId(session.id);
+                    setActivePanelMode('chat');
+                }}
+            >
+                <span>
+                    <HistoryOutlined />
+                    <strong>{session.title || '新对话'}</strong>
+                </span>
+                <small>{new Date(session.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
+            </button>
+        ));
+    };
+    const effectivePanelMode = isV2Ui ? activePanelMode : 'chat';
 
     return (
-        <div ref={panelRef} className="ai-chat-panel" style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
+        <div ref={panelRef} className={`ai-chat-panel${isV2Ui ? ' gn-v2-ai-panel' : ''}`} style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
             <div className={`ai-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={handleResizeStart} />
             
             {isResizing && panelRect.current && createPortal(
@@ -1622,53 +1696,96 @@ SELECT * FROM users WHERE status = 1;
                 mutedColor={mutedColor}
                 textColor={textColor}
                 overlayTheme={overlayTheme}
-                onHistoryClick={() => setHistoryOpen(true)}
-                onClear={createNewAISession}
+                isV2Ui={isV2Ui}
+                onHistoryClick={() => {
+                    if (isV2Ui) {
+                        setActivePanelMode('history');
+                    } else {
+                        setHistoryOpen(true);
+                    }
+                }}
+                onClear={() => {
+                    createNewAISession();
+                    setActivePanelMode('chat');
+                }}
                 onSettingsClick={() => { onOpenSettings?.(); setTimeout(loadActiveProvider, 500); }}
                 onClose={onClose}
                 messages={messages}
                 sessionTitle={useStore.getState().aiChatSessions.find(s => s.id === sid)?.title || '新对话'}
+                activeMode={effectivePanelMode}
+                onModeChange={(mode) => {
+                    if (!isV2Ui) return;
+                    setActivePanelMode(mode);
+                    if (mode === 'history') {
+                        setHistoryOpen(false);
+                    }
+                }}
             />
 
             <div className="ai-chat-messages" onScroll={handleScrollMessages}>
-                {messages.length === 0 ? (
-                    <AIChatWelcome
-                        overlayTheme={overlayTheme}
-                        quickActionBg={quickActionBg}
-                        quickActionBorder={quickActionBorder}
-                        textColor={textColor}
-                        mutedColor={mutedColor}
-                        onQuickAction={(prompt: string, autoSend?: boolean) => {
-                            setInput(prompt);
-                            if (autoSend) {
-                                // Use setTimeout to let setInput render, then trigger send
-                                setTimeout(() => {
-                                    const el = textareaRef.current;
-                                    if (el) el.focus();
-                                    // Dispatch a synthetic enter to trigger handleSend
-                                    // Simpler: just call handleSend directly with the prompt
-                                }, 50);
-                            }
-                        }}
-                        contextTableNames={contextTableNames}
-                    />
-                ) : (
-                    messages.map(msg => (
-                        <AIMessageBubble
-                            key={msg.id}
-                            msg={msg}
-                            darkMode={darkMode}
+                {effectivePanelMode === 'chat' && (
+                    messages.length === 0 ? (
+                        <AIChatWelcome
                             overlayTheme={overlayTheme}
+                            quickActionBg={quickActionBg}
+                            quickActionBorder={quickActionBorder}
                             textColor={textColor}
-                            onEdit={handleEditMessage}
-                            onRetry={handleRetryMessage}
-                            onDelete={handleDeleteMessage}
-                            activeConnectionId={inferredConnectionId}
-                            activeConnectionConfig={activeConnectionConfig}
-                            activeDbName={inferredDbName}
-                            allMessages={messages}
+                            mutedColor={mutedColor}
+                            onQuickAction={(prompt: string, autoSend?: boolean) => {
+                                setInput(prompt);
+                                if (autoSend) {
+                                    // Use setTimeout to let setInput render, then trigger send
+                                    setTimeout(() => {
+                                        const el = textareaRef.current;
+                                        if (el) el.focus();
+                                        // Dispatch a synthetic enter to trigger handleSend
+                                        // Simpler: just call handleSend directly with the prompt
+                                    }, 50);
+                                }
+                            }}
+                            contextTableNames={contextTableNames}
+                            isV2Ui={isV2Ui}
                         />
-                    ))
+                    ) : (
+                        messages.map(msg => (
+                            <AIMessageBubble
+                                key={msg.id}
+                                msg={msg}
+                                darkMode={darkMode}
+                                overlayTheme={overlayTheme}
+                                textColor={textColor}
+                                onEdit={handleEditMessage}
+                                onRetry={handleRetryMessage}
+                                onDelete={handleDeleteMessage}
+                                activeConnectionId={inferredConnectionId}
+                                activeConnectionConfig={activeConnectionConfig}
+                                activeDbName={inferredDbName}
+                                allMessages={messages}
+                            />
+                        ))
+                    )
+                )}
+
+                {effectivePanelMode === 'insights' && (
+                    <div className="gn-v2-ai-insights-list">
+                        {aiInsights.map((item) => (
+                            <div className={`gn-v2-ai-insight-card tone-${item.tone}`} key={item.title}>
+                                <span className="gn-v2-ai-insight-icon">
+                                    {item.tone === 'warn' ? <WarningOutlined /> : item.tone === 'accent' ? <DatabaseOutlined /> : <TableOutlined />}
+                                </span>
+                                <div>
+                                    <strong>{item.title}</strong>
+                                    <p>{item.body}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {effectivePanelMode === 'history' && (
+                    <div className="gn-v2-ai-history-list">
+                        {renderPanelHistoryList()}
+                    </div>
                 )}
                 
 
@@ -1706,6 +1823,7 @@ SELECT * FROM users WHERE status = 1;
                 dynamicModels={dynamicModels}
                 loadingModels={loadingModels}
                 sendShortcutBinding={aiChatSendShortcutBinding}
+                shortcutPlatform={activeShortcutPlatform}
                 composerNotice={composerNotice}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}
@@ -1716,6 +1834,7 @@ SELECT * FROM users WHERE status = 1;
                 overlayTheme={overlayTheme}
                 contextUsageChars={contextUsageChars}
                 maxContextChars={getDynamicMaxContextChars(activeProvider?.model)}
+                isV2Ui={isV2Ui}
             />
 
             <AIHistoryDrawer

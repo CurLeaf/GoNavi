@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Tooltip } from 'antd';
-import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined } from '@ant-design/icons';
+import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIChatMessage } from '../../types';
 
@@ -9,12 +9,15 @@ interface AIChatHeaderProps {
     mutedColor: string;
     textColor: string;
     overlayTheme: OverlayWorkbenchTheme;
+    isV2Ui?: boolean;
     onHistoryClick: () => void;
     onClear: () => void;
     onSettingsClick: () => void;
     onClose: () => void;
     messages?: AIChatMessage[];
     sessionTitle?: string;
+    activeMode?: 'chat' | 'insights' | 'history';
+    onModeChange?: (mode: 'chat' | 'insights' | 'history') => void;
 }
 
 const exportToMarkdown = (messages: AIChatMessage[], title: string) => {
@@ -41,36 +44,108 @@ const exportToMarkdown = (messages: AIChatMessage[], title: string) => {
 
 export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
     darkMode, mutedColor, textColor, overlayTheme,
+    isV2Ui = false,
     onHistoryClick, onClear, onSettingsClick, onClose,
-    messages = [], sessionTitle = '新对话'
+    messages = [], sessionTitle = '新对话',
+    activeMode = 'chat',
+    onModeChange,
 }) => {
-    return (
-        <div className="ai-chat-header" style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}>
-            <div className="ai-chat-header-left" style={{ gap: 8 }}>
-                <Tooltip title="历史会话">
-                    <Button type="text" size="small" icon={<HistoryOutlined />} onClick={onHistoryClick} style={{ color: mutedColor }} />
-                </Tooltip>
-                <div className="ai-logo" style={{ background: overlayTheme.iconBg, color: overlayTheme.iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 6, fontSize: 12 }}>
-                    <RobotOutlined />
-                </div>
-                <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
-            </div>
-            <div className="ai-chat-header-right">
-                {messages.length > 0 && (
-                    <Tooltip title="导出为 Markdown">
-                        <Button type="text" size="small" icon={<ExportOutlined />} onClick={() => exportToMarkdown(messages, sessionTitle)} style={{ color: mutedColor }} />
+    if (!isV2Ui) {
+        return (
+            <div className="ai-chat-header" style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}>
+                <div className="ai-chat-header-left" style={{ gap: 8 }}>
+                    <Tooltip title="历史会话">
+                        <Button type="text" size="small" icon={<HistoryOutlined />} onClick={onHistoryClick} style={{ color: mutedColor }} />
                     </Tooltip>
-                )}
-                <Tooltip title="新对话 (清空当前)">
-                    <Button type="text" size="small" icon={<ClearOutlined />} onClick={onClear} style={{ color: mutedColor }} />
-                </Tooltip>
-                <Tooltip title="AI 设置">
-                    <Button type="text" size="small" icon={<SettingOutlined />} onClick={onSettingsClick} style={{ color: mutedColor }} />
-                </Tooltip>
-                <Tooltip title="关闭面板">
-                    <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: mutedColor }} />
-                </Tooltip>
+                    <div className="ai-logo" style={{ background: overlayTheme.iconBg, color: overlayTheme.iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 6, fontSize: 12 }}>
+                        <RobotOutlined />
+                    </div>
+                    <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
+                </div>
+                <div className="ai-chat-header-right">
+                    {messages.length > 0 && (
+                        <Tooltip title="导出为 Markdown">
+                            <Button type="text" size="small" icon={<ExportOutlined />} onClick={() => exportToMarkdown(messages, sessionTitle)} style={{ color: mutedColor }} />
+                        </Tooltip>
+                    )}
+                    <Tooltip title="新对话 (清空当前)">
+                        <Button type="text" size="small" icon={<ClearOutlined />} onClick={onClear} style={{ color: mutedColor }} />
+                    </Tooltip>
+                    <Tooltip title="AI 设置">
+                        <Button type="text" size="small" icon={<SettingOutlined />} onClick={onSettingsClick} style={{ color: mutedColor }} />
+                    </Tooltip>
+                    <Tooltip title="关闭面板">
+                        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: mutedColor }} />
+                    </Tooltip>
+                </div>
             </div>
+        );
+    }
+
+    return (
+        <div className="ai-chat-header gn-v2-ai-header" style={{ borderBottom: 'none', padding: '10px 16px', background: darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)' }}>
+            <div className="gn-v2-ai-header-top">
+                <div className="ai-chat-header-left gn-v2-ai-brand" style={{ gap: 8 }}>
+                    <div className="ai-logo" style={{ background: overlayTheme.iconBg, color: overlayTheme.iconColor, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: 6, fontSize: 12 }}>
+                        <RobotOutlined />
+                    </div>
+                    <div className="ai-title-stack">
+                        <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
+                        <small>{sessionTitle} · 已连接</small>
+                    </div>
+                    <span className="gn-v2-ai-provider-badge">BETA</span>
+                </div>
+                <div className="ai-chat-header-right gn-v2-ai-header-actions">
+                    <Tooltip title="新对话">
+                        <Button type="text" size="small" icon={<PlusOutlined />} onClick={onClear} style={{ color: mutedColor }} />
+                    </Tooltip>
+                    <Tooltip title="历史会话">
+                        <Button type="text" size="small" icon={<HistoryOutlined />} onClick={onHistoryClick} style={{ color: mutedColor }} />
+                    </Tooltip>
+                    <Tooltip title="AI 设置">
+                        <Button type="text" size="small" icon={<SettingOutlined />} onClick={onSettingsClick} style={{ color: mutedColor }} />
+                    </Tooltip>
+                    <Tooltip title="关闭面板">
+                        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: mutedColor }} />
+                    </Tooltip>
+                </div>
+            </div>
+
+            <div className="gn-v2-ai-mode-tabs" aria-label="AI 工作模式">
+                <button
+                    type="button"
+                    className={activeMode === 'chat' ? 'is-active' : undefined}
+                    onClick={() => onModeChange?.('chat')}
+                >
+                    <RobotOutlined />
+                    <span>对话</span>
+                </button>
+                <button
+                    type="button"
+                    className={activeMode === 'insights' ? 'is-active' : undefined}
+                    onClick={() => onModeChange?.('insights')}
+                >
+                    <ThunderboltOutlined />
+                    <span>自动洞察</span>
+                </button>
+                <button
+                    type="button"
+                    className={activeMode === 'history' ? 'is-active' : undefined}
+                    onClick={() => onModeChange?.('history')}
+                >
+                    <HistoryOutlined />
+                    <span>历史</span>
+                </button>
+            </div>
+
+            {messages.length > 0 && (
+                <div className="gn-v2-ai-session-row">
+                    <button type="button" className="gn-v2-ai-export-button" onClick={() => exportToMarkdown(messages, sessionTitle)}>
+                        <ExportOutlined />
+                        <span>导出</span>
+                    </button>
+                </div>
+            )}
         </div>
     );
 };

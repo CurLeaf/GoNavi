@@ -8,6 +8,10 @@ import {
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
+  getShortcutDisplayLabel,
+  resolveShortcutBinding,
+  resolveShortcutDisplay,
+  sanitizeShortcutOptions,
   SHORTCUT_ACTION_META,
 } from './shortcuts';
 import type { ConflictInfo } from './shortcuts';
@@ -120,8 +124,8 @@ describe('RESERVED_SHORTCUTS', () => {
 describe('shortcut defaults', () => {
   it('registers select current statement as a query editor shortcut', () => {
     expect(DEFAULT_SHORTCUT_OPTIONS.selectCurrentStatement).toEqual({
-      combo: 'Ctrl+E',
-      enabled: true,
+      mac: { combo: 'Meta+E', enabled: true },
+      windows: { combo: 'Ctrl+E', enabled: true },
     });
     expect(SHORTCUT_ACTION_META.selectCurrentStatement).toMatchObject({
       label: '选择当前语句',
@@ -133,13 +137,86 @@ describe('shortcut defaults', () => {
   // 自动 fix 路径（9848b8b2）刻意不再 toggle 以避免可见动画，由该快捷键给用户主动触发的修复入口。
   it('registers reset window zoom shortcut with default Ctrl+Shift+0', () => {
     expect(DEFAULT_SHORTCUT_OPTIONS.resetWindowZoom).toEqual({
-      combo: 'Ctrl+Shift+0',
-      enabled: true,
+      mac: { combo: '', enabled: false },
+      windows: { combo: 'Ctrl+Shift+0', enabled: true },
     });
     expect(SHORTCUT_ACTION_META.resetWindowZoom).toMatchObject({
       label: '重置窗口缩放',
       allowInEditable: true,
     });
+  });
+
+  it('uses Navicat-inspired defaults separately for macOS and Windows/Linux', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.runQuery).toEqual({
+      mac: { combo: 'Meta+R', enabled: true },
+      windows: { combo: 'Ctrl+R', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.newQueryTab).toEqual({
+      mac: { combo: 'Meta+Y', enabled: true },
+      windows: { combo: 'Ctrl+Q', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.toggleLogPanel).toEqual({
+      mac: { combo: 'Meta+Shift+H', enabled: true },
+      windows: { combo: 'Ctrl+H', enabled: true },
+    });
+  });
+
+  it('registers connection and AI panel actions as real shortcuts', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.newConnection).toEqual({
+      mac: { combo: 'Meta+N', enabled: true },
+      windows: { combo: 'Ctrl+N', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.toggleAIPanel).toEqual({
+      mac: { combo: 'Meta+J', enabled: true },
+      windows: { combo: 'Ctrl+J', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.newConnection.label).toBe('新建数据源');
+    expect(SHORTCUT_ACTION_META.toggleAIPanel.label).toBe('打开 AI 数据洞察');
+  });
+
+  it('migrates legacy single-platform shortcut bindings into both platform slots', () => {
+    const options = sanitizeShortcutOptions({
+      runQuery: { combo: 'Ctrl+Shift+R', enabled: false },
+    });
+
+    expect(options.runQuery).toEqual({
+      mac: { combo: 'Ctrl+Shift+R', enabled: false },
+      windows: { combo: 'Ctrl+Shift+R', enabled: false },
+    });
+    expect(options.newQueryTab.windows.combo).toBe('Ctrl+Q');
+  });
+
+  it('sanitizes partial platform shortcut bindings without losing defaults', () => {
+    const options = sanitizeShortcutOptions({
+      newQueryTab: {
+        mac: { combo: 'Meta+Y', enabled: false },
+      },
+      sendAIChatMessage: {
+        windows: { combo: 'A', enabled: true },
+      },
+    });
+
+    expect(options.newQueryTab.mac).toEqual({ combo: 'Meta+Y', enabled: false });
+    expect(options.newQueryTab.windows).toEqual({ combo: 'Ctrl+Q', enabled: true });
+    expect(options.sendAIChatMessage.windows).toEqual({ combo: 'Enter', enabled: true });
+  });
+
+  it('resolves and displays platform-specific bindings', () => {
+    const options = sanitizeShortcutOptions({
+      newQueryTab: {
+        mac: { combo: 'Meta+Y', enabled: true },
+        windows: { combo: 'Ctrl+Q', enabled: true },
+      },
+    });
+
+    expect(resolveShortcutBinding(options, 'newQueryTab', 'mac')).toEqual({
+      combo: 'Meta+Y',
+      enabled: true,
+    });
+    expect(getShortcutDisplayLabel('Meta+N', 'mac')).toBe('⌘N');
+    expect(getShortcutDisplayLabel('Meta+Shift+H', 'mac')).toBe('⌘⇧H');
+    expect(getShortcutDisplayLabel('Ctrl+Meta+F', 'mac')).toBe('⌃⌘F');
+    expect(resolveShortcutDisplay(options, 'newQueryTab', 'windows')).toBe('Ctrl+Q');
   });
 });
 

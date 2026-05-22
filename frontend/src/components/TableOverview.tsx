@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'antd';
+import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
@@ -18,6 +19,7 @@ import {
     type TableOverviewSortOrder,
 } from '../utils/tableOverviewFilter';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
+import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -170,16 +172,21 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
 const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
+    const appearance = useStore(state => state.appearance);
     const addTab = useStore(state => state.addTab);
     const setActiveContext = useStore(state => state.setActiveContext);
+    const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
+    const addAIContext = useStore(state => state.addAIContext);
     const darkMode = theme === 'dark';
+    const isV2Ui = appearance.uiVersion === 'v2';
 
     const [tables, setTables] = useState<TableStatRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchText, setSearchText] = useState('');
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
-    const [viewMode, setViewMode] = useState<ViewMode>('list');
+    const [viewMode, setViewMode] = useState<ViewMode>(isV2Ui ? 'card' : 'list');
+    const [openContextMenuTable, setOpenContextMenuTable] = useState<string | null>(null);
     const [visibleTableLimit, setVisibleTableLimit] = useState(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
     const deferredSearchText = useDeferredValue(searchText);
     const isSearchPending = searchText !== deferredSearchText;
@@ -268,6 +275,49 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         });
     }, [connection, tab.dbName, addTab, setActiveContext]);
 
+    const openTableDdl = useCallback((tableName: string) => {
+        if (!connection) return;
+        setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
+        addTab({
+            id: `design-${connection.id}-${tab.dbName}-${tableName}`,
+            title: `表结构 (${tableName})`,
+            type: 'design',
+            connectionId: connection.id,
+            dbName: tab.dbName,
+            tableName,
+            initialTab: 'ddl',
+            readOnly: true,
+        });
+    }, [connection, tab.dbName, addTab, setActiveContext]);
+
+    const openQueryForTable = useCallback((tableName: string) => {
+        if (!connection) return;
+        setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
+        addTab({
+            id: `query-${Date.now()}`,
+            title: '新建查询',
+            type: 'query',
+            connectionId: connection.id,
+            dbName: tab.dbName,
+            query: buildTableSelectQuery(metadataDialect, tableName),
+        });
+    }, [addTab, connection, metadataDialect, setActiveContext, tab.dbName]);
+
+    const openTableInER = useCallback((tableName: string) => {
+        if (!connection) return;
+        openTable(tableName);
+        setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('gonavi:data-grid:set-view-mode', {
+                detail: {
+                    connectionId: connection.id,
+                    dbName: tab.dbName,
+                    tableName,
+                    viewMode: 'er',
+                },
+            }));
+        }, 0);
+    }, [connection, openTable, tab.dbName]);
+
     const buildConfig = useCallback(() => {
         if (!connection) return null;
         return {
@@ -318,6 +368,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             message.error('导出失败: ' + res.message);
         }
     }, [buildConfig, tab.dbName]);
+
+    const handleCopyTableAsInsert = useCallback(async (tableName: string) => {
+        await handleExport(tableName, 'sql');
+    }, [handleExport]);
 
     const handleDeleteTable = useCallback((tableName: string) => {
         const config = buildConfig();
@@ -403,6 +457,60 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         });
     }, [buildConfig, tab.dbName, loadData]);
 
+    const openCreateStarRocksRollup = useCallback((tableName: string) => {
+        if (!connection) return;
+        const safeTable = String(tableName || 'table_name').trim();
+        const quotedTable = safeTable.includes('`') ? safeTable : safeTable.split('.').map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
+        addTab({
+            id: `query-create-starrocks-rollup-${Date.now()}`,
+            title: '新增 Rollup',
+            type: 'query',
+            connectionId: connection.id,
+            dbName: tab.dbName,
+            query: `ALTER TABLE ${quotedTable}\nADD ROLLUP rollup_name (column1, column2);`,
+        });
+    }, [addTab, connection, tab.dbName]);
+
+    const injectTablePromptToAI = useCallback(async (tableName: string, promptKind: 'explain' | 'query') => {
+        const dbName = tab.dbName || '';
+        if (!connection?.id || !dbName || !tableName) {
+            message.warning('当前表缺少连接上下文，无法发送给 AI');
+            return;
+        }
+
+        let ddl = '';
+        const config = buildConfig();
+        if (config) {
+            try {
+                const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, dbName, tableName);
+                if (res.success) {
+                    ddl = String(res.data || '').trim();
+                    addAIContext(connection.id, { dbName, tableName, ddl });
+                }
+            } catch {
+                // AI 入口仍可基于表名工作，DDL 获取失败不阻断打开面板。
+            }
+        }
+
+        const prompt = promptKind === 'explain'
+            ? [
+                `请解释数据表 ${dbName}.${tableName} 的结构和业务含义。`,
+                '重点说明字段含义、主键/索引、潜在关联关系、典型查询场景和风险点。',
+                ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
+            ].filter(Boolean).join('\n')
+            : [
+                `请基于数据表 ${dbName}.${tableName} 生成 3 条常用查询 SQL。`,
+                '要求包含：数据预览查询、按关键字段过滤查询、一个聚合或统计查询。',
+                ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
+            ].filter(Boolean).join('\n');
+
+        const wasClosed = !useStore.getState().aiPanelVisible;
+        if (wasClosed) setAIPanelVisible(true);
+        setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+        }, wasClosed ? 350 : 0);
+    }, [addAIContext, buildConfig, connection?.id, setAIPanelVisible, tab.dbName]);
+
     // --- Theme ---
     const cardBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
     const cardHoverBg = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
@@ -435,22 +543,157 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     }, 0), [sortedFiltered]);
     const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
 
+    const handleV2TableContextMenuAction = useCallback((table: TableStatRow, action: V2TableContextMenuActionKey) => {
+        const tableName = table.name;
+        switch (action) {
+            case 'open-data':
+            case 'open-new-tab':
+                openTable(tableName);
+                return;
+            case 'design-table':
+                openDesign(tableName);
+                return;
+            case 'new-query':
+                openQueryForTable(tableName);
+                return;
+            case 'view-ddl':
+                openTableDdl(tableName);
+                return;
+            case 'view-er':
+                openTableInER(tableName);
+                return;
+            case 'copy-table-name':
+                void handleCopyTableName(tableName);
+                return;
+            case 'copy-structure':
+                void handleCopyStructure(tableName);
+                return;
+            case 'copy-insert':
+                void handleCopyTableAsInsert(tableName);
+                return;
+            case 'rename-table':
+                handleRenameTable(tableName);
+                return;
+            case 'new-rollup':
+                openCreateStarRocksRollup(tableName);
+                return;
+            case 'backup-table':
+                void handleExport(tableName, 'sql');
+                return;
+            case 'refresh-stats':
+                void loadData();
+                return;
+            case 'export-xlsx':
+                void handleExport(tableName, 'xlsx');
+                return;
+            case 'export-csv':
+                void handleExport(tableName, 'csv');
+                return;
+            case 'export-json':
+                void handleExport(tableName, 'json');
+                return;
+            case 'ai-explain':
+                void injectTablePromptToAI(tableName, 'explain');
+                return;
+            case 'ai-generate-query':
+                void injectTablePromptToAI(tableName, 'query');
+                return;
+            case 'truncate-table':
+                void handleTableDataDangerAction(tableName, 'truncate');
+                return;
+            case 'drop-table':
+                handleDeleteTable(tableName);
+                return;
+            default:
+                return;
+        }
+    }, [
+        handleCopyStructure,
+        handleCopyTableAsInsert,
+        handleCopyTableName,
+        handleDeleteTable,
+        handleExport,
+        handleRenameTable,
+        handleTableDataDangerAction,
+        injectTablePromptToAI,
+        loadData,
+        openCreateStarRocksRollup,
+        openDesign,
+        openQueryForTable,
+        openTable,
+        openTableDdl,
+        openTableInER,
+    ]);
+
+    const renderV2OverviewTableContextMenu = useCallback((table: TableStatRow) => (
+        <V2TableContextMenuView
+            tableName={table.name}
+            stats={{
+                rowCount: table.rows,
+                dataLength: table.dataSize,
+                indexLength: table.indexSize,
+                engine: table.engine,
+            }}
+            supportsTruncate={allowTruncate}
+            supportsStarRocksRollup={metadataDialect === 'starrocks'}
+            onAction={(action) => {
+                setOpenContextMenuTable(null);
+                handleV2TableContextMenuAction(table, action);
+            }}
+        />
+    ), [allowTruncate, handleV2TableContextMenuAction, metadataDialect]);
+
+    const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
+        { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
+        { type: 'divider' },
+        { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
+        { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
+        { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
+        { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
+        { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(table.name) },
+        { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
+            ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(table.name, 'truncate') }] : []),
+            { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(table.name, 'clear') },
+            { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(table.name) },
+        ]},
+        { type: 'divider' },
+        { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
+            { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(table.name, 'csv') },
+            { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(table.name, 'xlsx') },
+            { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(table.name, 'json') },
+            { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(table.name, 'md') },
+            { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(table.name, 'html') },
+        ]},
+    ], [
+        allowTruncate,
+        handleCopyStructure,
+        handleCopyTableName,
+        handleDeleteTable,
+        handleExport,
+        handleRenameTable,
+        handleTableDataDangerAction,
+        openDesign,
+        openQueryForTable,
+    ]);
+
     if (loading) {
         return (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: containerBg }}>
+            <div className={isV2Ui ? 'gn-v2-table-overview gn-v2-table-overview-loading' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: containerBg }}>
                 <Spin size="large" tip="加载表信息..." />
             </div>
         );
     }
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: containerBg, overflow: 'hidden' }}>
+        <div className={isV2Ui ? 'gn-v2-table-overview' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: containerBg, overflow: 'hidden' }}>
             {/* Toolbar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', flexShrink: 0 }}>
-                <DatabaseOutlined style={{ fontSize: 16, color: accentColor }} />
-                <span style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{tab.dbName}</span>
-                <span style={{ fontSize: 12, color: textMuted }}>
-                    {tables.length} 张表 · {formatRows(totalRows)} 行 · {formatSize(totalSize)}
+            <div className={isV2Ui ? 'gn-v2-table-overview-header' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', flexShrink: 0 }}>
+                <span className={isV2Ui ? 'gn-v2-table-overview-icon' : undefined}>
+                    <DatabaseOutlined style={{ fontSize: 16, color: isV2Ui ? undefined : accentColor }} />
+                </span>
+                <span className={isV2Ui ? 'gn-v2-table-overview-title' : undefined} style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{tab.dbName}</span>
+                <span className={isV2Ui ? 'gn-v2-table-overview-summary' : undefined} style={{ fontSize: 12, color: textMuted }}>
+                    <strong>{tables.length}</strong> 张表 · <strong>{formatRows(totalRows)}</strong> 行 · <strong>{formatSize(totalSize)}</strong>
                 </span>
                 <div style={{ flex: 1 }} />
                 <Input
@@ -498,7 +741,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             </div>
 
             {/* Content Area */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '0 16px 16px 16px' }}>
+            <div className={isV2Ui ? 'gn-v2-table-overview-content' : undefined} style={{ flex: 1, overflow: 'auto', padding: '0 16px 16px 16px' }}>
                 {sortedFiltered.length > 0 && (isSearchPending || visibleOverview.hiddenCount > 0 || deferredSearchText.trim()) && (
                     <div
                         style={{
@@ -528,7 +771,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                     <Empty description={searchText ? '无匹配结果' : '暂无表'} style={{ marginTop: 80 }} />
                 ) : viewMode === 'card' ? (
                     /* ========== 卡片视图 ========== */
-                    <div style={{
+                    <div className={isV2Ui ? 'gn-v2-table-card-grid' : undefined} style={{
                         display: 'grid',
                         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
                         gap: 12,
@@ -537,42 +780,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                             <Dropdown
                                 key={t.name}
                                 trigger={['contextMenu']}
-                                menu={{
-                                    items: [
-                                        { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
-                                            setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
-                                            addTab({
-                                                id: `query-${Date.now()}`,
-                                                title: '新建查询',
-                                                type: 'query',
-                                                connectionId: tab.connectionId,
-                                                dbName: tab.dbName,
-                                                query: buildTableSelectQuery(metadataDialect, t.name),
-                                            });
-                                        }},
-                                        { type: 'divider' },
-                                        { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
-                                        { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(t.name) },
-                                        { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
-                                        { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
-                                        { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                        { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
-                                            ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
-                                            { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
-                                            { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
-                                        ]},
-                                        { type: 'divider' },
-                                        { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
-                                            { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
-                                            { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(t.name, 'xlsx') },
-                                            { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(t.name, 'json') },
-                                            { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(t.name, 'md') },
-                                            { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(t.name, 'html') },
-                                        ]},
-                                    ],
-                                }}
+                                menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
+                                open={isV2Ui ? openContextMenuTable === t.name : undefined}
+                                onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
+                                popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
+                                rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
+                                overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
                             >
                                 <div
+                                    className={isV2Ui ? 'gn-v2-table-card' : undefined}
                                     onDoubleClick={() => openTable(t.name)}
                                     style={{
                                         background: cardBg,
@@ -580,13 +796,13 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                         borderRadius: 10,
                                         padding: '14px 16px',
                                         cursor: 'pointer',
-                                        transition: 'all 0.15s ease',
+                                        transition: isV2Ui ? undefined : 'all 0.15s ease',
                                         userSelect: 'none',
                                     }}
-                                    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
-                                    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
+                                    onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+                                    onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
                                 >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                        <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                         <TableOutlined style={{ fontSize: 14, color: accentColor }} />
                                         <Tooltip title={t.name} mouseEnterDelay={0.4}>
                                             <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
@@ -601,18 +817,23 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                             </div>
                                         </Tooltip>
                                     )}
-                                    <div style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
+                                    <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
                                         <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
                                         <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
                                         {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
                                     </div>
+                                    {isV2Ui && (
+                                        <div className="gn-v2-table-size-bar">
+                                            <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
+                                        </div>
+                                    )}
                                 </div>
                             </Dropdown>
                         ))}
                     </div>
                 ) : (
                     /* ========== 行视图 ========== */
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div className={isV2Ui ? 'gn-v2-table-row-list' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {visibleTables.map(t => {
                             const combinedSize = t.dataSize + t.indexSize;
                             const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
@@ -624,42 +845,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                 <Dropdown
                                     key={t.name}
                                     trigger={['contextMenu']}
-                                    menu={{
-                                        items: [
-                                            { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => {
-                                                setActiveContext({ connectionId: tab.connectionId, dbName: tab.dbName || '' });
-                                                addTab({
-                                                    id: `query-${Date.now()}`,
-                                                    title: '新建查询',
-                                                    type: 'query',
-                                                    connectionId: tab.connectionId,
-                                                    dbName: tab.dbName,
-                                                    query: buildTableSelectQuery(metadataDialect, t.name),
-                                                });
-                                            }},
-                                            { type: 'divider' },
-                                            { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(t.name) },
-                                            { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(t.name) },
-                                            { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(t.name) },
-                                            { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(t.name, 'sql') },
-                                            { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(t.name) },
-                                            { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
-                                                ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'truncate') }] : []),
-                                                { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(t.name, 'clear') },
-                                                { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(t.name) }
-                                            ]},
-                                            { type: 'divider' },
-                                            { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
-                                                { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(t.name, 'csv') },
-                                                { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(t.name, 'xlsx') },
-                                                { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(t.name, 'json') },
-                                                { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(t.name, 'md') },
-                                                { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(t.name, 'html') },
-                                            ]},
-                                        ],
-                                    }}
+                                    menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
+                                    open={isV2Ui ? openContextMenuTable === t.name : undefined}
+                                    onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
+                                    popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
+                                    rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
+                                    overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
                                 >
                                     <div
+                                        className={isV2Ui ? 'gn-v2-table-row' : undefined}
                                         onDoubleClick={() => openTable(t.name)}
                                         style={{
                                             position: 'relative',
@@ -668,11 +862,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                             border: `1px solid ${cardBorder}`,
                                             background: cardBg,
                                             cursor: 'pointer',
-                                            transition: 'all 0.15s ease',
+                                            transition: isV2Ui ? undefined : 'all 0.15s ease',
                                             userSelect: 'none',
                                         }}
-                                        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
-                                        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
+                                        onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+                                        onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
                                     >
                                         <div
                                             style={{

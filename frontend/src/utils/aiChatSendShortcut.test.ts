@@ -5,7 +5,7 @@ import {
   DEFAULT_SHORTCUT_OPTIONS,
   SHORTCUT_ACTION_META,
   SHORTCUT_ACTION_ORDER,
-  type ShortcutBinding,
+  type ShortcutPlatformBinding,
 } from './shortcuts';
 import {
   consumeAIChatSendShortcutOnKeyDown,
@@ -13,12 +13,15 @@ import {
   shouldSendAIChatOnKeyDown,
 } from './aiChatSendShortcut';
 
-const binding = (combo: string, enabled = true): ShortcutBinding => ({ combo, enabled });
+const binding = (combo: string, enabled = true): ShortcutPlatformBinding => ({ combo, enabled });
 
 describe('aiChatSendShortcut', () => {
   it('registers AI chat send in the shared shortcut center with Enter default', () => {
     expect(SHORTCUT_ACTION_ORDER).toContain('sendAIChatMessage');
-    expect(DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage).toEqual({ combo: 'Enter', enabled: true });
+    expect(DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage).toEqual({
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
+    });
     expect(SHORTCUT_ACTION_META.sendAIChatMessage).toMatchObject({
       label: 'AI 聊天发送',
       allowInEditable: true,
@@ -71,6 +74,7 @@ describe('aiChatSendShortcut', () => {
   it('does not allow Shift to become an AI send shortcut even if a stale binding exists', () => {
     expect(shouldSendAIChatOnKeyDown(binding('Shift+Enter'), { key: 'Enter', shiftKey: true })).toBe(false);
     expect(getAIChatSendShortcutLabel(binding('Meta+Enter'))).toBe('Meta+Enter 发送');
+    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'), 'mac')).toBe('⌘↵ 发送');
     expect(getAIChatSendShortcutLabel(binding('Enter', false))).toBe('快捷键发送已关闭');
   });
 
