@@ -35,6 +35,8 @@ const storeState = vi.hoisted(() => ({
     showColumnType: false,
   },
   setQueryOptions: vi.fn(),
+  addTab: vi.fn(),
+  setActiveContext: vi.fn(),
   tableColumnOrders: {},
   enableColumnOrderMemory: false,
   setTableColumnOrder: vi.fn(),
@@ -57,7 +59,12 @@ const backendApp = vi.hoisted(() => ({
   ApplyChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
+  DBGetForeignKeys: vi.fn(),
   DBShowCreateTable: vi.fn(),
+}));
+
+const testRenderState = vi.hoisted(() => ({
+  latestColumns: [] as any[],
 }));
 
 const messageApi = vi.hoisted(() => ({
@@ -115,6 +122,7 @@ vi.mock('@ant-design/icons', () => {
     RightOutlined: Icon,
     RobotOutlined: Icon,
     SearchOutlined: Icon,
+    LinkOutlined: Icon,
     TableOutlined: Icon,
     DatabaseOutlined: Icon,
     NodeIndexOutlined: Icon,
@@ -212,7 +220,10 @@ vi.mock('antd', () => {
   );
 
   return {
-    Table: () => <table />,
+    Table: ({ columns }: any) => {
+      testRenderState.latestColumns = Array.isArray(columns) ? columns : [];
+      return <table />;
+    },
     message: messageApi,
     Input,
     Button,
@@ -458,7 +469,12 @@ describe('DataGrid DDL interactions', () => {
   beforeEach(() => {
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetForeignKeys.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
+    storeState.appearance.uiVersion = 'legacy';
+    storeState.addTab.mockReset();
+    storeState.setActiveContext.mockReset();
+    testRenderState.latestColumns = [];
 
     vi.stubGlobal('document', {
       addEventListener: vi.fn(),
@@ -500,6 +516,7 @@ describe('DataGrid DDL interactions', () => {
     backendApp.ApplyChanges.mockReset();
     backendApp.DBGetColumns.mockReset();
     backendApp.DBGetIndexes.mockReset();
+    backendApp.DBGetForeignKeys.mockReset();
     backendApp.DBShowCreateTable.mockReset();
     vi.unstubAllGlobals();
   });
@@ -547,6 +564,58 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).not.toContain('CREATE TABLE users');
     expect(renderer!.root.findAll((node) => node.props['data-modal-title'] === 'DDL - orders')).toHaveLength(0);
   });
+
+  it.each(['legacy', 'v2'] as const)(
+    'opens the referenced table when clicking a foreign-key column header in %s UI',
+    async (uiVersion) => {
+      storeState.appearance.uiVersion = uiVersion;
+      backendApp.DBGetForeignKeys.mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columnName: 'customer_id',
+          refTableName: 'customers',
+          refColumnName: 'id',
+          constraintName: 'fk_orders_customer',
+        }],
+      });
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(
+          <DataGrid
+            data={[{ __gonavi_row_key__: 'row-1', id: 1, customer_id: 10 }]}
+            columnNames={['id', 'customer_id']}
+            loading={false}
+            tableName="orders"
+            dbName="main"
+            connectionId="conn-1"
+          />,
+        );
+      });
+      await waitForEffects();
+
+      const fkColumn = testRenderState.latestColumns.find((column) => column.key === 'customer_id');
+      expect(fkColumn).toBeTruthy();
+      const headerRenderer = create(<>{fkColumn.title}</>);
+      const fkJump = headerRenderer.root.findByProps({ 'data-grid-fk-jump': 'true' });
+      await act(async () => {
+        fkJump.props.onClick({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        });
+      });
+
+      expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
+      expect(storeState.addTab).toHaveBeenCalledWith({
+        id: 'conn-1-main-table-customers',
+        title: 'customers',
+        type: 'table',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        tableName: 'customers',
+      });
+    },
+  );
 
   it('switches the v2 footer field tab into the main fields view', async () => {
     storeState.appearance.uiVersion = 'v2';

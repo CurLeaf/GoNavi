@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker, AutoComplete } from 'antd';
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined, SearchOutlined, LinkOutlined } from '@ant-design/icons';
 import Editor from './MonacoEditor';
 import { 
     DndContext, 
@@ -23,10 +23,10 @@ import {
     arrayMove 
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, PreviewChanges, DBGetColumns, DBGetIndexes, DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, PreviewChanges, DBGetColumns, DBGetIndexes, DBGetForeignKeys, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
-import type { ColumnDefinition, IndexDefinition } from '../types';
+import type { ColumnDefinition, ForeignKeyDefinition, IndexDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
@@ -1040,6 +1040,13 @@ type ColumnMeta = {
     comment: string;
 };
 
+type ForeignKeyTarget = {
+    columnName: string;
+    refTableName: string;
+    refColumnName: string;
+    constraintName: string;
+};
+
 const EXACT_GRID_FILTER_OPERATOR = '=';
 const CONTAINS_GRID_FILTER_OPERATOR = 'CONTAINS';
 const STRING_LIKE_GRID_FILTER_TYPES = new Set([
@@ -1212,6 +1219,8 @@ const DataGrid: React.FC<DataGridProps> = ({
     scrollSnapshot, onScrollSnapshotChange
 }) => {
   const connections = useStore(state => state.connections);
+  const addTab = useStore(state => state.addTab);
+  const setActiveContext = useStore(state => state.setActiveContext);
   const addSqlLog = useStore(state => state.addSqlLog);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
@@ -1681,9 +1690,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
+  const [foreignKeyMap, setForeignKeyMap] = useState<Record<string, ForeignKeyTarget>>({});
   const [uniqueKeyGroups, setUniqueKeyGroups] = useState<string[][]>([]);
   const columnMetaCacheRef = useRef<Record<string, Record<string, ColumnMeta>>>({});
   const columnMetaSeqRef = useRef(0);
+  const foreignKeyCacheRef = useRef<Record<string, Record<string, ForeignKeyTarget>>>({});
+  const foreignKeySeqRef = useRef(0);
   const uniqueKeyGroupsCacheRef = useRef<Record<string, string[][]>>({});
   const uniqueKeyGroupsSeqRef = useRef(0);
 
@@ -1700,13 +1712,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       const normalizedDbName = String(dbName || '').trim();
       if (!connectionId || !normalizedTableName) {
           setColumnMetaMap({});
+          setForeignKeyMap({});
           setUniqueKeyGroups([]);
           return;
       }
       const cacheKey = `${connectionId}|${normalizedDbName}|${normalizedTableName}`;
       setColumnMetaMap(columnMetaCacheRef.current[cacheKey] || {});
+      foreignKeySeqRef.current += 1;
+      setForeignKeyMap(exportScope === 'table' ? (foreignKeyCacheRef.current[cacheKey] || {}) : {});
       setUniqueKeyGroups(uniqueKeyGroupsCacheRef.current[cacheKey] || []);
-  }, [connectionId, dbName, tableName]);
+  }, [connectionId, dbName, tableName, exportScope]);
 
   useEffect(() => {
       const normalizedTableName = String(tableName || '').trim();
@@ -1755,6 +1770,59 @@ const DataGrid: React.FC<DataGridProps> = ({
               setColumnMetaMap({});
           });
   }, [connections, connectionId, dbName, tableName]);
+
+  useEffect(() => {
+      const normalizedTableName = String(tableName || '').trim();
+      const normalizedDbName = String(dbName || '').trim();
+      if (!connectionId || !normalizedTableName || exportScope !== 'table') return;
+
+      const cacheKey = `${connectionId}|${normalizedDbName}|${normalizedTableName}`;
+      if (foreignKeyCacheRef.current[cacheKey]) return;
+
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) {
+          setForeignKeyMap({});
+          return;
+      }
+
+      const config = {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+
+      const seq = ++foreignKeySeqRef.current;
+      DBGetForeignKeys(buildRpcConnectionConfig(config) as any, normalizedDbName, normalizedTableName)
+          .then((res) => {
+              if (seq !== foreignKeySeqRef.current) return;
+              if (!res.success || !Array.isArray(res.data)) {
+                  setForeignKeyMap({});
+                  return;
+              }
+              const nextMap: Record<string, ForeignKeyTarget> = {};
+              (res.data as ForeignKeyDefinition[]).forEach((fk: any) => {
+                  const columnName = String(fk?.columnName ?? fk?.ColumnName ?? '').trim();
+                  const refTableName = String(fk?.refTableName ?? fk?.RefTableName ?? '').trim();
+                  if (!columnName || !refTableName || refTableName === '-') return;
+                  const target: ForeignKeyTarget = {
+                      columnName,
+                      refTableName,
+                      refColumnName: String(fk?.refColumnName ?? fk?.RefColumnName ?? '').trim(),
+                      constraintName: String(fk?.constraintName ?? fk?.ConstraintName ?? fk?.name ?? fk?.Name ?? '').trim(),
+                  };
+                  nextMap[columnName] = target;
+              });
+              foreignKeyCacheRef.current[cacheKey] = nextMap;
+              setForeignKeyMap(nextMap);
+          })
+          .catch(() => {
+              if (seq !== foreignKeySeqRef.current) return;
+              setForeignKeyMap({});
+          });
+  }, [connections, connectionId, dbName, tableName, exportScope]);
 
   useEffect(() => {
       const normalizedTableName = String(tableName || '').trim();
@@ -1817,6 +1885,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next;
   }, [columnMetaMapByLowerName]);
 
+  const foreignKeyMapByLowerName = useMemo(() => {
+      const next: Record<string, ForeignKeyTarget> = {};
+      Object.entries(foreignKeyMap).forEach(([name, target]) => {
+          const lowerName = String(name || '').toLowerCase();
+          if (!lowerName || next[lowerName]) return;
+          next[lowerName] = target;
+      });
+      return next;
+  }, [foreignKeyMap]);
+
   const getColumnFilterType = useCallback((columnName: string): string => {
       const normalizedName = String(columnName || '').trim();
       if (!normalizedName) return '';
@@ -1863,16 +1941,72 @@ const DataGrid: React.FC<DataGridProps> = ({
       [columnMetaMap, columnMetaMapByLowerName]
   );
 
+  const openForeignKeyTarget = useCallback((target: ForeignKeyTarget) => {
+      const refTableName = String(target?.refTableName || '').trim();
+      if (!connectionId || !refTableName || refTableName === '-') return;
+      const targetDbName = String(dbName || '').trim();
+      const tabId = `${connectionId}-${targetDbName}-table-${refTableName}`;
+      setActiveContext({ connectionId, dbName: targetDbName });
+      addTab({
+          id: tabId,
+          title: refTableName,
+          type: 'table',
+          connectionId,
+          dbName: targetDbName,
+          tableName: refTableName,
+      });
+  }, [addTab, connectionId, dbName, setActiveContext]);
+
   const renderColumnTitle = useCallback((name: string): React.ReactNode => {
       const normalizedName = String(name || '');
       const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
+      const foreignKeyTarget = foreignKeyMap[normalizedName] || foreignKeyMapByLowerName[normalizedName.toLowerCase()];
       const hoverLines: string[] = [];
       if (meta?.type) hoverLines.push(`类型：${meta.type}`);
       if (meta?.comment) hoverLines.push(`备注：${meta.comment}`);
+      if (foreignKeyTarget?.refTableName) {
+          const refColumnText = foreignKeyTarget.refColumnName ? `.${foreignKeyTarget.refColumnName}` : '';
+          hoverLines.push(`外键：${foreignKeyTarget.refTableName}${refColumnText}`);
+      }
+
+      const fieldLabel = foreignKeyTarget?.refTableName ? (
+          <button
+              type="button"
+              data-grid-fk-jump="true"
+              data-column-name={normalizedName}
+              data-ref-table-name={foreignKeyTarget.refTableName}
+              title={`跳转到外键表：${foreignKeyTarget.refTableName}`}
+              onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openForeignKeyTarget(foreignKeyTarget);
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  padding: 0,
+                  border: 0,
+                  background: 'transparent',
+                  color: 'inherit',
+                  font: 'inherit',
+                  lineHeight: 'inherit',
+                  cursor: 'pointer',
+              }}
+          >
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{normalizedName}</span>
+              <LinkOutlined style={{ fontSize: densityParams.metaFontSize + 1, color: columnMetaHintColor, flex: 'none' }} />
+          </button>
+      ) : (
+          <span style={{ whiteSpace: 'nowrap' }}>{normalizedName}</span>
+      );
 
       const titleNode = (
           <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.2 }}>
-              <span style={{ whiteSpace: 'nowrap' }}>{normalizedName}</span>
+              {fieldLabel}
               {showColumnType && meta?.type && (
                   <span
                       style={{
@@ -1916,7 +2050,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               <span style={{ display: 'inline-flex', maxWidth: '100%' }}>{titleNode}</span>
           </Tooltip>
       );
-  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, showColumnComment, showColumnType, densityParams]);
+  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, foreignKeyMap, foreignKeyMapByLowerName, showColumnComment, showColumnType, densityParams, openForeignKeyTarget]);
 
   const closeCellEditor = useCallback(() => {
       setCellEditorOpen(false);
@@ -4169,6 +4303,8 @@ const DataGrid: React.FC<DataGridProps> = ({
               onResizeAutoFit: handleResizeAutoFit(key),
               onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
                   if (!onSort) return;
+                  const eventTarget = event.target as HTMLElement | null;
+                  if (eventTarget?.closest?.('[data-grid-fk-jump="true"]')) return;
                   const headerCell = event.currentTarget as HTMLElement;
                   const upArrow = headerCell.querySelector('.ant-table-column-sorter-up') as HTMLElement | null;
                   const downArrow = headerCell.querySelector('.ant-table-column-sorter-down') as HTMLElement | null;

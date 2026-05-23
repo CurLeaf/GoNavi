@@ -20,12 +20,15 @@ vi.mock('../store', () => ({
       blur: 0,
       showDataTableVerticalBorders: false,
       dataTableDensity: 'comfortable',
+      uiVersion: 'v2',
     },
     queryOptions: {
       showColumnComment: false,
       showColumnType: false,
     },
     setQueryOptions: vi.fn(),
+    addTab: vi.fn(),
+    setActiveContext: vi.fn(),
     tableColumnOrders: {},
     enableColumnOrderMemory: false,
     setTableColumnOrder: vi.fn(),
@@ -49,6 +52,7 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   ApplyChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
+  DBGetForeignKeys: vi.fn(),
   DBShowCreateTable: vi.fn(),
 }));
 
