@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildOrderBySQL } from './sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, reverseOrderBySQL } from './sql';
 
 describe('buildOrderBySQL', () => {
   it('does not add fallback ORDER BY for DuckDB without explicit sort', () => {
@@ -9,5 +9,46 @@ describe('buildOrderBySQL', () => {
 
   it('keeps explicit DuckDB sort', () => {
     expect(buildOrderBySQL('duckdb', { columnKey: 'ID', order: 'descend' }, ['NAME'])).toBe(' ORDER BY "ID" DESC');
+  });
+});
+
+describe('buildPaginatedSelectSQL', () => {
+  it('uses SQL Server TOP for the first page to support old compatibility levels', () => {
+    const sql = buildPaginatedSelectSQL('sqlserver', 'SELECT * FROM [Users]', ' ORDER BY [ID] ASC', 101, 0);
+
+    expect(sql).toBe('SELECT TOP 101 * FROM [Users] ORDER BY [ID] ASC');
+    expect(sql.toLowerCase()).not.toContain('fetch next');
+    expect(sql.toLowerCase()).not.toContain('offset');
+  });
+
+  it('adds SQL Server TOP after DISTINCT', () => {
+    expect(buildPaginatedSelectSQL('mssql', 'SELECT DISTINCT [Name] FROM [Users]', '', 50, 0))
+      .toBe('SELECT DISTINCT TOP 50 [Name] FROM [Users]');
+  });
+
+  it('does not add another SQL Server TOP when base SQL already has one', () => {
+    expect(buildPaginatedSelectSQL('sqlserver', 'SELECT TOP 10 * FROM [Users]', '', 50, 0))
+      .toBe('SELECT TOP 10 * FROM [Users]');
+  });
+
+  it('uses SQL Server TOP window pagination instead of OFFSET FETCH for sorted pages', () => {
+    const sql = buildPaginatedSelectSQL('sqlserver', 'SELECT * FROM [Users]', ' ORDER BY [ID] ASC', 25, 50);
+
+    expect(sql).toContain('SELECT TOP 25 * FROM (SELECT TOP 75 * FROM (SELECT * FROM [Users])');
+    expect(sql).toContain('ORDER BY [ID] DESC');
+    expect(sql.endsWith('ORDER BY [ID] ASC')).toBe(true);
+    expect(sql.toLowerCase()).not.toContain('fetch next');
+  });
+
+  it('keeps generic pagination for other databases', () => {
+    expect(buildPaginatedSelectSQL('postgres', 'SELECT * FROM users', ' ORDER BY id ASC', 20, 40))
+      .toBe('SELECT * FROM users ORDER BY id ASC LIMIT 20 OFFSET 40');
+  });
+});
+
+describe('reverseOrderBySQL', () => {
+  it('reverses comma separated order parts without splitting function arguments', () => {
+    expect(reverseOrderBySQL(' ORDER BY COALESCE([a], [b]) ASC, [id] DESC'))
+      .toBe(' ORDER BY COALESCE([a], [b]) DESC, [id] ASC');
   });
 });

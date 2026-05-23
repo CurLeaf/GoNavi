@@ -8,6 +8,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -304,6 +305,56 @@ func TestClickHouseProtocolMismatchIncludesHTTPParseBinaryResponse(t *testing.T)
 	}
 }
 
+func TestClickHouseHTTPClientProtocolVersionUnsupportedEnablesCompatibilityRetry(t *testing.T) {
+	err := errors.New(`failed to query server hello: failed to query server hello info: sendQuery: [HTTP 404] response body: "Code: 115. DB::Exception: Unknown setting client_protocol_version. (UNKNOWN_SETTING)"`)
+	if !isClickHouseHTTPClientProtocolVersionUnsupported(err) {
+		t.Fatalf("expected client_protocol_version unknown setting to be treated as HTTP compatibility issue")
+	}
+	if !shouldTryNextClickHouseProtocol(clickhouse.HTTP, err) {
+		t.Fatalf("expected HTTP client_protocol_version issue to permit protocol fallback")
+	}
+	if shouldTryNextClickHouseProtocol(clickhouse.Native, err) {
+		t.Fatalf("native protocol should not treat HTTP client_protocol_version issue as retryable")
+	}
+
+	message := clickHouseAttemptFailureMessage(clickhouse.HTTP, err)
+	if !strings.Contains(message, "client_protocol_version") || !strings.Contains(message, "兼容模式") {
+		t.Fatalf("expected compatibility retry hint, got %q", message)
+	}
+}
+
+func TestClickHouseHTTPClientProtocolVersionStripperRemovesDriverQueryParam(t *testing.T) {
+	var seenQuery string
+	stripper := clickHouseHTTPClientProtocolVersionStripper{
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			seenQuery = req.URL.RawQuery
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	req, err := http.NewRequest(http.MethodPost, "http://clickhouse.local:8123/?database=default&client_protocol_version=54485", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	res, err := stripper.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if res != nil && res.Body != nil {
+		res.Body.Close()
+	}
+	if strings.Contains(seenQuery, "client_protocol_version") {
+		t.Fatalf("expected client_protocol_version stripped from query, got %q", seenQuery)
+	}
+	if !strings.Contains(seenQuery, "database=default") {
+		t.Fatalf("expected other query parameters to remain, got %q", seenQuery)
+	}
+}
+
 func TestWithClickHouseProtocolForcesProtocolSelection(t *testing.T) {
 	httpConfig := withClickHouseProtocol(connection.ConnectionConfig{
 		Type: "clickhouse",
@@ -379,6 +430,12 @@ func TestClickHouseProtocolsForAttemptOnlyFallsBackInAutoMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func protocolNames(protocols []clickhouse.Protocol) []string {

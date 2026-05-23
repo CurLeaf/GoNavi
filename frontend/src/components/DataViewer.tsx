@@ -4,7 +4,7 @@ import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBGetColumns, DBGetIndexes } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
-import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, reverseOrderBySQL, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
 import { buildOracleApproximateTotalSql, parseApproximateTableCountRow, resolveApproximateTableCountStrategy } from '../utils/approximateTableCount';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
@@ -217,25 +217,6 @@ const formatDataViewerQueryError = (dbType: string, messageText: unknown): strin
     return '查询超过连接超时时间，已中断。请调大连接超时时间，或减少查询范围后重试。';
   }
   return rawMessage;
-};
-
-const reverseOrderBySQL = (orderBySQL: string): string => {
-  const raw = String(orderBySQL || '').trim();
-  if (!raw) return '';
-  const body = raw.replace(/^order\s+by\s+/i, '').trim();
-  if (!body) return '';
-
-  const parts = body
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      if (/\s+asc$/i.test(part)) return part.replace(/\s+asc$/i, ' DESC');
-      if (/\s+desc$/i.test(part)) return part.replace(/\s+desc$/i, ' ASC');
-      return `${part} DESC`;
-    });
-  if (parts.length === 0) return '';
-  return ` ORDER BY ${parts.join(', ')}`;
 };
 
 type ViewerFilterSnapshot = {

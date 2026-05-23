@@ -27,6 +27,11 @@ describe('buildAIReadonlyPreviewSQL', () => {
       .toBe('SELECT * FROM users LIMIT 50 OFFSET 0');
   });
 
+  it('limits SQL Server readonly SQL with TOP syntax', () => {
+    expect(buildAIReadonlyPreviewSQL('sqlserver', 'SELECT * FROM users', 50))
+      .toBe('SELECT TOP 50 * FROM users');
+  });
+
   it('keeps PostgreSQL-compatible and ClickHouse SQL on LIMIT syntax', () => {
     expect(buildAIReadonlyPreviewSQL('postgres', 'SELECT * FROM users', 50))
       .toBe('SELECT * FROM users LIMIT 50 OFFSET 0');
