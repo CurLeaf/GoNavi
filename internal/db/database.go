@@ -58,6 +58,55 @@ type BatchWriteExecer interface {
 	ExecBatchContext(ctx context.Context, query string) (int64, error)
 }
 
+// StatementExecer is a single-session SQL execution handle.
+// It is used by long-running import jobs that must preserve session-scoped
+// settings across multiple statements.
+type StatementExecer interface {
+	Exec(query string) (int64, error)
+	ExecContext(ctx context.Context, query string) (int64, error)
+	Close() error
+}
+
+// SessionExecerProvider is implemented by database/sql based drivers that can
+// pin a long-running job to one physical connection.
+type SessionExecerProvider interface {
+	OpenSessionExecer(ctx context.Context) (StatementExecer, error)
+}
+
+type sqlConnStatementExecer struct {
+	conn *sql.Conn
+}
+
+func NewSQLConnStatementExecer(conn *sql.Conn) StatementExecer {
+	return &sqlConnStatementExecer{conn: conn}
+}
+
+func (e *sqlConnStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	if e == nil || e.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := e.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlConnStatementExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlConnStatementExecer) ExecBatchContext(ctx context.Context, query string) (int64, error) {
+	return e.ExecContext(ctx, query)
+}
+
+func (e *sqlConnStatementExecer) Close() error {
+	if e == nil || e.conn == nil {
+		return nil
+	}
+	return e.conn.Close()
+}
+
 // BatchApplier 定义了批量变更提交接口。
 // 支持批量编辑的驱动实现此接口，用于一次性提交前端 DataGrid 中的增删改操作。
 type BatchApplier interface {

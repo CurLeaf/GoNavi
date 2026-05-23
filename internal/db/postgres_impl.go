@@ -249,6 +249,17 @@ func (p *PostgresDB) ExecBatchContext(ctx context.Context, query string) (int64,
 	return res.RowsAffected()
 }
 
+func (p *PostgresDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if p.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := p.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if p.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

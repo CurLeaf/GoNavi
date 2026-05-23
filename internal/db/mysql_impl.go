@@ -679,6 +679,17 @@ func (m *MySQLDB) ExecBatchContext(ctx context.Context, query string) (int64, er
 	return res.RowsAffected()
 }
 
+func (m *MySQLDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if m.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := m.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

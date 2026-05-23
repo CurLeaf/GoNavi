@@ -187,6 +187,17 @@ func (h *HighGoDB) ExecBatchContext(ctx context.Context, query string) (int64, e
 	return res.RowsAffected()
 }
 
+func (h *HighGoDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if h.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := h.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (h *HighGoDB) Exec(query string) (int64, error) {
 	if h.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

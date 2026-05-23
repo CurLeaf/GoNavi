@@ -101,6 +101,17 @@ func (d *DuckDB) ExecBatchContext(ctx context.Context, query string) (int64, err
 	return res.RowsAffected()
 }
 
+func (d *DuckDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if d.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := d.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

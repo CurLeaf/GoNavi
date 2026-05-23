@@ -315,6 +315,17 @@ func (k *KingbaseDB) ExecBatchContext(ctx context.Context, query string) (int64,
 	return res.RowsAffected()
 }
 
+func (k *KingbaseDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if k.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := k.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (k *KingbaseDB) Exec(query string) (int64, error) {
 	if k.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
