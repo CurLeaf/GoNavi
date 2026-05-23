@@ -40,6 +40,8 @@ const getTabKindLabel = (tab: TabData): string => {
   return 'TAB';
 };
 
+export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
+
 const getTabKindIcon = (tab: TabData): React.ReactNode => {
   if (tab.type === 'query') return <ConsoleSqlOutlined />;
   if (tab.type === 'table-overview') return <DatabaseOutlined />;
@@ -532,8 +534,17 @@ const TabManager: React.FC = React.memo(() => {
   );
 
   return (
-    <div className={isV2Ui ? 'gn-v2-tab-workbench' : undefined}>
+    <div className={`${TAB_WORKBENCH_CLASS_NAME}${isV2Ui ? ' gn-v2-tab-workbench' : ''}`}>
         <style>{`
+            .${TAB_WORKBENCH_CLASS_NAME} {
+              height: 100%;
+              flex: 1 1 auto;
+              min-height: 0;
+              min-width: 0;
+              display: flex;
+              flex-direction: column;
+              overflow: hidden;
+            }
             .main-tabs {
               height: 100%;
               flex: 1 1 auto;

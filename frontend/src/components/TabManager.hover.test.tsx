@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveTabHoverOpen, TabHoverInfo, stopTabHoverDragPropagation } from './TabManager';
+import { TAB_WORKBENCH_CLASS_NAME, resolveTabHoverOpen, TabHoverInfo, stopTabHoverDragPropagation } from './TabManager';
 import type { TabData } from '../types';
 
 describe('TabManager hover info', () => {
@@ -11,6 +11,15 @@ describe('TabManager hover info', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('const TabManager: React.FC = React.memo(() => {');
+  });
+
+  it('keeps the tab workbench as a full-height flex child in legacy and v2 UI', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(TAB_WORKBENCH_CLASS_NAME).toBe('tab-workbench');
+    expect(source).toContain("className={`${TAB_WORKBENCH_CLASS_NAME}${isV2Ui ? ' gn-v2-tab-workbench' : ''}`}");
+    expect(source).toContain('.${TAB_WORKBENCH_CLASS_NAME} {');
+    expect(source).toMatch(/\.\$\{TAB_WORKBENCH_CLASS_NAME\} \{[\s\S]*height: 100%;[\s\S]*flex: 1 1 auto;[\s\S]*min-height: 0;[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*overflow: hidden;/);
   });
 
   it('renders full v2 tab hover context for table tabs', () => {
