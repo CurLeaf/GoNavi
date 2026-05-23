@@ -11,6 +11,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   FileTextOutlined,
   CopyOutlined,
   ExportOutlined,
+  FolderAddOutlined,
   SaveOutlined,
   EditOutlined,
   DownOutlined,
@@ -46,7 +47,7 @@ import { buildSidebarTablePinKey, useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { SavedConnection, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -466,7 +467,7 @@ const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
 
 const normalizeDriverType = (value: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'postgresql') return 'postgres';
+  if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
   if (normalized === 'doris') return 'diros';
   if (
     normalized === 'open_gauss' ||
@@ -489,6 +490,10 @@ const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): st
   }
   return normalizeDriverType(conn?.config?.driver || '');
 };
+
+const isPostgresSchemaDialect = (dialect: string): boolean => (
+  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
+);
 
 const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
   { value: 'smart', label: '智能' },
@@ -748,6 +753,9 @@ const Sidebar: React.FC<{
   const [isCreateDbModalOpen, setIsCreateDbModalOpen] = useState(false);
   const [createDbForm] = Form.useForm();
   const [targetConnection, setTargetConnection] = useState<any>(null);
+  const [isCreateSchemaModalOpen, setIsCreateSchemaModalOpen] = useState(false);
+  const [createSchemaForm] = Form.useForm();
+  const [createSchemaTarget, setCreateSchemaTarget] = useState<any>(null);
   const [isRenameDbModalOpen, setIsRenameDbModalOpen] = useState(false);
   const [renameDbForm] = Form.useForm();
   const [renameDbTarget, setRenameDbTarget] = useState<any>(null);
@@ -1109,12 +1117,11 @@ const Sidebar: React.FC<{
   };
 
   const getMetadataDialect = (conn: SavedConnection | undefined): string => {
-      const type = String(conn?.config?.type || '').trim().toLowerCase();
+      const type = normalizeDriverType(String(conn?.config?.type || '').trim());
       if (type === 'custom') {
-          const driver = String(conn?.config?.driver || '').trim().toLowerCase();
+          const driver = normalizeDriverType(String(conn?.config?.driver || '').trim());
           if (driver === 'diros' || driver === 'doris') return 'mysql';
           if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
-          if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
           return driver;
       }
       if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
@@ -1419,6 +1426,15 @@ const Sidebar: React.FC<{
       }
   };
 
+  const buildSchemasMetadataQuerySpecs = (dialect: string): MetadataQuerySpec[] => {
+      if (!isPostgresSchemaDialect(dialect)) {
+          return [];
+      }
+      return [{
+          sql: `SELECT nspname AS schema_name FROM pg_namespace WHERE nspname NOT IN ('pg_catalog', 'information_schema') AND nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY nspname`,
+      }];
+  };
+
   const queryMetadataRowsBySpecs = async (
       conn: any,
       dbName: string,
@@ -1586,7 +1602,28 @@ const Sidebar: React.FC<{
           });
 	      });
 	      return { routines, supported: hasSuccessfulQuery };
-	  };
+  };
+
+  const loadSchemas = async (conn: any, dbName: string): Promise<{ schemas: string[]; supported: boolean }> => {
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      const querySpecs = buildSchemasMetadataQuerySpecs(dialect);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
+      const seen = new Set<string>();
+      const schemas: string[] = [];
+
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'schemaname']) || getFirstRowValue(row);
+              if (!schemaName) return;
+              const key = schemaName.toLowerCase();
+              if (seen.has(key)) return;
+              seen.add(key);
+              schemas.push(schemaName);
+          });
+      });
+
+      return { schemas, supported: hasSuccessfulQuery };
+  };
 
 	  const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
 	      const cached = driverStatusCacheRef.current;
@@ -1894,7 +1931,8 @@ const Sidebar: React.FC<{
 	                };
 	            });
 
-	            const [viewsResult, materializedViewsResult, triggersResult, routinesResult] = await Promise.all([
+	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult] = await Promise.all([
+	                loadSchemas(conn, conn.dbName),
 	                loadViews(conn, conn.dbName),
 	                loadStarRocksMaterializedViews(conn, conn.dbName),
 	                loadDatabaseTriggers(conn, conn.dbName),
@@ -1932,6 +1970,7 @@ const Sidebar: React.FC<{
             const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
+            const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
 
             const viewEntries = viewRows.map((viewName: string) => {
                 const parsed = splitQualifiedName(viewName);
@@ -2127,6 +2166,7 @@ const Sidebar: React.FC<{
 	                    return bucket;
 	                };
 
+	                schemaRows.forEach((schemaName) => getSchemaBucket(schemaName));
 	                sortedTableEntries.forEach((entry) => getSchemaBucket(entry.schemaName).tables.push(buildTableNode(entry)));
 	                viewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).views.push(buildViewNode(entry)));
 	                materializedViewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).materializedViews.push(buildMaterializedViewNode(entry)));
@@ -3416,6 +3456,43 @@ const Sidebar: React.FC<{
       }
   };
 
+  const openCreateSchemaModal = (node: any) => {
+      const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
+      if (!isPostgresSchemaDialect(dialect)) {
+          message.warning('当前数据源暂不支持通过此入口新建模式');
+          return;
+      }
+      setCreateSchemaTarget(node);
+      createSchemaForm.resetFields();
+      setIsCreateSchemaModalOpen(true);
+  };
+
+  const handleCreateSchema = async () => {
+      try {
+          const values = await createSchemaForm.validateFields();
+          const node = createSchemaTarget;
+          const conn = node?.dataRef;
+          const dbName = String(conn?.dbName || node?.title || '').trim();
+          if (!conn || !dbName) {
+              message.error('未找到目标数据库，无法新建模式');
+              return;
+          }
+
+          const res = await CreateSchema(buildRpcConnectionConfig(conn.config, { database: dbName }) as any, dbName, values.name);
+          if (res.success) {
+              message.success('模式创建成功');
+              setIsCreateSchemaModalOpen(false);
+              setCreateSchemaTarget(null);
+              createSchemaForm.resetFields();
+              await loadTables(node);
+          } else {
+              message.error('创建失败: ' + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
       return buildRpcConnectionConfig(conn.config, {
           database: resolveSidebarRuntimeDatabase(
@@ -4241,6 +4318,9 @@ const Sidebar: React.FC<{
       switch (action) {
           case 'new-table':
               openNewTableDesign(node);
+              return;
+          case 'new-schema':
+              openCreateSchemaModal(node);
               return;
           case 'new-materialized-view':
               openCreateStarRocksMaterializedView(node);
@@ -5162,6 +5242,7 @@ const Sidebar: React.FC<{
           <V2DatabaseContextMenuView
               dbName={String(node.dataRef?.dbName || node.title || '')}
               dialect={dialect}
+              supportsSchemaActions={isPostgresSchemaDialect(dialect)}
               supportsStarRocksActions={dialect === 'starrocks'}
               onAction={(action) => {
                   setContextMenu(null);
@@ -5904,6 +5985,7 @@ const Sidebar: React.FC<{
         ];
     } else if (node.type === 'database') {
        const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+       const supportsSchemaActions = isPostgresSchemaDialect(getMetadataDialect(node.dataRef as SavedConnection));
        return [
            {
                key: 'new-table',
@@ -5911,6 +5993,14 @@ const Sidebar: React.FC<{
                icon: <TableOutlined />,
                onClick: () => openNewTableDesign(node)
            },
+           ...(supportsSchemaActions ? [
+               {
+                   key: 'new-schema',
+                   label: '新建模式',
+                   icon: <FolderAddOutlined />,
+                   onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
+               },
+           ] : []),
            ...(isStarRocks ? [
                {
                    key: 'new-materialized-view',
@@ -7029,6 +7119,23 @@ const Sidebar: React.FC<{
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
                 {/* Charset option could be added here */}
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`新建模式${createSchemaTarget?.dataRef?.dbName ? ` (${createSchemaTarget.dataRef.dbName})` : ''}`}
+            open={isCreateSchemaModalOpen}
+            onOk={handleCreateSchema}
+            onCancel={() => {
+                setIsCreateSchemaModalOpen(false);
+                setCreateSchemaTarget(null);
+                createSchemaForm.resetFields();
+            }}
+        >
+            <Form form={createSchemaForm} layout="vertical">
+                <Form.Item name="name" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
+                    <Input {...noAutoCapInputProps} />
+                </Form.Item>
             </Form>
         </Modal>
 

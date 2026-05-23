@@ -46,6 +46,10 @@ export function CreateDatabase(arg1, arg2) {
   return window['go']['app']['App']['CreateDatabase'](arg1, arg2);
 }
 
+export function CreateSchema(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CreateSchema'](arg1, arg2, arg3);
+}
+
 export function DBConnect(arg1) {
   return window['go']['app']['App']['DBConnect'](arg1);
 }

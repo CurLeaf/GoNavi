@@ -114,6 +114,7 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   ExecuteSQLFile: mocks.noop,
   CancelSQLFileExecution: mocks.noop,
   CreateDatabase: mocks.noop,
+  CreateSchema: mocks.noop,
   RenameDatabase: mocks.noop,
   DropDatabase: mocks.noop,
   RenameTable: mocks.noop,
@@ -649,6 +650,18 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('导出全部表结构 · SQL');
     expect(markup).toContain('备份全部表 · 结构 + 数据');
     expect(markup).toContain('删除数据库 · DROP');
+  });
+
+  it('renders the v2 database schema action for PostgreSQL-compatible databases', () => {
+    const markup = renderToStaticMarkup(
+      <V2DatabaseContextMenuView
+        dbName="app_db"
+        dialect="postgres"
+        supportsSchemaActions
+      />,
+    );
+
+    expect(markup).toContain('新建模式');
   });
 
   it('renders the v2 connection context menu for host rail actions', () => {

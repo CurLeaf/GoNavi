@@ -115,3 +115,58 @@ func TestCreateDatabase_SQLServerUsesBracketIdentifiers(t *testing.T) {
 		t.Fatalf("unexpected SQL Server create database SQL, want %q got %q", want, fakeDB.execQueries[0])
 	}
 }
+
+func TestBuildCreateSchemaSQL_PostgresQuotesSchemaName(t *testing.T) {
+	got, err := buildCreateSchemaSQL("postgresql", `sales"Ops`)
+	if err != nil {
+		t.Fatalf("expected postgres create schema SQL, got error: %v", err)
+	}
+	const want = `CREATE SCHEMA "sales""Ops"`
+	if got != want {
+		t.Fatalf("unexpected create schema SQL, want %q got %q", want, got)
+	}
+}
+
+func TestBuildCreateSchemaSQL_RejectsUnsupportedDatabaseType(t *testing.T) {
+	if _, err := buildCreateSchemaSQL("mysql", "sales"); err == nil {
+		t.Fatalf("expected unsupported database type error")
+	}
+}
+
+func TestCreateSchema_CustomPostgresUsesSelectedDatabase(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	fakeDB := &fakeCreateDatabaseDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.CreateSchema(connection.ConnectionConfig{
+		Type:     "custom",
+		Driver:   "pgx",
+		Database: "postgres",
+	}, "tenant_db", `tenant"schema`)
+
+	if !result.Success {
+		t.Fatalf("expected create schema success, got failure: %s", result.Message)
+	}
+	if fakeDB.connectConfig.Database != "tenant_db" {
+		t.Fatalf("expected create schema connection to use selected database tenant_db, got %q", fakeDB.connectConfig.Database)
+	}
+	if len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one create schema statement, got %d: %#v", len(fakeDB.execQueries), fakeDB.execQueries)
+	}
+	const want = `CREATE SCHEMA "tenant""schema"`
+	if fakeDB.execQueries[0] != want {
+		t.Fatalf("unexpected create schema SQL, want %q got %q", want, fakeDB.execQueries[0])
+	}
+}

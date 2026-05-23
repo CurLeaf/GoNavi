@@ -21,6 +21,7 @@ import {
   ClearOutlined,
   DashboardOutlined,
   FileTextOutlined,
+  FolderAddOutlined,
   HddOutlined,
   PushpinOutlined,
   VerticalAlignBottomOutlined,
@@ -282,6 +283,7 @@ export const V2TableGroupContextMenuView: React.FC<{
 
 export type V2DatabaseContextMenuActionKey =
   | 'new-table'
+  | 'new-schema'
   | 'new-materialized-view'
   | 'new-external-catalog'
   | 'rename-db'
@@ -296,11 +298,13 @@ export type V2DatabaseContextMenuActionKey =
 export const V2DatabaseContextMenuView: React.FC<{
   dbName: string;
   dialect?: string;
+  supportsSchemaActions?: boolean;
   supportsStarRocksActions?: boolean;
   onAction?: (action: V2DatabaseContextMenuActionKey) => void;
 }> = ({
   dbName,
   dialect,
+  supportsSchemaActions = false,
   supportsStarRocksActions = false,
   onAction,
 }) => {
@@ -321,6 +325,7 @@ export const V2DatabaseContextMenuView: React.FC<{
       <div className="gn-v2-context-menu-body">
         {renderItems([
           { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: '⌘N', featured: true },
+          ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: '新建模式' }] : []),
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
           { action: 'run-sql', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },
         ])}
