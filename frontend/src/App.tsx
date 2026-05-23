@@ -66,9 +66,11 @@ import {
   eventToShortcut,
   findReservedConflicts,
   getShortcutDisplay,
+  getShortcutPlatform,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
+  resolveShortcutBinding,
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
@@ -1270,6 +1272,7 @@ function App() {
   const isWindowsRuntime = runtimePlatform === 'windows'
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
+  const activeShortcutPlatform = getShortcutPlatform(isMacRuntime);
   const macWindowDiagnosticsEnabled = shouldEnableMacWindowDiagnostics(
       isMacRuntime,
       import.meta.env.DEV,
@@ -1956,7 +1959,7 @@ function App() {
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
       for (const action of SHORTCUT_ACTION_ORDER) {
-          const binding = shortcutOptions[action];
+          const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
           if (!binding?.enabled || !binding.combo) continue;
           const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo));
           if (conflicts.length > 0) {
@@ -1964,7 +1967,7 @@ function App() {
           }
       }
       return map;
-  }, [shortcutOptions]);
+  }, [activeShortcutPlatform, shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
@@ -2470,9 +2473,10 @@ function App() {
     document.body.style.backgroundColor = 'transparent';
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    document.body.setAttribute('data-ui-version', appearance.uiVersion);
     document.body.style.fontSize = `${effectiveFontSize}px`;
     document.documentElement.style.setProperty('--gonavi-font-size', `${effectiveFontSize}px`);
-  }, [darkMode, effectiveFontSize]);
+  }, [appearance.uiVersion, darkMode, effectiveFontSize]);
 
   useEffect(() => {
       isAboutOpenRef.current = isAboutOpen;
@@ -2596,7 +2600,7 @@ function App() {
               if (meta.scope && meta.scope !== 'global') {
                   return false;
               }
-              const binding = shortcutOptions[action];
+              const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
               if (!binding?.enabled) {
                   return false;
               }
@@ -2647,7 +2651,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -2680,7 +2684,7 @@ function App() {
               if (action === capturingShortcutAction) {
                   return false;
               }
-              const binding = shortcutOptions[action];
+              const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
               if (!binding?.enabled) {
                   return false;
               }
@@ -2702,7 +2706,7 @@ function App() {
               }
           }
 
-          updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true });
+          updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true }, activeShortcutPlatform);
           setCapturingShortcutAction(null);
       };
 
@@ -2710,7 +2714,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleShortcutCapture, true);
       };
-  }, [capturingShortcutAction, shortcutOptions, updateShortcut]);
+  }, [activeShortcutPlatform, capturingShortcutAction, shortcutOptions, updateShortcut]);
 
   const linuxResizeHandleStyleBase = {
       position: 'fixed',
@@ -3731,7 +3735,7 @@ function App() {
                       if (meta.platformOnly === 'mac' && !isMacRuntime) {
                           return null;
                       }
-                      const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
+                      const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
                       const isCapturing = capturingShortcutAction === action;
                       const conflicts = shortcutConflictMap[action];
                       const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
@@ -3775,7 +3779,7 @@ function App() {
                                   </Button>
                                   <Switch
                                       checked={binding.enabled}
-                                      onChange={(checked) => updateShortcut(action, { enabled: checked })}
+                                      onChange={(checked) => updateShortcut(action, { enabled: checked }, activeShortcutPlatform)}
                                   />
                               </div>
                           </div>

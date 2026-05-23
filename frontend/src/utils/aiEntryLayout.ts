@@ -2,7 +2,9 @@ import type { CSSProperties } from 'react';
 
 export const SIDEBAR_UTILITY_ITEM_KEYS = ['tools', 'settings'] as const;
 
+export type AIEntryPlacement = 'content-edge';
 export type LegacyAIEdgeHandleAttachment = 'content-shell' | 'panel-shell';
+export type AIEdgeHandleAttachment = LegacyAIEdgeHandleAttachment;
 
 export interface ResolveLegacyAIEdgeHandleStyleInput {
   darkMode: boolean;
@@ -10,9 +12,15 @@ export interface ResolveLegacyAIEdgeHandleStyleInput {
   effectiveUiScale: number;
 }
 
+export type ResolveAIEdgeHandleStyleInput = ResolveLegacyAIEdgeHandleStyleInput;
+
+export const resolveAIEntryPlacement = (): AIEntryPlacement => 'content-edge';
+
 export const resolveLegacyAIEdgeHandleAttachment = (
   aiPanelVisible: boolean,
 ): LegacyAIEdgeHandleAttachment => (aiPanelVisible ? 'panel-shell' : 'content-shell');
+
+export const resolveAIEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment;
 
 export const resolveLegacyAIEdgeHandleDockStyle = (
   attachment: LegacyAIEdgeHandleAttachment,
@@ -22,6 +30,8 @@ export const resolveLegacyAIEdgeHandleDockStyle = (
   right: attachment === 'panel-shell' ? '100%' : 0,
   zIndex: 12,
 });
+
+export const resolveAIEdgeHandleDockStyle = resolveLegacyAIEdgeHandleDockStyle;
 
 export const resolveLegacyAIEdgeHandleStyle = ({
   darkMode,
@@ -54,3 +64,5 @@ export const resolveLegacyAIEdgeHandleStyle = ({
     flexShrink: 0,
   };
 };
+
+export const resolveAIEdgeHandleStyle = resolveLegacyAIEdgeHandleStyle;

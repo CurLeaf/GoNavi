@@ -17,11 +17,13 @@ import {
 } from "./types";
 import {
   ShortcutAction,
-  ShortcutBinding,
   ShortcutOptions,
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
+  getShortcutPlatform,
   sanitizeShortcutOptions,
+  type ShortcutPlatformBinding,
+  type ShortcutPlatform,
 } from "./utils/shortcuts";
 import { buildExternalSQLDirectoryId } from "./utils/externalSqlTree";
 import {
@@ -41,6 +43,7 @@ import {
 } from "./utils/oceanBaseProtocol";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
+  uiVersion: "legacy" | "v2";
   enabled: boolean;
   opacity: number;
   blur: number;
@@ -48,6 +51,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  uiVersion: "legacy",
   enabled: true,
   opacity: 1.0,
   blur: 0,
@@ -799,6 +803,7 @@ interface AppState {
   enableColumnOrderMemory: boolean;
   tableHiddenColumns: Record<string, string[]>;
   enableHiddenColumnMemory: boolean;
+  pinnedSidebarTables: string[];
   windowBounds: { width: number; height: number; x: number; y: number } | null;
   windowState: "normal" | "fullscreen" | "maximized";
   sidebarWidth: number;
@@ -876,7 +881,8 @@ interface AppState {
   setQueryOptions: (options: Partial<QueryOptions>) => void;
   updateShortcut: (
     action: ShortcutAction,
-    binding: Partial<ShortcutBinding>,
+    binding: Partial<ShortcutPlatformBinding>,
+    platform?: ShortcutPlatform,
   ) => void;
   resetShortcutOptions: () => void;
   saveSqlSnippet: (snippet: SqlSnippet) => void;
@@ -895,6 +901,13 @@ interface AppState {
     connectionId: string,
     dbName: string,
     sortBy: "name" | "frequency",
+  ) => void;
+  setSidebarTablePinned: (
+    connectionId: string,
+    dbName: string,
+    tableName: string,
+    schemaName: string | undefined,
+    pinned: boolean,
   ) => void;
   setTableColumnOrder: (
     connectionId: string,
@@ -1164,6 +1177,17 @@ const sanitizeTableHiddenColumns = (
   return result;
 };
 
+const sanitizePinnedSidebarTables = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => toTrimmedString(entry))
+        .filter(Boolean),
+    ),
+  );
+};
+
 const sanitizeAppearance = (
   appearance: Partial<AppearanceSettings> | undefined,
   version: number,
@@ -1173,6 +1197,10 @@ const sanitizeAppearance = (
   }
   const dataGridDisplaySettings = sanitizeDataGridDisplaySettings(appearance);
   const nextAppearance = {
+    uiVersion:
+      appearance.uiVersion === "v2" || appearance.uiVersion === "legacy"
+        ? appearance.uiVersion
+        : DEFAULT_APPEARANCE.uiVersion,
     enabled:
       typeof appearance.enabled === "boolean"
         ? appearance.enabled
@@ -1192,6 +1220,12 @@ const sanitizeAppearance = (
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
+    dataTableFontSize: dataGridDisplaySettings.dataTableFontSize,
+    dataTableFontSizeFollowGlobal:
+      dataGridDisplaySettings.dataTableFontSizeFollowGlobal,
+    sidebarTreeFontSize: dataGridDisplaySettings.sidebarTreeFontSize,
+    sidebarTreeFontSizeFollowGlobal:
+      dataGridDisplaySettings.sidebarTreeFontSizeFollowGlobal,
   };
   if (version < 2 && isLegacyDefaultAppearance(appearance)) {
     return { ...DEFAULT_APPEARANCE };
@@ -1339,6 +1373,21 @@ const runWithExplicitShortcutPersistence = (callback: () => void): void => {
   }
 };
 
+export const buildSidebarTablePinKey = (
+  connectionId: string,
+  dbName: string,
+  tableName: string,
+  schemaName = "",
+): string => {
+  const parts = [
+    toTrimmedString(connectionId),
+    toTrimmedString(dbName),
+    toTrimmedString(schemaName),
+    toTrimmedString(tableName),
+  ];
+  return parts[0] && parts[1] && parts[3] ? JSON.stringify(parts) : "";
+};
+
 // --- AI 会话文件持久化辅助函数 ---
 
 /** 每个 session 独立防抖定时器（2秒） */
@@ -1448,6 +1497,7 @@ export const useStore = create<AppState>()(
       enableColumnOrderMemory: true,
       tableHiddenColumns: {},
       enableHiddenColumnMemory: true,
+      pinnedSidebarTables: [],
       windowBounds: null,
       windowState: "normal" as const,
       sidebarWidth: 330,
@@ -1823,14 +1873,18 @@ export const useStore = create<AppState>()(
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
         })),
-      updateShortcut: (action, binding) => {
+      updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
+          const targetPlatform = platform ?? getShortcutPlatform();
           set((state) => ({
             shortcutOptions: {
               ...state.shortcutOptions,
               [action]: {
                 ...state.shortcutOptions[action],
-                ...binding,
+                [targetPlatform]: {
+                  ...state.shortcutOptions[action][targetPlatform],
+                  ...binding,
+                },
               },
             },
           }));
@@ -1896,6 +1950,19 @@ export const useStore = create<AppState>()(
               [key]: sortBy,
             },
           };
+        }),
+
+      setSidebarTablePinned: (connectionId, dbName, tableName, schemaName, pinned) =>
+        set((state) => {
+          const key = buildSidebarTablePinKey(connectionId, dbName, tableName, schemaName);
+          if (!key) return state;
+          const current = new Set(state.pinnedSidebarTables);
+          if (pinned) {
+            current.add(key);
+          } else {
+            current.delete(key);
+          }
+          return { pinnedSidebarTables: Array.from(current) };
         }),
 
       setTableColumnOrder: (connectionId, dbName, tableName, order) =>
@@ -2230,6 +2297,9 @@ export const useStore = create<AppState>()(
         nextState.tableHiddenColumns = safeHidden;
         nextState.enableHiddenColumnMemory =
           state.enableHiddenColumnMemory !== false;
+        nextState.pinnedSidebarTables = sanitizePinnedSidebarTables(
+          state.pinnedSidebarTables,
+        );
         nextState.windowBounds = sanitizeWindowBounds(state.windowBounds);
         nextState.windowState = sanitizeWindowState(state.windowState);
         nextState.sidebarWidth = sanitizeSidebarWidth(state.sidebarWidth);
@@ -2272,6 +2342,9 @@ export const useStore = create<AppState>()(
             state.tableHiddenColumns,
           ),
           enableHiddenColumnMemory: state.enableHiddenColumnMemory !== false,
+          pinnedSidebarTables: sanitizePinnedSidebarTables(
+            state.pinnedSidebarTables,
+          ),
           windowBounds: sanitizeWindowBounds(state.windowBounds),
           windowState: sanitizeWindowState(state.windowState),
           sidebarWidth: sanitizeSidebarWidth(state.sidebarWidth),
@@ -2311,6 +2384,7 @@ export const useStore = create<AppState>()(
           enableColumnOrderMemory: state.enableColumnOrderMemory,
           tableHiddenColumns: state.tableHiddenColumns,
           enableHiddenColumnMemory: state.enableHiddenColumnMemory,
+          pinnedSidebarTables: state.pinnedSidebarTables,
           windowBounds: state.windowBounds,
           windowState: state.windowState,
           sidebarWidth: state.sidebarWidth,

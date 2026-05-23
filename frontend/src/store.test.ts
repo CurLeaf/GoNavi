@@ -64,12 +64,17 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
     const appearance = useStore.getState().appearance;
 
+    expect(appearance.uiVersion).toBe('legacy');
     expect(appearance.enabled).toBe(false);
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.dataTableDensity).toBe('comfortable');
+    expect(appearance.dataTableFontSize).toBeNull();
+    expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
+    expect(appearance.sidebarTreeFontSize).toBeNull();
+    expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -565,8 +570,8 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
 
     expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -576,19 +581,19 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Meta+Enter',
       enabled: true,
-    });
+    }, 'mac');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
 
     vi.resetModules();
     const reloaded = await importStore();
     expect(reloaded.useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -608,8 +613,8 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
 
     expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -618,14 +623,14 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Ctrl+Enter',
       enabled: true,
-    });
+    }, 'windows');
 
     useStore.getState().replaceConnections([]);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Ctrl+Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Ctrl+Enter', enabled: true },
     });
   });
 
@@ -637,8 +642,8 @@ describe('store appearance persistence', () => {
         shortcutOptions: {
           ...shortcutOptions,
           sendAIChatMessage: {
-            combo: 'Meta+Enter',
-            enabled: true,
+            mac: { combo: 'Meta+Enter', enabled: true },
+            windows: { combo: 'Ctrl+Enter', enabled: true },
           },
         },
       },
@@ -648,8 +653,8 @@ describe('store appearance persistence', () => {
       shortcutOptions: {
         ...shortcutOptions,
         sendAIChatMessage: {
-          combo: 'Enter',
-          enabled: true,
+          mac: { combo: 'Enter', enabled: true },
+          windows: { combo: 'Enter', enabled: true },
         },
       },
     });
@@ -658,8 +663,8 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Ctrl+Enter', enabled: true },
     });
   });
 
@@ -670,13 +675,13 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Meta+Enter',
       enabled: true,
-    });
+    }, 'mac');
     useStore.setState({
       shortcutOptions: {
         ...shortcutOptions,
         sendAIChatMessage: {
-          combo: 'Enter',
-          enabled: true,
+          mac: { combo: 'Enter', enabled: true },
+          windows: { combo: 'Enter', enabled: true },
         },
       },
     });
@@ -684,8 +689,8 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 });
