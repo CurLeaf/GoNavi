@@ -12,31 +12,28 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   frontend:
     name: Build frontend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.24'
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
       - name: Cache frontend node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-node20-frontend-${{ hashFiles('frontend/package-lock.json') }}
@@ -59,7 +56,7 @@ jobs:
         run: tar -cf frontend-dist.tar -C frontend/dist .
 
       - name: Upload frontend dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
           path: frontend-dist.tar
@@ -75,7 +72,7 @@ jobs:
       release_source: ${{ steps.detect.outputs.release_source }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -170,15 +167,15 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.24'
 
       - name: Download frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: .
@@ -632,7 +629,7 @@ jobs:
           fi
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dev-build-artifacts-${{ strategy.job-index }}
           path: |
@@ -652,10 +649,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download All Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: release-assets
           pattern: dev-build-artifacts-*
@@ -801,7 +798,7 @@ jobs:
 
       # 删除旧的 dev pre-release（保持只有最新一个）
       - name: Reset Previous Dev Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -846,7 +843,7 @@ jobs:
 
       - name: Reset Previous Driver Dev Release
         if: steps.driver_assets.outputs.has_driver_assets == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
           script: |
@@ -891,7 +888,7 @@ jobs:
 
       - name: Create Dev Driver Agents Pre-release
         if: steps.driver_assets.outputs.has_driver_assets == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: Syngnat/GoNavi-DriverAgents
           tag_name: dev-latest
@@ -910,7 +907,7 @@ jobs:
           token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
 
       - name: Create Dev Pre-release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: dev-latest
           name: "🧪 Dev Build (${{ steps.version.outputs.version }})"
