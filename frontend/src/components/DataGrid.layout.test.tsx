@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import DataGrid, {
+  buildGridFieldSelectOptions,
   formatCellDisplayText,
   resolveContextMenuFieldName,
   resolveDefaultGridFilterOperator,
@@ -138,6 +139,16 @@ describe('DataGrid layout', () => {
       previousColumnType: 'varchar(64)',
       nextColumnType: 'bigint',
     })).toBe('STARTS_WITH');
+  });
+
+  it('keeps full field names in filter field select options', () => {
+    const [option] = buildGridFieldSelectOptions(['mes_manufacture_order_really_long_column_name']);
+
+    expect(option).toEqual({
+      value: 'mes_manufacture_order_really_long_column_name',
+      label: 'mes_manufacture_order_really_long_column_name',
+      title: 'mes_manufacture_order_really_long_column_name',
+    });
   });
 
   it('renders a DDL action for table data pages only', () => {

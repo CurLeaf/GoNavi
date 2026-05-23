@@ -1049,6 +1049,19 @@ type ForeignKeyTarget = {
 
 const EXACT_GRID_FILTER_OPERATOR = '=';
 const CONTAINS_GRID_FILTER_OPERATOR = 'CONTAINS';
+const FILTER_FIELD_SELECT_STYLE: React.CSSProperties = {
+    width: 320,
+    flex: '0 1 320px',
+    minWidth: 260,
+    maxWidth: 'min(460px, 100%)',
+};
+const FILTER_FIELD_POPUP_WIDTH = 520;
+const FILTER_FIELD_OPTION_STYLE: React.CSSProperties = {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+};
 const STRING_LIKE_GRID_FILTER_TYPES = new Set([
     'bpchar',
     'char',
@@ -1107,6 +1120,26 @@ export const resolveNextGridFilterOperatorForColumnChange = ({
     if (!current) return resolveDefaultGridFilterOperator(nextColumnType);
     const previousDefault = resolveDefaultGridFilterOperator(previousColumnType);
     return current === previousDefault ? resolveDefaultGridFilterOperator(nextColumnType) : current;
+};
+
+export const buildGridFieldSelectOptions = (columnNames: string[]) => (
+    (columnNames || []).map((columnName) => {
+        const text = String(columnName || '');
+        return {
+            value: text,
+            label: text,
+            title: text,
+        };
+    })
+);
+
+const renderGridFieldSelectOption = (option: { label?: React.ReactNode; value?: unknown; title?: unknown }) => {
+    const text = String(option?.title ?? option?.label ?? option?.value ?? '');
+    return (
+        <span title={text} style={FILTER_FIELD_OPTION_STYLE}>
+            {text}
+        </span>
+    );
 };
 
 type NormalizeCommitCellValue = (columnName: string, value: any, mode: 'insert' | 'update') => any;
@@ -2785,6 +2818,11 @@ const DataGrid: React.FC<DataGridProps> = ({
           ),
       }));
   }, [allTableColumnNames, displayColumnNames, quickWhereDraft, dbType, darkMode]);
+
+  const gridFieldSelectOptions = useMemo(
+      () => buildGridFieldSelectOptions(displayColumnNames),
+      [displayColumnNames],
+  );
 
   useEffect(() => {
       if (!showFilter) {
@@ -6363,12 +6401,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                             disabled={condIndex === 0}
                         />
                         <Select
-                            style={{ width: 180 }}
+                            style={FILTER_FIELD_SELECT_STYLE}
                             value={cond.column}
                             onChange={v => updateFilter(cond.id, 'column', v)}
-                            options={displayColumnNames.map(c => ({ value: c, label: c }))}
+                            options={gridFieldSelectOptions}
                             showSearch
                             optionFilterProp="label"
+                            optionRender={renderGridFieldSelectOption}
+                            popupMatchSelectWidth={FILTER_FIELD_POPUP_WIDTH}
                             filterOption={(input, option) =>
                                 String(option?.label ?? '')
                                     .toLowerCase()
@@ -6448,7 +6488,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                 />
                                 <span style={{ fontSize: 12, color: 'inherit', opacity: 0.7, whiteSpace: 'nowrap', minWidth: 32 }}>{idx === 0 ? '排序' : '然后'}</span>
                                 <Select
-                                    style={{ width: 180 }}
+                                    style={FILTER_FIELD_SELECT_STYLE}
                                     value={s.columnKey || undefined}
                                     onChange={v => {
                                         const next = [...sortInfo];
@@ -6458,9 +6498,11 @@ const DataGrid: React.FC<DataGridProps> = ({
                                     }}
                                     options={displayColumnNames
                                         .filter(c => c === s.columnKey || !sortInfo.some(si => si.columnKey === c))
-                                        .map(c => ({ value: c, label: c }))}
+                                        .map(c => ({ value: c, label: c, title: c }))}
                                     showSearch
                                     optionFilterProp="label"
+                                    optionRender={renderGridFieldSelectOption}
+                                    popupMatchSelectWidth={FILTER_FIELD_POPUP_WIDTH}
                                     filterOption={(input, option) =>
                                         String(option?.label ?? '')
                                             .toLowerCase()
