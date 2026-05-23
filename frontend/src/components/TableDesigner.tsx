@@ -11,6 +11,7 @@ import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, D
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
+import { normalizeSchemaStatementForExecution, parseTableCommentFromDDL, splitSchemaExecutionStatements } from './tableDesignerExecutionSql';
 import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
@@ -832,8 +833,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
     if (ddlRes && ddlRes.success) {
         const ddlText = String(ddlRes.data || '');
         setDdl(ddlText);
-        const commentMatch = ddlText.replace(/\r?\n/g, ' ').match(/COMMENT\s*=\s*'((?:\\'|''|[^'])*)'/i);
-        const parsedTableComment = commentMatch ? commentMatch[1].replace(/\\'/g, "'").replace(/''/g, "'") : '';
+        const parsedTableComment = parseTableCommentFromDDL(ddlText);
         setTableComment(parsedTableComment);
         if (!isTableCommentModalOpen) {
             setTableCommentDraft(parsedTableComment);
@@ -1617,10 +1617,10 @@ ${selectedTrigger.statement}`;
           useSSH: conn.config.useSSH || false,
           ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
       };
-      const statements = sqlText.split(/;\s*\n/).map(s => s.trim()).filter(Boolean);
+      const dbType = resolveTableInfo().dbType;
+      const statements = splitSchemaExecutionStatements(sqlText);
       for (let i = 0; i < statements.length; i++) {
-          let stmt = statements[i];
-          if (!stmt.endsWith(';')) stmt += ';';
+          const stmt = normalizeSchemaStatementForExecution(statements[i], dbType);
           const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', stmt);
           if (!res.success) {
               const prefix = statements.length > 1 ? `第 ${i + 1}/${statements.length} 条语句执行失败: ` : '执行失败: ';

@@ -27,6 +27,7 @@ type oracleRecordingState struct {
 	mu           sync.Mutex
 	execQueries  []string
 	execArgs     [][]driver.NamedValue
+	queries      []string
 	rowsAffected int64
 	queryResults map[string]oracleRecordingQueryResult
 	queryError   error
@@ -52,6 +53,12 @@ func (s *oracleRecordingState) snapshotExecArgs() [][]driver.NamedValue {
 		result[i] = append([]driver.NamedValue(nil), args...)
 	}
 	return result
+}
+
+func (s *oracleRecordingState) snapshotQueries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.queries...)
 }
 
 type oracleRecordingDriver struct{}
@@ -88,6 +95,7 @@ func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args 
 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
+	c.state.queries = append(c.state.queries, query)
 	if err := c.state.queryError; err != nil {
 		c.state.mu.Unlock()
 		return nil, err
@@ -103,10 +111,10 @@ func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []
 
 	if strings.Contains(strings.ToLower(query), "tab_columns") {
 		return &oracleRecordingRows{
-			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT"},
+			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT", "COLUMN_KEY", "COMMENT"},
 			rows: [][]driver.Value{
-				{"UPDATED_AT", "TIMESTAMP", "YES", nil},
-				{"CREATED_AT", "DATE", "NO", nil},
+				{"UPDATED_AT", "TIMESTAMP", "YES", nil, "", "更新时间"},
+				{"CREATED_AT", "DATE", "NO", nil, "", nil},
 			},
 		}, nil
 	}
