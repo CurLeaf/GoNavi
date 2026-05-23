@@ -374,6 +374,7 @@ func (t *TDengineDB) GetAllColumns(dbName string) ([]connection.ColumnDefinition
 				TableName: table,
 				Name:      col.Name,
 				Type:      col.Type,
+				Comment:   col.Comment,
 			})
 		}
 	}

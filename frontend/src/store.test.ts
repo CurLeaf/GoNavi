@@ -566,6 +566,125 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('persists open query tab drafts and restores them after reload', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-tab-1',
+      title: '临时 SQL',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      query: 'select * from users where id = 1;',
+    });
+    useStore.getState().updateQueryTabDraft('query-tab-1', {
+      query: 'select * from orders where status = "paid";',
+      connectionId: 'conn-2',
+      dbName: 'reporting',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-tab-1',
+        title: '临时 SQL',
+        type: 'query',
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+        query: 'select * from orders where status = "paid";',
+      }),
+    ]);
+    expect(persisted.state.activeTabId).toBe('query-tab-1');
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-tab-1',
+        type: 'query',
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+        query: 'select * from orders where status = "paid";',
+      }),
+    ]);
+    expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+  });
+
+  it('only restores persisted query tabs with useful SQL state', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        tabs: [
+          {
+            id: 'query-1',
+            title: '有效 SQL',
+            type: 'query',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            query: 'select 1;',
+          },
+          {
+            id: 'table-1',
+            title: 'users',
+            type: 'table',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            tableName: 'users',
+          },
+          {
+            id: 'empty-query',
+            title: '空查询',
+            type: 'query',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            query: '   ',
+          },
+        ],
+        activeTabId: 'table-1',
+      },
+      version: 9,
+    }));
+
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-1',
+        type: 'query',
+        query: 'select 1;',
+      }),
+    ]);
+    expect(useStore.getState().activeTabId).toBe('query-1');
+  });
+
+  it('persists recent SQL execution logs and trims oversized entries', async () => {
+    const { useStore } = await importStore();
+    const longSql = `select '${'x'.repeat(120 * 1024)}'`;
+
+    useStore.getState().addSqlLog({
+      id: 'log-1',
+      timestamp: 100,
+      sql: longSql,
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sqlLogs).toHaveLength(1);
+    expect(persisted.state.sqlLogs[0].sql.length).toBe(100 * 1024);
+    expect(persisted.state.sqlLogs[0].dbName).toBe('main');
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'log-1',
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    }));
+    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(100 * 1024);
+  });
+
   it('defaults AI chat send shortcut to Enter in shared shortcut options', async () => {
     const { useStore } = await importStore();
 

@@ -406,6 +406,7 @@ func (i *IrisDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWith
 			TableName: tableName,
 			Name:      name,
 			Type:      buildIRISColumnType(row),
+			Comment:   rowString(row, "DESCRIPTION", "description", "COMMENT", "comment"),
 		})
 	}
 	sort.SliceStable(cols, func(a, b int) bool {

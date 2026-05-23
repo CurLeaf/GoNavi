@@ -925,7 +925,8 @@ SELECT
     database,
     table,
     name,
-    type
+    type,
+    comment
 FROM system.columns
 WHERE database = '%s'
 ORDER BY table, position`,
@@ -937,7 +938,8 @@ SELECT
     database,
     table,
     name,
-    type
+    type,
+    comment
 FROM system.columns
 WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
 ORDER BY database, table, position`
@@ -954,6 +956,7 @@ ORDER BY database, table, position`
 		tableValue, hasTable := getClickHouseValueFromRow(row, "table", "table_name")
 		nameValue, hasName := getClickHouseValueFromRow(row, "name", "column_name")
 		typeValue, _ := getClickHouseValueFromRow(row, "type", "data_type")
+		commentValue, _ := getClickHouseValueFromRow(row, "comment")
 		if !hasTable || !hasName {
 			continue
 		}
@@ -970,6 +973,7 @@ ORDER BY database, table, position`
 			TableName: tableName,
 			Name:      strings.TrimSpace(fmt.Sprintf("%v", nameValue)),
 			Type:      strings.TrimSpace(fmt.Sprintf("%v", typeValue)),
+			Comment:   strings.TrimSpace(fmt.Sprintf("%v", commentValue)),
 		})
 	}
 	return result, nil

@@ -736,6 +736,7 @@ func (s *SQLiteDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWi
 				TableName: table,
 				Name:      col.Name,
 				Type:      col.Type,
+				Comment:   col.Comment,
 			})
 		}
 	}

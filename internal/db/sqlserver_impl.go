@@ -355,13 +355,14 @@ ORDER BY c.column_id`,
 func (s *SqlServerDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	safeDB := quoteBracket(dbName)
 	query := fmt.Sprintf(`
-SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, tp.name AS data_type
+SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, tp.name AS data_type, ep.value AS comment
 FROM [%s].sys.columns c
 JOIN [%s].sys.tables t ON c.object_id = t.object_id
 JOIN [%s].sys.schemas s ON t.schema_id = s.schema_id
 JOIN [%s].sys.types tp ON c.user_type_id = tp.user_type_id
+LEFT JOIN [%s].sys.extended_properties ep ON ep.major_id = c.object_id AND ep.minor_id = c.column_id AND ep.name = 'MS_Description'
 WHERE t.type = 'U'
-ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB)
+ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB, safeDB)
 
 	data, _, err := s.Query(query)
 	if err != nil {
@@ -378,6 +379,9 @@ ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB)
 			TableName: tableName,
 			Name:      fmt.Sprintf("%v", row["column_name"]),
 			Type:      fmt.Sprintf("%v", row["data_type"]),
+		}
+		if v, ok := row["comment"]; ok && v != nil {
+			col.Comment = fmt.Sprintf("%v", v)
 		}
 		cols = append(cols, col)
 	}

@@ -1302,10 +1302,10 @@ func formatMySQLDateTime(t time.Time) string {
 }
 
 func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
-	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", dbName)
 	if dbName == "" {
 		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
 	}
+	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", strings.ReplaceAll(dbName, "'", "''"))
 
 	data, _, err := m.Query(query)
 	if err != nil {
@@ -1318,6 +1318,7 @@ func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWit
 			TableName: fmt.Sprintf("%v", row["TABLE_NAME"]),
 			Name:      fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:      fmt.Sprintf("%v", row["COLUMN_TYPE"]),
+			Comment:   fmt.Sprintf("%v", row["COLUMN_COMMENT"]),
 		}
 		cols = append(cols, col)
 	}

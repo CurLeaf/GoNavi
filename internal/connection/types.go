@@ -178,6 +178,7 @@ type ColumnDefinitionWithTable struct {
 	TableName string `json:"tableName"`
 	Name      string `json:"name"`
 	Type      string `json:"type"`
+	Comment   string `json:"comment,omitempty"`
 }
 
 // UpdateRow 表示一行更新操作，Keys 为 WHERE 条件，Values 为 SET 值。

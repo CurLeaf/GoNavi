@@ -522,11 +522,19 @@ ORDER BY trigger_name, event_manipulation`, esc(table), esc(schema))
 
 func (v *VastbaseDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	query := `
-SELECT table_schema, table_name, column_name, data_type
-FROM information_schema.columns
-WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-  AND table_schema NOT LIKE 'pg|_%' ESCAPE '|'
-ORDER BY table_schema, table_name, ordinal_position`
+SELECT
+	c.table_schema,
+	c.table_name,
+	c.column_name,
+	c.data_type,
+	col_description(cls.oid, a.attnum) AS comment
+FROM information_schema.columns c
+LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
+LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
+LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name
+WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+  AND c.table_schema NOT LIKE 'pg|_%' ESCAPE '|'
+ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 
 	data, _, err := v.Query(query)
 	if err != nil {
@@ -546,6 +554,7 @@ ORDER BY table_schema, table_name, ordinal_position`
 			TableName: tableName,
 			Name:      fmt.Sprintf("%v", row["column_name"]),
 			Type:      fmt.Sprintf("%v", row["data_type"]),
+			Comment:   fmt.Sprintf("%v", row["comment"]),
 		}
 		cols = append(cols, col)
 	}

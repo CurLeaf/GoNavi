@@ -747,9 +747,11 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 }
 
 func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
-	query := fmt.Sprintf(`SELECT table_name, column_name, data_type 
-		FROM all_tab_columns 
-		WHERE owner = '%s'`, strings.ToUpper(dbName))
+	query := fmt.Sprintf(`SELECT c.table_name, c.column_name, c.data_type, cc.comments AS comment
+		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
+		WHERE c.owner = '%s'`, strings.ReplaceAll(strings.ToUpper(dbName), "'", "''"))
 
 	data, _, err := o.Query(query)
 	if err != nil {
@@ -762,6 +764,7 @@ func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWi
 			TableName: fmt.Sprintf("%v", row["TABLE_NAME"]),
 			Name:      fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:      fmt.Sprintf("%v", row["DATA_TYPE"]),
+			Comment:   fmt.Sprintf("%v", row["COMMENT"]),
 		}
 		cols = append(cols, col)
 	}

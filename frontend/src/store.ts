@@ -76,6 +76,12 @@ const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 9;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
+const MAX_PERSISTED_QUERY_TABS = 20;
+const MAX_PERSISTED_QUERY_LENGTH = 1024 * 1024;
+const MAX_SQL_LOGS = 1000;
+const MAX_PERSISTED_SQL_LOGS = 200;
+const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
+const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
@@ -852,6 +858,10 @@ interface AppState {
   reorderTags: (tagIds: string[]) => void;
 
   addTab: (tab: TabData) => void;
+  updateQueryTabDraft: (
+    id: string,
+    draft: Partial<Pick<TabData, "query" | "connectionId" | "dbName" | "title">>,
+  ) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToLeft: (id: string) => void;
@@ -1048,6 +1058,97 @@ const sanitizeExternalSQLDirectories = (
     });
   });
   return result;
+};
+
+const sanitizeQueryTabs = (value: unknown): TabData[] => {
+  if (!Array.isArray(value)) return [];
+  const result: TabData[] = [];
+  const seenIds = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    if (raw.type !== "query") return;
+
+    const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
+    const filePath = toTrimmedString(raw.filePath);
+    const savedQueryId = toTrimmedString(raw.savedQueryId);
+    if (!query.trim() && !filePath && !savedQueryId) return;
+
+    let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
+    if (seenIds.has(id)) {
+      id = `${id}-${index + 1}`;
+    }
+    seenIds.add(id);
+
+    result.push({
+      id,
+      title: toTrimmedString(raw.title, "新建查询") || "新建查询",
+      type: "query",
+      connectionId: toTrimmedString(raw.connectionId),
+      dbName: toTrimmedString(raw.dbName),
+      query,
+      filePath: filePath || undefined,
+      savedQueryId: savedQueryId || undefined,
+      readOnly: raw.readOnly === true,
+    });
+  });
+
+  return result.slice(0, MAX_PERSISTED_QUERY_TABS);
+};
+
+const sanitizeActiveTabId = (activeTabId: unknown, tabs: TabData[]): string | null => {
+  const id = toTrimmedString(activeTabId);
+  if (id && tabs.some((tab) => tab.id === id)) {
+    return id;
+  }
+  return tabs[0]?.id || null;
+};
+
+const sanitizeSqlLogs = (value: unknown, limit = MAX_PERSISTED_SQL_LOGS): SqlLog[] => {
+  if (!Array.isArray(value)) return [];
+  const result: SqlLog[] = [];
+  const seenIds = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    const sql = typeof raw.sql === "string" ? raw.sql.slice(0, MAX_PERSISTED_SQL_LOG_LENGTH) : "";
+    if (!sql.trim()) return;
+
+    let id = toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`;
+    if (seenIds.has(id)) {
+      id = `${id}-${index + 1}`;
+    }
+    seenIds.add(id);
+
+    const status = raw.status === "error" ? "error" : "success";
+    const timestamp = Number(raw.timestamp);
+    const duration = Number(raw.duration);
+    const affectedRows = Number(raw.affectedRows);
+    const log: SqlLog = {
+      id,
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+      sql,
+      status,
+      duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
+      dbName: toTrimmedString(raw.dbName) || undefined,
+    };
+
+    const message = typeof raw.message === "string"
+      ? raw.message.slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH)
+      : "";
+    if (message) {
+      log.message = message;
+    }
+    if (Number.isFinite(affectedRows)) {
+      log.affectedRows = affectedRows;
+    }
+
+    result.push(log);
+  });
+
+  return result.slice(0, limit);
 };
 
 const hasLegacyConnectionSecrets = (
@@ -1649,6 +1750,51 @@ export const useStore = create<AppState>()(
           return { tabs: [...state.tabs, tab], activeTabId: tab.id };
         }),
 
+      updateQueryTabDraft: (id, draft) =>
+        set((state) => {
+          const tabId = toTrimmedString(id);
+          if (!tabId) return state;
+
+          let changed = false;
+          const nextTabs = state.tabs.map((tab) => {
+            if (tab.id !== tabId || tab.type !== "query") return tab;
+            const nextTab: TabData = { ...tab };
+
+            if (draft.query !== undefined) {
+              const nextQuery = typeof draft.query === "string" ? draft.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
+              if (nextTab.query !== nextQuery) {
+                nextTab.query = nextQuery;
+                changed = true;
+              }
+            }
+            if (draft.connectionId !== undefined) {
+              const nextConnectionId = toTrimmedString(draft.connectionId);
+              if (nextTab.connectionId !== nextConnectionId) {
+                nextTab.connectionId = nextConnectionId;
+                changed = true;
+              }
+            }
+            if (draft.dbName !== undefined) {
+              const nextDbName = toTrimmedString(draft.dbName);
+              if ((nextTab.dbName || "") !== nextDbName) {
+                nextTab.dbName = nextDbName;
+                changed = true;
+              }
+            }
+            if (draft.title !== undefined) {
+              const nextTitle = toTrimmedString(draft.title, nextTab.title) || nextTab.title;
+              if (nextTab.title !== nextTitle) {
+                nextTab.title = nextTitle;
+                changed = true;
+              }
+            }
+
+            return nextTab;
+          });
+
+          return changed ? { tabs: nextTabs } : state;
+        }),
+
       closeTab: (id) =>
         set((state) => {
           const newTabs = state.tabs.filter((t) => t.id !== id);
@@ -1926,7 +2072,7 @@ export const useStore = create<AppState>()(
         }),
 
       addSqlLog: (log) =>
-        set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
+        set((state) => ({ sqlLogs: sanitizeSqlLogs([log, ...state.sqlLogs], MAX_SQL_LOGS) })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
 
       recordTableAccess: (connectionId, dbName, tableName) =>
@@ -2245,6 +2391,9 @@ export const useStore = create<AppState>()(
         ) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
+        const safeTabs = sanitizeQueryTabs(state.tabs);
+        nextState.tabs = safeTabs;
+        nextState.activeTabId = sanitizeActiveTabId(state.activeTabId, safeTabs);
         if (version < 5) {
           nextState.connectionTags = sanitizeConnectionTags(
             state.connectionTags,
@@ -2273,6 +2422,7 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
+        nextState.sqlLogs = sanitizeSqlLogs(state.sqlLogs);
         const existingSnippets = sanitizeSqlSnippets(state.sqlSnippets);
         const existingSnippetIds = new Set(existingSnippets.map((s) => s.id));
         const missingSnippets = DEFAULT_SQL_SNIPPETS.filter(
@@ -2318,11 +2468,14 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        const safeTabs = sanitizeQueryTabs(state.tabs);
         return {
           ...currentState,
           ...state,
           connections: sanitizeConnections(state.connections),
           connectionTags: sanitizeConnectionTags(state.connectionTags),
+          tabs: safeTabs,
+          activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
@@ -2352,6 +2505,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
+          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
@@ -2361,7 +2515,10 @@ export const useStore = create<AppState>()(
         };
       },
       partialize: (state) => {
+        const tabs = sanitizeQueryTabs(state.tabs);
         const partialState: Partial<AppState> = {
+          tabs,
+          activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
           savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
@@ -2377,6 +2534,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
+          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,
