@@ -297,25 +297,57 @@ func (p *PostgresDB) GetDatabases() ([]string, error) {
 }
 
 func (p *PostgresDB) GetTables(dbName string) ([]string, error) {
-	query := "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, tablename"
+	query := buildPostgresTablesQuery()
 	data, _, err := p.Query(query)
 	if err != nil {
-		return nil, err
+		data, _, err = p.Query(buildPostgresLegacyTablesQuery())
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	var tables []string
+	tables := parsePostgresTableNames(data)
+	return resolveShardingSphereLogicalTables(tables, p.Query), nil
+}
+
+func buildPostgresTablesQuery() string {
+	return `
+SELECT DISTINCT
+	n.nspname AS schemaname,
+	c.relname AS tablename
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p')
+  AND n.nspname != 'information_schema'
+  AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|'
+ORDER BY n.nspname, c.relname`
+}
+
+func buildPostgresLegacyTablesQuery() string {
+	return "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, tablename"
+}
+
+func parsePostgresTableNames(data []map[string]interface{}) []string {
+	tables := make([]string, 0, len(data))
+	seen := make(map[string]struct{}, len(data))
 	for _, row := range data {
-		schema, okSchema := row["schemaname"]
-		name, okName := row["tablename"]
-		if okSchema && okName {
-			tables = append(tables, fmt.Sprintf("%v.%v", schema, name))
+		schema := getCaseInsensitiveRowString(row, "schemaname", "schema_name", "schema", "nspname")
+		name := getCaseInsensitiveRowString(row, "tablename", "table_name", "relname", "name")
+		if name == "" {
 			continue
 		}
-		if okName {
-			tables = append(tables, fmt.Sprintf("%v", name))
+		table := name
+		if schema != "" {
+			table = fmt.Sprintf("%s.%s", schema, name)
 		}
+		key := strings.ToLower(table)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		tables = append(tables, table)
 	}
-	return tables, nil
+	return tables
 }
 
 func (p *PostgresDB) GetCreateStatement(dbName, tableName string) (string, error) {

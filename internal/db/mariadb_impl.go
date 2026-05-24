@@ -210,7 +210,7 @@ func (m *MariaDB) GetTables(dbName string) ([]string, error) {
 			break
 		}
 	}
-	return tables, nil
+	return resolveShardingSphereLogicalTables(tables, m.Query), nil
 }
 
 func (m *MariaDB) GetCreateStatement(dbName, tableName string) (string, error) {

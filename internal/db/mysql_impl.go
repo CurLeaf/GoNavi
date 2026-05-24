@@ -801,7 +801,7 @@ func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
 			break
 		}
 	}
-	return tables, nil
+	return resolveShardingSphereLogicalTables(tables, m.Query), nil
 }
 
 func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
