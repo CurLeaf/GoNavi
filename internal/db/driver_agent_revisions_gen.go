@@ -4,11 +4,11 @@ package db
 
 func init() {
 	optionalDriverAgentRevisions = map[string]string{
-		"mariadb":    "src-4e1ec648c70c87ea",
-		"oceanbase":  "src-8e445fc4899d850f",
-		"diros":      "src-74927b3809258666",
-		"starrocks":  "src-4ea05ce44321c17b",
-		"sphinx":     "src-269bd60a34df47d3",
+		"mariadb":    "src-0a4176f4b5743323",
+		"oceanbase":  "src-e996325fd6d52648",
+		"diros":      "src-cc11b882e28fa5d4",
+		"starrocks":  "src-83a6d81c91c7f5c8",
+		"sphinx":     "src-a70c2cd4d223dac2",
 		"sqlserver":  "src-84553484c72e7253",
 		"sqlite":     "src-762863d48f653b89",
 		"duckdb":     "src-3e551d777ae96d8d",

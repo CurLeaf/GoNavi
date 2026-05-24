@@ -319,6 +319,70 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 	), nil
 }
 
+func normalizeMySQLRawDSNCompatibilityParams(raw string) string {
+	text := strings.TrimSpace(raw)
+	queryIndex := strings.Index(text, "?")
+	if text == "" || queryIndex < 0 {
+		return raw
+	}
+
+	prefix := text[:queryIndex]
+	queryText := text[queryIndex+1:]
+	suffix := ""
+	if fragmentIndex := strings.Index(queryText, "#"); fragmentIndex >= 0 {
+		suffix = queryText[fragmentIndex:]
+		queryText = queryText[:fragmentIndex]
+	}
+	values, err := url.ParseQuery(queryText)
+	if err != nil {
+		return raw
+	}
+
+	changed := false
+	explicitMultiStatements := ""
+	hasExplicitMultiStatements := false
+	allowMultiQueries := ""
+	hasAllowMultiQueries := false
+
+	for key, items := range values {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "multistatements":
+			delete(values, key)
+			changed = true
+			for _, item := range items {
+				if enabled, ok := parseMySQLBoolParam(item); ok {
+					explicitMultiStatements = strconv.FormatBool(enabled)
+					hasExplicitMultiStatements = true
+				}
+			}
+		case "allowmultiqueries":
+			delete(values, key)
+			changed = true
+			for _, item := range items {
+				if enabled, ok := parseMySQLBoolParam(item); ok {
+					allowMultiQueries = strconv.FormatBool(enabled)
+					hasAllowMultiQueries = true
+				}
+			}
+		}
+	}
+
+	if hasExplicitMultiStatements {
+		values.Set("multiStatements", explicitMultiStatements)
+	} else if hasAllowMultiQueries {
+		values.Set("multiStatements", allowMultiQueries)
+	}
+
+	if !changed {
+		return raw
+	}
+	encoded := values.Encode()
+	if encoded == "" {
+		return prefix + suffix
+	}
+	return prefix + "?" + encoded + suffix
+}
+
 func parseHostPortWithDefault(raw string, defaultPort int) (string, int, bool) {
 	text := strings.TrimSpace(raw)
 	if text == "" {

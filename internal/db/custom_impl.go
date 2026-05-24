@@ -23,6 +23,9 @@ func (c *CustomDB) Connect(config connection.ConnectionConfig) error {
 	if driver == "" || dsn == "" {
 		return fmt.Errorf("driver and dsn are required for custom connection")
 	}
+	if strings.EqualFold(driver, "mysql") {
+		dsn = normalizeMySQLRawDSNCompatibilityParams(dsn)
+	}
 
 	// Verify driver is registered (implicit check by sql.Open)
 	// We might not need explicit check, sql.Open will fail or Ping will fail if driver not found.
