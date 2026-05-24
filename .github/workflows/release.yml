@@ -126,7 +126,7 @@ jobs:
             artifact_suffix: ""
             build_optional_agents: true
             linux_webkit: ""
-          - os: windows-latest
+          - os: windows-2025-vs2026
             platform: windows/amd64
             os_name: Windows
             arch_name: Amd64
@@ -135,7 +135,7 @@ jobs:
             artifact_suffix: ""
             build_optional_agents: true
             linux_webkit: ""
-          - os: windows-latest
+          - os: windows-2025-vs2026
             platform: windows/arm64
             os_name: Windows
             arch_name: Arm64
