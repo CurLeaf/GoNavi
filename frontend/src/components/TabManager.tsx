@@ -36,6 +36,7 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type.startsWith('jvm')) return 'JVM';
   if (tab.type === 'trigger') return 'TRG';
   if (tab.type === 'view-def') return tab.viewKind === 'materialized' ? 'MV' : 'VIEW';
+  if (tab.type === 'event-def') return 'EVT';
   if (tab.type === 'routine-def') return 'FUNC';
   return 'TAB';
 };
@@ -65,6 +66,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'jvm-monitoring') return 'JVM 监控';
   if (tab.type === 'trigger') return '触发器';
   if (tab.type === 'view-def') return tab.viewKind === 'materialized' ? '物化视图' : '视图';
+  if (tab.type === 'event-def') return '事件';
   if (tab.type === 'routine-def') return '函数 / 过程';
   return '标签页';
 };
@@ -72,6 +74,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
 const getTabObjectLabel = (tab: TabData): string => {
   if (tab.tableName) return tab.tableName;
   if (tab.viewName) return tab.viewName;
+  if (tab.eventName) return tab.eventName;
   if (tab.routineName) return tab.routineName;
   if (tab.triggerName) return tab.triggerName;
   if (tab.resourcePath) return tab.resourcePath;
@@ -410,7 +413,7 @@ const TabManager: React.FC = React.memo(() => {
       content = <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
     } else if (tab.type === 'trigger') {
       content = <TriggerViewer tab={tab} />;
-    } else if (tab.type === 'view-def' || tab.type === 'routine-def') {
+    } else if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def') {
       content = <DefinitionViewer tab={tab} />;
     } else if (tab.type === 'table-overview') {
       content = <TableOverview tab={tab} />;

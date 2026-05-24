@@ -400,6 +400,7 @@ export interface TabData {
     | "redis-monitor"
     | "trigger"
     | "view-def"
+    | "event-def"
     | "routine-def"
     | "table-overview"
     | "jvm-overview"
@@ -421,6 +422,7 @@ export interface TabData {
   triggerName?: string; // Trigger name for trigger tabs
   viewName?: string; // View name for view definition tabs
   viewKind?: "view" | "materialized";
+  eventName?: string; // Event name for MySQL event definition tabs
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
   savedQueryId?: string; // Saved query identity for quick-save behavior

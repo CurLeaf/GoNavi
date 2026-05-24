@@ -106,7 +106,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
 const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
@@ -114,6 +114,7 @@ const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined):
       || node?.type === 'view'
       || node?.type === 'materialized-view'
       || node?.type === 'db-trigger'
+      || node?.type === 'db-event'
       || node?.type === 'routine';
 };
 
@@ -196,7 +197,7 @@ type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
 type SearchScope = 'smart' | 'object' | 'database' | 'host' | 'tag';
-type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines';
+type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
 
 export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-connections__';
 
@@ -257,12 +258,14 @@ const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }
   { key: 'tables', label: '表' },
   { key: 'views', label: '视图' },
   { key: 'routines', label: '函数' },
+  { key: 'events', label: '事件' },
 ];
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
   tables: ['tables'],
   views: ['views', 'materializedViews'],
   routines: ['routines'],
+  events: ['events'],
 };
 
 export const filterV2ExplorerTreeByKind = (
@@ -275,6 +278,7 @@ export const filterV2ExplorerTreeByKind = (
     if (filter === 'tables') return node.type === 'table';
     if (filter === 'views') return node.type === 'view' || node.type === 'materialized-view';
     if (filter === 'routines') return node.type === 'routine';
+    if (filter === 'events') return node.type === 'db-event';
     return false;
   };
 
@@ -1130,6 +1134,10 @@ const Sidebar: React.FC<{
       return type;
   };
 
+  const supportsDatabaseEvents = (conn: SavedConnection | undefined): boolean => {
+      return getMetadataDialect(conn) === 'mysql';
+  };
+
   const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
   const quoteSqlServerIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
 
@@ -1426,6 +1434,23 @@ const Sidebar: React.FC<{
       }
   };
 
+  const buildEventsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+      if (dialect !== 'mysql') {
+          return [];
+      }
+      const safeDbName = escapeSQLLiteral(dbName);
+      const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+      return normalizeMetadataQuerySpecs([
+          {
+              sql: safeDbName
+                  ? `SELECT EVENT_SCHEMA AS schema_name, EVENT_NAME AS event_name, EVENT_TYPE AS event_type, STATUS AS status FROM information_schema.events WHERE event_schema = '${safeDbName}' ORDER BY EVENT_NAME`
+                  : '',
+          },
+          { sql: dbIdent ? `SHOW EVENTS FROM \`${dbIdent}\`` : '' },
+          { sql: `SHOW EVENTS` },
+      ]);
+  };
+
   const buildSchemasMetadataQuerySpecs = (dialect: string): MetadataQuerySpec[] => {
       if (!isPostgresSchemaDialect(dialect)) {
           return [];
@@ -1602,6 +1627,46 @@ const Sidebar: React.FC<{
           });
 	      });
 	      return { routines, supported: hasSuccessfulQuery };
+  };
+
+  const loadDatabaseEvents = async (
+      conn: any,
+      dbName: string
+  ): Promise<{ events: Array<{ displayName: string; eventName: string; schemaName: string; eventType: string; status: string }>; supported: boolean }> => {
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      const querySpecs = buildEventsMetadataQuerySpecs(dialect, dbName);
+      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
+      const seen = new Set<string>();
+      const events: Array<{ displayName: string; eventName: string; schemaName: string; eventType: string; status: string }> = [];
+
+      results.forEach((queryResult) => {
+          queryResult.rows.forEach((row) => {
+              const rawEventName = getCaseInsensitiveValue(row, ['event_name', 'eventname', 'name', 'event']);
+              if (!rawEventName) return;
+
+              const rawSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'event_schema', 'db', 'database']);
+              const parsed = splitQualifiedName(rawEventName);
+              const schemaName = (rawSchemaName || parsed.schemaName || dbName).trim();
+              const eventName = (parsed.objectName || rawEventName).trim();
+              if (!eventName) return;
+
+              const uniqueKey = `${schemaName.toLowerCase()}@@${eventName.toLowerCase()}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+
+              const eventType = getCaseInsensitiveValue(row, ['event_type', 'type']);
+              const status = getCaseInsensitiveValue(row, ['status']);
+              events.push({
+                  displayName: eventName,
+                  eventName,
+                  schemaName,
+                  eventType,
+                  status,
+              });
+          });
+      });
+
+      return { events, supported: hasSuccessfulQuery };
   };
 
   const loadSchemas = async (conn: any, dbName: string): Promise<{ schemas: string[]; supported: boolean }> => {
@@ -1931,12 +1996,13 @@ const Sidebar: React.FC<{
 	                };
 	            });
 
-	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult] = await Promise.all([
+	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult, eventsResult] = await Promise.all([
 	                loadSchemas(conn, conn.dbName),
 	                loadViews(conn, conn.dbName),
 	                loadStarRocksMaterializedViews(conn, conn.dbName),
 	                loadDatabaseTriggers(conn, conn.dbName),
 	                loadFunctions(conn, conn.dbName),
+	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
                 const externalSQLDirectoryResults = await Promise.all(
                     dbExternalSQLDirectories.map(async (directory) => {
@@ -1970,6 +2036,7 @@ const Sidebar: React.FC<{
             const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
+            const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
             const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
 
             const viewEntries = viewRows.map((viewName: string) => {
@@ -2030,6 +2097,12 @@ const Sidebar: React.FC<{
                 };
             });
 
+            const eventEntries = eventRows.map((event: any) => ({
+                ...event,
+                schemaName: String(event.schemaName || conn.dbName || '').trim(),
+                displayName: String(event.displayName || event.eventName || '').trim(),
+            })).filter((event: any) => event.eventName && event.displayName);
+
             if (isSphinxConnection(conn as SavedConnection)) {
                 const unsupportedObjects: string[] = [];
                 if (!viewsResult.supported) unsupportedObjects.push('视图');
@@ -2070,6 +2143,8 @@ const Sidebar: React.FC<{
 
 	            // Sort routines by display name (case-insensitive)
 	            routineEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+
+	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
 	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string }): TreeNode => {
 	                const isPinned = isSidebarTablePinned(currentPinnedSidebarTables, conn.id, conn.dbName, entry.tableName, entry.schemaName);
@@ -2119,6 +2194,15 @@ const Sidebar: React.FC<{
 	                isLeaf: true,
 	            });
 
+	            const buildEventNode = (entry: { eventName: string; schemaName: string; displayName: string; eventType?: string; status?: string }): TreeNode => ({
+	                title: entry.displayName,
+	                key: `${conn.id}-${conn.dbName}-event-${entry.schemaName}-${entry.eventName}`,
+	                icon: <ClockCircleOutlined />,
+	                type: 'db-event',
+	                dataRef: { ...conn, eventName: entry.eventName, schemaName: entry.schemaName, eventType: entry.eventType, eventStatus: entry.status },
+	                isLeaf: true,
+	            });
+
 	            const buildObjectGroup = (
 	                parentKey: string,
 	                groupKey: string,
@@ -2145,6 +2229,7 @@ const Sidebar: React.FC<{
 	                    materializedViews: TreeNode[];
 	                    routines: TreeNode[];
 	                    triggers: TreeNode[];
+	                    events: TreeNode[];
 	                };
 
 	                const schemaMap = new Map<string, SchemaBucket>();
@@ -2160,6 +2245,7 @@ const Sidebar: React.FC<{
 	                            materializedViews: [],
 	                            routines: [],
 	                            triggers: [],
+	                            events: [],
 	                        };
 	                        schemaMap.set(schemaKey, bucket);
 	                    }
@@ -2172,10 +2258,12 @@ const Sidebar: React.FC<{
 	                materializedViewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).materializedViews.push(buildMaterializedViewNode(entry)));
 	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
 	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
+	                eventEntries.forEach((entry) => getSchemaBucket(entry.schemaName).events.push(buildEventNode(entry)));
 
 	                const dialect = getMetadataDialect(conn as SavedConnection);
 	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
 	                const includeMaterializedViews = dialect === 'starrocks';
+	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
 
 	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
 	                    .filter((bucket) => !(isOracleLike && !bucket.schemaName))
@@ -2194,6 +2282,7 @@ const Sidebar: React.FC<{
 	                            ...(includeMaterializedViews ? [buildObjectGroup(schemaNodeKey, 'materializedViews', '物化视图', <ThunderboltOutlined />, bucket.materializedViews, { schemaName: bucket.schemaName })] : []),
 	                            buildObjectGroup(schemaNodeKey, 'routines', '函数', <CodeOutlined />, bucket.routines, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'triggers', '触发器', <FunctionOutlined />, bucket.triggers, { schemaName: bucket.schemaName }),
+	                            ...(includeEvents ? [buildObjectGroup(schemaNodeKey, 'events', '事件', <ClockCircleOutlined />, bucket.events, { schemaName: bucket.schemaName })] : []),
 	                        ];
 
 	                        return {
@@ -2210,12 +2299,14 @@ const Sidebar: React.FC<{
 	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...schemaNodes]);
 	            } else {
 	                const includeMaterializedViews = getMetadataDialect(conn as SavedConnection) === 'starrocks';
+	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
 	                const groupedNodes: TreeNode[] = [
 	                    buildObjectGroup(key as string, 'tables', '表', <TableOutlined />, sortedTableEntries.map(buildTableNode)),
 	                    buildObjectGroup(key as string, 'views', '视图', <EyeOutlined />, viewEntries.map(buildViewNode)),
 	                    ...(includeMaterializedViews ? [buildObjectGroup(key as string, 'materializedViews', '物化视图', <ThunderboltOutlined />, materializedViewEntries.map(buildMaterializedViewNode))] : []),
 	                    buildObjectGroup(key as string, 'routines', '函数', <CodeOutlined />, routineEntries.map(buildRoutineNode)),
 	                    buildObjectGroup(key as string, 'triggers', '触发器', <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
+	                    ...(includeEvents ? [buildObjectGroup(key as string, 'events', '事件', <ClockCircleOutlined />, eventEntries.map(buildEventNode))] : []),
 	                ];
 
 	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...groupedNodes]);
@@ -2435,7 +2526,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'routine') {
+      } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -2493,7 +2584,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'routine') {
+      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -2558,6 +2649,9 @@ const Sidebar: React.FC<{
               dbName,
               triggerName
           });
+          return;
+      } else if (node.type === 'db-event') {
+          openEventDefinition(node);
           return;
       } else if (node.type === 'routine') {
           const { routineName, routineType, dbName, id } = node.dataRef;
@@ -4021,6 +4115,18 @@ const Sidebar: React.FC<{
       });
   };
 
+  const openEventDefinition = (node: any) => {
+      const { eventName, dbName, id } = node.dataRef;
+      addTab({
+          id: `event-def-${id}-${dbName}-${eventName}`,
+          title: `事件: ${eventName}`,
+          type: 'event-def',
+          connectionId: id,
+          dbName,
+          eventName,
+      });
+  };
+
   const openEditRoutine = async (node: any) => {
       const conn = node.dataRef;
       const { routineName, routineType, dbName, id } = conn;
@@ -4769,16 +4875,25 @@ const Sidebar: React.FC<{
                       icon: <DatabaseOutlined />,
                       node,
                   });
-              } else if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
+              } else if (
+                  node.type === 'table'
+                  || node.type === 'view'
+                  || node.type === 'materialized-view'
+                  || node.type === 'db-trigger'
+                  || node.type === 'db-event'
+                  || node.type === 'routine'
+              ) {
                   const conn = connections.find((item) => item.id === dataRef.id);
-                  const objectName = String(dataRef.tableName || dataRef.viewName || node.title || '').trim();
+                  const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || node.title || '').trim();
                   const displayName = String(node.title || extractObjectName(objectName) || objectName).trim();
                   result.push({
                       key: `node-${node.key}`,
                       kind: 'node',
                       title: displayName,
                       meta: [conn?.name || dataRef.id, dataRef.dbName].filter(Boolean).join(' · '),
-                      icon: node.type === 'table' ? <TableOutlined /> : <EyeOutlined />,
+                      icon: node.type === 'table'
+                          ? <TableOutlined />
+                          : (node.type === 'db-event' ? <ClockCircleOutlined /> : (node.type === 'routine' ? <CodeOutlined /> : <EyeOutlined />)),
                       node,
                   });
               }
@@ -5352,6 +5467,7 @@ const Sidebar: React.FC<{
               if (groupKey === 'views') return '视图 · views';
               if (groupKey === 'routines') return '函数 · functions';
               if (groupKey === 'triggers') return '触发器 · triggers';
+              if (groupKey === 'events') return '事件 · events';
               if (groupKey === 'materializedViews') return '物化视图 · materialized';
           }
           return rawTitle;
@@ -5361,6 +5477,7 @@ const Sidebar: React.FC<{
           || node.type === 'view'
           || node.type === 'materialized-view'
           || node.type === 'db-trigger'
+          || node.type === 'db-event'
           || node.type === 'routine'
           || node.type === 'saved-query'
           || node.type === 'external-sql-file';
@@ -5445,6 +5562,14 @@ const Sidebar: React.FC<{
               schemaName: dataRef.schemaName,
               objectGroup: node.type === 'table' ? 'tables' : (node.type === 'materialized-view' ? 'materializedViews' : 'views'),
           });
+          onDoubleClick(null, node);
+          return;
+      }
+      if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine') {
+          setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
+          setSelectedKeys([node.key]);
+          selectedNodesRef.current = [node];
+          scrollSidebarTreeToKey(node.key);
           onDoubleClick(null, node);
       }
   }, [activeContext, activeTab, addTab, closeV2CommandSearch, selectConnectionFromRail, setActiveContext]);
@@ -5637,6 +5762,26 @@ const Sidebar: React.FC<{
             });
         }
         return routineMenu;
+    }
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'events') {
+        return [
+            {
+                key: 'create-event-query',
+                label: '新建事件',
+                icon: <PlusOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `query-create-event-${Date.now()}`,
+                        title: '新建事件',
+                        type: 'query',
+                        connectionId: node.dataRef.id,
+                        dbName: node.dataRef.dbName,
+                        query: `CREATE EVENT event_name\nON SCHEDULE EVERY 1 DAY\nDO\nBEGIN\n    -- event body\nEND;`
+                    });
+                }
+            },
+        ];
     }
 
     // Connection Tag Menu — must be BEFORE the connection check
@@ -6197,6 +6342,31 @@ const Sidebar: React.FC<{
                 ]
             },
         ];
+    } else if (node.type === 'db-event') {
+        return [
+            {
+                key: 'view-event-def',
+                label: '查看定义',
+                icon: <CodeOutlined />,
+                onClick: () => openEventDefinition(node)
+            },
+            {
+                key: 'edit-event-query',
+                label: '编辑定义',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    const { eventName, dbName, id } = node.dataRef;
+                    addTab({
+                        id: `query-edit-event-${Date.now()}`,
+                        title: `编辑事件: ${eventName}`,
+                        type: 'query',
+                        connectionId: id,
+                        dbName,
+                        query: `SHOW CREATE EVENT \`${String(eventName || '').replace(/`/g, '``')}\`;`
+                    });
+                }
+            },
+        ];
     } else if (node.type === 'table') {
         const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
         return [
@@ -6418,8 +6588,8 @@ const Sidebar: React.FC<{
 
     const displayTitle = String(node.title ?? '');
     let hoverTitle = displayTitle;
-    if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
-        const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || '').trim();
+    if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'db-event') {
+        const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
         const conn = node?.dataRef as SavedConnection | undefined;
         if (rawTableName && shouldHideSchemaPrefix(conn)) {
             const lastDotIndex = rawTableName.lastIndexOf('.');

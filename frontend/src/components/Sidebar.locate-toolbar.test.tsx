@@ -520,6 +520,13 @@ describe('Sidebar locate toolbar', () => {
           dataRef: { groupKey: 'routines' },
           children: [{ title: 'calc_total', key: 'calc_total', type: 'routine' as const }],
         },
+        {
+          title: '事件',
+          key: 'conn-main-events',
+          type: 'object-group' as const,
+          dataRef: { groupKey: 'events' },
+          children: [{ title: 'daily_cleanup', key: 'daily_cleanup', type: 'db-event' as const }],
+        },
       ],
     }];
 
@@ -528,10 +535,12 @@ describe('Sidebar locate toolbar', () => {
       'conn-main-tables',
       'conn-main-views',
       'conn-main-routines',
+      'conn-main-events',
     ]);
     expect(filterV2ExplorerTreeByKind(tree, 'tables')[0].children?.map((node) => node.key)).toEqual(['conn-main-tables']);
     expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node) => node.key)).toEqual(['conn-main-views']);
     expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node) => node.key)).toEqual(['conn-main-routines']);
+    expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node) => node.key)).toEqual(['conn-main-events']);
   });
 
   it('renders the v2 table context menu with the redesigned table layout', () => {
