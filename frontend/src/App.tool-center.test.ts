@@ -49,6 +49,23 @@ describe('tool center menu entries', () => {
     expect(appSource).not.toContain('const sqlLogs = useStore(state => state.sqlLogs);');
   });
 
+  it('lets the v2 Sidebar own the entire left layout instead of stacking legacy controls above it', () => {
+    const siderIndex = appSource.indexOf("className={isV2Ui ? 'gn-v2-app-sider' : undefined}");
+    const legacyGuardIndex = appSource.indexOf('{!isV2Ui && (', siderIndex);
+    const legacyCreateIndex = appSource.indexOf('新建连接', legacyGuardIndex);
+    const sidebarIndex = appSource.indexOf('<Sidebar', legacyGuardIndex);
+    const floatingLogIndex = appSource.indexOf('Floating SQL Log Toggle', sidebarIndex);
+    const floatingLogGuardIndex = appSource.indexOf('{!isV2Ui && (', floatingLogIndex);
+
+    expect(siderIndex).toBeGreaterThan(-1);
+    expect(legacyGuardIndex).toBeGreaterThan(siderIndex);
+    expect(legacyCreateIndex).toBeGreaterThan(legacyGuardIndex);
+    expect(legacyCreateIndex).toBeLessThan(sidebarIndex);
+    expect(appSource).toContain('paddingBottom: isV2Ui ? 0 : 58');
+    expect(floatingLogIndex).toBeGreaterThan(sidebarIndex);
+    expect(floatingLogGuardIndex).toBeGreaterThan(floatingLogIndex);
+  });
+
   it('uses the v2 green accent for sidebar and log resize guide lines', () => {
     expect(appSource).toContain('const resizeGuideColor = isV2Ui');
     expect(appSource).toContain("'var(--gn-accent, #16a34a)'");
@@ -78,7 +95,7 @@ describe('tool center menu entries', () => {
 
   it('renders recorded shortcuts with platform-specific display labels', () => {
     expect(appSource).toContain('getShortcutDisplayLabel');
-    expect(appSource).toContain("getShortcutDisplayLabel(binding.combo, platform)");
+    expect(appSource).toContain('getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)');
   });
 });
 
