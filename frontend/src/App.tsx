@@ -2179,11 +2179,11 @@ function App() {
       document.removeEventListener('mouseup', handleLogResizeUp);
   };
   
-  const handleCreateConnection = () => {
+  const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(null);
       setIsModalOpen(true);
-  };
+  }, []);
 
   const handleEditConnection = (conn: SavedConnection) => {
       setSecurityUpdateRepairSource(null);
@@ -2675,6 +2675,12 @@ function App() {
               case 'newQueryTab':
                   handleNewQuery();
                   break;
+              case 'newConnection':
+                  handleCreateConnection();
+                  break;
+              case 'toggleAIPanel':
+                  toggleAIPanel();
+                  break;
               case 'toggleLogPanel':
                   handleToggleLogPanel();
                   break;
@@ -2699,7 +2705,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [activeShortcutPlatform, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {

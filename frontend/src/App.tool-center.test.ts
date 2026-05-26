@@ -7,6 +7,20 @@ const appSource = readFileSync(
   'utf8',
 );
 
+const getGlobalShortcutCaseBlock = (action: string) => {
+  const caseToken = `case '${action}':`;
+  const start = appSource.indexOf(caseToken);
+  expect(start).toBeGreaterThan(-1);
+
+  const afterCase = appSource.slice(start + caseToken.length);
+  const nextCaseIndex = afterCase.search(/\n\s+case '[^']+':/);
+  const switchEndIndex = afterCase.search(/\n\s+}\n\s+};\n\n\s+window\.addEventListener\('keydown', handleGlobalShortcut\);/);
+  const endIndex = nextCaseIndex >= 0 ? nextCaseIndex : switchEndIndex;
+
+  expect(endIndex).toBeGreaterThan(-1);
+  return afterCase.slice(0, endIndex);
+};
+
 describe('tool center menu entries', () => {
   it('exposes snippet management next to shortcut management', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
@@ -96,6 +110,27 @@ describe('tool center menu entries', () => {
   it('renders recorded shortcuts with platform-specific display labels', () => {
     expect(appSource).toContain('getShortcutDisplayLabel');
     expect(appSource).toContain('getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)');
+  });
+
+  it('executes every global shortcut action exposed in the shortcut manager', () => {
+    const expectedHandlers = new Map([
+      ['runQuery', 'gonavi:run-active-query'],
+      ['focusSidebarSearch', 'gonavi:focus-sidebar-search'],
+      ['newQueryTab', 'handleNewQuery();'],
+      ['newConnection', 'handleCreateConnection();'],
+      ['toggleAIPanel', 'toggleAIPanel();'],
+      ['toggleLogPanel', 'handleToggleLogPanel();'],
+      ['toggleTheme', 'setTheme('],
+      ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
+      ['toggleMacFullscreen', 'handleTitleBarWindowToggle();'],
+      ['resetWindowZoom', 'handleManualResetWindowZoom();'],
+    ]);
+
+    for (const [action, handler] of expectedHandlers) {
+      expect(getGlobalShortcutCaseBlock(action)).toContain(handler);
+    }
+    expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
+    expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
   });
 });
 
