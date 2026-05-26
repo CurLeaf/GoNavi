@@ -19,11 +19,15 @@ import {
   CheckSquareOutlined,
   CloudOutlined,
   ClearOutlined,
+  ColumnWidthOutlined,
   DashboardOutlined,
+  EyeInvisibleOutlined,
   FileTextOutlined,
   FolderAddOutlined,
   HddOutlined,
   PushpinOutlined,
+  SortAscendingOutlined,
+  SortDescendingOutlined,
   VerticalAlignBottomOutlined,
 } from '@ant-design/icons';
 
@@ -508,6 +512,8 @@ export const V2ConnectionContextMenuView: React.FC<{
 
 export type V2CellContextMenuActionKey =
   | 'copy-field-name'
+  | 'copy-row-data'
+  | 'copy-column-data'
   | 'set-null'
   | 'edit-row'
   | 'fill-selected'
@@ -522,6 +528,91 @@ export type V2CellContextMenuActionKey =
   | 'export-xlsx'
   | 'export-json'
   | 'export-html';
+
+export type V2ColumnHeaderContextMenuActionKey =
+  | 'copy-field-name'
+  | 'copy-column-data'
+  | 'sort-asc'
+  | 'sort-desc'
+  | 'clear-sort'
+  | 'auto-fit-column'
+  | 'hide-column'
+  | 'show-column-type'
+  | 'hide-column-type'
+  | 'show-column-comment'
+  | 'hide-column-comment';
+
+export const V2ColumnHeaderContextMenuView: React.FC<{
+  fieldName: string;
+  columnType?: string;
+  columnComment?: string;
+  sortOrder?: 'ascend' | 'descend' | null;
+  showColumnType?: boolean;
+  showColumnComment?: boolean;
+  onAction?: (action: V2ColumnHeaderContextMenuActionKey) => void;
+}> = ({
+  fieldName,
+  columnType,
+  columnComment,
+  sortOrder,
+  showColumnType = true,
+  showColumnComment = true,
+  onAction,
+}) => {
+  const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
+    items,
+    onAction as (action: string) => void,
+  );
+  const normalizedType = String(columnType || '').trim();
+  const normalizedComment = String(columnComment || '').trim();
+  const meta = [
+    normalizedType || '未知类型',
+    normalizedComment || '暂无备注',
+  ].join(' · ');
+
+  return (
+    <div className="gn-v2-table-context-menu gn-v2-column-context-menu" data-v2-column-context-menu="true" role="menu">
+      <V2ContextMenuHeader
+        icon={<FileTextOutlined />}
+        title={fieldName || '未命名字段'}
+        meta={meta}
+        pill="FIELD"
+      />
+
+      <div className="gn-v2-context-menu-body">
+        {renderItems([
+          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: '⌘C', featured: true },
+          { action: 'copy-column-data', icon: <CopyOutlined />, title: '复制列数据' },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">排序</div>
+        {renderItems([
+          { action: 'sort-asc', icon: <SortAscendingOutlined />, title: '升序排序', selected: sortOrder === 'ascend', kbd: sortOrder === 'ascend' ? '当前' : undefined },
+          { action: 'sort-desc', icon: <SortDescendingOutlined />, title: '降序排序', selected: sortOrder === 'descend', kbd: sortOrder === 'descend' ? '当前' : undefined },
+          { action: 'clear-sort', icon: <ClearOutlined />, title: '取消此字段排序', disabled: !sortOrder },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">字段显示</div>
+        {renderItems([
+          { action: 'auto-fit-column', icon: <ColumnWidthOutlined />, title: '按内容自适应列宽' },
+          { action: 'hide-column', icon: <EyeInvisibleOutlined />, title: '隐藏此字段' },
+          {
+            action: showColumnType ? 'hide-column-type' : 'show-column-type',
+            icon: <FileTextOutlined />,
+            title: showColumnType ? '隐藏字段类型' : '显示字段类型',
+            selected: showColumnType,
+          },
+          {
+            action: showColumnComment ? 'hide-column-comment' : 'show-column-comment',
+            icon: <FileTextOutlined />,
+            title: showColumnComment ? '隐藏字段备注' : '显示字段备注',
+            selected: showColumnComment,
+          },
+        ])}
+      </div>
+    </div>
+  );
+};
 
 export const V2CellContextMenuView: React.FC<{
   fieldName: string;
@@ -588,6 +679,8 @@ export const V2CellContextMenuView: React.FC<{
 
         <div className="gn-v2-context-menu-section-title">复制</div>
         {renderItems([
+          { action: 'copy-row-data', icon: <CopyOutlined />, title: '复制行数据' },
+          { action: 'copy-column-data', icon: <CopyOutlined />, title: '复制列数据' },
           ...(supportsCopyInsert ? [
             { action: 'copy-insert' as const, icon: <ConsoleSqlOutlined />, title: '复制为 INSERT', kbd: 'SQL' },
             { action: 'copy-update' as const, icon: <ConsoleSqlOutlined />, title: '复制为 UPDATE' },

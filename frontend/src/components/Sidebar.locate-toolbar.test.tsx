@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Sidebar, {
+  buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
   filterV2ExplorerTreeByKind,
   getV2RailConnectionGroupBadgeText,
@@ -628,6 +629,63 @@ describe('Sidebar locate toolbar', () => {
     }).map((entry) => entry.tableName)).toEqual(['orders', 'users', 'audit']);
   });
 
+  it('keeps the v2 table pin action on sidebar table rows', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(source).toContain('data-v2-sidebar-table-pin-action="true"');
+    expect(source).toContain('node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />');
+    expect(source).toContain('toggleSidebarTablePinned(node);');
+    expect(source).toContain("message.success(shouldPin ? '已置顶表' : '已取消置顶');");
+    expect(css).toMatch(/\.gn-v2-table-pin-action \{[^}]*opacity: 0;/s);
+    expect(css).toMatch(/\.gn-v2-table-pin-action\.is-pinned \{[^}]*color: #f59e0b;[^}]*opacity: 1;/s);
+    expect(css).toMatch(/\.ant-tree-node-content-wrapper:hover \.gn-v2-table-pin-action,/s);
+  });
+
+  it('splits v2 sidebar pinned tables into a dedicated table section', () => {
+    const children = buildV2SidebarTableSectionedChildren('conn-main-tables', [
+      { title: 'orders', key: 'orders', type: 'table', dataRef: { pinnedSidebarTable: true } },
+      { title: 'users', key: 'users', type: 'table', dataRef: { pinnedSidebarTable: false } },
+      { title: 'audit', key: 'audit', type: 'table', dataRef: {} },
+    ]);
+
+    expect(children.map((node) => node.title)).toEqual(['置顶', 'orders', '全部', 'users', 'audit']);
+    expect(children.map((node) => node.type)).toEqual(['v2-table-section', 'table', 'v2-table-section', 'table', 'table']);
+    expect(children[0]).toMatchObject({
+      key: 'conn-main-tables-v2-pinned-tables-section',
+      isLeaf: true,
+      selectable: false,
+      dataRef: { sectionKind: 'pinned' },
+    });
+    expect(children[2]).toMatchObject({
+      key: 'conn-main-tables-v2-all-tables-section',
+      isLeaf: true,
+      selectable: false,
+      dataRef: { sectionKind: 'all' },
+    });
+  });
+
+  it('keeps v2 table sections out of regular table lists when nothing is pinned', () => {
+    const tableNodes = [
+      { title: 'users', key: 'users', type: 'table' as const, dataRef: { pinnedSidebarTable: false } },
+    ];
+
+    expect(buildV2SidebarTableSectionedChildren('conn-main-tables', tableNodes)).toBe(tableNodes);
+  });
+
+  it('renders v2 table section labels as tree children instead of group header badges', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(source).toContain("node.type === 'v2-table-section'");
+    expect(source).toContain('className="gn-v2-tree-section-title"');
+    expect(source).not.toContain('gn-v2-tree-section-label');
+    expect(source).toContain("if (isV2Ui && node?.type === 'v2-table-section')");
+    expect(source).toContain("if (isV2Ui && info?.node?.type === 'v2-table-section')");
+    expect(css).toContain('.gn-v2-tree-section-title');
+    expect(css).toContain('.ant-tree-treenode:has(.gn-v2-tree-section-title)');
+  });
+
   it('formats v2 table context menu stats like the prototype header', () => {
     expect(formatV2TableContextMenuRows(2)).toBe('2 行');
     expect(formatV2TableContextMenuSize(16 * 1024)).toBe('16 KB');
@@ -722,5 +780,14 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('按名称排序');
     expect(markup).toContain('按使用频率排序');
     expect(markup).toContain('当前');
+  });
+
+  it('listens for table overview pin changes to refresh the matching sidebar database node', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("window.addEventListener('gonavi:sidebar-table-pin-changed'");
+    expect(source).toContain('findTreeNodeByKeyRef.current(treeDataRef.current, `${connectionId}-${dbName}`)');
+    expect(source).toContain('void loadTables(dbNode);');
+    expect(source).toContain("window.removeEventListener('gonavi:sidebar-table-pin-changed'");
   });
 });

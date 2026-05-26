@@ -64,3 +64,25 @@ export const resolveTableOverviewVisibleRows = <T>(
     totalCount: rows.length,
   };
 };
+
+export const prioritizePinnedTableOverviewRows = <T>(
+  rows: T[],
+  isPinned: (row: T) => boolean,
+): { orderedRows: T[]; pinnedRows: T[]; regularRows: T[] } => {
+  const pinnedRows: T[] = [];
+  const regularRows: T[] = [];
+
+  rows.forEach((row) => {
+    if (isPinned(row)) {
+      pinnedRows.push(row);
+    } else {
+      regularRows.push(row);
+    }
+  });
+
+  return {
+    orderedRows: pinnedRows.length > 0 ? [...pinnedRows, ...regularRows] : [...rows],
+    pinnedRows,
+    regularRows,
+  };
+};

@@ -65,6 +65,7 @@ const backendApp = vi.hoisted(() => ({
 
 const testRenderState = vi.hoisted(() => ({
   latestColumns: [] as any[],
+  latestTableProps: null as any,
 }));
 
 const messageApi = vi.hoisted(() => ({
@@ -80,6 +81,14 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+
+vi.mock('react-dom', async () => {
+  const actual = await vi.importActual<any>('react-dom');
+  return {
+    ...actual,
+    createPortal: (children: React.ReactNode) => children,
+  };
+});
 
 vi.mock('@monaco-editor/react', () => ({
   default: (props: { value?: string; language?: string; theme?: string; options?: Record<string, unknown> }) => (
@@ -118,12 +127,16 @@ vi.mock('@ant-design/icons', () => {
     ClearOutlined: Icon,
     EditOutlined: Icon,
     VerticalAlignBottomOutlined: Icon,
+    ColumnWidthOutlined: Icon,
+    EyeInvisibleOutlined: Icon,
     LeftOutlined: Icon,
     RightOutlined: Icon,
     RobotOutlined: Icon,
     SearchOutlined: Icon,
     LinkOutlined: Icon,
     TableOutlined: Icon,
+    SortAscendingOutlined: Icon,
+    SortDescendingOutlined: Icon,
     DatabaseOutlined: Icon,
     NodeIndexOutlined: Icon,
     ThunderboltOutlined: Icon,
@@ -220,8 +233,10 @@ vi.mock('antd', () => {
   );
 
   return {
-    Table: ({ columns }: any) => {
+    Table: (props: any) => {
+      const { columns } = props;
       testRenderState.latestColumns = Array.isArray(columns) ? columns : [];
+      testRenderState.latestTableProps = props;
       return <table />;
     },
     message: messageApi,
@@ -475,6 +490,7 @@ describe('DataGrid DDL interactions', () => {
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     testRenderState.latestColumns = [];
+    testRenderState.latestTableProps = null;
 
     vi.stubGlobal('document', {
       addEventListener: vi.fn(),
@@ -616,6 +632,225 @@ describe('DataGrid DDL interactions', () => {
       });
     },
   );
+
+  it('marks v2 table headers as single-line when column type and comment rows are hidden', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.queryOptions.showColumnComment = false;
+    storeState.queryOptions.showColumnType = false;
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
+    expect(idColumn).toBeTruthy();
+    expect(idColumn.onHeaderCell(idColumn).className).toContain('is-single-line-title');
+
+    const headerRenderer = create(<>{idColumn.title}</>);
+    expect(headerRenderer.root.findByProps({ 'data-grid-column-title-single-line': 'true' })).toBeTruthy();
+    expect(headerRenderer.root.findAllByProps({ className: 'gn-v2-column-title-type' })).toHaveLength(0);
+    expect(headerRenderer.root.findAllByProps({ className: 'gn-v2-column-title-comment' })).toHaveLength(0);
+    renderer!.unmount();
+  });
+
+  it('opens the v2 column header context menu from table headers', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.queryOptions.showColumnComment = true;
+    storeState.queryOptions.showColumnType = true;
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'id', type: 'bigint', comment: '主键 ID' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
+    expect(idColumn).toBeTruthy();
+    const headerProps = idColumn.onHeaderCell(idColumn);
+
+    await act(async () => {
+      headerProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 120,
+        clientY: 88,
+      });
+    });
+
+    expect(renderer!.root.findByProps({ 'data-v2-column-context-menu': 'true' })).toBeTruthy();
+    expect(textContent(renderer!.root)).toContain('复制字段名称');
+    expect(textContent(renderer!.root)).toContain('复制列数据');
+    expect(textContent(renderer!.root)).toContain('升序排序');
+    expect(textContent(renderer!.root)).toContain('隐藏此字段');
+    expect(textContent(renderer!.root)).toContain('隐藏字段类型');
+    expect(textContent(renderer!.root)).toContain('隐藏字段备注');
+    renderer!.unmount();
+  });
+
+  it('opens the v2 cell context menu for table cells instead of the legacy inline menu', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
+    const cellProps = idColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1 });
+    await act(async () => {
+      cellProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 160,
+        clientY: 120,
+      });
+    });
+
+    expect(renderer!.root.findByProps({ 'data-v2-cell-context-menu': 'true' })).toBeTruthy();
+    expect(textContent(renderer!.root)).toContain('复制字段名称');
+    expect(textContent(renderer!.root)).toContain('复制行数据');
+    expect(textContent(renderer!.root)).toContain('复制列数据');
+    expect(textContent(renderer!.root)).toContain('复制为 INSERT');
+    expect(textContent(renderer!.root)).toContain('导出');
+    renderer!.unmount();
+  });
+
+  it('copies loaded column data from the v2 column header context menu', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'beta' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
+    const headerProps = idColumn.onHeaderCell(idColumn);
+    await act(async () => {
+      headerProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 120,
+        clientY: 88,
+      });
+    });
+
+    await act(async () => {
+      findButton(renderer!, '复制列数据').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('1\n2');
+    renderer!.unmount();
+  });
+
+  it('copies row and column data from the v2 cell context menu', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' },
+            { __gonavi_row_key__: 'row-2', id: 2, name: 'beta' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const cellProps = nameColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' });
+    await act(async () => {
+      cellProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 160,
+        clientY: 120,
+      });
+    });
+
+    await act(async () => {
+      findButton(renderer!, '复制行数据').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('id\tname\n1\talpha');
+
+    await act(async () => {
+      cellProps.onContextMenu({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        clientX: 160,
+        clientY: 120,
+      });
+    });
+    await act(async () => {
+      findButton(renderer!, '复制列数据').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('alpha\nbeta');
+    renderer!.unmount();
+  });
 
   it('switches the v2 footer field tab into the main fields view', async () => {
     storeState.appearance.uiVersion = 'v2';

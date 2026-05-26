@@ -41,7 +41,8 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   ToolOutlined,
   SettingOutlined,
   BarsOutlined,
-  PushpinOutlined
+  StarFilled,
+  StarOutlined
 	} from '@ant-design/icons';
 import { buildSidebarTablePinKey, useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -103,10 +104,11 @@ interface TreeNode {
   title: string;
   key: string;
   isLeaf?: boolean;
+  selectable?: boolean;
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
 const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
@@ -190,6 +192,33 @@ export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
     }
     return compareWithinPinnedGroup(a, b);
   });
+};
+
+export const buildV2SidebarTableSectionedChildren = (
+  parentKey: string,
+  tableNodes: TreeNode[],
+): TreeNode[] => {
+  const pinnedTables = tableNodes.filter((node) => node?.dataRef?.pinnedSidebarTable);
+  if (pinnedTables.length === 0) return tableNodes;
+
+  const regularTables = tableNodes.filter((node) => !node?.dataRef?.pinnedSidebarTable);
+  const buildSectionNode = (kind: 'pinned' | 'all', title: string): TreeNode => ({
+    title,
+    key: `${parentKey}-v2-${kind}-tables-section`,
+    type: 'v2-table-section',
+    isLeaf: true,
+    selectable: false,
+    dataRef: {
+      sectionKind: kind,
+    },
+  });
+
+  return [
+    buildSectionNode('pinned', '置顶'),
+    ...pinnedTables,
+    buildSectionNode('all', '全部'),
+    ...regularTables,
+  ];
 };
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -2151,7 +2180,7 @@ const Sidebar: React.FC<{
 	                return {
 	                    title: entry.displayName,
 	                    key: `${conn.id}-${conn.dbName}-${entry.tableName}`,
-	                    icon: isPinned ? <PushpinOutlined /> : <TableOutlined />,
+	                    icon: <TableOutlined />,
 	                    type: 'table',
 	                    dataRef: { ...conn, tableName: entry.tableName, schemaName: entry.schemaName, pinnedSidebarTable: isPinned },
 	                    isLeaf: false,
@@ -2210,15 +2239,21 @@ const Sidebar: React.FC<{
 	                groupIcon: React.ReactNode,
 	                children: TreeNode[],
 	                extraData: Record<string, any> = {}
-	            ): TreeNode => ({
-	                title: groupTitle,
-	                key: `${parentKey}-${groupKey}`,
-	                icon: groupIcon,
-	                type: 'object-group',
-	                isLeaf: children.length === 0,
-	                children: children.length > 0 ? children : undefined,
-	                dataRef: { ...conn, dbName: conn.dbName, groupKey, ...extraData }
-	            });
+	            ): TreeNode => {
+	                const groupNodeKey = `${parentKey}-${groupKey}`;
+	                const groupedChildren = groupKey === 'tables'
+	                    ? buildV2SidebarTableSectionedChildren(groupNodeKey, children)
+	                    : children;
+	                return {
+	                    title: groupTitle,
+	                    key: groupNodeKey,
+	                    icon: groupIcon,
+	                    type: 'object-group',
+	                    isLeaf: children.length === 0,
+	                    children: groupedChildren.length > 0 ? groupedChildren : undefined,
+	                    dataRef: { ...conn, dbName: conn.dbName, groupKey, ...extraData }
+	                };
+	            };
 
 	            const shouldGroupBySchema = shouldHideSchemaPrefix(conn as SavedConnection);
 	            if (shouldGroupBySchema) {
@@ -2419,6 +2454,23 @@ const Sidebar: React.FC<{
       };
   }, []);
 
+  useEffect(() => {
+      const handleSidebarTablePinChanged = (event: Event) => {
+          const detail = (event as CustomEvent).detail || {};
+          const connectionId = String(detail.connectionId || '').trim();
+          const dbName = String(detail.dbName || '').trim();
+          if (!connectionId || !dbName) return;
+          const dbNode = findTreeNodeByKeyRef.current(treeDataRef.current, `${connectionId}-${dbName}`);
+          if (dbNode) {
+              void loadTables(dbNode);
+          }
+      };
+      window.addEventListener('gonavi:sidebar-table-pin-changed', handleSidebarTablePinChanged as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:sidebar-table-pin-changed', handleSidebarTablePinChanged as EventListener);
+      };
+  }, []);
+
   const onLoadData = async ({ key, children, dataRef, type }: any) => {
     if (type === 'tag') return;
     if (hasSidebarLazyChildren(children)) return;
@@ -2503,6 +2555,9 @@ const Sidebar: React.FC<{
   const isV2Ui = (uiVersion ?? appearance.uiVersion) === 'v2';
 
   const onSelect = (keys: React.Key[], info: any) => {
+      if (isV2Ui && info?.node?.type === 'v2-table-section') {
+          return;
+      }
       setSelectedKeys(keys);
       selectedNodesRef.current = info.selectedNodes || [];
 
@@ -2573,6 +2628,9 @@ const Sidebar: React.FC<{
           clickTimerRef.current = null;
       }
       const { type, dataRef, key: nodeKey } = node;
+      if (isV2Ui && type === 'v2-table-section') {
+          return;
+      }
       const nodeConnectionId = resolveSidebarNodeConnectionId(node, connectionIds);
       if (type === 'connection') {
           setSelectedKeys([nodeKey]);
@@ -4280,14 +4338,7 @@ const Sidebar: React.FC<{
       switch (action) {
           case 'pin-table':
           case 'unpin-table': {
-              const conn = node.dataRef || {};
-              const tableName = String(conn.tableName || '').trim();
-              const dbName = String(conn.dbName || '').trim();
-              if (!conn.id || !dbName || !tableName) return;
-              const shouldPin = action === 'pin-table';
-              setSidebarTablePinned(conn.id, dbName, tableName, conn.schemaName || '', shouldPin);
-              void loadTables(getDatabaseNodeRef(conn, dbName));
-              message.success(shouldPin ? '已置顶表' : '已取消置顶');
+              toggleSidebarTablePinned(node, action === 'pin-table');
               return;
           }
           case 'open-data':
@@ -4363,6 +4414,24 @@ const Sidebar: React.FC<{
           default:
               return;
       }
+  };
+
+  const toggleSidebarTablePinned = (node: any, pinned?: boolean) => {
+      const conn = node?.dataRef || {};
+      const tableName = String(conn.tableName || node?.title || '').trim();
+      const dbName = String(conn.dbName || '').trim();
+      if (!conn.id || !dbName || !tableName) return;
+      const currentlyPinned = isSidebarTablePinned(
+          pinnedSidebarTables,
+          String(conn.id || ''),
+          dbName,
+          tableName,
+          String(conn.schemaName || ''),
+      );
+      const shouldPin = pinned ?? !currentlyPinned;
+      setSidebarTablePinned(conn.id, dbName, tableName, conn.schemaName || '', shouldPin);
+      void loadTables(getDatabaseNodeRef(conn, dbName));
+      message.success(shouldPin ? '已置顶表' : '已取消置顶');
   };
 
   const handleTableGroupSortAction = (node: any, sortBy: 'name' | 'frequency') => {
@@ -5115,7 +5184,7 @@ const Sidebar: React.FC<{
           if (node.type === 'database') {
               databaseObjectCounts.set(node.key, childCount);
           } else if (node.type === 'object-group') {
-              objectGroupCounts.set(node.key, Array.isArray(node.children) ? node.children.length : 0);
+              objectGroupCounts.set(node.key, childCount);
           }
           return totalCount;
       };
@@ -5459,6 +5528,17 @@ const Sidebar: React.FC<{
   const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {
       const rawTitle = String(node.title ?? '');
       const groupKey = String(node?.dataRef?.groupKey || '');
+      if (node.type === 'v2-table-section') {
+          return (
+              <span
+                  className="gn-v2-tree-section-title"
+                  data-section-kind={node?.dataRef?.sectionKind || undefined}
+                  title={rawTitle}
+              >
+                  {rawTitle}
+              </span>
+          );
+      }
       const displayTitle = (() => {
           if (node.type === 'queries-folder') return '已存查询 · saved';
           if (node.type === 'external-sql-root') return '外部 SQL 目录';
@@ -5481,14 +5561,40 @@ const Sidebar: React.FC<{
           || node.type === 'routine'
           || node.type === 'saved-query'
           || node.type === 'external-sql-file';
-      const sectionLabel = node.type === 'object-group' && groupKey === 'tables' && metaText ? (
-          <span className="gn-v2-tree-section-label">全部</span>
-      ) : null;
       const titleClassName = [
           'gn-v2-tree-title',
           isMono ? 'is-mono' : '',
           node.type === 'object-group' ? 'is-group' : '',
+          node.type === 'table' && node?.dataRef?.pinnedSidebarTable ? 'is-pinned-table' : '',
       ].filter(Boolean).join(' ');
+      const tablePinAction = node.type === 'table' ? (
+          <button
+              type="button"
+              className={[
+                  'gn-v2-table-pin-action',
+                  node?.dataRef?.pinnedSidebarTable ? 'is-pinned' : '',
+              ].filter(Boolean).join(' ')}
+              title={node?.dataRef?.pinnedSidebarTable ? '取消置顶表' : '置顶表'}
+              aria-label={node?.dataRef?.pinnedSidebarTable ? '取消置顶表' : '置顶表'}
+              aria-pressed={node?.dataRef?.pinnedSidebarTable ? true : false}
+              data-v2-sidebar-table-pin-action="true"
+              onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+              }}
+              onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleSidebarTablePinned(node);
+              }}
+              onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+              }}
+          >
+              {node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />}
+          </button>
+      ) : null;
       return (
         <>
           <span
@@ -5501,7 +5607,7 @@ const Sidebar: React.FC<{
               <span className="gn-v2-tree-label">{displayTitle}</span>
               {metaText && <span className="gn-v2-tree-count">{metaText}</span>}
           </span>
-          {sectionLabel}
+          {tablePinAction}
         </>
       );
   };
@@ -6717,6 +6823,11 @@ const Sidebar: React.FC<{
   };
 
   const onRightClick = ({ event, node }: any) => {
+      if (isV2Ui && node?.type === 'v2-table-section') {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+      }
       if (isV2Ui && node?.type === 'connection') {
           openV2ConnectionContextMenu(event, node);
           return;

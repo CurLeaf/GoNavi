@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } fr
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
-import { useStore } from '../store';
+import { buildSidebarTablePinKey, useStore } from '../store';
 import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
@@ -14,6 +14,7 @@ import {
     TABLE_OVERVIEW_RENDER_BATCH_SIZE,
     buildTableOverviewSearchIndex,
     filterAndSortTableOverviewRows,
+    prioritizePinnedTableOverviewRows,
     resolveTableOverviewVisibleRows,
     type TableOverviewSortField,
     type TableOverviewSortOrder,
@@ -39,6 +40,12 @@ interface TableStatRow {
 type SortField = TableOverviewSortField;
 type SortOrder = TableOverviewSortOrder;
 type ViewMode = 'card' | 'list';
+type OverviewTableSection = {
+    key: string;
+    title: string;
+    kind: 'pinned' | 'all';
+    rows: TableStatRow[];
+};
 
 const formatSize = (bytes: number): string => {
     if (!bytes || bytes <= 0) return '—';
@@ -53,6 +60,17 @@ const formatRows = (count: number): string => {
     if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
     if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
     return String(count);
+};
+
+const isOverviewTablePinned = (
+    pinnedKeys: string[],
+    connectionId: string | undefined,
+    dbName: string | undefined,
+    schemaName: string | undefined,
+    tableName: string,
+): boolean => {
+    const key = buildSidebarTablePinKey(connectionId || '', dbName || '', tableName, schemaName || '');
+    return !!key && pinnedKeys.includes(key);
 };
 
 const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol?: string): string => {
@@ -177,6 +195,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const setActiveContext = useStore(state => state.setActiveContext);
     const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
     const addAIContext = useStore(state => state.addAIContext);
+    const pinnedSidebarTables = useStore(state => state.pinnedSidebarTables);
+    const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
     const darkMode = theme === 'dark';
     const isV2Ui = appearance.uiVersion === 'v2';
 
@@ -196,6 +216,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         () => getMetadataDialect(connection?.config?.type || '', connection?.config?.driver, connection?.config?.oceanBaseProtocol),
         [connection?.config?.driver, connection?.config?.oceanBaseProtocol, connection?.config?.type]
     );
+    const schemaName = String((tab as any).schemaName || '').trim();
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -210,7 +231,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
-            const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', (tab as any).schemaName);
+            const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', schemaName);
             const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
                 setTables(parseTableStats(metadataDialect, res.data));
@@ -222,7 +243,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         } finally {
             setLoading(false);
         }
-    }, [connection, metadataDialect, tab.dbName]);
+    }, [connection, metadataDialect, schemaName, tab.dbName]);
 
     useEffect(() => {
         if (!autoFetchVisible) {
@@ -237,15 +258,39 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         filterAndSortTableOverviewRows(tableSearchIndex, deferredSearchText, sortField, sortOrder)
     ), [deferredSearchText, sortField, sortOrder, tableSearchIndex]);
 
+    const pinnedOverview = useMemo(() => (
+        prioritizePinnedTableOverviewRows(
+            sortedFiltered,
+            (table) => isOverviewTablePinned(pinnedSidebarTables, connection?.id, tab.dbName, schemaName, table.name),
+        )
+    ), [connection?.id, pinnedSidebarTables, schemaName, sortedFiltered, tab.dbName]);
+
     useEffect(() => {
         setVisibleTableLimit(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
-    }, [deferredSearchText, sortField, sortOrder, viewMode, tables]);
+    }, [deferredSearchText, sortField, sortOrder, viewMode, tables, pinnedSidebarTables]);
 
     const visibleOverview = useMemo(() => (
-        resolveTableOverviewVisibleRows(sortedFiltered, visibleTableLimit)
-    ), [sortedFiltered, visibleTableLimit]);
+        resolveTableOverviewVisibleRows(pinnedOverview.orderedRows, visibleTableLimit)
+    ), [pinnedOverview.orderedRows, visibleTableLimit]);
 
     const visibleTables = visibleOverview.visibleRows;
+
+    const visibleTableSections = useMemo<OverviewTableSection[]>(() => {
+        if (pinnedOverview.pinnedRows.length === 0) {
+            return [{ key: 'all', title: '全部', kind: 'all', rows: visibleTables }];
+        }
+        const visiblePinnedNames = new Set(
+            visibleTables
+                .filter((table) => isOverviewTablePinned(pinnedSidebarTables, connection?.id, tab.dbName, schemaName, table.name))
+                .map((table) => table.name),
+        );
+        const pinnedRows = pinnedOverview.pinnedRows.filter((table) => visiblePinnedNames.has(table.name));
+        const regularRows = visibleTables.filter((table) => !visiblePinnedNames.has(table.name));
+        return [
+            ...(pinnedRows.length > 0 ? [{ key: 'pinned', title: '置顶', kind: 'pinned' as const, rows: pinnedRows }] : []),
+            ...(regularRows.length > 0 ? [{ key: 'all', title: '全部', kind: 'all' as const, rows: regularRows }] : []),
+        ];
+    }, [connection?.id, pinnedOverview.pinnedRows, pinnedSidebarTables, schemaName, tab.dbName, visibleTables]);
 
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
@@ -426,6 +471,26 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         });
     }, [buildConfig, tab.dbName, loadData]);
 
+    const toggleOverviewTablePinned = useCallback((tableName: string, pinned?: boolean) => {
+        if (!connection?.id || !tab.dbName || !tableName) return;
+        const currentlyPinned = isOverviewTablePinned(
+            pinnedSidebarTables,
+            connection.id,
+            tab.dbName,
+            schemaName,
+            tableName,
+        );
+        const shouldPin = pinned ?? !currentlyPinned;
+        setSidebarTablePinned(connection.id, tab.dbName, tableName, schemaName, shouldPin);
+        window.dispatchEvent(new CustomEvent('gonavi:sidebar-table-pin-changed', {
+            detail: {
+                connectionId: connection.id,
+                dbName: tab.dbName,
+            },
+        }));
+        message.success(shouldPin ? '已置顶表' : '已取消置顶');
+    }, [connection?.id, pinnedSidebarTables, schemaName, setSidebarTablePinned, tab.dbName]);
+
     const handleRenameTable = useCallback((tableName: string) => {
         const config = buildConfig();
         if (!config) return;
@@ -550,6 +615,12 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             case 'open-new-tab':
                 openTable(tableName);
                 return;
+            case 'pin-table':
+                toggleOverviewTablePinned(tableName, true);
+                return;
+            case 'unpin-table':
+                toggleOverviewTablePinned(tableName, false);
+                return;
             case 'design-table':
                 openDesign(tableName);
                 return;
@@ -623,6 +694,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         openTable,
         openTableDdl,
         openTableInER,
+        toggleOverviewTablePinned,
     ]);
 
     const renderV2OverviewTableContextMenu = useCallback((table: TableStatRow) => (
@@ -634,6 +706,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 indexLength: table.indexSize,
                 engine: table.engine,
             }}
+            isPinned={isOverviewTablePinned(pinnedSidebarTables, connection?.id, tab.dbName, schemaName, table.name)}
             supportsTruncate={allowTruncate}
             supportsStarRocksRollup={metadataDialect === 'starrocks'}
             onAction={(action) => {
@@ -641,7 +714,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 handleV2TableContextMenuAction(table, action);
             }}
         />
-    ), [allowTruncate, handleV2TableContextMenuAction, metadataDialect]);
+    ), [allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, tab.dbName]);
 
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
         { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
@@ -675,6 +748,192 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         openDesign,
         openQueryForTable,
     ]);
+
+    const renderOverviewSectionTitle = (section: OverviewTableSection) => (
+        <div
+            className={isV2Ui ? 'gn-v2-table-overview-section-title' : undefined}
+            data-overview-table-section={section.kind}
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                margin: section.kind === 'pinned' ? '0 0 8px' : '14px 0 8px',
+                color: textMuted,
+                fontSize: 12,
+                fontWeight: 600,
+            }}
+        >
+            <span>{section.title}</span>
+            <span>{section.rows.length}</span>
+        </div>
+    );
+
+    const renderCardTable = (t: TableStatRow) => (
+        <Dropdown
+            key={t.name}
+            trigger={['contextMenu']}
+            menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
+            open={isV2Ui ? openContextMenuTable === t.name : undefined}
+            onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
+            popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
+            rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
+            overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
+        >
+            <div
+                className={isV2Ui ? 'gn-v2-table-card' : undefined}
+                onDoubleClick={() => openTable(t.name)}
+                style={{
+                    background: cardBg,
+                    border: `1px solid ${cardBorder}`,
+                    borderRadius: 10,
+                    padding: '14px 16px',
+                    cursor: 'pointer',
+                    transition: isV2Ui ? undefined : 'all 0.15s ease',
+                    userSelect: 'none',
+                }}
+                onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+                onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
+            >
+                <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <TableOutlined style={{ fontSize: 14, color: accentColor }} />
+                    <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
+                            {t.name}
+                        </span>
+                    </Tooltip>
+                </div>
+                {t.comment && (
+                    <Tooltip title={t.comment} mouseEnterDelay={0.4}>
+                        <div style={{ fontSize: 12, color: textSecondary, marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {t.comment}
+                        </div>
+                    </Tooltip>
+                )}
+                <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
+                    <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
+                    <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
+                    {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
+                </div>
+                {isV2Ui && (
+                    <div className="gn-v2-table-size-bar">
+                        <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
+                    </div>
+                )}
+            </div>
+        </Dropdown>
+    );
+
+    const renderListTable = (t: TableStatRow) => {
+        const combinedSize = t.dataSize + t.indexSize;
+        const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
+        const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
+        const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
+        const rowSecondary = t.comment || (t.engine ? `${t.engine} 表` : '双击打开数据，右键查看更多操作');
+
+        return (
+            <Dropdown
+                key={t.name}
+                trigger={['contextMenu']}
+                menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
+                open={isV2Ui ? openContextMenuTable === t.name : undefined}
+                onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
+                popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
+                rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
+                overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
+            >
+                <div
+                    className={isV2Ui ? 'gn-v2-table-row' : undefined}
+                    onDoubleClick={() => openTable(t.name)}
+                    style={{
+                        position: 'relative',
+                        overflow: 'hidden',
+                        borderRadius: 10,
+                        border: `1px solid ${cardBorder}`,
+                        background: cardBg,
+                        cursor: 'pointer',
+                        transition: isV2Ui ? undefined : 'all 0.15s ease',
+                        userSelect: 'none',
+                    }}
+                    onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+                    onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
+                >
+                    <div
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            bottom: 0,
+                            width: fillWidth,
+                            background: fillColor,
+                            pointerEvents: 'none',
+                            transition: 'width 0.2s ease',
+                        }}
+                    />
+                    <div
+                        style={{
+                            position: 'relative',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 16,
+                            padding: '14px 16px',
+                            flexWrap: 'wrap',
+                        }}
+                    >
+                        <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                <TableOutlined style={{ fontSize: 13, color: accentColor, flexShrink: 0 }} />
+                                <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                                    <span style={{ color: textPrimary, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {t.name}
+                                    </span>
+                                </Tooltip>
+                                {t.engine && (
+                                    <span
+                                        style={{
+                                            flexShrink: 0,
+                                            padding: '1px 6px',
+                                            borderRadius: 999,
+                                            fontSize: 11,
+                                            color: textMuted,
+                                            background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                        }}
+                                    >
+                                        {t.engine}
+                                    </span>
+                                )}
+                            </div>
+                            <Tooltip title={rowSecondary} mouseEnterDelay={0.4}>
+                                <div style={{ marginTop: 6, color: textSecondary, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {rowSecondary}
+                                </div>
+                            </Tooltip>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
+                            <div style={{ minWidth: 96, textAlign: 'right' }}>
+                                <div style={{ color: textMuted }}>行数</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</div>
+                            </div>
+                            <div style={{ minWidth: 110, textAlign: 'right' }}>
+                                <div style={{ color: textMuted }}>数据大小</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</div>
+                            </div>
+                            <div style={{ minWidth: 110, textAlign: 'right' }}>
+                                <div style={{ color: textMuted }}>索引大小</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</div>
+                            </div>
+                            <div style={{ minWidth: 96, textAlign: 'right' }}>
+                                <div style={{ color: textMuted }}>相对大小</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                                    {maxCombinedSize > 0 ? `${Math.round(sizeRatio * 100)}%` : '—'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </Dropdown>
+        );
+    };
 
     if (loading) {
         return (
@@ -769,182 +1028,26 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 )}
                 {sortedFiltered.length === 0 ? (
                     <Empty description={searchText ? '无匹配结果' : '暂无表'} style={{ marginTop: 80 }} />
-                ) : viewMode === 'card' ? (
-                    /* ========== 卡片视图 ========== */
-                    <div className={isV2Ui ? 'gn-v2-table-card-grid' : undefined} style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                        gap: 12,
-                    }}>
-                        {visibleTables.map(t => (
-                            <Dropdown
-                                key={t.name}
-                                trigger={['contextMenu']}
-                                menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
-                                open={isV2Ui ? openContextMenuTable === t.name : undefined}
-                                onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
-                                popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
-                                rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
-                                overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
-                            >
-                                <div
-                                    className={isV2Ui ? 'gn-v2-table-card' : undefined}
-                                    onDoubleClick={() => openTable(t.name)}
-                                    style={{
-                                        background: cardBg,
-                                        border: `1px solid ${cardBorder}`,
-                                        borderRadius: 10,
-                                        padding: '14px 16px',
-                                        cursor: 'pointer',
-                                        transition: isV2Ui ? undefined : 'all 0.15s ease',
-                                        userSelect: 'none',
-                                    }}
-                                    onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
-                                    onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
-                                >
-                                        <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                        <TableOutlined style={{ fontSize: 14, color: accentColor }} />
-                                        <Tooltip title={t.name} mouseEnterDelay={0.4}>
-                                            <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
-                                                {t.name}
-                                            </span>
-                                        </Tooltip>
-                                    </div>
-                                    {t.comment && (
-                                        <Tooltip title={t.comment} mouseEnterDelay={0.4}>
-                                            <div style={{ fontSize: 12, color: textSecondary, marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {t.comment}
-                                            </div>
-                                        </Tooltip>
-                                    )}
-                                    <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
-                                        <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
-                                        <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
-                                        {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
-                                    </div>
-                                    {isV2Ui && (
-                                        <div className="gn-v2-table-size-bar">
-                                            <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
-                                        </div>
-                                    )}
-                                </div>
-                            </Dropdown>
-                        ))}
-                    </div>
                 ) : (
-                    /* ========== 行视图 ========== */
-                    <div className={isV2Ui ? 'gn-v2-table-row-list' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {visibleTables.map(t => {
-                            const combinedSize = t.dataSize + t.indexSize;
-                            const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
-                            const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
-                            const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
-                            const rowSecondary = t.comment || (t.engine ? `${t.engine} 表` : '双击打开数据，右键查看更多操作');
-
-                            return (
-                                <Dropdown
-                                    key={t.name}
-                                    trigger={['contextMenu']}
-                                    menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
-                                    open={isV2Ui ? openContextMenuTable === t.name : undefined}
-                                    onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
-                                    popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
-                                    rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
-                                    overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
-                                >
-                                    <div
-                                        className={isV2Ui ? 'gn-v2-table-row' : undefined}
-                                        onDoubleClick={() => openTable(t.name)}
-                                        style={{
-                                            position: 'relative',
-                                            overflow: 'hidden',
-                                            borderRadius: 10,
-                                            border: `1px solid ${cardBorder}`,
-                                            background: cardBg,
-                                            cursor: 'pointer',
-                                            transition: isV2Ui ? undefined : 'all 0.15s ease',
-                                            userSelect: 'none',
-                                        }}
-                                        onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
-                                        onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
-                                    >
-                                        <div
-                                            style={{
-                                                position: 'absolute',
-                                                top: 0,
-                                                left: 0,
-                                                bottom: 0,
-                                                width: fillWidth,
-                                                background: fillColor,
-                                                pointerEvents: 'none',
-                                                transition: 'width 0.2s ease',
-                                            }}
-                                        />
-                                        <div
-                                            style={{
-                                                position: 'relative',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'space-between',
-                                                gap: 16,
-                                                padding: '14px 16px',
-                                                flexWrap: 'wrap',
-                                            }}
-                                        >
-                                            <div style={{ minWidth: 0, flex: '1 1 320px' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                                    <TableOutlined style={{ fontSize: 13, color: accentColor, flexShrink: 0 }} />
-                                                    <Tooltip title={t.name} mouseEnterDelay={0.4}>
-                                                        <span style={{ color: textPrimary, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                            {t.name}
-                                                        </span>
-                                                    </Tooltip>
-                                                    {t.engine && (
-                                                        <span
-                                                            style={{
-                                                                flexShrink: 0,
-                                                                padding: '1px 6px',
-                                                                borderRadius: 999,
-                                                                fontSize: 11,
-                                                                color: textMuted,
-                                                                background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-                                                            }}
-                                                        >
-                                                            {t.engine}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <Tooltip title={rowSecondary} mouseEnterDelay={0.4}>
-                                                    <div style={{ marginTop: 6, color: textSecondary, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                        {rowSecondary}
-                                                    </div>
-                                                </Tooltip>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
-                                                <div style={{ minWidth: 96, textAlign: 'right' }}>
-                                                    <div style={{ color: textMuted }}>行数</div>
-                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</div>
-                                                </div>
-                                                <div style={{ minWidth: 110, textAlign: 'right' }}>
-                                                    <div style={{ color: textMuted }}>数据大小</div>
-                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</div>
-                                                </div>
-                                                <div style={{ minWidth: 110, textAlign: 'right' }}>
-                                                    <div style={{ color: textMuted }}>索引大小</div>
-                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</div>
-                                                </div>
-                                                <div style={{ minWidth: 96, textAlign: 'right' }}>
-                                                    <div style={{ color: textMuted }}>相对大小</div>
-                                                    <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                                                        {maxCombinedSize > 0 ? `${Math.round(sizeRatio * 100)}%` : '—'}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                    <div className={isV2Ui ? 'gn-v2-table-overview-sections' : undefined}>
+                        {visibleTableSections.map((section) => (
+                            <section key={section.key} className={isV2Ui ? 'gn-v2-table-overview-section' : undefined}>
+                                {pinnedOverview.pinnedRows.length > 0 && renderOverviewSectionTitle(section)}
+                                {viewMode === 'card' ? (
+                                    <div className={isV2Ui ? 'gn-v2-table-card-grid' : undefined} style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                                        gap: 12,
+                                    }}>
+                                        {section.rows.map(renderCardTable)}
                                     </div>
-                                </Dropdown>
-                            );
-                        })}
+                                ) : (
+                                    <div className={isV2Ui ? 'gn-v2-table-row-list' : undefined} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {section.rows.map(renderListTable)}
+                                    </div>
+                                )}
+                            </section>
+                        ))}
                     </div>
                 )}
                 {sortedFiltered.length > 0 && visibleOverview.hiddenCount > 0 && (
