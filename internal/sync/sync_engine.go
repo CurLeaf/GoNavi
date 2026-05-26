@@ -5,10 +5,13 @@ import (
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 )
+
+const defaultSyncApplyBatchSize = 1000
 
 // SyncConfig defines the parameters for a synchronization task
 type SyncConfig struct {
@@ -251,6 +254,54 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 				return
 			}
 
+			if handled, inserted, err := s.tryApplyDirectImportInPages(config, &result, i, totalTables, tableName, sourceDB, targetDB, plan, cols, targetCols, opts, sourceType, targetType, applyTableName); handled {
+				if err != nil {
+					logger.Error(err, "分页流式导入失败：表=%s", tableName)
+					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("  -> 分页流式导入失败: %v", err))
+					return
+				}
+				result.RowsInserted += inserted
+				if inserted > 0 {
+					s.appendLog(config.JobID, &result, "info", fmt.Sprintf("  -> 分页流式导入完成：插入=%d 行", inserted))
+				} else {
+					s.appendLog(config.JobID, &result, "info", "  -> 源表无可导入数据")
+				}
+				if len(plan.PostDataSQL) > 0 {
+					s.progress(config.JobID, i, totalTables, tableName, "创建索引")
+					if err := executeSQLStatements(targetDB.Exec, plan.PostDataSQL); err != nil {
+						s.appendLog(config.JobID, &result, "error", fmt.Sprintf("创建索引失败：表=%s 错误=%v", tableName, err))
+						return
+					}
+				}
+				result.TablesSynced++
+				return
+			}
+
+			if handled, counts, err := s.tryApplyDiffInPages(config, &result, i, totalTables, tableName, sourceDB, targetDB, plan, cols, targetCols, opts, sourceType, targetType, applyTableName, pkCol); handled {
+				if err != nil {
+					logger.Error(err, "分页差异同步失败：表=%s", tableName)
+					s.appendLog(config.JobID, &result, "error", fmt.Sprintf("  -> 分页差异同步失败: %v", err))
+					return
+				}
+				result.RowsInserted += counts.Inserts
+				result.RowsUpdated += counts.Updates
+				result.RowsDeleted += counts.Deletes
+				if counts.Inserts > 0 || counts.Updates > 0 || counts.Deletes > 0 {
+					s.appendLog(config.JobID, &result, "info", fmt.Sprintf("  -> 分页差异同步完成：插入=%d 更新=%d 删除=%d", counts.Inserts, counts.Updates, counts.Deletes))
+				} else {
+					s.appendLog(config.JobID, &result, "info", "  -> 数据一致，无需变更.")
+				}
+				if len(plan.PostDataSQL) > 0 {
+					s.progress(config.JobID, i, totalTables, tableName, "创建索引")
+					if err := executeSQLStatements(targetDB.Exec, plan.PostDataSQL); err != nil {
+						s.appendLog(config.JobID, &result, "error", fmt.Sprintf("创建索引失败：表=%s 错误=%v", tableName, err))
+						return
+					}
+				}
+				result.TablesSynced++
+				return
+			}
+
 			s.progress(config.JobID, i, totalTables, tableName, "读取源表数据")
 			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, sourceQueryTable)))
 			if err != nil {
@@ -401,7 +452,7 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 			if len(changeSet.Inserts) > 0 || len(changeSet.Updates) > 0 || len(changeSet.Deletes) > 0 {
 				s.appendLog(config.JobID, &result, "info", fmt.Sprintf("  -> 需插入: %d 行, 需更新: %d 行, 需删除: %d 行", len(changeSet.Inserts), len(changeSet.Updates), len(changeSet.Deletes)))
 				if applier, ok := targetDB.(db.BatchApplier); ok {
-					if err := applier.ApplyChanges(applyTableName, changeSet); err != nil {
+					if err := s.applyChangesInBatches(config.JobID, &result, applyTableName, applier, changeSet); err != nil {
 						s.appendLog(config.JobID, &result, "error", fmt.Sprintf("  -> 应用变更失败: %v", err))
 						return
 					}
@@ -495,6 +546,75 @@ func (s *SyncEngine) fail(jobID string, totalTables int, res SyncResult, msg str
 	s.appendLog(jobID, &res, "error", "致命错误: "+msg)
 	s.progress(jobID, res.TablesSynced, totalTables, "", "同步失败")
 	return res
+}
+
+func (s *SyncEngine) applyChangesInBatches(jobID string, res *SyncResult, tableName string, applier db.BatchApplier, changes connection.ChangeSet) error {
+	batches := splitChangeSetBatches(changes, defaultSyncApplyBatchSize)
+	if len(batches) == 0 {
+		return nil
+	}
+	if len(batches) > 1 {
+		s.appendLog(jobID, res, "info", fmt.Sprintf("  -> 大批量变更将拆分为 %d 批提交（每批最多 %d 行）", len(batches), defaultSyncApplyBatchSize))
+	}
+	for idx, batch := range batches {
+		if len(batches) > 1 {
+			s.appendLog(jobID, res, "info", fmt.Sprintf("  -> 提交批次 %d/%d：插入=%d 更新=%d 删除=%d",
+				idx+1, len(batches), len(batch.Inserts), len(batch.Updates), len(batch.Deletes)))
+		}
+		if err := applier.ApplyChanges(tableName, batch); err != nil {
+			if len(batches) > 1 {
+				return fmt.Errorf("批次 %d/%d 失败: %w", idx+1, len(batches), err)
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func splitChangeSetBatches(changes connection.ChangeSet, batchSize int) []connection.ChangeSet {
+	if batchSize <= 0 {
+		batchSize = defaultSyncApplyBatchSize
+	}
+	total := len(changes.Deletes) + len(changes.Updates) + len(changes.Inserts)
+	if total == 0 {
+		return nil
+	}
+
+	batches := make([]connection.ChangeSet, 0, int(math.Ceil(float64(total)/float64(batchSize))))
+	current := connection.ChangeSet{LocatorStrategy: changes.LocatorStrategy}
+	currentSize := 0
+	flush := func() {
+		if currentSize == 0 {
+			return
+		}
+		batches = append(batches, current)
+		current = connection.ChangeSet{LocatorStrategy: changes.LocatorStrategy}
+		currentSize = 0
+	}
+
+	for _, row := range changes.Deletes {
+		if currentSize >= batchSize {
+			flush()
+		}
+		current.Deletes = append(current.Deletes, row)
+		currentSize++
+	}
+	for _, row := range changes.Updates {
+		if currentSize >= batchSize {
+			flush()
+		}
+		current.Updates = append(current.Updates, row)
+		currentSize++
+	}
+	for _, row := range changes.Inserts {
+		if currentSize >= batchSize {
+			flush()
+		}
+		current.Inserts = append(current.Inserts, row)
+		currentSize++
+	}
+	flush()
+	return batches
 }
 
 func (s *SyncEngine) execDDLStatements(jobID string, res *SyncResult, database db.Database, tableName string, stage string, statements []string) error {

@@ -917,28 +917,18 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-		idx := 0
-
-		for k, v := range row {
-			idx++
-			cols = append(cols, quoteKingbaseIdent(k))
-			placeholders = append(placeholders, fmt.Sprintf("$%d", idx))
-			args = append(args, v)
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteKingbaseIdent,
+		Placeholder: func(idx int) string {
+			return fmt.Sprintf("$%d", idx)
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()

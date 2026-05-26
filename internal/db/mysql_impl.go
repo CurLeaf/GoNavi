@@ -25,7 +25,11 @@ type MySQLDB struct {
 	pingTimeout time.Duration
 }
 
-const defaultMySQLPort = 3306
+const (
+	defaultMySQLPort            = 3306
+	defaultMySQLInsertBatchSize = 1000
+	maxMySQLInsertBatchArgs     = 60000
+)
 
 func parseMySQLCompatibleURI(raw string, allowedSchemes ...string) (*url.URL, bool) {
 	return parseConnectionURI(raw, allowedSchemes...)
@@ -1020,45 +1024,38 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			normalizedValue, omit := normalizeMySQLValueForInsert(k, v, columnTypeMap)
-			if omit {
-				continue
-			}
-			cols = append(cols, fmt.Sprintf("`%s`", k))
-			placeholders = append(placeholders, "?")
-			args = append(args, normalizedValue)
-		}
-
-		if len(cols) == 0 {
-			query := fmt.Sprintf("INSERT INTO `%s` () VALUES ()", tableName)
-			res, err := tx.Exec(query)
-			if err != nil {
-				return fmt.Errorf("插入失败：%v", err)
-			}
-			if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-				return fmt.Errorf("插入未生效：未影响任何行")
-			}
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", tableName, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		res, err := tx.Exec(query, args...)
-		if err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
-		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-			return fmt.Errorf("插入未生效：未影响任何行")
-		}
+	if err := m.applyInsertChanges(tx, tableName, changes.Inserts, columnTypeMap); err != nil {
+		return err
 	}
 
 	return tx.Commit()
+}
+
+func (m *MySQLDB) applyInsertChanges(tx *sql.Tx, tableName string, rows []map[string]interface{}, columnTypeMap map[string]string) error {
+	return execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table: fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(tableName)),
+		Rows:  rows,
+		QuoteColumn: func(column string) string {
+			return fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(column))
+		},
+		Placeholder: func(int) string { return "?" },
+		Value: func(column string, value interface{}) (interface{}, bool) {
+			return normalizeMySQLValueForInsert(column, value, columnTypeMap)
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxRows:         defaultMySQLInsertBatchSize,
+		MaxArgs:         maxMySQLInsertBatchArgs,
+		RequireAffected: true,
+		EmptyInsertSQL: func(table string) string {
+			return fmt.Sprintf("INSERT INTO %s () VALUES ()", table)
+		},
+	})
+}
+
+func escapeMySQLBacktickIdent(ident string) string {
+	return strings.ReplaceAll(strings.TrimSpace(ident), "`", "``")
 }
 
 func normalizeMySQLComplexValue(value interface{}) interface{} {

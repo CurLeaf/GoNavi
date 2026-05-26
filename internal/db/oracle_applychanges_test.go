@@ -366,6 +366,59 @@ func TestMySQLApplyChangesReturnsErrorWhenUpdateAffectsMultipleRows(t *testing.T
 	}
 }
 
+func TestMySQLApplyChangesBatchesLargeInsertRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 1000
+	mysqlDB := &MySQLDB{conn: dbConn}
+
+	rows := make([]map[string]interface{}, 1201)
+	for i := range rows {
+		rows[i] = map[string]interface{}{
+			"id":   i + 1,
+			"name": fmt.Sprintf("name-%d", i+1),
+		}
+	}
+
+	if err := mysqlDB.ApplyChanges("users", connection.ChangeSet{Inserts: rows}); err != nil {
+		t.Fatalf("ApplyChanges() unexpected error: %v", err)
+	}
+
+	executions := state.snapshotExecQueries()
+	if len(executions) != 2 {
+		t.Fatalf("期望 1201 行插入拆成 2 条批量 INSERT，实际 %d 条：%v", len(executions), executions)
+	}
+	for _, query := range executions {
+		if !strings.HasPrefix(query, "INSERT INTO `users` (`id`, `name`) VALUES ") {
+			t.Fatalf("批量 INSERT 语句格式不正确: %s", query)
+		}
+		if got := strings.Count(query, "(?, ?)"); got == 0 || got > defaultMySQLInsertBatchSize {
+			t.Fatalf("批量 INSERT values 数量异常，got=%d query=%s", got, query)
+		}
+	}
+	if got := strings.Count(executions[0], "(?, ?)"); got != defaultMySQLInsertBatchSize {
+		t.Fatalf("第一批 values=%d, want %d", got, defaultMySQLInsertBatchSize)
+	}
+	if got := strings.Count(executions[1], "(?, ?)"); got != 201 {
+		t.Fatalf("第二批 values=%d, want 201", got)
+	}
+}
+
+func TestMySQLInsertBatchSizeRespectsArgumentLimit(t *testing.T) {
+	t.Parallel()
+
+	if got := batchInsertRowLimit(2, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != defaultMySQLInsertBatchSize {
+		t.Fatalf("2 列批大小=%d, want %d", got, defaultMySQLInsertBatchSize)
+	}
+	if got := batchInsertRowLimit(100, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != 600 {
+		t.Fatalf("100 列批大小=%d, want 600", got)
+	}
+	if got := batchInsertRowLimit(70000, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != 1 {
+		t.Fatalf("超宽表批大小=%d, want 1", got)
+	}
+}
+
 func TestPostgresApplyChangesReturnsErrorWhenDeleteAffectsMultipleRows(t *testing.T) {
 	t.Parallel()
 

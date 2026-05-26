@@ -324,6 +324,8 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 	isKingbase := strings.Contains(driver, "kingbase")
 	isPostgres := strings.Contains(driver, "postgres") || isKingbase || strings.Contains(driver, "pg")
 	isOracle := strings.Contains(driver, "oracle") || strings.Contains(driver, "ora") || strings.Contains(driver, "dm") || strings.Contains(driver, "dameng")
+	isSQLServer := strings.Contains(driver, "sqlserver") || strings.Contains(driver, "mssql")
+	isSQLite := strings.Contains(driver, "sqlite") || strings.Contains(driver, "duckdb")
 
 	quoteIdent := func(name string) string {
 		n := strings.TrimSpace(name)
@@ -425,31 +427,31 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-		idx := 0
-
-		for k, v := range row {
-			idx++
-			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, placeholder(idx))
-			args = append(args, v)
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteIdent,
+		Placeholder: placeholder,
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxArgs: customInsertMaxArgs(isSQLServer, isSQLite),
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()
+}
+
+func customInsertMaxArgs(isSQLServer, isSQLite bool) int {
+	switch {
+	case isSQLServer:
+		return sqlServerBatchInsertArgs
+	case isSQLite:
+		return sqliteBatchInsertArgs
+	default:
+		return 0
+	}
 }
 
 func (c *CustomDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {

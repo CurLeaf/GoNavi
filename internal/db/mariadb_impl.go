@@ -419,26 +419,23 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			cols = append(cols, fmt.Sprintf("`%s`", k))
-			placeholders = append(placeholders, "?")
-			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", tableName, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table: fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(tableName)),
+		Rows:  changes.Inserts,
+		QuoteColumn: func(column string) string {
+			return fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(column))
+		},
+		Placeholder: func(int) string { return "?" },
+		Value: func(_ string, value interface{}) (interface{}, bool) {
+			return normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(value)), false
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxRows: defaultMySQLInsertBatchSize,
+		MaxArgs: maxMySQLInsertBatchArgs,
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()

@@ -406,19 +406,24 @@ func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet
 	}
 
 	qualifiedTable := quoteTDengineTable("", tableName)
-	for _, row := range changes.Inserts {
-		query, err := buildTDengineInsertSQL(qualifiedTable, row)
-		if err != nil {
-			return err
-		}
-		if query == "" {
-			continue
-		}
-		if _, err := t.conn.Exec(query); err != nil {
-			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
-		}
+	return execTDengineInsertBatches(t.conn, qualifiedTable, changes.Inserts)
+}
+
+func execTDengineInsertBatches(conn *sql.DB, qualifiedTable string, rows []map[string]interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("连接未打开")
 	}
-	return nil
+	return execLiteralInsertBatches(literalInsertConfig{
+		Table: qualifiedTable,
+		Rows:  rows,
+		QuoteColumn: func(column string) string {
+			return fmt.Sprintf("`%s`", escapeBacktickIdent(column))
+		},
+		Literal: tdengineLiteral,
+		Exec: func(query string) (sql.Result, error) {
+			return conn.Exec(query)
+		},
+	})
 }
 
 func buildTDengineInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {

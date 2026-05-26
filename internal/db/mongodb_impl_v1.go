@@ -1317,15 +1317,37 @@ func (m *MongoDBV1) ApplyChanges(tableName string, changes connection.ChangeSet)
 		}
 	}
 
-	// Process inserts
-	for _, row := range changes.Inserts {
-		doc := copyMongoChangeDocument(row)
-		if len(doc) > 0 {
-			if _, err := collection.InsertOne(ctx, doc); err != nil {
-				return fmt.Errorf("插入失败：%v", err)
-			}
-		}
+	if err := insertMongoV1Documents(ctx, collection, changes.Inserts); err != nil {
+		return err
 	}
 
+	return nil
+}
+
+func insertMongoV1Documents(ctx context.Context, collection *mongo.Collection, rows []map[string]interface{}) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	docs := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		doc := copyMongoChangeDocument(row)
+		if len(doc) > 0 {
+			docs = append(docs, doc)
+		}
+	}
+	if len(docs) == 0 {
+		return nil
+	}
+
+	for start := 0; start < len(docs); start += defaultBatchInsertRows {
+		end := start + defaultBatchInsertRows
+		if end > len(docs) {
+			end = len(docs)
+		}
+		if _, err := collection.InsertMany(ctx, docs[start:end]); err != nil {
+			return fmt.Errorf("插入失败：%v", err)
+		}
+	}
 	return nil
 }

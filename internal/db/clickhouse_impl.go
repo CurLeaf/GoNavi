@@ -1225,19 +1225,25 @@ func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeS
 		}
 	}
 
-	for _, row := range changes.Inserts {
-		query, err := buildClickHouseInsertSQL(qualifiedTable, row)
-		if err != nil {
-			return err
-		}
-		if query == "" {
-			continue
-		}
-		if _, err := c.conn.Exec(query); err != nil {
-			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
-		}
+	if err := execClickHouseInsertBatches(c.conn, qualifiedTable, changes.Inserts); err != nil {
+		return err
 	}
 	return nil
+}
+
+func execClickHouseInsertBatches(conn *sql.DB, qualifiedTable string, rows []map[string]interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	return execLiteralInsertBatches(literalInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        rows,
+		QuoteColumn: quoteClickHouseIdentifier,
+		Literal:     clickHouseLiteral,
+		Exec: func(query string) (sql.Result, error) {
+			return conn.Exec(query)
+		},
+	})
 }
 
 func buildClickHouseInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {

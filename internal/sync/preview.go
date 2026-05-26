@@ -104,31 +104,8 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 	}
 	pkCol := pkCols[0]
 
-	sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(resolveMigrationDBType(config.SourceConfig), plan.SourceQueryTable)))
-	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("读取源表失败: %w", err)
-	}
-
-	targetRows := make([]map[string]interface{}, 0)
-	if plan.TargetTableExists {
-		targetRows, _, err = targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(resolveMigrationDBType(config.TargetConfig), plan.TargetQueryTable)))
-		if err != nil {
-			return TableDiffPreview{}, fmt.Errorf("读取目标表失败: %w", err)
-		}
-	}
-
-	targetMap := make(map[string]map[string]interface{}, len(targetRows))
-	for _, row := range targetRows {
-		if row[pkCol] == nil {
-			continue
-		}
-		pkVal := strings.TrimSpace(fmt.Sprintf("%v", row[pkCol]))
-		if pkVal == "" || pkVal == "<nil>" {
-			continue
-		}
-		targetMap[pkVal] = row
-	}
-
+	sourceType := resolveMigrationDBType(config.SourceConfig)
+	targetType := resolveMigrationDBType(config.TargetConfig)
 	out := TableDiffPreview{
 		Table:            tableName,
 		PKColumn:         pkCol,
@@ -150,6 +127,119 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 			continue
 		}
 		out.ColumnTypes[name] = typ
+	}
+
+	tableMode := normalizeSyncMode(config.Mode)
+	targetColSet := map[string]struct{}{}
+	if plan.TargetTableExists {
+		targetCols, err := targetDB.GetColumns(plan.TargetSchema, plan.TargetTable)
+		if err == nil {
+			targetColSet = buildTargetColumnSet(targetCols)
+		}
+	}
+
+	if !plan.TargetTableExists || tableMode != "insert_update" {
+		sourceCount, counted, err := countTableRowsForSync(sourceDB, sourceType, plan.SourceQueryTable)
+		if err != nil {
+			return TableDiffPreview{}, fmt.Errorf("读取源表数量失败: %w", err)
+		}
+		query := buildPagedSourceTableQuery(sourceType, plan.SourceQueryTable, cols, pkCol, limit, 0)
+		if strings.TrimSpace(query) == "" {
+			return TableDiffPreview{}, fmt.Errorf("当前数据源不支持分页预览")
+		}
+		sourceRows, _, err := sourceDB.Query(query)
+		if err != nil {
+			return TableDiffPreview{}, fmt.Errorf("读取源表失败: %w", err)
+		}
+		if !counted {
+			sourceCount = len(sourceRows)
+		}
+		out.TotalInserts = sourceCount
+		for _, row := range sourceRows {
+			if len(out.Inserts) >= limit {
+				break
+			}
+			pkVal := strings.TrimSpace(fmt.Sprintf("%v", row[pkCol]))
+			if pkVal == "" || pkVal == "<nil>" {
+				continue
+			}
+			out.Inserts = append(out.Inserts, PreviewRow{PK: pkVal, Row: row})
+		}
+		return out, nil
+	}
+
+	handled, _, err := scanTableDiffInPages(sourceDB, targetDB, sourceType, targetType, plan, cols, nil, pkCol, targetColSet, true, func(page pagedDiffPage) error {
+		out.TotalInserts += len(page.Inserts)
+		out.TotalUpdates += len(page.Updates)
+		out.TotalDeletes += len(page.Deletes)
+
+		for _, row := range page.Inserts {
+			if len(out.Inserts) >= limit {
+				break
+			}
+			pkVal := strings.TrimSpace(fmt.Sprintf("%v", row[pkCol]))
+			if pkVal == "" || pkVal == "<nil>" {
+				continue
+			}
+			out.Inserts = append(out.Inserts, PreviewRow{PK: pkVal, Row: row})
+		}
+		for _, update := range page.Updates {
+			if len(out.Updates) >= limit {
+				break
+			}
+			pkVal := strings.TrimSpace(fmt.Sprintf("%v", update.UpdateRow.Keys[pkCol]))
+			if pkVal == "" || pkVal == "<nil>" {
+				continue
+			}
+			out.Updates = append(out.Updates, PreviewUpdateRow{
+				PK:             pkVal,
+				ChangedColumns: append([]string(nil), update.ChangedColumns...),
+				Source:         update.Source,
+				Target:         update.Target,
+			})
+		}
+		for _, row := range page.Deletes {
+			if len(out.Deletes) >= limit {
+				break
+			}
+			pkVal := strings.TrimSpace(fmt.Sprintf("%v", row[pkCol]))
+			if pkVal == "" || pkVal == "<nil>" {
+				continue
+			}
+			out.Deletes = append(out.Deletes, PreviewRow{PK: pkVal, Row: row})
+		}
+		return nil
+	})
+	if handled {
+		if err != nil {
+			return TableDiffPreview{}, err
+		}
+		return out, nil
+	}
+
+	sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, plan.SourceQueryTable)))
+	if err != nil {
+		return TableDiffPreview{}, fmt.Errorf("读取源表失败: %w", err)
+	}
+
+	targetRows := make([]map[string]interface{}, 0)
+	if plan.TargetTableExists {
+		targetRows, _, err = targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(targetType, plan.TargetQueryTable)))
+		if err != nil {
+			return TableDiffPreview{}, fmt.Errorf("读取目标表失败: %w", err)
+		}
+	}
+
+	targetMap := make(map[string]map[string]interface{}, len(targetRows))
+	for _, row := range targetRows {
+		if row[pkCol] == nil {
+			continue
+		}
+		pkVal := strings.TrimSpace(fmt.Sprintf("%v", row[pkCol]))
+		if pkVal == "" || pkVal == "<nil>" {
+			continue
+		}
+		targetMap[pkVal] = row
 	}
 
 	sourcePKSet := make(map[string]struct{}, len(sourceRows))
