@@ -86,6 +86,32 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)'");
   });
 
+  it('does not start sidebar resize from right-clicking the resize handle', () => {
+    expect(appSource).toContain('if (e.button !== 0)');
+    expect(appSource).toContain('onContextMenu={(event) => {');
+    expect(appSource).toContain('event.preventDefault();');
+    expect(appSource).toContain('event.stopPropagation();');
+
+    const guardIndex = appSource.indexOf('if (e.button !== 0)');
+    const ghostDisplayIndex = appSource.indexOf("ghostRef.current.style.display = 'block'", guardIndex);
+    const dragStartIndex = appSource.indexOf('sidebarDragRef.current = {', guardIndex);
+
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(ghostDisplayIndex).toBeGreaterThan(guardIndex);
+    expect(dragStartIndex).toBeGreaterThan(guardIndex);
+  });
+
+  it('positions sidebar resize guide from the rendered sider edge', () => {
+    expect(appSource).toContain('const siderRef = React.useRef<HTMLDivElement | null>(null);');
+    expect(appSource).toContain('ref={siderRef}');
+    expect(appSource).toContain('const siderRect = siderRef.current?.getBoundingClientRect();');
+    expect(appSource).toContain('const startGuideLeft = siderRect?.right ?? sidebarWidth;');
+    expect(appSource).toContain('const startWidth = siderRect?.width ?? sidebarWidth;');
+    expect(appSource).toContain('resolveSidebarResizeBounds(siderRef.current)');
+    expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft}px`;');
+    expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
+  });
+
   it('mounts heavyweight modals only while they are open', () => {
     expect(appSource).toContain('{isModalOpen && (');
     expect(appSource).toContain('{isToolsModalOpen && (');

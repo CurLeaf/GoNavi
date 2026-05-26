@@ -96,12 +96,42 @@ import './v2-theme.css';
 const AIChatPanel = React.lazy(() => import('./components/AIChatPanel'));
 
 const { Sider, Content } = Layout;
+const SIDEBAR_RESIZE_MIN_WIDTH = 200;
+const SIDEBAR_RESIZE_MAX_WIDTH = 600;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
+type SidebarResizeBounds = { minWidth: number; maxWidth: number };
+type SidebarResizeDragState = SidebarResizeBounds & {
+  startX: number;
+  startWidth: number;
+  startGuideLeft: number;
+};
+
+const parseCssPixelValue = (value: string | null | undefined): number | null => {
+  const parsed = Number.parseFloat(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const resolveSidebarResizeBounds = (siderElement: Element | null): SidebarResizeBounds => {
+  if (typeof window === 'undefined' || !(siderElement instanceof HTMLElement)) {
+    return { minWidth: SIDEBAR_RESIZE_MIN_WIDTH, maxWidth: SIDEBAR_RESIZE_MAX_WIDTH };
+  }
+  const computed = window.getComputedStyle(siderElement);
+  const cssMinWidth = parseCssPixelValue(computed.minWidth);
+  const cssMaxWidth = parseCssPixelValue(computed.maxWidth);
+  const minWidth = Math.max(SIDEBAR_RESIZE_MIN_WIDTH, cssMinWidth && cssMinWidth > 0 ? cssMinWidth : SIDEBAR_RESIZE_MIN_WIDTH);
+  const maxWidth = Math.max(minWidth, Math.min(SIDEBAR_RESIZE_MAX_WIDTH, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : SIDEBAR_RESIZE_MAX_WIDTH));
+  return { minWidth, maxWidth };
+};
+
+const clampSidebarResizeWidth = (width: number, bounds: SidebarResizeBounds): number => (
+  Math.max(bounds.minWidth, Math.min(bounds.maxWidth, width))
+);
+
 const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
   overallStatus: 'not_detected',
   summary: {
@@ -2413,9 +2443,10 @@ function App() {
   }, []);
   
   // Sidebar Resizing
-  const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
+  const sidebarDragRef = React.useRef<SidebarResizeDragState | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
+  const siderRef = React.useRef<HTMLDivElement | null>(null);
   const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
   const latestMouseX = React.useRef<number>(0); // Store latest mouse position
   const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
@@ -2434,6 +2465,12 @@ function App() {
   };
 
   const handleSidebarMouseDown = (e: React.MouseEvent) => {
+      if (e.button !== 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+      }
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -2448,12 +2485,22 @@ function App() {
           (document.body.style as any).WebkitUserSelect = 'none';
       }
       
+      const siderRect = siderRef.current?.getBoundingClientRect();
+      const startGuideLeft = siderRect?.right ?? sidebarWidth;
+      const startWidth = siderRect?.width ?? sidebarWidth;
+      const resizeBounds = resolveSidebarResizeBounds(siderRef.current);
+
       if (ghostRef.current) {
-          ghostRef.current.style.left = `${sidebarWidth}px`;
+          ghostRef.current.style.left = `${startGuideLeft}px`;
           ghostRef.current.style.display = 'block';
       }
-      
-      sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+
+      sidebarDragRef.current = {
+          startX: e.clientX,
+          startWidth,
+          startGuideLeft,
+          ...resizeBounds,
+      };
       latestMouseX.current = e.clientX; // Init
       document.addEventListener('mousemove', handleSidebarMouseMove);
       document.addEventListener('mouseup', handleSidebarMouseUp);
@@ -2469,9 +2516,10 @@ function App() {
       rafRef.current = requestAnimationFrame(() => {
           if (!sidebarDragRef.current || !ghostRef.current) return;
           // Use latestMouseX.current instead of stale closure 'e.clientX'
-          const delta = latestMouseX.current - sidebarDragRef.current.startX;
-          const newWidth = Math.max(200, Math.min(600, sidebarDragRef.current.startWidth + delta));
-          ghostRef.current.style.left = `${newWidth}px`;
+          const { startX, startWidth, startGuideLeft, minWidth, maxWidth } = sidebarDragRef.current;
+          const delta = latestMouseX.current - startX;
+          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
+          ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;
           rafRef.current = null;
       });
   };
@@ -2484,8 +2532,9 @@ function App() {
       
       if (sidebarDragRef.current) {
           // Use latest position for final commit too
-          const delta = e.clientX - sidebarDragRef.current.startX;
-          const newWidth = Math.max(200, Math.min(600, sidebarDragRef.current.startWidth + delta));
+          const { startX, startWidth, minWidth, maxWidth } = sidebarDragRef.current;
+          const delta = e.clientX - startX;
+          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
           setSidebarWidth(newWidth);
       }
 
@@ -2921,6 +2970,7 @@ function App() {
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Sider 
+            ref={siderRef}
             width={sidebarWidth} 
             className={isV2Ui ? 'gn-v2-app-sider' : undefined}
             style={{ 
@@ -3004,6 +3054,10 @@ function App() {
                     )}
                     <div
                         onMouseDown={handleSidebarMouseDown}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
                         role="separator"
                         aria-orientation="vertical"
                         title="拖动调整宽度"
