@@ -33,6 +33,8 @@ func main() {
 		Title:     "GoNavi",
 		Width:     1024,
 		Height:    768,
+		MinWidth:  900,
+		MinHeight: 600,
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
