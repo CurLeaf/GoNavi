@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
+import {
+  calculateTableBodyBottomPadding,
+  calculateVirtualTableScrollX,
+  resolveDataGridHorizontalWheelDelta,
+} from './dataGridLayout';
 
 describe('dataGridLayout helpers', () => {
   it('returns zero bottom padding without horizontal overflow', () => {
@@ -28,5 +32,31 @@ describe('dataGridLayout helpers', () => {
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 1200, isMacLike: false })).toBe(1200);
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 0, isMacLike: false })).toBe(646);
     expect(calculateVirtualTableScrollX({ totalWidth: 1200, tableViewportWidth: 800, isMacLike: true })).toBe(1202);
+  });
+
+  it('only treats wheel gestures as horizontal when the horizontal intent is strong enough', () => {
+    expect(resolveDataGridHorizontalWheelDelta({
+      deltaX: 18,
+      deltaY: 3,
+      shiftKey: false,
+    })).toBe(18);
+
+    expect(resolveDataGridHorizontalWheelDelta({
+      deltaX: 2,
+      deltaY: 24,
+      shiftKey: false,
+    })).toBe(0);
+
+    expect(resolveDataGridHorizontalWheelDelta({
+      deltaX: 0.2,
+      deltaY: 16,
+      shiftKey: false,
+    })).toBe(0);
+
+    expect(resolveDataGridHorizontalWheelDelta({
+      deltaX: 0,
+      deltaY: 20,
+      shiftKey: true,
+    })).toBe(20);
   });
 });

@@ -1,17 +1,14 @@
 // cspell:ignore anticon sqls uuidv uuidv4 hscroll
 import React, { useState, useEffect, useRef, useContext, useMemo, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker, AutoComplete } from 'antd';
+import { Table, message, Input, Button, Dropdown, MenuProps, Form, Pagination, Select, Modal, Checkbox, Segmented, Tooltip, Popover, DatePicker, TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import type { SortOrder, ColumnType } from 'antd/es/table/interface';
-import { ReloadOutlined, ImportOutlined, ExportOutlined, DownOutlined, PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined, FilterOutlined, CloseOutlined, ConsoleSqlOutlined, FileTextOutlined, CopyOutlined, ClearOutlined, EditOutlined, VerticalAlignBottomOutlined, LeftOutlined, RightOutlined, RobotOutlined, SearchOutlined, LinkOutlined, TableOutlined } from '@ant-design/icons';
-import Editor from './MonacoEditor';
+import { CloseOutlined, ConsoleSqlOutlined, CopyOutlined, EditOutlined, ExportOutlined, FileTextOutlined, LeftOutlined, RightOutlined, SearchOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
 import { 
     DndContext, 
     DragEndEvent, 
     PointerSensor, 
-    MouseSensor,
-    TouchSensor,
     useSensor, 
     useSensors, 
     closestCenter 
@@ -40,7 +37,11 @@ import {
 } from '../utils/dataGridDisplay';
 import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
-import { calculateTableBodyBottomPadding, calculateVirtualTableScrollX } from './dataGridLayout';
+import {
+    calculateTableBodyBottomPadding,
+    calculateVirtualTableScrollX,
+    resolveDataGridHorizontalWheelDelta,
+} from './dataGridLayout';
 import {
     buildCopyDeleteSQL,
     buildCopyInsertSQL,
@@ -105,6 +106,23 @@ import {
     type V2CellContextMenuActionKey,
     type V2ColumnHeaderContextMenuActionKey,
 } from './V2TableContextMenu';
+import DataGridColumnTitle from './DataGridColumnTitle';
+import DataGridColumnInfoPopoverContent from './DataGridColumnInfoPopoverContent';
+import DataGridPageFind from './DataGridPageFind';
+import DataGridPaginationBar from './DataGridPaginationBar';
+import DataGridResultViewSwitcher from './DataGridResultViewSwitcher';
+import DataGridSecondaryActions from './DataGridSecondaryActions';
+import DataGridToolbarFrame from './DataGridToolbarFrame';
+import DataGridModals from './DataGridModals';
+import DataGridLegacyCellContextMenu from './DataGridLegacyCellContextMenu';
+import DataGridPreviewPanel from './DataGridPreviewPanel';
+import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
+import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
+import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
+import { useDataGridFilters } from './useDataGridFilters';
+import { useDataGridDdlView } from './useDataGridDdlView';
+import { useDataGridModalEditors } from './useDataGridModalEditors';
+import { useDataGridPreviewPanel } from './useDataGridPreviewPanel';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -160,6 +178,7 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
+const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
 const normalizedDateTimeCache = new Map<string, string>();
 const objectCellPreviewCache = new WeakMap<object, string>();
 const makeCellKey = (rowKey: string, colName: string) => `${rowKey}${CELL_KEY_SEP}${colName}`;
@@ -352,6 +371,36 @@ const renderCellDisplayValue = (val: any, query: string, columnType?: string): R
 };
 
 const formatCellValue = (val: any) => renderCellDisplayValue(val, '');
+
+export const attachDataGridVirtualEditRenderVersion = <T extends Item>(
+    rows: T[],
+    editingCell: VirtualEditingCellState | null,
+): T[] => {
+    if (!editingCell) return rows;
+
+    return rows.map((row) => {
+        const rowKey = row?.[GONAVI_ROW_KEY];
+        if (rowKey === undefined || rowKey === null || String(rowKey) !== editingCell.rowKey) {
+            return row;
+        }
+        const nextRow = { ...(row as object) } as T;
+        Object.defineProperty(nextRow, DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION, {
+            value: `${editingCell.rowKey}${CELL_KEY_SEP}${editingCell.dataIndex}`,
+            enumerable: false,
+        });
+        return nextRow;
+    });
+};
+
+export const hasDataGridVirtualEditRenderVersionChanged = (nextRecord: unknown, previousRecord: unknown): boolean => {
+    const nextVersion = nextRecord && typeof nextRecord === 'object'
+        ? (nextRecord as Record<symbol, unknown>)[DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION]
+        : undefined;
+    const previousVersion = previousRecord && typeof previousRecord === 'object'
+        ? (previousRecord as Record<symbol, unknown>)[DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION]
+        : undefined;
+    return nextVersion !== previousVersion;
+};
 
 const toEditableText = (val: any): string => {
     if (val === null || val === undefined) return '';
@@ -696,6 +745,69 @@ interface EditableCellProps {
 // 仅靠 props 传递 deletedRowKeys 可能因缓存而不触发重渲染。
 let globalDeletedRowKeys: Set<string> = new Set();
 
+const resolveEditableCellRowKey = (
+  record: Item | undefined,
+  rowKeyStr?: (k: React.Key) => string,
+): string | null => {
+  const rowKey = record?.[GONAVI_ROW_KEY];
+  if (rowKey === undefined || rowKey === null || typeof rowKeyStr !== 'function') {
+      return null;
+  }
+  return rowKeyStr(rowKey);
+};
+
+const isEditableCellDeleted = (
+  record: Item | undefined,
+  deletedRowKeys?: Set<string>,
+  rowKeyStr?: (k: React.Key) => string,
+): boolean => {
+  const rowKey = resolveEditableCellRowKey(record, rowKeyStr);
+  return rowKey ? !!deletedRowKeys?.has(rowKey) : false;
+};
+
+const isEditableCellModified = (
+  record: Item | undefined,
+  dataIndex: string,
+  modifiedColumns?: Record<string, Set<string>>,
+  rowKeyStr?: (k: React.Key) => string,
+): boolean => {
+  const rowKey = resolveEditableCellRowKey(record, rowKeyStr);
+  return rowKey ? !!modifiedColumns?.[rowKey]?.has(dataIndex) : false;
+};
+
+const areEditableCellPropsEqual = (prevProps: EditableCellProps, nextProps: EditableCellProps): boolean => {
+  if (prevProps.editable !== nextProps.editable) return false;
+  if (prevProps.dataIndex !== nextProps.dataIndex) return false;
+  if (prevProps.title !== nextProps.title) return false;
+  if (prevProps.columnType !== nextProps.columnType) return false;
+  if (prevProps.darkMode !== nextProps.darkMode) return false;
+  if (prevProps.as !== nextProps.as) return false;
+  if (prevProps.handleSave !== nextProps.handleSave) return false;
+  if (prevProps.focusCell !== nextProps.focusCell) return false;
+  if ((prevProps.inputCellPadding?.padding ?? null) !== (nextProps.inputCellPadding?.padding ?? null)) return false;
+  if (prevProps.style !== nextProps.style) return false;
+
+  const prevRecord = prevProps.record;
+  const nextRecord = nextProps.record;
+  if (resolveEditableCellRowKey(prevRecord, prevProps.rowKeyStr) !== resolveEditableCellRowKey(nextRecord, nextProps.rowKeyStr)) {
+      return false;
+  }
+  if (hasDataGridFindRenderVersionChanged(nextRecord, prevRecord)) {
+      return false;
+  }
+  if (!isCellValueEqualForRender(prevRecord?.[prevProps.dataIndex], nextRecord?.[nextProps.dataIndex])) {
+      return false;
+  }
+  if (isEditableCellDeleted(prevRecord, prevProps.deletedRowKeys, prevProps.rowKeyStr) !== isEditableCellDeleted(nextRecord, nextProps.deletedRowKeys, nextProps.rowKeyStr)) {
+      return false;
+  }
+  if (isEditableCellModified(prevRecord, prevProps.dataIndex, prevProps.modifiedColumns, prevProps.rowKeyStr) !== isEditableCellModified(nextRecord, nextProps.dataIndex, nextProps.modifiedColumns, nextProps.rowKeyStr)) {
+      return false;
+  }
+
+  return true;
+};
+
 const EditableCell: React.FC<EditableCellProps> = React.memo(({
   title,
   editable,
@@ -803,7 +915,9 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     ? modifiedColumns[rowKeyStr(record[GONAVI_ROW_KEY])]?.has(dataIndex)
     : false;
 
-  const modifiedStyle: React.CSSProperties = isModified ? { backgroundColor: darkMode ? 'rgba(255, 214, 102, 0.16)' : '#FFF3B0' } : {};
+  const modifiedStyle: React.CSSProperties | undefined = isModified
+    ? { backgroundColor: darkMode ? 'rgba(255, 214, 102, 0.16)' : '#FFF3B0' }
+    : undefined;
 
   if (editable) {
     childNode = editing ? (
@@ -890,7 +1004,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
     ) : (
       <div
         className="editable-cell-value-wrap"
-        style={{ paddingRight: 0, minHeight: 20, position: 'relative', width: '100%', minWidth: 0, display: 'flex', alignItems: 'center', ...modifiedStyle }}
+        style={modifiedStyle}
         onContextMenu={handleContextMenu}
       >
         {children}
@@ -899,7 +1013,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   } else if (cellContextMenuContext) {
     // 非编辑模式（只读查询结果）也绑定右键菜单，支持复制为 INSERT/JSON/CSV 等操作
     childNode = (
-      <div onContextMenu={handleContextMenu} style={{ minHeight: 20, display: 'flex', alignItems: 'center', width: '100%', minWidth: 0, ...modifiedStyle }}>
+      <div onContextMenu={handleContextMenu} style={modifiedStyle ? { ...READONLY_CELL_WRAP_STYLE, ...modifiedStyle } : READONLY_CELL_WRAP_STYLE}>
         {children}
       </div>
     );
@@ -939,7 +1053,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
           {childNode}
       </Component>
   );
-});
+}, areEditableCellPropsEqual);
 
 const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
     const context = useContext(DataContext);
@@ -1081,6 +1195,12 @@ type GridFilterCondition = FilterCondition & {
 
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
 type DdlViewLayoutMode = 'bottom' | 'side';
+type VirtualEditingCellState = {
+    rowKey: string;
+    dataIndex: string;
+    title: React.ReactNode;
+    columnType?: string;
+};
 
 type ColumnMeta = {
     type: string;
@@ -1291,6 +1411,14 @@ export const buildDataGridCommitChangeSet = ({
 
 // P2 性能优化：提取内联 style 对象为模块级常量，避免每次 render 创建新对象
 const CELL_ELLIPSIS_STYLE: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, width: '100%' };
+const VIRTUAL_CELL_TEXT_STYLE: React.CSSProperties = {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+    width: '100%',
+};
+const READONLY_CELL_WRAP_STYLE: React.CSSProperties = { minHeight: 20, display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 };
 
 const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
@@ -1325,15 +1453,20 @@ const DataGrid: React.FC<DataGridProps> = ({
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const useAggressiveVirtualPaintHints = !isMacLike;
+  const dataGridBackdropFilter = isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');
   const showDataTableVerticalBorders = appearance.showDataTableVerticalBorders === true;
   const dataTableDensity = appearance.dataTableDensity;
   const densityParams = useMemo(() => getDensityParams(dataTableDensity), [dataTableDensity]);
   const virtualCellWrapperStyle = useMemo<React.CSSProperties>(() => ({
       margin: -8,
       padding: densityParams.cellPadding,
-      display: 'flex',
-      alignItems: 'center',
+      display: 'block',
       minWidth: 0,
+      width: '100%',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
   }), [densityParams]);
   const headerCellMinHeight = densityParams.headerMinHeight;
   const inputCellPadding: React.CSSProperties = { padding: densityParams.inputCellPadding };
@@ -1445,8 +1578,6 @@ const DataGrid: React.FC<DataGridProps> = ({
   // Handle Dragging
   const sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-      useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
-      useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -1533,7 +1664,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           panelFrameColor: darkMode ? 'rgba(0, 0, 0, 0.42)' : 'rgba(0, 0, 0, 0.18)',
           floatingScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.44)',
           floatingScrollbarThumbBorderColor: darkMode ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.52)',
-          floatingScrollbarThumbShadow: darkMode ? '0 4px 14px rgba(0,0,0,0.42)' : '0 4px 10px rgba(0,0,0,0.20)',
+          floatingScrollbarThumbShadow: isMacLike ? 'none' : (darkMode ? '0 4px 14px rgba(0,0,0,0.42)' : '0 4px 10px rgba(0,0,0,0.20)'),
           verticalScrollbarTrackBg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
           horizontalScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.14)',
           toolbarDividerColor: darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)',
@@ -1543,9 +1674,11 @@ const DataGrid: React.FC<DataGridProps> = ({
           paginationShellBorderColor: darkMode
               ? `rgba(255,255,255,${_glassMode ? 0.10 : 0.08})`
               : `rgba(16,24,40,${_glassMode ? 0.08 : 0.08})`,
-          paginationShellShadow: darkMode
-              ? `0 16px 34px rgba(0,0,0,${_glassMode ? 0.10 : 0.22})`
-              : `0 14px 30px rgba(15,23,42,${_glassMode ? 0.03 : 0.08})`,
+          paginationShellShadow: isMacLike
+              ? 'none'
+              : (darkMode
+                  ? `0 16px 34px rgba(0,0,0,${_glassMode ? 0.10 : 0.22})`
+                  : `0 14px 30px rgba(15,23,42,${_glassMode ? 0.03 : 0.08})`),
           paginationChipBg: darkMode
               ? `rgba(255,255,255,${_glassMode ? Math.max(0.02, opacity * 0.035) : 0.04})`
               : `rgba(255,255,255,${_glassMode ? Math.max(0.18, opacity * 0.26) : 0.86})`,
@@ -1563,7 +1696,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           paginationActiveItemBorderColor: darkMode ? 'rgba(255,214,102,0.46)' : 'rgba(24,144,255,0.28)',
           paginationActiveItemTextColor: darkMode ? '#fff7d6' : '#0958d9',
       };
-  }, [darkMode, opacity, resolvedAppearance.blur]);
+  }, [darkMode, opacity, resolvedAppearance.blur, isMacLike]);
 
   // 解构常用变量以保持后续代码引用不变
   const {
@@ -1604,50 +1737,66 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
   const gridId = useMemo(() => `grid-${generateUuid()}`, []);
-  const [viewMode, setViewMode] = useState<GridViewMode>('table');
   const [textRecordIndex, setTextRecordIndex] = useState(0);
-  const [cellEditorOpen, setCellEditorOpen] = useState(false);
-  const [cellEditorValue, setCellEditorValue] = useState('');
-  const [cellEditorIsJson, setCellEditorIsJson] = useState(false);
-  const [cellEditorMeta, setCellEditorMeta] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
-  const cellEditorApplyRef = useRef<((val: string) => void) | null>(null);
-  const [jsonEditorOpen, setJsonEditorOpen] = useState(false);
-  const [jsonEditorValue, setJsonEditorValue] = useState('');
-  const [ddlModalOpen, setDdlModalOpen] = useState(false);
-  const [ddlLoading, setDdlLoading] = useState(false);
-  const [ddlText, setDdlText] = useState('');
-  const [ddlViewLayout, setDdlViewLayout] = useState<DdlViewLayoutMode>('bottom');
-  const [ddlSidebarWidth, setDdlSidebarWidth] = useState(420);
-  const [ddlSidebarResizePreviewX, setDdlSidebarResizePreviewX] = useState<number | null>(null);
-  const ddlSidebarResizeRef = useRef<{
-      startX: number;
-      startWidth: number;
-      previewWidth: number;
-      moveHandler?: (event: MouseEvent) => void;
-      upHandler?: () => void;
-  } | null>(null);
-  const ddlRequestSeqRef = useRef(0);
-  const isTableSurfaceActive = viewMode === 'table' || (isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side');
-
-  // --- Data Preview Panel State ---
-  const [dataPanelOpen, setDataPanelOpen] = useState(false);
-  const dataPanelOpenRef = useRef(false);
-  const [focusedCellInfo, setFocusedCellInfo] = useState<{ record: Item; dataIndex: string; title: string } | null>(null);
-  const [dataPanelValue, setDataPanelValue] = useState('');
-  const [dataPanelIsJson, setDataPanelIsJson] = useState(false);
-  const dataPanelDirtyRef = useRef(false);
-  const dataPanelOriginalRef = useRef('');
+  const {
+      cellEditorOpen,
+      cellEditorValue,
+      setCellEditorValue,
+      cellEditorIsJson,
+      cellEditorMeta,
+      cellEditorApplyRef,
+      closeCellEditor,
+      openCellEditor,
+      jsonEditorOpen,
+      jsonEditorValue,
+      setJsonEditorValue,
+      openJsonEditor,
+      closeJsonEditor,
+      rowEditorOpen,
+      rowEditorRowKey,
+      rowEditorBaseRawRef,
+      rowEditorDisplayRef,
+      rowEditorNullColsRef,
+      rowEditorForm,
+      closeRowEditor,
+      openRowEditor,
+      batchEditModalOpen,
+      batchEditValue,
+      setBatchEditValue,
+      batchEditSetNull,
+      setBatchEditSetNull,
+      openBatchEditModal,
+      closeBatchEditModal,
+  } = useDataGridModalEditors({
+      toEditableText,
+      looksLikeJsonText,
+  });
+  const [virtualEditingCell, setVirtualEditingCell] = useState<VirtualEditingCellState | null>(null);
+  const virtualInlineInputRef = useRef<any>(null);
+  const virtualInlinePickerOpenRef = useRef(false);
+  const virtualInlineScrollLockRef = useRef<{ el: HTMLElement; handler: (e: WheelEvent) => void } | null>(null);
+  const {
+      dataPanelOpen,
+      dataPanelOpenRef,
+      focusedCellInfo,
+      dataPanelValue,
+      setDataPanelValue,
+      dataPanelIsJson,
+      dataPanelDirtyRef,
+      dataPanelOriginalRef,
+      toggleDataPanel,
+      updateFocusedCell,
+      handleDataPanelFormatJson,
+  } = useDataGridPreviewPanel({
+      toEditableText,
+      looksLikeJsonText,
+      normalizeDateTimeString,
+  });
   const focusedCellWritable = useMemo(() => (
       canModifyData &&
       !!focusedCellInfo &&
       isWritableResultColumn(focusedCellInfo.dataIndex, effectiveEditLocator)
   ), [canModifyData, focusedCellInfo, effectiveEditLocator]);
-  const [rowEditorOpen, setRowEditorOpen] = useState(false);
-  const [rowEditorRowKey, setRowEditorRowKey] = useState<string>('');
-  const rowEditorBaseRawRef = useRef<Record<string, any>>({});
-  const rowEditorDisplayRef = useRef<Record<string, string>>({});
-  const rowEditorNullColsRef = useRef<Set<string>>(new Set());
-  const [rowEditorForm] = Form.useForm();
 
   // Cell Context Menu State
   const [cellContextMenu, setCellContextMenu] = useState<{
@@ -1682,8 +1831,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const lastTableScrollLeftRef = useRef(0);
   const lastExternalScrollLeftRef = useRef(0);
   const externalSyncRafRef = useRef<number | null>(null);
+  const tableTargetSyncRafRef = useRef<number | null>(null);
   const tableHorizontalWheelRafRef = useRef<number | null>(null);
   const pendingTableHorizontalDeltaRef = useRef(0);
+  const pendingTableTargetSyncSourceRef = useRef<HTMLElement | null>(null);
   const scrollSnapshotRafRef = useRef<number | null>(null);
   const pendingScrollToBottomRef = useRef(false);
   const pastedRowSequenceRef = useRef(0);
@@ -1695,9 +1846,6 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [copiedCellPatch, setCopiedCellPatch] = useState<{ sourceRowKey: string; values: Record<string, any> } | null>(null);
   const [copiedRowsForPaste, setCopiedRowsForPaste] = useState<Array<Record<string, any>>>([]);
-  const [batchEditModalOpen, setBatchEditModalOpen] = useState(false);
-  const [batchEditValue, setBatchEditValue] = useState('');
-  const [batchEditSetNull, setBatchEditSetNull] = useState(false);
 
   // 使用 ref 来优化拖拽性能，完全避免状态更新
   const cellSelectionRafRef = useRef<number | null>(null);
@@ -1715,6 +1863,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const currentSelectionRef = useRef<Set<string>>(new Set());
   const selectionStartRef = useRef<{ rowKey: string; colName: string; rowIndex: number; colIndex: number } | null>(null);
   const rowIndexMapRef = useRef<Map<string, number>>(new Map());
+  const mergedDisplayDataByRowKeyRef = useRef<Map<string, Item>>(new Map());
 
   const scrollTableBodyToBottom = useCallback(() => {
       const root = containerRef.current;
@@ -1729,6 +1878,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           cancelAnimationFrame(externalSyncRafRef.current);
           externalSyncRafRef.current = null;
       }
+      if (tableTargetSyncRafRef.current !== null) {
+          cancelAnimationFrame(tableTargetSyncRafRef.current);
+          tableTargetSyncRafRef.current = null;
+      }
       if (tableHorizontalWheelRafRef.current !== null) {
           cancelAnimationFrame(tableHorizontalWheelRafRef.current);
           tableHorizontalWheelRafRef.current = null;
@@ -1738,6 +1891,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           scrollSnapshotRafRef.current = null;
       }
       pendingTableHorizontalDeltaRef.current = 0;
+      pendingTableTargetSyncSourceRef.current = null;
   }, []);
 
   // Close cell context menu when clicking outside
@@ -1841,6 +1995,10 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
   const [foreignKeyMap, setForeignKeyMap] = useState<Record<string, ForeignKeyTarget>>({});
   const [uniqueKeyGroups, setUniqueKeyGroups] = useState<string[][]>([]);
+  const mergedDisplayDataRef = useRef<Item[]>([]);
+  const closeCellEditModeRef = useRef<() => void>(() => {});
+  const formRef = useRef(form);
+  formRef.current = form;
   const columnMetaCacheRef = useRef<Record<string, Record<string, ColumnMeta>>>({});
   const columnMetaSeqRef = useRef(0);
   const foreignKeyCacheRef = useRef<Record<string, Record<string, ForeignKeyTarget>>>({});
@@ -2034,6 +2192,16 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next;
   }, [columnMetaMapByLowerName]);
 
+  const displayColumnTypeMap = useMemo(() => {
+      const next: Record<string, string> = {};
+      displayColumnNames.forEach((columnName) => {
+          const normalizedName = String(columnName || '').trim();
+          if (!normalizedName) return;
+          next[normalizedName] = columnMetaMap[normalizedName]?.type || columnTypeMapByLowerName[normalizedName.toLowerCase()] || '';
+      });
+      return next;
+  }, [displayColumnNames, columnMetaMap, columnTypeMapByLowerName]);
+
   const foreignKeyMapByLowerName = useMemo(() => {
       const next: Record<string, ForeignKeyTarget> = {};
       Object.entries(foreignKeyMap).forEach(([name, target]) => {
@@ -2110,159 +2278,53 @@ const DataGrid: React.FC<DataGridProps> = ({
       const normalizedName = String(name || '');
       const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
       const foreignKeyTarget = foreignKeyMap[normalizedName] || foreignKeyMapByLowerName[normalizedName.toLowerCase()];
-      const shouldShowColumnType = showColumnType && !!meta?.type;
-      const shouldShowColumnComment = showColumnComment && !!meta?.comment;
-      const isSingleLineColumnTitle = !shouldShowColumnType && !shouldShowColumnComment;
-      const hoverLines: string[] = [];
-      if (meta?.type) hoverLines.push(`类型：${meta.type}`);
-      if (meta?.comment) hoverLines.push(`备注：${meta.comment}`);
-      if (foreignKeyTarget?.refTableName) {
-          const refColumnText = foreignKeyTarget.refColumnName ? `.${foreignKeyTarget.refColumnName}` : '';
-          hoverLines.push(`外键：${foreignKeyTarget.refTableName}${refColumnText}`);
-      }
 
-      const fieldLabel = foreignKeyTarget?.refTableName ? (
-          <button
-              type="button"
-              data-grid-fk-jump="true"
-              data-column-name={normalizedName}
-              data-ref-table-name={foreignKeyTarget.refTableName}
-              title={`跳转到外键表：${foreignKeyTarget.refTableName}`}
-              onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  openForeignKeyTarget(foreignKeyTarget);
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-              style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  minWidth: 0,
-                  maxWidth: '100%',
-                  padding: 0,
-                  border: 0,
-                  background: 'transparent',
-                  color: 'inherit',
-                  font: 'inherit',
-                  lineHeight: 'inherit',
-                  cursor: 'pointer',
-              }}
-          >
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{normalizedName}</span>
-              <LinkOutlined style={{ fontSize: densityParams.metaFontSize + 1, color: columnMetaHintColor, flex: 'none' }} />
-          </button>
-      ) : (
-          <span style={{ whiteSpace: 'nowrap' }}>{normalizedName}</span>
-      );
-
-      const titleNode = (
-          <div
-              className={isSingleLineColumnTitle ? 'gn-v2-column-title is-single-line' : 'gn-v2-column-title'}
-              data-grid-column-title-single-line={isSingleLineColumnTitle ? 'true' : undefined}
-              style={isV2Ui ? undefined : { display: 'flex', flexDirection: 'column', minWidth: 0, lineHeight: 1.2 }}
-          >
-              {fieldLabel}
-              {shouldShowColumnType && (
-                  <span
-                      className="gn-v2-column-title-type"
-                      style={{
-                          marginTop: 2,
-                          fontSize: densityParams.metaFontSize,
-                          color: columnMetaHintColor,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: '100%',
-                      }}
-                  >
-                      {meta.type}
-                  </span>
-              )}
-              {shouldShowColumnComment && (
-                  <span
-                      className="gn-v2-column-title-comment"
-                      style={{
-                          marginTop: 2,
-                          fontSize: densityParams.metaFontSize,
-                          color: columnMetaHintColor,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: '100%',
-                      }}
-                  >
-                      {meta.comment}
-                  </span>
-              )}
-          </div>
-      );
-
-      if (hoverLines.length === 0) return titleNode;
       return (
-          <Tooltip
-              title={<pre style={{ maxHeight: 260, overflow: 'auto', margin: 0, fontSize: 12, whiteSpace: 'pre-wrap', color: darkMode ? columnMetaTooltipColor : '#fff' }}>{hoverLines.join('\n')}</pre>}
-              styles={{ root: { maxWidth: 640 } }}
-              {...(!darkMode ? { color: 'rgba(0, 0, 0, 0.82)' } : {})}
-          >
-              <span style={{ display: 'inline-flex', maxWidth: '100%' }}>{titleNode}</span>
-          </Tooltip>
+          <DataGridColumnTitle
+              columnName={normalizedName}
+              columnMeta={meta}
+              foreignKeyTarget={foreignKeyTarget}
+              showColumnType={showColumnType}
+              showColumnComment={showColumnComment}
+              metaFontSize={densityParams.metaFontSize}
+              columnMetaHintColor={columnMetaHintColor}
+              columnMetaTooltipColor={columnMetaTooltipColor}
+              darkMode={darkMode}
+              onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
+          />
       );
-  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, foreignKeyMap, foreignKeyMapByLowerName, showColumnComment, showColumnType, densityParams, isV2Ui, openForeignKeyTarget]);
+  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, openForeignKeyTarget, showColumnComment, showColumnType]);
 
-  const closeCellEditor = useCallback(() => {
-      setCellEditorOpen(false);
-      setCellEditorMeta(null);
-      setCellEditorValue('');
-      setCellEditorIsJson(false);
-      cellEditorApplyRef.current = null;
-  }, []);
-
-  // --- Data Preview Panel Helpers ---
-  const updateFocusedCell = useCallback((record: Item, dataIndex: string) => {
-      if (!record || !dataIndex) return;
-      const raw = record?.[dataIndex];
-      let text = toEditableText(raw);
-      // 日期时间字段格式化（处理带时区的 ISO 格式如 2026-03-22T00:00:00+08:00）
-      if (typeof raw === 'string') {
-          text = normalizeDateTimeString(raw);
+  const lockVirtualInlineTableScroll = useCallback((lock: boolean) => {
+      if (lock) {
+          if (virtualInlineScrollLockRef.current) {
+              return;
+          }
+          const tableWrapper = tableContainerRef.current?.closest?.('.ant-table-wrapper') as HTMLElement | null;
+          if (!tableWrapper) {
+              return;
+          }
+          const handler = (e: WheelEvent) => {
+              e.preventDefault();
+              e.stopPropagation();
+          };
+          tableWrapper.addEventListener('wheel', handler, { capture: true, passive: false });
+          virtualInlineScrollLockRef.current = { el: tableWrapper, handler };
+          return;
       }
-      const isJson = looksLikeJsonText(text);
-      setFocusedCellInfo({ record, dataIndex, title: dataIndex });
-      // 切换到新单元格时总是更新预览值并重置 dirty 标记
-      dataPanelOriginalRef.current = text;
-      setDataPanelValue(text);
-      setDataPanelIsJson(isJson);
-      dataPanelDirtyRef.current = false;
-  }, []);
-
-  const handleDataPanelFormatJson = useCallback(() => {
-      if (!dataPanelIsJson) return;
-      try {
-          const obj = JSON.parse(dataPanelValue);
-          setDataPanelValue(JSON.stringify(obj, null, 2));
-          dataPanelDirtyRef.current = true;
-      } catch (e: any) {
-          void message.error('JSON 格式无效：' + (e?.message || String(e)));
+      if (!virtualInlineScrollLockRef.current) {
+          return;
       }
-  }, [dataPanelIsJson, dataPanelValue]);
-
-  // 同步 ref 用于 onCell 闭包
-  useEffect(() => { dataPanelOpenRef.current = dataPanelOpen; }, [dataPanelOpen]);
-
-  const openCellEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode, onApplyValue?: (val: string) => void) => {
-      if (!record || !dataIndex) return;
-      const raw = record?.[dataIndex];
-      const text = toEditableText(raw);
-      const isJson = looksLikeJsonText(text);
-      const titleText = typeof (title as any) === 'string' ? (title as string) : (typeof (title as any) === 'number' ? String(title) : String(dataIndex));
-
-      setCellEditorMeta({ record, dataIndex, title: titleText });
-      setCellEditorValue(text);
-      setCellEditorIsJson(isJson);
-      setCellEditorOpen(true);
-      cellEditorApplyRef.current = typeof onApplyValue === 'function' ? onApplyValue : null;
+      const { el, handler } = virtualInlineScrollLockRef.current;
+      el.removeEventListener('wheel', handler, { capture: true } as EventListenerOptions);
+      virtualInlineScrollLockRef.current = null;
   }, []);
+
+  const closeVirtualInlineEditor = useCallback(() => {
+      lockVirtualInlineTableScroll(false);
+      virtualInlinePickerOpenRef.current = false;
+      setVirtualEditingCell(null);
+  }, [lockVirtualInlineTableScroll]);
 
   // Dynamic Height
   const [tableHeight, setTableHeight] = useState(500);
@@ -2403,16 +2465,24 @@ const DataGrid: React.FC<DataGridProps> = ({
                     padding-bottom: ${tableBodyBottomPadding}px;
                     box-sizing: border-box;
                     scroll-padding-bottom: ${tableBodyBottomPadding}px;
+                    contain: layout paint style;
                 }
                 .${gridId} .ant-table-tbody-virtual-holder,
                 .${gridId} .rc-virtual-list-holder {
                     padding-bottom: ${tableBodyBottomPadding}px;
                     box-sizing: border-box;
                     scroll-padding-bottom: ${tableBodyBottomPadding}px;
+                    contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'layout style'};
+                    content-visibility: ${useAggressiveVirtualPaintHints ? 'auto' : 'visible'};
                 }
                 .${gridId} .ant-table-tbody-virtual-holder-inner {
                     padding-bottom: ${tableBodyBottomPadding}px;
                     box-sizing: border-box;
+                    contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'layout style'};
+                }
+                .${gridId} .ant-table-tbody-virtual-holder .ant-table-row,
+                .${gridId} .ant-table-tbody-virtual-holder .ant-table-row > .ant-table-cell {
+                    contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'none'};
                 }
                 .${gridId} .data-grid-table-wrap {
                     width: 100%;
@@ -2427,6 +2497,22 @@ const DataGrid: React.FC<DataGridProps> = ({
                     border-radius: 3px;
                     background: ${darkMode ? 'rgba(246, 196, 83, 0.42)' : 'rgba(255, 193, 7, 0.42)'};
                     color: inherit;
+                }
+                .${gridId} .editable-cell-value-wrap {
+                    display: block;
+                    width: 100%;
+                    min-width: 0;
+                    min-height: 20px;
+                    padding-right: 0;
+                    position: relative;
+                    contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'layout style'};
+                }
+                .${gridId} .editable-cell-value-wrap > * {
+                    min-width: 0;
+                }
+                .${gridId} .ant-table-tbody-virtual-holder .editable-cell-value-wrap {
+                    content-visibility: ${useAggressiveVirtualPaintHints ? 'auto' : 'visible'};
+                    contain-intrinsic-size: ${useAggressiveVirtualPaintHints ? '24px 160px' : 'auto'};
                 }
                 /* 虚拟表列对齐：阻止 header <table> 通过 min-width:100% 拉伸到视口，
                    使 header 列宽与虚拟 body 单元格宽度精确一致 */
@@ -2526,8 +2612,8 @@ const DataGrid: React.FC<DataGridProps> = ({
                     border: 1px solid ${paginationShellBorderColor};
                     background: ${paginationShellBg};
                     box-shadow: ${paginationShellShadow};
-                    backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
-                    -webkit-backdrop-filter: ${opacity < 0.999 ? 'blur(14px)' : 'none'};
+                    backdrop-filter: ${dataGridBackdropFilter};
+                    -webkit-backdrop-filter: ${dataGridBackdropFilter};
                 }
                 .${gridId} .data-grid-pagination-summary,
                 .${gridId} .data-grid-pagination-page-chip {
@@ -2861,142 +2947,57 @@ const DataGrid: React.FC<DataGridProps> = ({
       inserts: string[];
   }>({ deletes: [], updates: [], inserts: [] });
 
-  const normalizeFilterLogic = useCallback((logic: unknown): 'AND' | 'OR' => {
-      return String(logic || '').trim().toUpperCase() === 'OR' ? 'OR' : 'AND';
-  }, []);
-
-  // P6 性能优化：使用 ref 缓存首列名，避免 displayColumnNames 变化导致级联更新
-  const firstColumnNameRef = useRef(displayColumnNames[0] || '');
-  firstColumnNameRef.current = displayColumnNames[0] || '';
-
-  const normalizeGridFilterConditions = useCallback((conditions?: FilterCondition[]): GridFilterCondition[] => {
-      if (!Array.isArray(conditions)) return [];
-      return conditions.map((cond, index) => {
-          const fallbackId = index + 1;
-          const nextId = Number.isFinite(Number(cond?.id)) ? Number(cond?.id) : fallbackId;
-          const op = String(cond?.op || EXACT_GRID_FILTER_OPERATOR);
-          const rawColumn = String(cond?.column || '');
-          return {
-              id: nextId,
-              enabled: cond?.enabled !== false,
-              logic: normalizeFilterLogic(cond?.logic),
-              column: rawColumn || (op === 'CUSTOM' ? '' : String(firstColumnNameRef.current || '')),
-              op,
-              value: String(cond?.value ?? ''),
-              value2: String(cond?.value2 ?? ''),
-          };
-      });
-  }, [normalizeFilterLogic]);
-
-  // Filter State
-  const [filterConditions, setFilterConditions] = useState<GridFilterCondition[]>([]);
-  const [nextFilterId, setNextFilterId] = useState(1);
-  const [quickWhereDraft, setQuickWhereDraft] = useState(() => normalizeQuickWhereCondition(quickWhereCondition));
-  const [quickWhereSuggestionsOpen, setQuickWhereSuggestionsOpen] = useState(false);
-  const filterPanelRef = useRef<HTMLDivElement | null>(null);
-  const autoDefaultFilterIdsRef = useRef<Set<number>>(new Set());
-
-  useEffect(() => {
-      const nextConditions = normalizeGridFilterConditions(appliedFilterConditions);
-      autoDefaultFilterIdsRef.current.clear();
-      setFilterConditions(nextConditions);
-      const maxId = nextConditions.reduce((max, cond) => (cond.id > max ? cond.id : max), 0);
-      setNextFilterId(Math.max(1, maxId + 1));
-  }, [appliedFilterConditions, normalizeGridFilterConditions]);
-
-  useEffect(() => {
-      setQuickWhereDraft(normalizeQuickWhereCondition(quickWhereCondition));
-  }, [quickWhereCondition]);
-
-  useEffect(() => {
-      if (Object.keys(columnMetaMap).length === 0) return;
-      setFilterConditions(prev => {
-          let changed = false;
-          const nextConditions = prev.map((cond) => {
-              if (!autoDefaultFilterIdsRef.current.has(cond.id)) {
-                  return cond;
-              }
-              const nextOp = resolveDefaultGridFilterOperator(getColumnFilterType(cond.column));
-              if (nextOp === cond.op) return cond;
-              changed = true;
-              return { ...cond, op: nextOp };
-          });
-          return changed ? nextConditions : prev;
-      });
-  }, [columnMetaMap, getColumnFilterType]);
-
-  const quickWhereSuggestionOptions = useMemo(() => {
-      const columnSuggestionSource = allTableColumnNames.length > 0 ? allTableColumnNames : displayColumnNames;
-      return resolveWhereConditionSuggestions({
-          input: quickWhereDraft,
-          columnNames: columnSuggestionSource,
-          dbType,
-      }).map((item) => ({
-          value: item.value,
-          insertText: item.insertText,
-          suggestionKind: item.kind,
-          label: (
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                  <span>{item.label}</span>
-                  <span style={{ color: darkMode ? 'rgba(255,255,255,0.46)' : 'rgba(0,0,0,0.42)', fontSize: 12 }}>{item.detail}</span>
-              </div>
-          ),
-      }));
-  }, [allTableColumnNames, displayColumnNames, quickWhereDraft, dbType, darkMode]);
-
-  const handleQuickWherePaste = useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
-      const pastedText = event.clipboardData.getData('text/plain') || event.clipboardData.getData('text');
-      if (!pastedText) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      const input = event.currentTarget;
-      const currentValue = input.value ?? quickWhereDraft;
-      const start = input.selectionStart ?? currentValue.length;
-      const end = input.selectionEnd ?? start;
-      const nextValue = `${currentValue.slice(0, start)}${pastedText}${currentValue.slice(end)}`;
-      const nextCursor = start + pastedText.length;
-
-      setQuickWhereDraft(nextValue);
-      requestAnimationFrame(() => {
-          input.focus();
-          input.setSelectionRange(nextCursor, nextCursor);
-      });
-  }, [quickWhereDraft]);
-
-  const stopQuickWhereClipboardPropagation = useCallback((event: React.ClipboardEvent<HTMLInputElement>) => {
-      event.stopPropagation();
-  }, []);
-
   const gridFieldSelectOptions = useMemo(
       () => buildGridFieldSelectOptions(displayColumnNames),
       [displayColumnNames],
   );
 
-  useEffect(() => {
-      if (!showFilter) {
-          return;
-      }
-      const root = filterPanelRef.current;
-      if (!root) {
-          return;
-      }
-      const apply = () => {
-          applyNoAutoCapAttributesWithin(root);
-      };
-      apply();
-      if (typeof MutationObserver === 'undefined') {
-          return;
-      }
-      const observer = new MutationObserver(() => {
-          apply();
-      });
-      observer.observe(root, { childList: true, subtree: true });
-      return () => {
-          observer.disconnect();
-      };
-  }, [showFilter]);
+  const {
+      filterConditions,
+      setFilterConditions,
+      quickWhereDraft,
+      setQuickWhereDraft,
+      quickWhereSuggestionsOpen,
+      setQuickWhereSuggestionsOpen,
+      filterPanelRef,
+      filterOpOptions,
+      filterLogicOptions,
+      quickWhereSuggestionOptions,
+      handleQuickWherePaste,
+      stopQuickWhereClipboardPropagation,
+      isNoValueOp,
+      isBetweenOp,
+      isListOp,
+      addFilter,
+      updateFilter,
+      removeFilter,
+      applyQuickWhereCondition,
+      clearQuickWhereCondition,
+      clearAllFiltersAndSorts,
+      applyFilters,
+      applyAllFiltersEnabled,
+      applyAllFiltersDisabled,
+  } = useDataGridFilters({
+      appliedFilterConditions,
+      quickWhereCondition,
+      showFilter,
+      displayColumnNames,
+      allTableColumnNames,
+      columnMetaMap,
+      dbType,
+      darkMode,
+      onApplyFilter,
+      onApplyQuickWhereCondition,
+      onSort,
+      messageApi: {
+          warning: (content) => {
+              void message.warning(content);
+          },
+      },
+      getColumnFilterType,
+      resolveDefaultGridFilterOperator,
+      resolveNextGridFilterOperatorForColumnChange,
+  });
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
@@ -3013,32 +3014,43 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [addedRows.length, scrollTableBodyToBottom]);
 
-  // Reset local state when data source likely changes (e.g. tableName change)
-  useEffect(() => {
-      setAddedRows([]);
-      setModifiedRows({});
-      setDeletedRowKeys(new Set());
-      setModifiedColumns({});
-      setSelectedRowKeys([]);
-      setCopiedCellPatch(null);
-      setCopiedRowsForPaste([]);
-      setRowEditorOpen(false);
-      setRowEditorRowKey('');
-      rowEditorBaseRawRef.current = {};
-      rowEditorDisplayRef.current = {};
-      rowEditorNullColsRef.current = new Set();
-      ddlRequestSeqRef.current += 1;
-      setDdlModalOpen(false);
-      setDdlLoading(false);
-      setDdlText('');
-      setDdlViewLayout('bottom');
-      setDdlSidebarResizePreviewX(null);
-      rowEditorForm.resetFields();
-      closeCellEditor();
-      form.resetFields();
-  }, [tableName, dbName, connectionId]); // Reset on context change
-
   const rowKeyStr = useCallback((k: React.Key) => String(k), []);
+
+  const {
+      viewMode,
+      setViewMode,
+      ddlModalOpen,
+      setDdlModalOpen,
+      ddlLoading,
+      ddlText,
+      ddlViewLayout,
+      setDdlViewLayout,
+      ddlSidebarWidth,
+      ddlSidebarResizePreviewX,
+      ddlRequestSeqRef,
+      isTableSurfaceActive,
+      handleOpenTableDdl,
+      handleViewModeChange,
+      handleDdlSidebarResizeStart,
+      resetDdlViewState,
+  } = useDataGridDdlView({
+      canViewDdl,
+      currentConnConfig,
+      dbName,
+      tableName,
+      isV2Ui,
+      cellEditMode,
+      selectedRowKeys,
+      mergedDisplayDataRef,
+      rowKeyStr,
+      closeCellEditModeRef,
+      setTextRecordIndex,
+      messageApi: {
+          error: (content) => {
+              void message.error(content);
+          },
+      },
+  });
 
   useEffect(() => {
       cellEditModeRef.current = cellEditMode;
@@ -3098,9 +3110,13 @@ const DataGrid: React.FC<DataGridProps> = ({
   const closeCellEditMode = useCallback(() => {
     setCellEditMode(false);
     cellEditModeRef.current = false;
-    setBatchEditModalOpen(false);
+    closeBatchEditModal();
     resetCellSelection();
   }, [resetCellSelection]);
+
+  useEffect(() => {
+    closeCellEditModeRef.current = closeCellEditMode;
+  }, [closeCellEditMode]);
 
   // 批量填充选中的单元格
   const handleBatchFillCells = useCallback(() => {
@@ -3188,7 +3204,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
 
     void message.success(`已填充 ${updatedCount} 个单元格`);
-    setBatchEditModalOpen(false);
+    closeBatchEditModal();
 
     // 清除选中状态
     setSelectedCells(new Set());
@@ -3201,7 +3217,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellSelectionAutoScrollRafRef.current = null;
     }
     updateCellSelection(new Set());
-  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection]);
+  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection, closeBatchEditModal]);
 
   // 事件委托：在容器级别处理单元格拖选；未开启模式时，拖拽超过阈值会自动进入单元格编辑模式。
   useEffect(() => {
@@ -4098,10 +4114,39 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   }, [cellEditorIsJson, cellEditorValue]);
 
+  const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
+      if (!record || !dataIndex || !canModifyData) return;
+      const rowKey = record?.[GONAVI_ROW_KEY];
+      if (rowKey === undefined || rowKey === null) return;
+
+      const raw = record?.[dataIndex];
+      if (shouldOpenModalEditor(raw)) {
+          openCellEditor(record, dataIndex, title);
+          return;
+      }
+
+      const columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
+      const pickerType = getTemporalPickerType(columnType);
+      const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(raw || '')));
+      const fieldName = getCellFieldName(record, dataIndex);
+      if (isDateTimeField) {
+          setCellFieldValue(form, fieldName, parseToDayjs(raw, pickerType));
+      } else {
+          const initialValue = typeof raw === 'string' ? normalizeDateTimeString(raw) : raw;
+          setCellFieldValue(form, fieldName, initialValue);
+      }
+      setVirtualEditingCell({
+          rowKey: rowKeyStr(rowKey),
+          dataIndex,
+          title,
+          columnType,
+      });
+  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, form, openCellEditor, rowKeyStr]);
+
   const handleVirtualCellActivate = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!canModifyData) return;
-      openCellEditor(record, dataIndex, title);
-  }, [canModifyData, openCellEditor]);
+      openVirtualInlineEditor(record, dataIndex, title);
+  }, [canModifyData, openVirtualInlineEditor]);
 
   const handleVirtualCellContextMenu = useCallback((e: React.MouseEvent, record: Item, dataIndex: string) => {
       e.preventDefault();
@@ -4128,6 +4173,110 @@ const DataGrid: React.FC<DataGridProps> = ({
           return result;
       });
   }, [displayData, modifiedRows, deletedRowKeys]);
+  mergedDisplayDataRef.current = mergedDisplayData;
+
+  // Reset local state when data source likely changes (e.g. tableName change)
+  useEffect(() => {
+      setAddedRows([]);
+      setModifiedRows({});
+      setDeletedRowKeys(new Set());
+      setModifiedColumns({});
+      setSelectedRowKeys([]);
+      setCopiedCellPatch(null);
+      setCopiedRowsForPaste([]);
+      closeRowEditor();
+      resetDdlViewState();
+      closeVirtualInlineEditor();
+      closeCellEditor();
+      formRef.current.resetFields();
+  }, [tableName, dbName, connectionId, closeRowEditor, resetDdlViewState, closeVirtualInlineEditor, closeCellEditor]); // Reset on context change
+
+  useEffect(() => {
+      const next = new Map<string, Item>();
+      mergedDisplayData.forEach((row) => {
+          const key = row?.[GONAVI_ROW_KEY];
+          if (key === undefined || key === null) return;
+          next.set(rowKeyStr(key), row);
+      });
+      mergedDisplayDataByRowKeyRef.current = next;
+  }, [mergedDisplayData, rowKeyStr]);
+
+  const resolveRenderedCellInfoFromElement = useCallback((target: EventTarget | null) => {
+      const element = target instanceof HTMLElement ? target.closest('[data-row-key][data-col-name]') as HTMLElement | null : null;
+      if (!element) {
+          return null;
+      }
+      const rowKey = String(element.getAttribute('data-row-key') || '').trim();
+      const dataIndex = String(element.getAttribute('data-col-name') || '').trim();
+      if (!rowKey || !dataIndex) {
+          return null;
+      }
+      const record = mergedDisplayDataByRowKeyRef.current.get(rowKey);
+      if (!record) {
+          return null;
+      }
+      return { rowKey, dataIndex, record };
+  }, []);
+
+  const handleVirtualTableClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+      if (!dataPanelOpenRef.current) return;
+      const cellInfo = resolveRenderedCellInfoFromElement(event.target);
+      if (!cellInfo) return;
+      updateFocusedCell(cellInfo.record, cellInfo.dataIndex);
+  }, [resolveRenderedCellInfoFromElement, updateFocusedCell]);
+
+  const handleVirtualTableDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+      const cellInfo = resolveRenderedCellInfoFromElement(event.target);
+      if (!cellInfo) return;
+      const rowDeleted = cellInfo.record?.[GONAVI_ROW_KEY] !== undefined
+          ? deletedRowKeys.has(rowKeyStr(cellInfo.record[GONAVI_ROW_KEY]))
+          : false;
+      if (rowDeleted || !isWritableResultColumn(cellInfo.dataIndex, effectiveEditLocator)) {
+          return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      handleVirtualCellActivate(cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
+  }, [resolveRenderedCellInfoFromElement, deletedRowKeys, rowKeyStr, effectiveEditLocator, handleVirtualCellActivate]);
+
+  const handleVirtualTableContextMenuCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+      const cellInfo = resolveRenderedCellInfoFromElement(event.target);
+      if (!cellInfo) return;
+      event.preventDefault();
+      event.stopPropagation();
+      showCellContextMenu(event, cellInfo.record, cellInfo.dataIndex, cellInfo.dataIndex);
+  }, [resolveRenderedCellInfoFromElement, showCellContextMenu]);
+
+  const saveVirtualInlineEditor = useCallback(async (pickerValue?: dayjs.Dayjs | null) => {
+      const editingCell = virtualEditingCell;
+      if (!editingCell) return;
+
+      const record = mergedDisplayDataByRowKeyRef.current.get(editingCell.rowKey);
+      if (!record) {
+          closeVirtualInlineEditor();
+          return;
+      }
+
+      const pickerType = getTemporalPickerType(editingCell.columnType);
+      const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[editingCell.dataIndex] || '')));
+      const fieldName = getCellFieldName(record, editingCell.dataIndex);
+      try {
+          await form.validateFields([fieldName]);
+          let nextValue = form.getFieldValue(fieldName);
+          if (isDateTimeField) {
+              nextValue = resolveTemporalEditorSaveValue(nextValue, pickerValue, pickerType);
+          }
+          closeVirtualInlineEditor();
+          if (!isCellValueEqualForDiff(record?.[editingCell.dataIndex], nextValue)) {
+              handleCellSave({ ...record, [editingCell.dataIndex]: nextValue });
+          }
+      } catch (errInfo) {
+          console.log('Virtual inline save failed:', errInfo);
+          if (isDateTimeField) {
+              closeVirtualInlineEditor();
+          }
+      }
+  }, [closeVirtualInlineEditor, form, handleCellSave, virtualEditingCell]);
 
   const pageFindMatches = useMemo(() => collectDataGridFindMatches(
       mergedDisplayData,
@@ -4162,8 +4311,11 @@ const DataGrid: React.FC<DataGridProps> = ({
       : 0;
 
   const tableRenderData = useMemo(
-      () => attachDataGridFindRenderVersion(mergedDisplayData, normalizedPageFindText),
-      [mergedDisplayData, normalizedPageFindText]
+      () => attachDataGridVirtualEditRenderVersion(
+          attachDataGridFindRenderVersion(mergedDisplayData, normalizedPageFindText),
+          virtualEditingCell,
+      ),
+      [mergedDisplayData, normalizedPageFindText, virtualEditingCell]
   );
 
   useEffect(() => {
@@ -4210,15 +4362,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       return String(val);
   }, [columnMetaMap, columnMetaMapByLowerName]);
 
-  const closeRowEditor = useCallback(() => {
-      setRowEditorOpen(false);
-      setRowEditorRowKey('');
-      rowEditorBaseRawRef.current = {};
-      rowEditorDisplayRef.current = {};
-      rowEditorNullColsRef.current = new Set();
-      rowEditorForm.resetFields();
-  }, [rowEditorForm]);
-
   const openRowEditorByKey = useCallback((keyStr?: string) => {
       if (!canModifyData) return;
       if (!keyStr) {
@@ -4258,14 +4401,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (baseVal === null || baseVal === undefined) nullCols.add(col);
       });
 
-      rowEditorBaseRawRef.current = baseRawMap;
-      rowEditorDisplayRef.current = displayMap;
-      rowEditorNullColsRef.current = nullCols;
-
-      rowEditorForm.setFieldsValue(formMap);
-      setRowEditorRowKey(keyStr);
-      setRowEditorOpen(true);
-  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowEditorForm, rowKeyStr, columnMetaMap, columnMetaMapByLowerName]);
+      openRowEditor({
+          rowKey: keyStr,
+          baseRawMap,
+          displayMap,
+          nullCols,
+          formValues: formMap,
+      });
+  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, openRowEditor]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4278,76 +4421,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       openRowEditorByKey(rowKeyStr(rowKey));
   }, [canModifyData, mergedDisplayData, textRecordIndex, rowKeyStr, openRowEditorByKey]);
 
-  const openJsonEditor = useCallback(() => {
+  const handleOpenJsonEditor = useCallback(() => {
       if (!canModifyData) return;
-      setJsonEditorValue(jsonViewText);
-      setJsonEditorOpen(true);
-  }, [canModifyData, jsonViewText]);
-
-  const handleOpenTableDdl = useCallback(async (options?: { asView?: boolean }) => {
-      if (!canViewDdl || !currentConnConfig || !tableName) {
-          void message.error('当前表缺少连接或表名，无法查看 DDL');
-          return;
-      }
-      const asView = options?.asView === true && isV2Ui;
-      const requestSeq = ++ddlRequestSeqRef.current;
-      if (asView) {
-          setViewMode('ddl');
-          setDdlModalOpen(false);
-      } else {
-          setDdlModalOpen(true);
-      }
-      setDdlLoading(true);
-      setDdlText('');
-      try {
-          const res = await DBShowCreateTable(buildRpcConnectionConfig(currentConnConfig) as any, dbName || '', tableName);
-          if (requestSeq !== ddlRequestSeqRef.current) return;
-          if (res.success) {
-              setDdlText(String(res.data ?? ''));
-              return;
-          }
-          void message.error(res.message || '获取 DDL 失败');
-      } catch (error: any) {
-          if (requestSeq !== ddlRequestSeqRef.current) return;
-          void message.error(error?.message || '获取 DDL 失败');
-      } finally {
-          if (requestSeq === ddlRequestSeqRef.current) {
-              setDdlLoading(false);
-          }
-      }
-  }, [canViewDdl, currentConnConfig, dbName, isV2Ui, tableName]);
-
-  useEffect(() => {
-      if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er')) return;
-      setViewMode('table');
-  }, [isV2Ui, viewMode]);
-
-  const handleViewModeChange = useCallback((nextMode: GridViewMode) => {
-      if ((nextMode === 'fields' || nextMode === 'ddl' || nextMode === 'er') && !isV2Ui) {
-          setViewMode('table');
-          return;
-      }
-      if (nextMode === 'ddl') {
-          void handleOpenTableDdl({ asView: true });
-          setViewMode('ddl');
-          return;
-      }
-      if (nextMode === 'json' && cellEditMode) {
-          closeCellEditMode();
-      }
-
-      if (nextMode === 'text') {
-          const selectedKey = selectedRowKeys[0];
-          if (selectedKey !== undefined) {
-              const idx = mergedDisplayData.findIndex((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === rowKeyStr(selectedKey));
-              if (idx >= 0) {
-                  setTextRecordIndex(idx);
-              }
-          }
-      }
-
-      setViewMode(nextMode);
-  }, [cellEditMode, handleOpenTableDdl, isV2Ui, mergedDisplayData, selectedRowKeys, rowKeyStr, closeCellEditMode]);
+      openJsonEditor(jsonViewText);
+  }, [canModifyData, jsonViewText, openJsonEditor]);
 
   const handleOpenContextMenuRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4464,9 +4541,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           return next;
       });
 
-      setJsonEditorOpen(false);
+      closeJsonEditor();
       void message.success("JSON 修改已应用到当前结果集，可继续“提交事务”");
-  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator]);
+  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator, closeJsonEditor]);
 
   const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
       if (!dataIndex) return;
@@ -4535,6 +4612,21 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const enableVirtual = isTableSurfaceActive;
   const enableInlineEditableCell = canModifyData;
+  const useInlineEditableBodyCell = enableInlineEditableCell && !enableVirtual;
+
+  useEffect(() => {
+      if (!virtualEditingCell) return;
+      const rafId = requestAnimationFrame(() => {
+          virtualInlineInputRef.current?.focus?.();
+          try {
+              const inputElement = virtualInlineInputRef.current?.input as HTMLInputElement | undefined;
+              inputElement?.select?.();
+          } catch {
+              // ignore
+          }
+      });
+      return () => cancelAnimationFrame(rafId);
+  }, [virtualEditingCell]);
 
   const columns: (ColumnType<any> & { editable?: boolean })[] = useMemo(() => {
       return displayColumnNames.map(key => ({
@@ -4549,15 +4641,22 @@ const DataGrid: React.FC<DataGridProps> = ({
           sorter: onSort ? { multiple: displayColumnNames.indexOf(key) + 1 } : false,
           sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData && isWritableResultColumn(key, effectiveEditLocator),
-          render: (text: any) => (
-              <div style={CELL_ELLIPSIS_STYLE}>
-                  {renderCellDisplayValue(text, normalizedPageFindText, (columnMetaMap[key] || columnMetaMapByLowerName[key.toLowerCase()])?.type)}
-              </div>
-          ),
+          render: (text: any) => {
+              const renderedContent = renderCellDisplayValue(text, normalizedPageFindText, displayColumnTypeMap[key]);
+              if (enableVirtual) {
+                  return renderedContent;
+              }
+              return (
+                  <div style={CELL_ELLIPSIS_STYLE}>
+                      {renderedContent}
+                  </div>
+              );
+          },
           shouldCellUpdate: (record: Item, prevRecord: Item) => {
               const rowKeyChanged = record?.[GONAVI_ROW_KEY] !== prevRecord?.[GONAVI_ROW_KEY];
               if (rowKeyChanged) return true;
               if (hasDataGridFindRenderVersionChanged(record, prevRecord)) return true;
+              if (hasDataGridVirtualEditRenderVersionChanged(record, prevRecord)) return true;
               return !isCellValueEqualForRender(record?.[key], prevRecord?.[key]);
           },
           onHeaderCell: (column: any) => ({
@@ -4594,7 +4693,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, isV2Ui, showColumnHeaderContextMenu, canModifyData, onSort, renderColumnTitle, dataTableDensity, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName, showColumnComment, showColumnType]);
+  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, isV2Ui, showColumnHeaderContextMenu, canModifyData, onSort, renderColumnTitle, dataTableDensity, normalizedPageFindText, displayColumnTypeMap, enableVirtual, showColumnComment, showColumnType]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -4607,14 +4706,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                   'data-row-key': rowKey === undefined || rowKey === null ? undefined : String(rowKey),
                   'data-col-name': dataIndex,
               };
-              // 数据预览面板：单击单元格时更新聚焦信息
-              cellProps.onClick = () => {
-                  if (dataPanelOpenRef.current) {
+              if (!enableVirtual && dataPanelOpenRef.current) {
+                  // 非虚拟表保留最直接的点击同步；虚拟表改走容器级事件委托，避免每格闭包。
+                  cellProps.onClick = () => {
                       updateFocusedCell(record, dataIndex);
-                  }
-              };
+                  };
+              }
 
-              if (col.editable && enableInlineEditableCell) {
+              if (col.editable && useInlineEditableBodyCell) {
                   // 可编辑模式（非虚拟）：传递给 EditableCell 的 props
                   cellProps.record = record;
                   cellProps.editable = col.editable;
@@ -4622,20 +4721,16 @@ const DataGrid: React.FC<DataGridProps> = ({
                   cellProps.title = dataIndex;
                   cellProps.handleSave = handleCellSave;
                   cellProps.focusCell = openCellEditor;
-                  cellProps.columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
+                  cellProps.columnType = displayColumnTypeMap[dataIndex];
                   cellProps.inputCellPadding = inputCellPadding;
-              } else if (col.editable && !enableInlineEditableCell) {
-                  // 可编辑但非 inline（虚拟模式下）：已删除行不绑定双击处理
-                  const rowDeleted = record?.[GONAVI_ROW_KEY] !== undefined
-                      ? deletedRowKeys.has(rowKeyStr(record[GONAVI_ROW_KEY]))
-                      : false;
-                  if (!rowDeleted) {
-                      cellProps.onDoubleClick = () => handleVirtualCellActivate(record, dataIndex, dataIndex);
-                  }
+                  cellProps.modifiedColumns = modifiedColumns;
+                  cellProps.rowKeyStr = rowKeyStr;
+                  cellProps.deletedRowKeys = deletedRowKeys;
+                  cellProps.darkMode = darkMode;
+              } else if (enableVirtual) {
+                  // 虚拟表格主要走 table 容器级事件委托；这里保留一个共享右键入口，兼容测试桩和非标准事件分发场景。
                   cellProps.onContextMenu = (e: React.MouseEvent) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      showCellContextMenu(e, record, dataIndex, dataIndex);
+                      handleVirtualCellContextMenu(e, record, dataIndex);
                   };
               } else {
                   // 不可编辑（只读查询结果）：只绑定右键菜单
@@ -4645,52 +4740,128 @@ const DataGrid: React.FC<DataGridProps> = ({
                       showCellContextMenu(e, record, dataIndex, dataIndex);
                   };
               }
-              cellProps.modifiedColumns = modifiedColumns;
-              cellProps.rowKeyStr = rowKeyStr;
-              cellProps.deletedRowKeys = deletedRowKeys;
-              cellProps.darkMode = darkMode;
               return cellProps;
           },
           render: (text: any, record: Item, index: number) => {
               const originalRenderContent = col.render ? (col.render as any)(text, record, index) : text;
-              const rowDeletedForRender = record?.[GONAVI_ROW_KEY] !== undefined
-                  ? deletedRowKeys.has(rowKeyStr(record[GONAVI_ROW_KEY]))
-                  : false;
+              const rowKey = record?.[GONAVI_ROW_KEY];
+              const rowKeyText = rowKey === undefined || rowKey === null ? '' : rowKeyStr(rowKey);
+              const rowDeletedForRender = !!rowKeyText && deletedRowKeys.has(rowKeyText);
+              const columnType = displayColumnTypeMap[dataIndex];
+              const isVirtualInlineEditingCell = !!virtualEditingCell
+                  && virtualEditingCell.rowKey === rowKeyText
+                  && virtualEditingCell.dataIndex === dataIndex;
+              const isModifiedCell = !!rowKeyText && !!modifiedColumns[rowKeyText]?.has(dataIndex);
+              const modifiedStyle: React.CSSProperties | undefined = isModifiedCell
+                  ? { backgroundColor: darkMode ? 'rgba(255, 214, 102, 0.16)' : '#FFF3B0' }
+                  : undefined;
               if (enableVirtual && enableInlineEditableCell) {
-                  return (
-                      <EditableCell
-                          title={dataIndex}
-                          editable={!!col.editable && !rowDeletedForRender}
-                          dataIndex={dataIndex}
-                          record={record}
-                          handleSave={handleCellSave}
-                          focusCell={openCellEditor}
-                          columnType={(columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type}
-                          as="div"
-                          style={virtualCellWrapperStyle}
-                          modifiedColumns={modifiedColumns}
-                          rowKeyStr={rowKeyStr}
-                          deletedRowKeys={deletedRowKeys}
-                          darkMode={darkMode}
-                      >
-                          {originalRenderContent}
-                      </EditableCell>
-                  );
-              }
-              if (enableVirtual) {
+                  const pickerType = getTemporalPickerType(columnType);
+                  const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
+                  const virtualCellStyle = modifiedStyle ? { ...virtualCellWrapperStyle, ...modifiedStyle } : virtualCellWrapperStyle;
+                  const virtualEditable = !!col.editable && !rowDeletedForRender;
+                  if (isVirtualInlineEditingCell && virtualEditable) {
                   return (
                       <div
-                          style={virtualCellWrapperStyle}
+                          style={virtualCellStyle}
                           onContextMenu={(e) => handleVirtualCellContextMenu(e, record, dataIndex)}
                       >
-                          {originalRenderContent}
-                      </div>
-                  );
+                              <Form.Item style={{ margin: 0, width: '100%' }} name={getCellFieldName(record, dataIndex)}>
+                                  {isDateTimeField ? (
+                                      pickerType === 'time' ? (
+                                          <TimePicker
+                                              ref={virtualInlineInputRef}
+                                              style={{ width: '100%' }}
+                                              format={TEMPORAL_FORMATS[pickerType]}
+                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(value); }, 0)}
+                                              onOpenChange={lockVirtualInlineTableScroll}
+                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(); }, 0)}
+                                              needConfirm={false}
+                                          />
+                                      ) : pickerType === 'datetime' ? (
+                                          <DatePicker
+                                              ref={virtualInlineInputRef}
+                                              style={{ width: '100%' }}
+                                              showTime
+                                              showNow={false}
+                                              format={TEMPORAL_FORMATS[pickerType]}
+                                              renderExtraFooter={() => (
+                                                  <a
+                                                      style={{ padding: '0 2px' }}
+                                                      onClick={() => {
+                                                          setCellFieldValue(form, getCellFieldName(record, dataIndex), dayjs());
+                                                      }}
+                                                  >此刻</a>
+                                              )}
+                                              onOk={(value) => setTimeout(() => { void saveVirtualInlineEditor((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
+                                              onOpenChange={(open) => {
+                                                  virtualInlinePickerOpenRef.current = open;
+                                                  lockVirtualInlineTableScroll(open);
+                                                  if (!open) {
+                                                      setTimeout(() => {
+                                                          if (!virtualInlinePickerOpenRef.current) {
+                                                              closeVirtualInlineEditor();
+                                                          }
+                                                      }, 0);
+                                                  }
+                                              }}
+                                              onBlur={() => {
+                                                  setTimeout(() => {
+                                                      if (!virtualInlinePickerOpenRef.current) {
+                                                          closeVirtualInlineEditor();
+                                                      }
+                                                  }, 150);
+                                              }}
+                                              needConfirm
+                                          />
+                                      ) : (
+                                          <DatePicker
+                                              ref={virtualInlineInputRef}
+                                              style={{ width: '100%' }}
+                                              format={TEMPORAL_FORMATS[pickerType]}
+                                              picker={pickerType as any}
+                                              onChange={(value) => setTimeout(() => { void saveVirtualInlineEditor(value); }, 0)}
+                                              onOpenChange={lockVirtualInlineTableScroll}
+                                              onBlur={() => setTimeout(() => { void saveVirtualInlineEditor(); }, 0)}
+                                              needConfirm={false}
+                                          />
+                                      )
+                                  ) : (
+                                      <Input
+                                          ref={virtualInlineInputRef}
+                                          style={inputCellPadding}
+                                          onPressEnter={() => { void saveVirtualInlineEditor(); }}
+                                          onBlur={() => { void saveVirtualInlineEditor(); }}
+                                          onFocus={(e) => {
+                                              try {
+                                                  (e.target as HTMLInputElement)?.select?.();
+                                              } catch {
+                                                  // ignore
+                                              }
+                                          }}
+                                          onDoubleClick={(e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                  (e.target as HTMLInputElement)?.select?.();
+                                              } catch {
+                                                  // ignore
+                                              }
+                                          }}
+                                      />
+                                  )}
+                              </Form.Item>
+                          </div>
+                      );
+                  }
+                  return <div style={virtualCellStyle}>{originalRenderContent}</div>;
+              }
+              if (enableVirtual) {
+                  return <div style={virtualCellWrapperStyle}>{originalRenderContent}</div>;
               }
               return originalRenderContent;
           }
       };
-  }), [columns, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleVirtualCellContextMenu, columnMetaMap, columnMetaMapByLowerName, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode]);
+  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleVirtualCellContextMenu, displayColumnTypeMap, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -5640,117 +5811,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (onReload) onReload();
   };
 
-  // Filters
-  const filterOpOptions = useMemo(() => ([
-      { value: '=', label: '=' },
-      { value: '!=', label: '!=' },
-      { value: '<', label: '<' },
-      { value: '<=', label: '<=' },
-      { value: '>', label: '>' },
-      { value: '>=', label: '>=' },
-      { value: 'CONTAINS', label: '包含' },
-      { value: 'NOT_CONTAINS', label: '不包含' },
-      { value: 'STARTS_WITH', label: '开始以' },
-      { value: 'NOT_STARTS_WITH', label: '不是开始于' },
-      { value: 'ENDS_WITH', label: '结束以' },
-      { value: 'NOT_ENDS_WITH', label: '不是结束于' },
-      { value: 'IS_NULL', label: '是 null' },
-      { value: 'IS_NOT_NULL', label: '不是 null' },
-      { value: 'IS_EMPTY', label: '是空的' },
-      { value: 'IS_NOT_EMPTY', label: '不是空的' },
-      { value: 'BETWEEN', label: '介于' },
-      { value: 'NOT_BETWEEN', label: '不介于' },
-      { value: 'IN', label: '在列表' },
-      { value: 'NOT_IN', label: '不在列表' },
-      { value: 'CUSTOM', label: '[自定义]' },
-  ]), []);
-  const filterLogicOptions = useMemo(() => ([
-      { value: 'AND', label: '且 (AND)' },
-      { value: 'OR', label: '或 (OR)' },
-  ]), []);
-
-  const isNoValueOp = useCallback((op: string) => (
-      op === 'IS_NULL' || op === 'IS_NOT_NULL' || op === 'IS_EMPTY' || op === 'IS_NOT_EMPTY'
-  ), []);
-  const isBetweenOp = useCallback((op: string) => op === 'BETWEEN' || op === 'NOT_BETWEEN', []);
-  const isListOp = useCallback((op: string) => op === 'IN' || op === 'NOT_IN', []);
-
-  const addFilter = () => {
-      const column = displayColumnNames[0] || '';
-      const id = nextFilterId;
-      autoDefaultFilterIdsRef.current.add(id);
-      setFilterConditions([
-          ...filterConditions,
-          {
-              id,
-              enabled: true,
-              logic: 'AND',
-              column,
-              op: resolveDefaultGridFilterOperator(getColumnFilterType(column)),
-              value: '',
-              value2: '',
-          }
-      ]);
-      setNextFilterId(nextFilterId + 1);
-  };
-  const updateFilter = (id: number, field: keyof GridFilterCondition, val: string | boolean) => {
-      setFilterConditions(prev => prev.map(c => {
-          if (c.id !== id) return c;
-          const next: GridFilterCondition = { ...c, [field]: val } as GridFilterCondition;
-          if (field === 'column') {
-              next.op = resolveNextGridFilterOperatorForColumnChange({
-                  currentOperator: c.op,
-                  previousColumnType: getColumnFilterType(c.column),
-                  nextColumnType: getColumnFilterType(String(val)),
-              });
-              if (isNoValueOp(next.op)) {
-                  next.value = '';
-                  next.value2 = '';
-              } else if (!isBetweenOp(next.op)) {
-                  next.value2 = '';
-              }
-          }
-          if (field === 'op') {
-              autoDefaultFilterIdsRef.current.delete(id);
-              const nextOp = String(val);
-              if (isNoValueOp(nextOp)) {
-                  next.value = '';
-                  next.value2 = '';
-              } else if (isBetweenOp(nextOp)) {
-                  if (typeof next.value2 !== 'string') next.value2 = '';
-              } else {
-                  next.value2 = '';
-              }
-          }
-          return next;
-      }));
-  };
-  const removeFilter = (id: number) => {
-      autoDefaultFilterIdsRef.current.delete(id);
-      setFilterConditions(prev => prev.filter(c => c.id !== id));
-  };
-  const applyQuickWhereCondition = useCallback((condition: string = quickWhereDraft): boolean => {
-      const normalized = normalizeQuickWhereCondition(condition);
-      const validation = validateQuickWhereCondition(normalized);
-      if (!validation.ok) {
-          void message.warning(validation.message);
-          return false;
-      }
-      setQuickWhereDraft(normalized);
-      if (onApplyQuickWhereCondition) onApplyQuickWhereCondition(normalized);
-      return true;
-  }, [quickWhereDraft, onApplyQuickWhereCondition]);
-
-  const clearQuickWhereCondition = useCallback(() => {
-      setQuickWhereDraft('');
-      if (onApplyQuickWhereCondition) onApplyQuickWhereCondition('');
-  }, [onApplyQuickWhereCondition]);
-
-  const applyFilters = () => {
-      if (!applyQuickWhereCondition()) return;
-      if (onApplyFilter) onApplyFilter(filterConditions);
-  };
-
   const exportMenu: MenuProps['items'] = hasFilteredExportSql ? [
       { type: 'group', label: '筛选结果', children: [
           { key: 'filtered-csv', label: 'CSV', onClick: () => handleExportFilteredAll('csv') },
@@ -5783,94 +5843,38 @@ const DataGrid: React.FC<DataGridProps> = ({
   const canCopyQueryResult = isQueryResultExport && mergedDisplayData.length > 0 && displayOutputColumnNames.length > 0;
 
   const columnInfoSettingContent = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200, maxWidth: 300 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666' }}>显示设置</div>
-          <Checkbox
-              checked={showColumnComment}
-              onChange={(e) => setQueryOptions({ showColumnComment: e.target.checked })}
-          >
-              表头显示备注
-          </Checkbox>
-          <Checkbox
-              checked={showColumnType}
-              onChange={(e) => setQueryOptions({ showColumnType: e.target.checked })}
-          >
-              表头显示类型
-          </Checkbox>
-          <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
-          
-          <div style={{ fontWeight: 600, fontSize: 13, color: darkMode ? '#ddd' : '#666', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>列可见性</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                  <a style={{ fontSize: 12 }} onClick={() => toggleAllColumnsVisibility(true)}>全显</a>
-                  <a style={{ fontSize: 12 }} onClick={() => toggleAllColumnsVisibility(false)}>全隐</a>
-              </div>
-          </div>
-          <Input 
-              placeholder="搜索列名..." 
-              size="small" 
-              value={columnSearchText}
-              onChange={e => setColumnSearchText(e.target.value)}
-              allowClear
-          />
-          <div className="custom-scrollbar" style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {allOrderedColumnNames.filter(col => !columnSearchText || col.toLowerCase().includes(columnSearchText.toLowerCase())).map(col => (
-                  <Checkbox
-                      key={col}
-                      checked={!localHiddenColumns.includes(col)}
-                      onChange={(e) => toggleColumnVisibility(col, e.target.checked)}
-                      style={{ marginLeft: 0 }}
-                  >
-                      {col}
-                  </Checkbox>
-              ))}
-          </div>
-
-          <div style={{ height: 1, backgroundColor: darkMode ? '#424242' : '#f0f0f0', margin: '4px 0' }} />
-          <Checkbox
-              checked={enableColumnOrderMemory}
-              onChange={(e) => setEnableColumnOrderMemory(e.target.checked)}
-          >
-              记忆自定义列序
-          </Checkbox>
-          <Checkbox
-              checked={enableHiddenColumnMemory}
-              onChange={(e) => setEnableHiddenColumnMemory(e.target.checked)}
-          >
-              记忆隐藏列配置
-          </Checkbox>
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <Button
-                  size="small"
-                  danger
-                  style={{ flex: 1 }}
-                  disabled={!connectionId || !dbName || !tableName || !tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
-                  onClick={() => {
-                      if (connectionId && dbName && tableName) {
-                          clearTableColumnOrder(connectionId, dbName, tableName);
-                          void message.success('已恢复默认列排序');
-                      }
-                  }}
-              >
-                  重置排序
-              </Button>
-              <Button
-                  size="small"
-                  danger
-                  style={{ flex: 1 }}
-                  disabled={!connectionId || !dbName || !tableName || !tableHiddenColumns[`${connectionId}-${dbName}-${tableName}`]}
-                  onClick={() => {
-                      if (connectionId && dbName && tableName) {
-                          clearTableHiddenColumns(connectionId, dbName, tableName);
-                          setLocalHiddenColumns([]);
-                          void message.success('已恢复全列显示');
-                      }
-                  }}
-              >
-                  重置隐藏
-              </Button>
-          </div>
-      </div>
+      <DataGridColumnInfoPopoverContent
+          darkMode={darkMode}
+          showColumnComment={showColumnComment}
+          showColumnType={showColumnType}
+          columnSearchText={columnSearchText}
+          allOrderedColumnNames={allOrderedColumnNames}
+          localHiddenColumns={localHiddenColumns}
+          enableColumnOrderMemory={enableColumnOrderMemory}
+          enableHiddenColumnMemory={enableHiddenColumnMemory}
+          canResetOrder={!!connectionId && !!dbName && !!tableName && !!tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
+          canResetHidden={!!connectionId && !!dbName && !!tableName && !!tableHiddenColumns[`${connectionId}-${dbName}-${tableName}`]}
+          onShowColumnCommentChange={(checked) => setQueryOptions({ showColumnComment: checked })}
+          onShowColumnTypeChange={(checked) => setQueryOptions({ showColumnType: checked })}
+          onToggleAllColumnsVisibility={toggleAllColumnsVisibility}
+          onColumnSearchTextChange={setColumnSearchText}
+          onToggleColumnVisibility={toggleColumnVisibility}
+          onEnableColumnOrderMemoryChange={setEnableColumnOrderMemory}
+          onEnableHiddenColumnMemoryChange={setEnableHiddenColumnMemory}
+          onResetOrder={() => {
+              if (connectionId && dbName && tableName) {
+                  clearTableColumnOrder(connectionId, dbName, tableName);
+                  void message.success('已恢复默认列排序');
+              }
+          }}
+          onResetHidden={() => {
+              if (connectionId && dbName && tableName) {
+                  clearTableHiddenColumns(connectionId, dbName, tableName);
+                  setLocalHiddenColumns([]);
+                  void message.success('已恢复全列显示');
+              }
+          }}
+      />
   );
 
   const dataContextValue = useMemo(() => ({
@@ -5922,7 +5926,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   const tableScrollConfig = useMemo(() => ({ x: tableScrollX, y: tableHeight }), [tableScrollX, tableHeight]);
   const tableComponents = useMemo(() => {
       const body: Record<string, any> = {};
-      if (enableInlineEditableCell) {
+      // 虚拟表模式下 render() 已返回 EditableCell；这里再挂 body.cell 会形成双层包装，
+      // 增加滚动期间的组件与上下文开销。
+      if (useInlineEditableBodyCell) {
           body.cell = EditableCell;
       }
       if (useContextMenuRow) {
@@ -5931,7 +5937,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return Object.keys(body).length > 0
           ? { body, header: { cell: SortableHeaderCell } }
           : { header: { cell: SortableHeaderCell } };
-  }, [enableInlineEditableCell, useContextMenuRow]);
+  }, [useInlineEditableBodyCell, useContextMenuRow]);
   const tableOnRow = useMemo(() => (useContextMenuRow ? rowPropsFactory : undefined), [useContextMenuRow, rowPropsFactory]);
 
   const resolveVirtualHorizontalElements = useCallback((tableContainer: HTMLElement) => {
@@ -6028,6 +6034,19 @@ const DataGrid: React.FC<DataGridProps> = ({
       const active = candidates.find((target) => target.scrollWidth > target.clientWidth + 1) || candidates[0];
       return active ? [active] : [];
   }, []);
+
+  const pickTableToExternalSyncTargets = useCallback((tableContainer: HTMLElement): HTMLElement[] => {
+      if (enableVirtual) {
+          const headerEl = tableContainer.querySelector('.ant-table-header') as HTMLElement | null;
+          const contentEl = tableContainer.querySelector('.ant-table-content') as HTMLElement | null;
+          const candidates = [headerEl, contentEl].filter((node): node is HTMLElement => node instanceof HTMLElement);
+          const active = candidates.find((target) => target.scrollWidth > target.clientWidth + 1) || candidates[0];
+          if (active) {
+              return [active];
+          }
+      }
+      return pickHorizontalScrollTargets(tableContainer);
+  }, [enableVirtual, pickHorizontalScrollTargets]);
 
   const pickVerticalScrollTarget = useCallback((tableContainer: HTMLElement): HTMLElement | null => {
       const virtualHolder = tableContainer.querySelector('.ant-table-tbody-virtual-holder') as HTMLElement | null;
@@ -6133,6 +6152,24 @@ const DataGrid: React.FC<DataGridProps> = ({
           lastExternalScrollLeftRef.current = nextScrollLeft;
       }
   }, [enableVirtual, readVirtualHorizontalOffset]);
+
+  const scheduleSyncExternalScrollFromTargets = useCallback((source?: HTMLElement | null) => {
+      pendingTableTargetSyncSourceRef.current = source ?? null;
+      if (tableTargetSyncRafRef.current !== null) {
+          return;
+      }
+      tableTargetSyncRafRef.current = requestAnimationFrame(() => {
+          tableTargetSyncRafRef.current = null;
+          const pendingSource = pendingTableTargetSyncSourceRef.current;
+          pendingTableTargetSyncSourceRef.current = null;
+          if (horizontalSyncSourceRef.current === 'external') {
+              return;
+          }
+          horizontalSyncSourceRef.current = 'table';
+          syncExternalScrollFromTargets(undefined, pendingSource);
+          horizontalSyncSourceRef.current = '';
+      });
+  }, [syncExternalScrollFromTargets]);
 
   const applyExternalScrollToTableTargets = useCallback(() => {
       const externalScroll = externalHorizontalScrollRef.current;
@@ -6243,16 +6280,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       const container = tableContainerRef.current;
       if (!(container instanceof HTMLElement)) return;
 
-      const resolveHorizontalDelta = (event: WheelEvent) => {
-          if (Math.abs(event.deltaX) > 0.5) {
-              return event.deltaX;
-          }
-          if (event.shiftKey && Math.abs(event.deltaY) > 0.5) {
-              return event.deltaY;
-          }
-          return 0;
-      };
-
       const isTableDataAreaTarget = (target: EventTarget | null) => {
           const element = target instanceof HTMLElement ? target : null;
           if (!element) return false;
@@ -6267,7 +6294,11 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 需要传播到 rc-virtual-list 的内部 handler，此处不拦截。
           if (!event.isTrusted) return;
 
-          const horizontalDelta = resolveHorizontalDelta(event);
+          const horizontalDelta = resolveDataGridHorizontalWheelDelta({
+              deltaX: event.deltaX,
+              deltaY: event.deltaY,
+              shiftKey: event.shiftKey,
+          });
           if (!Number.isFinite(horizontalDelta) || Math.abs(horizontalDelta) < 0.5) return;
           if (!isTableDataAreaTarget(event.target)) return;
 
@@ -6370,11 +6401,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
       syncHeaderWidth();
       const rafId = requestAnimationFrame(syncHeaderWidth);
-      // 监听 antd 可能的重渲染覆盖
-      const observer = new MutationObserver(syncHeaderWidth);
-      const headerEl = container.querySelector('.ant-table-header');
-      if (headerEl) observer.observe(headerEl, { attributes: true, childList: true, subtree: true, attributeFilter: ['style'] });
-      return () => { cancelAnimationFrame(rafId); observer.disconnect(); };
+      return () => { cancelAnimationFrame(rafId); };
   }, [isTableSurfaceActive, tableScrollX, mergedDisplayData.length]);
 
   useEffect(() => {
@@ -6396,7 +6423,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const verticalTarget = boundVerticalTarget || pickVerticalScrollTarget(tableContainer);
           const horizontalTargets = boundHorizontalTargets.length > 0 ? boundHorizontalTargets : pickHorizontalScrollTargets(tableContainer);
           const top = verticalTarget ? verticalTarget.scrollTop : 0;
-          const left = horizontalTargets[0]?.scrollLeft ?? externalScroll?.scrollLeft ?? 0;
+          const left = externalScroll?.scrollLeft ?? horizontalTargets[0]?.scrollLeft ?? 0;
           if (Math.abs(lastReportedScrollRef.current.top - top) < 1 && Math.abs(lastReportedScrollRef.current.left - left) < 1) {
               return;
           }
@@ -6416,11 +6443,11 @@ const DataGrid: React.FC<DataGridProps> = ({
           externalScroll?.removeEventListener('scroll', emitSnapshot);
 
           boundVerticalTarget = pickVerticalScrollTarget(tableContainer);
-          boundHorizontalTargets = pickHorizontalScrollTargets(tableContainer);
+          boundHorizontalTargets = externalScroll ? [] : pickHorizontalScrollTargets(tableContainer);
 
           boundVerticalTarget?.addEventListener('scroll', emitSnapshot, { passive: true });
-          boundHorizontalTargets.forEach(target => target.addEventListener('scroll', emitSnapshot, { passive: true }));
           externalScroll?.addEventListener('scroll', emitSnapshot, { passive: true });
+          boundHorizontalTargets.forEach(target => target.addEventListener('scroll', emitSnapshot, { passive: true }));
           emitSnapshot();
       };
 
@@ -6430,6 +6457,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (scrollSnapshotRafRef.current !== null) {
               cancelAnimationFrame(scrollSnapshotRafRef.current);
               scrollSnapshotRafRef.current = null;
+              emitSnapshotNow();
           }
           if (boundVerticalTarget) {
               boundVerticalTarget.removeEventListener('scroll', emitSnapshot);
@@ -6488,15 +6516,13 @@ const DataGrid: React.FC<DataGridProps> = ({
       const handleTargetScroll = (event: Event) => {
           const source = event.target as HTMLElement | null;
           if (horizontalSyncSourceRef.current === 'external') return;
-          horizontalSyncSourceRef.current = 'table';
-          syncExternalScrollFromTargets(undefined, source);
-          horizontalSyncSourceRef.current = '';
+          scheduleSyncExternalScrollFromTargets(source);
       };
 
       const bindCurrentTableTargets = () => {
           // Unbind previous targets
           boundTargets.forEach(t => t.removeEventListener('scroll', handleTargetScroll));
-          const nextTargets = pickHorizontalScrollTargets(tableContainer);
+          const nextTargets = pickTableToExternalSyncTargets(tableContainer);
           tableScrollTargetsRef.current = nextTargets;
           boundTargets = nextTargets;
           // Bind scroll listener on new targets
@@ -6523,8 +6549,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (rafId !== null) {
               cancelAnimationFrame(rafId);
           }
+          if (tableTargetSyncRafRef.current !== null) {
+              cancelAnimationFrame(tableTargetSyncRafRef.current);
+              tableTargetSyncRafRef.current = null;
+          }
+          pendingTableTargetSyncSourceRef.current = null;
       };
-  }, [isTableSurfaceActive, tableScrollX, mergedDisplayData.length, syncExternalScrollFromTargets, pickHorizontalScrollTargets]);
+  }, [isTableSurfaceActive, tableScrollX, mergedDisplayData.length, pickTableToExternalSyncTargets, scheduleSyncExternalScrollFromTargets, syncExternalScrollFromTargets]);
 
   const paginationSummaryText = useMemo(() => {
       if (!pagination) return '';
@@ -6600,12 +6631,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       onPageChange(nextPage, pagination.pageSize);
   }, [onPageChange, pagination, paginationTotalPages]);
 
-  const renderToolbarDivider = () => (
-      <div
-          className={isV2Ui ? 'gn-v2-toolbar-divider' : undefined}
-          style={isV2Ui ? undefined : { width: 1, background: toolbarDividerColor, height: 20, margin: '0 8px' }}
-      />
-  );
   const aiShortcutLabel = resolveShortcutDisplay(shortcutOptions ?? DEFAULT_SHORTCUT_OPTIONS, 'toggleAIPanel', activeShortcutPlatform);
   const legacyAiButtonStyle: React.CSSProperties | undefined = isV2Ui ? undefined : {
       background: darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))' : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))',
@@ -6618,6 +6643,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       <div
           ref={tableContainerRef}
           className={`${isV2Ui ? 'gn-v2-data-grid-table-shell gn-v2-data-grid-table-wrap ' : ''}data-grid-table-wrap${horizontalScrollVisible ? ' data-grid-table-wrap-external-active' : ''}`}
+          onClickCapture={enableVirtual ? handleVirtualTableClickCapture : undefined}
+          onDoubleClickCapture={enableVirtual ? handleVirtualTableDoubleClickCapture : undefined}
+          onContextMenuCapture={enableVirtual ? handleVirtualTableContextMenuCapture : undefined}
           style={{
               flex: '1 1 auto',
               minHeight: 0,
@@ -6674,1296 +6702,379 @@ const DataGrid: React.FC<DataGridProps> = ({
           </div>
       </div>
   );
-  const renderV2FieldsView = () => (
-      <div className="gn-v2-data-grid-fields-view">
-          <div className="gn-v2-data-grid-fields-head">
-              <div>
-                  <span>FIELDS</span>
-                  <strong>{tableName || '查询结果'}</strong>
-              </div>
-              <div>
-                  <span>{displayOutputColumnNames.length} 个字段</span>
-              </div>
-          </div>
-          <div className="gn-v2-data-grid-fields-table">
-              <div className="gn-v2-data-grid-fields-row is-head">
-                  <span>#</span>
-                  <span>名称</span>
-                  <span>类型</span>
-                  <span>NN</span>
-                  <span>PK</span>
-                  <span>默认值</span>
-                  <span>注释</span>
-              </div>
-              {displayOutputColumnNames.map((columnName, index) => {
-                  const meta = columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()];
-                  const isPk = pkColumns.includes(columnName) || effectiveEditLocator?.columns?.includes(columnName);
-                  return (
-                      <div className="gn-v2-data-grid-fields-row" key={columnName}>
-                          <span>{index + 1}</span>
-                          <span className="gn-v2-data-grid-field-name">{columnName}</span>
-                          <span className="gn-v2-data-grid-field-type">{meta?.type || '-'}</span>
-                          <span>-</span>
-                          <span>{isPk ? <em>PK</em> : '-'}</span>
-                          <span>-</span>
-                          <span>{meta?.comment || '-'}</span>
-                      </div>
-                  );
-              })}
-          </div>
-      </div>
-  );
-  const renderV2DdlView = (layout: DdlViewLayoutMode) => (
-      <div data-grid-ddl-view={layout} className={`gn-v2-data-grid-ddl-view${layout === 'side' ? ' is-side' : ''}`}>
-          <div className="gn-v2-data-grid-alt-toolbar">
-              <div>
-                  <span>DDL</span>
-                  <strong>{tableName ? `DDL - ${tableName}` : 'DDL'}</strong>
-              </div>
-              <div>
-                  <Segmented
-                      size="small"
-                      value={ddlViewLayout}
-                      options={[
-                          { label: '底部', value: 'bottom' },
-                          { label: '侧栏', value: 'side' },
-                      ]}
-                      onChange={(value) => setDdlViewLayout(String(value) as DdlViewLayoutMode)}
-                  />
-                  <Button size="small" onClick={() => handleOpenTableDdl({ asView: true })} loading={ddlLoading}>
-                      重新加载
-                  </Button>
-                  <Button size="small" icon={<CopyOutlined />} onClick={handleCopyDdl} disabled={!ddlText.trim()}>
-                      复制 DDL
-                  </Button>
-                  {layout === 'side' && (
-                      <Button size="small" onClick={() => setDdlViewLayout('bottom')}>
-                          关闭
-                      </Button>
-                  )}
-              </div>
-          </div>
-          <div className="gn-v2-data-grid-ddl-code">
-              <Editor
-                  height="100%"
-                  language="sql"
-                  theme={darkMode ? "transparent-dark" : "transparent-light"}
-                  value={ddlLoading ? '正在加载 DDL...' : ddlText}
-                  options={{
-                      readOnly: true,
-                      minimap: { enabled: false },
-                      scrollBeyondLastLine: false,
-                      wordWrap: "off",
-                      fontSize: 12,
-                      tabSize: 2,
-                      automaticLayout: true,
-                  }}
-              />
-          </div>
-      </div>
-  );
-  const handleDdlSidebarResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const startX = event.clientX;
-      const startWidth = ddlSidebarWidth;
-      const moveHandler = (moveEvent: MouseEvent) => {
-          const nextWidth = Math.max(320, Math.min(760, startWidth + (startX - moveEvent.clientX)));
-          if (ddlSidebarResizeRef.current) {
-              ddlSidebarResizeRef.current.previewWidth = nextWidth;
-          }
-          setDdlSidebarResizePreviewX(moveEvent.clientX);
-      };
-      const upHandler = () => {
-          const nextWidth = ddlSidebarResizeRef.current?.previewWidth ?? startWidth;
-          setDdlSidebarWidth(nextWidth);
-          setDdlSidebarResizePreviewX(null);
-          document.removeEventListener('mousemove', moveHandler);
-          document.removeEventListener('mouseup', upHandler);
-          ddlSidebarResizeRef.current = null;
-      };
-
-      ddlSidebarResizeRef.current = { startX, startWidth, previewWidth: startWidth, moveHandler, upHandler };
-      document.addEventListener('mousemove', moveHandler);
-      document.addEventListener('mouseup', upHandler);
-  }, [ddlSidebarWidth]);
-  const renderV2DdlSideWorkspace = () => (
-      <div
-          data-grid-ddl-layout="side"
-          className="gn-v2-data-grid-split-workspace"
-          style={{
-              gridTemplateColumns: `minmax(0, 1fr) 8px ${ddlSidebarWidth}px`,
-              '--gn-v2-ddl-sidebar-width': `${ddlSidebarWidth}px`,
-          } as React.CSSProperties}
-      >
-          <div className="gn-v2-data-grid-split-main">
-              {renderDataTableView()}
-          </div>
-          <div
-              data-grid-ddl-resizer="true"
-              className="gn-v2-data-grid-ddl-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              aria-valuemin={320}
-              aria-valuemax={760}
-              aria-valuenow={ddlSidebarWidth}
-              onMouseDown={handleDdlSidebarResizeStart}
-          />
-          <aside aria-label="表 DDL 侧栏" className="gn-v2-data-grid-ddl-sidebar">
-              {renderV2DdlView('side')}
-          </aside>
-          <div
-              data-grid-ddl-resize-preview="true"
-              className="gn-v2-data-grid-ddl-resize-preview"
-              style={{
-                  opacity: ddlSidebarResizePreviewX === null ? 0 : 1,
-                  transform: ddlSidebarResizePreviewX === null ? undefined : `translateX(${ddlSidebarResizePreviewX}px)`,
-              }}
-          />
-      </div>
-  );
-  const renderV2ErView = () => (
-      <div className="gn-v2-data-grid-er-view">
-          <div className="gn-v2-data-grid-er-node is-main">
-              <span>TABLE</span>
-              <strong>{tableName || '查询结果'}</strong>
-              <small>{displayOutputColumnNames.length} fields</small>
-          </div>
-          <div className="gn-v2-data-grid-er-lines">
-              <span />
-              <span />
-          </div>
-          <div className="gn-v2-data-grid-er-side">
-              {displayOutputColumnNames.slice(0, 6).map((columnName) => (
-                  <div className="gn-v2-data-grid-er-node" key={columnName}>
-                      <span>FIELD</span>
-                      <strong>{columnName}</strong>
-                      <small>{(columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type || '-'}</small>
-                  </div>
-              ))}
-          </div>
-      </div>
-  );
-  const toggleDataPanel = () => {
-      const next = !dataPanelOpen;
-      setDataPanelOpen(next);
-      if (!next) {
-          setFocusedCellInfo(null);
-          setDataPanelValue('');
-          setDataPanelIsJson(false);
-          dataPanelDirtyRef.current = false;
-      }
-  };
   const pageFindContent = (
-      <Tooltip title="仅查找当前页已加载数据，不改变 WHERE 条件">
-          <div data-grid-page-find="true" className={isV2Ui ? 'gn-v2-data-grid-page-find' : undefined} style={isV2Ui ? undefined : { display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Input
-                  {...noAutoCapInputProps}
-                  allowClear
-                  size="small"
-                  prefix={<SearchOutlined />}
-                  placeholder="当前页查找..."
-                  value={pageFindText}
-                  onChange={(event) => setPageFindText(event.target.value)}
-                  style={isV2Ui ? undefined : { width: 220 }}
-              />
-              <Button
-                  data-grid-page-find-prev="true"
-                  size="small"
-                  icon={<LeftOutlined />}
-                  disabled={pageFindMatches.length === 0}
-                  onClick={() => handleNavigatePageFind('previous')}
-              >
-                  {isV2Ui ? null : '上一个'}
-              </Button>
-              <Button
-                  data-grid-page-find-next="true"
-                  size="small"
-                  icon={<RightOutlined />}
-                  disabled={pageFindMatches.length === 0}
-                  onClick={() => handleNavigatePageFind('next')}
-              >
-                  {isV2Ui ? null : '下一个'}
-              </Button>
-              {normalizedPageFindText && (
-                  <span aria-live="polite" style={isV2Ui ? undefined : { fontSize: 12, color: darkMode ? '#999' : '#666', whiteSpace: 'nowrap' }}>
-                      {pageFindMatches.length > 0 ? `${activePageFindPosition} / ${pageFindMatches.length} · ` : ''}匹配 {pageFindSummary.occurrenceCount} 处 / {pageFindSummary.matchedCellCount} 个单元格
-                  </span>
-              )}
-          </div>
-      </Tooltip>
+      <DataGridPageFind
+          isV2Ui={isV2Ui}
+          darkMode={darkMode}
+          inputProps={noAutoCapInputProps as Record<string, unknown>}
+          pageFindText={pageFindText}
+          normalizedPageFindText={normalizedPageFindText}
+          hasMatches={pageFindMatches.length > 0}
+          activePageFindPosition={activePageFindPosition}
+          matchCount={pageFindMatches.length}
+          occurrenceCount={pageFindSummary.occurrenceCount}
+          matchedCellCount={pageFindSummary.matchedCellCount}
+          onPageFindTextChange={setPageFindText}
+          onNavigatePrevious={() => handleNavigatePageFind('previous')}
+          onNavigateNext={() => handleNavigatePageFind('next')}
+      />
   );
   const resultViewSwitcher = (
-      <div
-          data-grid-view-switcher="true"
-          className={isV2Ui ? 'gn-v2-data-grid-result-switcher' : undefined}
-          style={isV2Ui ? undefined : { display: 'flex', alignItems: 'center', gap: 8 }}
-      >
-          <span style={isV2Ui ? undefined : { fontSize: 12, color: darkMode ? '#999' : '#666' }}>结果视图</span>
-          <Segmented
-              size="small"
-              value={viewMode === 'json' || viewMode === 'text' ? viewMode : 'table'}
-              options={[
-                  { label: '表格', value: 'table' },
-                  { label: 'JSON', value: 'json' },
-                  { label: '文本', value: 'text' }
-              ]}
-              onChange={(val) => handleViewModeChange(String(val) as GridViewMode)}
-          />
-      </div>
+      <DataGridResultViewSwitcher
+          isV2Ui={isV2Ui}
+          darkMode={darkMode}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
+      />
   );
-  const paginationContent = pagination ? (
-      <div className={`${isV2Ui ? 'gn-v2-data-grid-pagination-wrap ' : ''}data-grid-pagination-wrap`} style={isV2Ui ? undefined : { padding: '12px 0 0', borderTop: 'none', display: 'flex', justifyContent: 'flex-end' }}>
-          {isV2Ui ? (
-              <div className="data-grid-pagination-shell" data-grid-v2-pagination="true">
-                  <div className="data-grid-pagination-summary" aria-live="polite">
-                      <span className="data-grid-pagination-summary-value">{paginationV2SummaryText}</span>
-                  </div>
-                  <Button
-                      data-grid-v2-pagination-prev="true"
-                      size="small"
-                      icon={<LeftOutlined />}
-                      disabled={!onPageChange || pagination.current <= 1}
-                      onClick={() => handleV2PageStep('previous')}
-                  />
-                  <div className="data-grid-pagination-page-chip" data-grid-v2-page-chip="true">
-                      <strong>{pagination.current}</strong>
-                      <span>/</span>
-                      <span>{paginationTotalPages}</span>
-                  </div>
-                  <Button
-                      data-grid-v2-pagination-next="true"
-                      size="small"
-                      icon={<RightOutlined />}
-                      disabled={!onPageChange || pagination.current >= paginationTotalPages}
-                      onClick={() => handleV2PageStep('next')}
-                  />
-                  <Select
-                      size="small"
-                      popupMatchSelectWidth={false}
-                      value={String(pagination.pageSize)}
-                      onChange={handlePageSizeChange}
-                      options={paginationPageSizeOptions.map((value) => ({ value, label: `${value} /页` }))}
-                      className="data-grid-pagination-size-select"
-                      aria-label="每页条数"
-                  />
-              </div>
-          ) : (
-              <div className="data-grid-pagination-shell">
-                  <div className="data-grid-pagination-summary" aria-live="polite">
-                      <span className="data-grid-pagination-kicker">结果集</span>
-                      <span className="data-grid-pagination-summary-value">{paginationSummaryText}</span>
-                  </div>
-                  <div className="data-grid-pagination-page-chip">{paginationPageText}</div>
-                  <Pagination
-                      current={pagination.current}
-                      pageSize={pagination.pageSize}
-                      total={paginationControlTotal}
-                      showSizeChanger={false}
-                      onChange={onPageChange}
-                      showTitle={false}
-                      size="small"
-                      itemRender={(_page, type, originalElement) => {
-                          if (type === 'prev') {
-                              return <span className="data-grid-pagination-nav-icon" aria-hidden="true"><LeftOutlined /></span>;
-                          }
-                          if (type === 'next') {
-                              return <span className="data-grid-pagination-nav-icon" aria-hidden="true"><RightOutlined /></span>;
-                          }
-                          return originalElement;
-                      }}
-                  />
-                  <Select
-                      size="small"
-                      popupMatchSelectWidth={false}
-                      value={String(pagination.pageSize)}
-                      onChange={handlePageSizeChange}
-                      options={paginationPageSizeOptions.map((value) => ({ value, label: `${value} 条 / 页` }))}
-                      className="data-grid-pagination-size-select"
-                      aria-label="每页条数"
-                  />
-              </div>
-          )}
-      </div>
-  ) : null;
-  const renderSecondaryActions = () => {
-      if (isV2Ui) {
-          const viewTabItems: Array<{ key: GridViewMode; label: string; icon: React.ReactNode; disabled?: boolean }> = [
-              { key: 'table', label: '数据预览', icon: <TableOutlined /> },
-              { key: 'fields', label: '字段信息', icon: <FileTextOutlined /> },
-              { key: 'ddl', label: '查看 DDL', icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
-              { key: 'er', label: 'ER 图', icon: <LinkOutlined /> },
-          ];
-          return (
-              <div data-grid-secondary-actions="true" className="gn-v2-data-grid-statusbar">
-                  <div className="gn-v2-data-grid-view-tabs">
-                      {viewTabItems.map((item) => (
-                          <Button
-                              data-grid-ddl-action={item.key === 'ddl' && canViewDdl ? 'true' : undefined}
-                              key={item.key}
-                              size="small"
-                              type={viewMode === item.key || (item.key === 'table' && (viewMode === 'json' || viewMode === 'text')) ? 'primary' : 'text'}
-                              icon={item.icon}
-                              disabled={item.disabled}
-                              loading={item.key === 'ddl' && ddlLoading}
-                              onClick={() => {
-                                  if (item.key === 'table') {
-                                      handleViewModeChange('table');
-                                      return;
-                                  }
-                                  handleViewModeChange(item.key);
-                              }}
-                          >
-                              {item.label}
-                          </Button>
-                      ))}
-                  </div>
-                  <div className="gn-v2-toolbar-divider" />
-                  {resultViewSwitcher}
-                  <Popover
-                      trigger="click"
-                      placement="topRight"
-                      content={columnInfoSettingContent}
-                  >
-                      <Button
-                          data-grid-column-display-action="true"
-                          size="small"
-                          type={showColumnComment || showColumnType ? 'primary' : 'text'}
-                          icon={<FileTextOutlined />}
-                      >
-                          字段显示
-                      </Button>
-                  </Popover>
-                  <div className="gn-v2-data-grid-status-center">
-                      <span className="gn-v2-data-grid-live">live</span>
-                      <span>{mergedDisplayData.length} 行</span>
-                      <span>未提交 {pendingChangeCount}</span>
-                  </div>
-                  {pageFindContent}
-                  <div className="gn-v2-data-grid-pagination-spacer" aria-hidden="true" />
-                  {paginationContent}
-              </div>
-          );
+  const paginationContent = (
+      <DataGridPaginationBar
+          isV2Ui={isV2Ui}
+          pagination={pagination}
+          paginationV2SummaryText={paginationV2SummaryText}
+          paginationSummaryText={paginationSummaryText}
+          paginationPageText={paginationPageText}
+          paginationControlTotal={paginationControlTotal}
+          paginationTotalPages={paginationTotalPages}
+          paginationPageSizeOptions={paginationPageSizeOptions}
+          onPageChange={onPageChange}
+          onPageSizeChange={handlePageSizeChange}
+          onV2PageStep={handleV2PageStep}
+      />
+  );
+
+  const rowEditorFields = useMemo(() => (
+      displayColumnNames.map((col) => {
+          const sample = rowEditorDisplayRef.current?.[col] ?? '';
+          const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
+          const isJson = looksLikeJsonText(sample);
+          const useTextArea = isJson || sample.includes('\n') || sample.length >= 160;
+          const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
+          const pickerType = getTemporalPickerType(colMeta?.type);
+          const isTemporalValue = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
+          const isWritable = isWritableResultColumn(col, effectiveEditLocator);
+          return {
+              columnName: col,
+              sample,
+              placeholder,
+              isJson,
+              useTextArea,
+              pickerType,
+              isTemporalValue,
+              isWritable,
+          };
+      })
+  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
+
+  const handleRefreshGrid = useCallback(() => {
+      setAddedRows([]);
+      setModifiedRows({});
+      setDeletedRowKeys(new Set());
+      setSelectedRowKeys([]);
+      if (onReload) onReload();
+  }, [onReload]);
+
+  const handleToggleFilterWithDefault = useCallback(() => {
+      if (!onToggleFilter) return;
+      onToggleFilter();
+      if (filterConditions.length === 0 && !showFilter) addFilter();
+  }, [onToggleFilter, filterConditions.length, showFilter]);
+
+  const handleToggleCellEditMode = useCallback(() => {
+      const next = !cellEditMode;
+      if (!next) {
+          closeCellEditMode();
+      } else {
+          cellEditModeRef.current = true;
+          setCellEditMode(true);
+          resetCellSelection();
       }
-      return (
-          <>
-              <div
-                  data-grid-secondary-actions="true"
-                  style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 10,
-                      flexWrap: 'wrap',
-                      padding: '4px 0 0',
-                  }}
-              >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <Button
-                          icon={<EditOutlined />}
-                          type={dataPanelOpen ? 'primary' : 'default'}
-                          disabled={!isTableSurfaceActive}
-                          onClick={toggleDataPanel}
-                      >
-                          数据预览
-                      </Button>
-                      <Popover
-                          trigger="click"
-                          placement="bottomRight"
-                          content={columnInfoSettingContent}
-                      >
-                          <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>字段信息</Button>
-                      </Popover>
-                      {canViewDdl && (
-                          <Button
-                              data-grid-ddl-action="true"
-                              icon={<FileTextOutlined />}
-                              loading={ddlLoading}
-                              onClick={() => handleOpenTableDdl()}
-                          >
-                              查看 DDL
-                          </Button>
-                      )}
-                      {pageFindContent}
-                  </div>
-                  {resultViewSwitcher}
-              </div>
-              {paginationContent}
-          </>
-      );
-  };
+      void message.info(next ? '已进入单元格编辑模式，可拖拽选择多个单元格' : '已退出单元格编辑模式').then();
+  }, [cellEditMode, closeCellEditMode, resetCellSelection]);
+
+  const handleRequestAiInsight = useCallback(() => {
+      const sampleData = mergedDisplayData.slice(0, 10);
+      const prompt = `请帮我分析以下查询结果数据（取前 ${sampleData.length} 条示例）：\n\`\`\`json\n${JSON.stringify(sampleData, null, 2)}\n\`\`\`\n\n请分析数据特征、发现规律，或者给出一些业务上的洞察。`;
+      const store = useStore.getState();
+      const wasClosed = !store.aiPanelVisible;
+      if (wasClosed) store.setAIPanelVisible(true);
+      setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+      }, wasClosed ? 350 : 0);
+  }, [mergedDisplayData]);
+
+  const handleToggleTotalCount = useCallback(() => {
+      if (!onRequestTotalCount) return;
+      if (pagination?.totalCountLoading) {
+          if (onCancelTotalCount) onCancelTotalCount();
+          return;
+      }
+      onRequestTotalCount();
+  }, [onCancelTotalCount, onRequestTotalCount, pagination?.totalCountLoading]);
 
   return (
     <div ref={rootRef} className={`${gridId}${cellEditMode ? ' cell-edit-mode' : ''} data-grid-root${isV2Ui ? ' gn-v2-data-grid' : ''}`} style={{ '--gonavi-header-min-height': `${headerCellMinHeight}px`, flex: '1 1 auto', height: '100%', overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, background: 'transparent' } as React.CSSProperties}>
-		       {/* Toolbar + Filter Panel */}
-           <div className={isV2Ui ? 'gn-v2-data-grid-toolbar-frame' : undefined} style={{ margin: `${panelOuterGap}px 0 ${panelOuterGap}px 0`, border: `1px solid ${panelFrameColor}`, borderRadius: `${panelRadius}px`, background: bgFilter, overflow: 'hidden', boxSizing: 'border-box' }}>
-		        <div className="data-grid-toolbar-scroll" data-grid-primary-actions="true" style={{ padding: showFilter ? `${panelPaddingY}px ${panelPaddingX}px ${toolbarBottomPadding}px ${panelPaddingX}px` : `${panelPaddingY}px ${panelPaddingX}px`, border: 'none', borderRadius: 0, background: 'transparent', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap', minWidth: 0, overflowX: 'auto', overflowY: 'hidden', scrollbarGutter: 'stable', WebkitOverflowScrolling: 'touch', boxSizing: 'border-box' }}>
-                {isV2Ui && (
-                    <>
-                        <div className="gn-v2-data-grid-toolbar-title">
-                            <TableOutlined className="gn-v2-data-grid-icon" />
-                            <strong title={tableName || '查询结果'}>{tableName || '查询结果'}</strong>
-                            {dbName && <small title={dbName}>· {dbName}</small>}
-                        </div>
-                        {renderToolbarDivider()}
-                    </>
-                )}
-	            {onReload && <Button icon={<ReloadOutlined />} disabled={loading} onClick={() => {
-	                setAddedRows([]);
-	                setModifiedRows({});
-	               setDeletedRowKeys(new Set());
-	               setSelectedRowKeys([]);
-	               onReload();
-	           }}>刷新</Button>}
-
-	           {onToggleFilter && (
-	               <>
-	                   {renderToolbarDivider()}
-	                   <Button icon={<FilterOutlined />} type={showFilter ? 'primary' : 'default'} onClick={() => { 
-	                       onToggleFilter(); 
-	                       if (filterConditions.length === 0 && !showFilter) addFilter(); 
-	                   }}>筛选</Button>
-	               </>
-	           )}
-	           
-	           {canModifyData && (
-	               <>
-	                   {renderToolbarDivider()}
-	                   <Button icon={<PlusOutlined />} onClick={handleAddRow}>添加行</Button>
-	                   <Button
-	                       data-grid-copy-row-action="true"
-	                       icon={<CopyOutlined />}
-	                       disabled={selectedRowKeys.length === 0}
-	                       onClick={handleCopySelectedRowsForPaste}
-	                   >
-	                       复制行
-	                   </Button>
-	                   <Button
-	                       data-grid-paste-row-action="true"
-	                       icon={<VerticalAlignBottomOutlined />}
-	                       disabled={copiedRowsForPaste.length === 0}
-	                       onClick={handlePasteCopiedRowsAsNew}
-	                   >
-	                       {copiedRowsForPaste.length > 0 ? `粘贴行 (${copiedRowsForPaste.length})` : '粘贴行'}
-	                   </Button>
-	                   {allSelectedAreDeleted ? (
-                       <Button icon={<UndoOutlined />} disabled={selectedRowKeys.length === 0} onClick={handleUndoDeleteSelected}>撤销删除</Button>
-                   ) : (
-                       <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0} onClick={handleDeleteSelected}>删除选中</Button>
-                   )}
-	                   {selectedRowKeys.length > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeys.length}</span>}
-	                   {renderToolbarDivider()}
-	                   <Button
-                            data-grid-cell-editor-action="true"
-                            icon={<EditOutlined />}
-                            type={cellEditMode ? 'primary' : 'default'}
-                            onClick={() => {
-                                const next = !cellEditMode;
-                                if (!next) {
-                                    closeCellEditMode();
-                                } else {
-                                    cellEditModeRef.current = true;
-                                    setCellEditMode(true);
-                                    resetCellSelection();
-                                }
-                                void message.info(next ? '已进入单元格编辑模式，可拖拽选择多个单元格' : '已退出单元格编辑模式').then();
-                            }}
-                        >
-                            单元格编辑器
-                        </Button>
-                       {cellEditMode && selectedCells.size > 0 && (
-                           <>
-                               <Button
-                                   icon={<CopyOutlined />}
-                                   onClick={handleCopySelectedCellsToClipboard}
-                               >
-                                   复制选区 ({selectedCells.size})
-                               </Button>
-                               <Button
-                                   icon={<CopyOutlined />}
-                                   onClick={handleCopySelectedColumnsFromRow}
-                               >
-                                   复制选区列值 ({selectedCells.size})
-                               </Button>
-                                <Button
-                                    type="primary"
-                                    onClick={() => {
-                                        setBatchEditValue('');
-                                        setBatchEditSetNull(false);
-                                       setBatchEditModalOpen(true);
-                                   }}
-                                >
-                                    批量填充 ({selectedCells.size})
-                                </Button>
-                            </>
-                        )}
-                       {cellEditMode && copiedCellPatch && (
-                           <>
-                               <Button
-                                   icon={<VerticalAlignBottomOutlined />}
-                                   disabled={selectedRowKeys.length === 0}
-                                   onClick={() => handlePasteCopiedColumnsToSelectedRows()}
-                               >
-                                   粘贴到选中行 ({selectedRowKeys.length})
-                               </Button>
-                               <span style={{ fontSize: '12px', color: '#888' }}>
-                                   已复制 {Object.keys(copiedCellPatch.values).length} 列
-                               </span>
-	                           </>
-	                       )}
-	                   {renderToolbarDivider()}
-	                   <Button
-                           className={isV2Ui ? 'gn-v2-commit-button' : undefined}
-                           icon={<SaveOutlined />}
-                           type="primary"
-                           disabled={!hasChanges}
-                           onClick={handleCommit}
-                       >
-                           {isV2Ui ? (
-                               <>
-                                   <span>提交事务</span>
-                                   <span className="gn-v2-toolbar-kbd">{pendingChangeCount}</span>
-                               </>
-                           ) : `提交事务 (${pendingChangeCount})`}
-                       </Button>
-	                   {hasChanges && (
-	                       <Dropdown menu={{ items: [
-	                           {
-	                               key: 'preview-sql',
-	                               label: '生成预览 SQL',
-	                               icon: <ConsoleSqlOutlined />,
-	                               onClick: handlePreviewChanges,
-	                           }
-	                       ] }}>
-	                           <Button icon={<ConsoleSqlOutlined />}>预览SQL <DownOutlined /></Button>
-	                       </Dropdown>
-	                   )}
-	                   {hasChanges && (<Button icon={<UndoOutlined />} onClick={() => {
-	                        setAddedRows([]);
-                        setModifiedRows({});
-                        setDeletedRowKeys(new Set());
-                        setModifiedColumns({});
-                   }}>回滚</Button>)}
-               </>
-           )}
-
-           {(canImport || canExport) && (
-               <>
-                   {renderToolbarDivider()}
-                   {canImport && <Button icon={<ImportOutlined />} onClick={handleImport}>导入</Button>}
-                   {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
-               </>
-           )}
-
-           {isQueryResultExport && (
-               <>
-                   {renderToolbarDivider()}
-                   <Button
-                       data-grid-query-copy-action="true"
-                       icon={<CopyOutlined />}
-                       disabled={!canCopyQueryResult}
-                       onClick={handleCopyQueryResultCsv}
-                   >
-                       复制
-                   </Button>
-                   <Dropdown menu={{ items: queryResultCopyMenu }} disabled={!canCopyQueryResult}>
-                       <Button icon={<DownOutlined />} disabled={!canCopyQueryResult} />
-                   </Dropdown>
-               </>
-           )}
-
-           <>
-               {renderToolbarDivider()}
-               <Tooltip title="一键借助 AI 智能分析当前查询页数据">
-                   <Button 
-                       className={isV2Ui ? 'gn-v2-ai-insight-button' : undefined}
-                       icon={<RobotOutlined />} 
-                       style={legacyAiButtonStyle}
-                       onMouseEnter={(e) => {
-                           if (isV2Ui) return;
-                           e.currentTarget.style.background = darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.25), rgba(16,185,129,0.1))' : 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))';
-                           e.currentTarget.style.borderColor = '#10b981';
-                       }}
-                       onMouseLeave={(e) => {
-                           if (isV2Ui) return;
-                           e.currentTarget.style.background = darkMode ? 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))' : 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))';
-                           e.currentTarget.style.borderColor = darkMode ? 'rgba(16,185,129,0.3)' : 'rgba(16,185,129,0.4)';
-                       }}
-                       onClick={() => {
-                           const sampleData = mergedDisplayData.slice(0, 10);
-                           const prompt = `请帮我分析以下查询结果数据（取前 ${sampleData.length} 条示例）：\n\`\`\`json\n${JSON.stringify(sampleData, null, 2)}\n\`\`\`\n\n请分析数据特征、发现规律，或者给出一些业务上的洞察。`;
-                           const store = useStore.getState();
-                           const wasClosed = !store.aiPanelVisible;
-                           if (wasClosed) store.setAIPanelVisible(true);
-                           // 如果面板刚打开，需要等待组件挂载完成后再注入 prompt
-                           setTimeout(() => {
-                               window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
-                           }, wasClosed ? 350 : 0);
-                       }}
-                   >
-                       <span>{isV2Ui ? 'AI 洞察' : 'AI 数据洞察'}</span>
-                       {isV2Ui && aiShortcutLabel !== '-' && <span className="gn-v2-toolbar-kbd">{aiShortcutLabel}</span>}
-                   </Button>
-               </Tooltip>
-           </>
-
-           {prefersManualTotalCount && onRequestTotalCount && (
-               <>
-                   {renderToolbarDivider()}
-                   <Tooltip title={pagination?.totalCountLoading ? '取消本次精确总数统计（不会影响当前浏览）' : '按当前筛选统计精确总数'}>
-                       <Button
-                           icon={pagination?.totalCountLoading ? <CloseOutlined /> : <VerticalAlignBottomOutlined />}
-                           onClick={() => {
-                               if (pagination?.totalCountLoading) {
-                                   if (onCancelTotalCount) onCancelTotalCount();
-                                   return;
-                               }
-                               onRequestTotalCount();
-                           }}
-                       >
-                           {pagination?.totalCountLoading ? '取消统计' : '统计总数'}
-                       </Button>
-                   </Tooltip>
-               </>
-           )}
-
-           <div style={{ marginLeft: 'auto' }} />
-	          </div>
-
-       {showFilter && (
-           <div ref={filterPanelRef} className={isV2Ui ? 'gn-v2-smart-filter-panel' : undefined} style={{
-               padding: `${filterTopPadding}px ${panelPaddingX}px ${panelPaddingY}px ${panelPaddingX}px`,
-               background: 'transparent',
-               boxSizing: 'border-box',
-               display: 'flex',
-               flexDirection: 'column',
-           }}>
-               <div
-                   data-grid-quick-where="true"
-                   style={{
-                       display: 'flex',
-                       alignItems: 'center',
-                       gap: 10,
-                       padding: '10px 12px',
-                       marginBottom: 10,
-                       borderRadius: Math.max(10, panelRadius - 2),
-                       border: `1px solid ${panelFrameColor}`,
-                       background: darkMode ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.72)',
-                       boxSizing: 'border-box',
-                       minWidth: 0,
-                   }}
-               >
-                   <span
-                       style={{
-                           flex: '0 0 auto',
-                           minWidth: 58,
-                           height: 28,
-                           display: 'inline-flex',
-                           alignItems: 'center',
-                           justifyContent: 'center',
-                           borderRadius: 999,
-                           background: darkMode ? 'rgba(24,144,255,0.18)' : 'rgba(24,144,255,0.10)',
-                           border: `1px solid ${darkMode ? 'rgba(24,144,255,0.32)' : 'rgba(24,144,255,0.22)'}`,
-                           color: selectionAccentHex,
-                           fontSize: 12,
-                           fontWeight: 700,
-                           letterSpacing: '0.03em',
-                       }}
-                   >
-                       WHERE
-                   </span>
-                   <AutoComplete
-                       value={quickWhereDraft}
-                       options={quickWhereSuggestionOptions}
-                       onChange={setQuickWhereDraft}
-                       onOpenChange={setQuickWhereSuggestionsOpen}
-                       onInputKeyDown={(event) => {
-                           const isClipboardShortcut = (event.metaKey || event.ctrlKey) && !event.altKey && ['c', 'v', 'x'].includes(String(event.key || '').toLowerCase());
-                           if (isClipboardShortcut) {
-                               event.stopPropagation();
-                               return;
-                           }
-                           if (!shouldApplyQuickWhereOnEnter({
-                               key: event.key,
-                               shiftKey: event.shiftKey,
-                               isComposing: Boolean((event.nativeEvent as any)?.isComposing),
-                               suggestionsOpen: quickWhereSuggestionsOpen,
-                               suggestionCount: quickWhereSuggestionOptions.length,
-                               activeSuggestionId: event.currentTarget.getAttribute('aria-activedescendant'),
-                           })) {
-                               return;
-                           }
-                           event.preventDefault();
-                           applyQuickWhereCondition();
-                       }}
-                       onSelect={(value, option) => {
-                           setQuickWhereDraft(resolveWhereConditionSelectedValue({
-                               selectedValue: value,
-                               currentInput: quickWhereDraft,
-                               insertText: (option as any)?.insertText,
-                           }));
-                       }}
-                       style={{ flex: '1 1 320px', minWidth: 220 }}
-                       popupMatchSelectWidth={420}
-                   >
-                       <Input
-                           {...noAutoCapInputProps}
-                           allowClear
-                           data-grid-quick-where-input="true"
-                           onCopy={stopQuickWhereClipboardPropagation}
-                           onCut={stopQuickWhereClipboardPropagation}
-                           onPaste={handleQuickWherePaste}
-                           placeholder={dbType === 'mongodb' ? '输入 MongoDB JSON 查询对象，例如 {"status":"A"}' : '输入 WHERE 后面的条件，例如 status = 1 AND name LIKE \'A%\''}
-                       />
-                   </AutoComplete>
-                   <Button size="small" type="primary" onClick={() => applyQuickWhereCondition()}>
-                       应用 WHERE
-                   </Button>
-                   <Button size="small" onClick={clearQuickWhereCondition} disabled={!quickWhereDraft && !quickWhereCondition}>
-                       清空
-                   </Button>
-               </div>
-               {/* 筛选条件 + 排序区域：固定最大高度，超出后可滚动，避免条件过多挤压数据表 */}
-               <div style={{ maxHeight: 200, overflowY: 'auto', overflowX: 'hidden', flex: '0 1 auto' }}>
-               {filterConditions.map((cond, condIndex) => (
-                   <div key={cond.id} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start', opacity: cond.enabled === false ? 0.58 : 1 }}>
-                       <Checkbox
-                           checked={cond.enabled !== false}
-                           onChange={e => updateFilter(cond.id, 'enabled', e.target.checked)}
-                            style={{ marginTop: 6, flex: '0 0 auto', whiteSpace: 'nowrap' }}
-                       >
-                           启用
-                       </Checkbox>
-                        <Select
-                            style={{ width: 96, minWidth: 96, maxWidth: 96, flex: '0 0 96px' }}
-                            value={condIndex === 0 ? '__FIRST__' : (cond.logic === 'OR' ? 'OR' : 'AND')}
-                            onChange={v => updateFilter(cond.id, 'logic', v)}
-                            options={condIndex === 0 ? [{ value: '__FIRST__', label: '首条' }] : (filterLogicOptions as any)}
-                            disabled={condIndex === 0}
-                        />
-                        <Select
-                            style={FILTER_FIELD_SELECT_STYLE}
-                            value={cond.column}
-                            onChange={v => updateFilter(cond.id, 'column', v)}
-                            options={gridFieldSelectOptions}
-                            showSearch
-                            optionFilterProp="label"
-                            optionRender={renderGridFieldSelectOption}
-                            popupMatchSelectWidth={FILTER_FIELD_POPUP_WIDTH}
-                            filterOption={(input, option) =>
-                                String(option?.label ?? '')
-                                    .toLowerCase()
-                                    .includes(String(input || '').trim().toLowerCase())
-                            }
-                            placeholder="搜索字段名"
-                            disabled={cond.op === 'CUSTOM'}
-                        />
-                       <Select
-                           style={{ width: 140 }}
-                           value={cond.op}
-                           onChange={v => updateFilter(cond.id, 'op', v)}
-                           options={filterOpOptions as any}
-                       />
-
-                       {cond.op === 'CUSTOM' ? (
-                           <Input.TextArea
-                               {...noAutoCapInputProps}
-                               style={{ flex: 1 }}
-                               autoSize={{ minRows: 1, maxRows: 4 }}
-                               value={cond.value}
-                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
-                               placeholder="输入自定义 WHERE 表达式（不需要再写 WHERE），例如：status IN ('A','B')"
-                           />
-                       ) : isListOp(cond.op) ? (
-                           <Input.TextArea
-                               {...noAutoCapInputProps}
-                               style={{ flex: 1 }}
-                               autoSize={{ minRows: 1, maxRows: 4 }}
-                               value={cond.value}
-                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
-                               placeholder="多个值用逗号或换行分隔"
-                           />
-                       ) : isBetweenOp(cond.op) ? (
-                           <>
-                               <Input
-                                   {...noAutoCapInputProps}
-                                   style={{ width: 220 }}
-                                   value={cond.value}
-                                   onChange={e => updateFilter(cond.id, 'value', e.target.value)}
-                                   placeholder="开始值"
-                               />
-                               <Input
-                                   {...noAutoCapInputProps}
-                                   style={{ width: 220 }}
-                                   value={cond.value2 || ''}
-                                   onChange={e => updateFilter(cond.id, 'value2', e.target.value)}
-                                   placeholder="结束值"
-                               />
-                           </>
-                       ) : isNoValueOp(cond.op) ? (
-                           <Input {...noAutoCapInputProps} style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
-                       ) : (
-                           <Input
-                               {...noAutoCapInputProps}
-                               style={{ width: 280 }}
-                               value={cond.value}
-                               onChange={e => updateFilter(cond.id, 'value', e.target.value)}
-                           />
-                       )}
-
-                       <Button icon={<CloseOutlined />} onClick={() => removeFilter(cond.id)} type="text" danger />
-                   </div>
-               ))}
-                {onSort && (
-                    <div style={{ paddingTop: filterConditions.length > 0 ? 4 : 0, borderTop: filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
-                        {sortInfo.map((s, idx) => (
-                            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', opacity: s.enabled === false ? 0.58 : 1 }}>
-                                <Checkbox
-                                    checked={s.enabled !== false}
-                                    onChange={e => {
-                                        const next = [...sortInfo];
-                                        next[idx] = { ...next[idx], enabled: e.target.checked };
-                                        onSort(JSON.stringify(next), '');
-                                    }}
-                                    style={{ flex: '0 0 auto' }}
-                                />
-                                <span style={{ fontSize: 12, color: 'inherit', opacity: 0.7, whiteSpace: 'nowrap', minWidth: 32 }}>{idx === 0 ? '排序' : '然后'}</span>
-                                <Select
-                                    style={FILTER_FIELD_SELECT_STYLE}
-                                    value={s.columnKey || undefined}
-                                    onChange={v => {
-                                        const next = [...sortInfo];
-                                        if (!v) { next.splice(idx, 1); } else { next[idx] = { ...next[idx], columnKey: v }; }
-                                        const filtered = next.filter(si => si.columnKey);
-                                        onSort(JSON.stringify(filtered), '');
-                                    }}
-                                    options={displayColumnNames
-                                        .filter(c => c === s.columnKey || !sortInfo.some(si => si.columnKey === c))
-                                        .map(c => ({ value: c, label: c, title: c }))}
-                                    showSearch
-                                    optionFilterProp="label"
-                                    optionRender={renderGridFieldSelectOption}
-                                    popupMatchSelectWidth={FILTER_FIELD_POPUP_WIDTH}
-                                    filterOption={(input, option) =>
-                                        String(option?.label ?? '')
-                                            .toLowerCase()
-                                            .includes(String(input || '').trim().toLowerCase())
-                                    }
-                                    placeholder="选择排序字段"
-                                    allowClear
-                                    onClear={() => {
-                                        const next = sortInfo.filter((_, i) => i !== idx);
-                                        onSort(JSON.stringify(next), '');
-                                    }}
-                                />
-                                <Select
-                                    style={{ width: 110 }}
-                                    value={s.order || 'ascend'}
-                                    onChange={v => {
-                                        const next = [...sortInfo];
-                                        next[idx] = { ...next[idx], order: v };
-                                        onSort(JSON.stringify(next), '');
-                                    }}
-                                    options={[
-                                        { value: 'ascend', label: '升序 ↑' },
-                                        { value: 'descend', label: '降序 ↓' },
-                                    ]}
-                                    disabled={!s.columnKey}
-                                />
-                                <Button icon={<CloseOutlined />} type="text" danger size="small" onClick={() => {
-                                    const next = sortInfo.filter((_, i) => i !== idx);
-                                    onSort(JSON.stringify(next), '');
-                                }} />
-                            </div>
-                        ))}
-                    </div>
-                )}
-               </div>
-               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: '0 0 auto', marginTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 4 : 0, paddingTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? 6 : 0, borderTop: (onSort && sortInfo.length > 0) || filterConditions.length > 0 ? `1px dashed ${panelFrameColor}` : 'none' }}>
-                   <Button type="primary" ghost onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
-                   {onSort && (
-                       <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={() => {
-                           const next = [...sortInfo, { columnKey: displayColumnNames.find(c => !sortInfo.some(s => s.columnKey === c)) || displayColumnNames[0] || '', order: 'ascend', enabled: true }];
-                           onSort(JSON.stringify(next), '');
-                       }} disabled={sortInfo.length >= displayColumnNames.length}>添加排序</Button>
-                   )}
-                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
-                   <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: true })))}>全启用</Button>
-                   <Button size="small" onClick={() => setFilterConditions(prev => prev.map(c => ({ ...c, enabled: false })))}>全停用</Button>
-                   <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
-                   <Button type="primary" onClick={applyFilters} size="small">应用</Button>
-                   <Button size="small" icon={<ClearOutlined />} onClick={() => {
-                       setFilterConditions([]);
-                       clearQuickWhereCondition();
-                       if (onApplyFilter) onApplyFilter([]);
-                       if (onSort) onSort('', '');
-                   }}>清除</Button>
-               </div>
-           </div>
-       )}
-       </div>
+        <DataGridToolbarFrame
+            isV2Ui={isV2Ui}
+            tableName={tableName}
+            dbName={dbName}
+            loading={loading}
+            darkMode={darkMode}
+            bgFilter={bgFilter}
+            panelFrameColor={panelFrameColor}
+            panelRadius={panelRadius}
+            panelOuterGap={panelOuterGap}
+            panelPaddingY={panelPaddingY}
+            panelPaddingX={panelPaddingX}
+            toolbarBottomPadding={toolbarBottomPadding}
+            filterTopPadding={filterTopPadding}
+            selectionAccentHex={selectionAccentHex}
+            toolbarDividerColor={toolbarDividerColor}
+            showFilter={showFilter}
+            filterPanelRef={filterPanelRef}
+            onReload={onReload}
+            onToggleFilter={onToggleFilter}
+            canModifyData={canModifyData}
+            selectedRowKeysLength={selectedRowKeys.length}
+            copiedRowsForPasteLength={copiedRowsForPaste.length}
+            allSelectedAreDeleted={allSelectedAreDeleted}
+            cellEditMode={cellEditMode}
+            selectedCellsSize={selectedCells.size}
+            copiedCellPatchColumnCount={copiedCellPatch ? Object.keys(copiedCellPatch.values).length : 0}
+            hasChanges={hasChanges}
+            pendingChangeCount={pendingChangeCount}
+            canImport={canImport}
+            canExport={canExport}
+            isQueryResultExport={isQueryResultExport}
+            canCopyQueryResult={canCopyQueryResult}
+            prefersManualTotalCount={prefersManualTotalCount && !!onRequestTotalCount}
+            aiShortcutLabel={aiShortcutLabel}
+            legacyAiButtonStyle={legacyAiButtonStyle}
+            paginationTotalCountLoading={pagination?.totalCountLoading}
+            filterConditions={filterConditions}
+            sortInfo={sortInfo}
+            displayColumnNames={displayColumnNames}
+            quickWhereDraft={quickWhereDraft}
+            quickWhereCondition={quickWhereCondition}
+            quickWhereSuggestionsOpen={quickWhereSuggestionsOpen}
+            quickWhereSuggestionOptions={quickWhereSuggestionOptions}
+            gridFieldSelectOptions={gridFieldSelectOptions}
+            filterLogicOptions={filterLogicOptions}
+            filterOpOptions={filterOpOptions}
+            renderGridFieldSelectOption={renderGridFieldSelectOption}
+            noAutoCapInputProps={noAutoCapInputProps as Record<string, unknown>}
+            filterFieldSelectStyle={FILTER_FIELD_SELECT_STYLE}
+            filterFieldPopupWidth={FILTER_FIELD_POPUP_WIDTH}
+            exportMenu={exportMenu}
+            queryResultCopyMenu={queryResultCopyMenu}
+            dbType={dbType}
+            onResetPendingChanges={() => {
+                setAddedRows([]);
+                setModifiedRows({});
+                setDeletedRowKeys(new Set());
+                setModifiedColumns({});
+            }}
+            onRefresh={handleRefreshGrid}
+            onToggleFilterClick={handleToggleFilterWithDefault}
+            onAddRow={handleAddRow}
+            onCopySelectedRowsForPaste={handleCopySelectedRowsForPaste}
+            onPasteCopiedRowsAsNew={handlePasteCopiedRowsAsNew}
+            onUndoDeleteSelected={handleUndoDeleteSelected}
+            onDeleteSelected={handleDeleteSelected}
+            onToggleCellEditMode={handleToggleCellEditMode}
+            onCopySelectedCellsToClipboard={handleCopySelectedCellsToClipboard}
+            onCopySelectedColumnsFromRow={handleCopySelectedColumnsFromRow}
+            onOpenBatchEditModal={openBatchEditModal}
+            onPasteCopiedColumnsToSelectedRows={() => handlePasteCopiedColumnsToSelectedRows()}
+            onCommit={handleCommit}
+            onPreviewChanges={handlePreviewChanges}
+            onImport={handleImport}
+            onCopyQueryResultCsv={handleCopyQueryResultCsv}
+            onRequestAiInsight={handleRequestAiInsight}
+            onToggleTotalCount={handleToggleTotalCount}
+            onQuickWhereDraftChange={setQuickWhereDraft}
+            onQuickWhereSuggestionsOpenChange={setQuickWhereSuggestionsOpen}
+            onQuickWhereKeyDown={(event) => {
+                const isClipboardShortcut = (event.metaKey || event.ctrlKey) && !event.altKey && ['c', 'v', 'x'].includes(String(event.key || '').toLowerCase());
+                if (isClipboardShortcut) {
+                    event.stopPropagation();
+                    return;
+                }
+                if (!shouldApplyQuickWhereOnEnter({
+                    key: event.key,
+                    shiftKey: event.shiftKey,
+                    isComposing: Boolean((event.nativeEvent as any)?.isComposing),
+                    suggestionsOpen: quickWhereSuggestionsOpen,
+                    suggestionCount: quickWhereSuggestionOptions.length,
+                    activeSuggestionId: event.currentTarget.getAttribute('aria-activedescendant'),
+                })) {
+                    return;
+                }
+                event.preventDefault();
+                applyQuickWhereCondition();
+            }}
+            onQuickWhereSelect={(value, option) => {
+                setQuickWhereDraft(resolveWhereConditionSelectedValue({
+                    selectedValue: value,
+                    currentInput: quickWhereDraft,
+                    insertText: (option as any)?.insertText,
+                }));
+            }}
+            onQuickWhereCopy={stopQuickWhereClipboardPropagation}
+            onQuickWhereCut={stopQuickWhereClipboardPropagation}
+            onQuickWherePaste={handleQuickWherePaste}
+            onApplyQuickWhere={() => applyQuickWhereCondition()}
+            onClearQuickWhere={clearQuickWhereCondition}
+            updateFilter={updateFilter}
+            removeFilter={removeFilter}
+            addFilter={addFilter}
+            isListOp={isListOp}
+            isBetweenOp={isBetweenOp}
+            isNoValueOp={isNoValueOp}
+            enableSortControls={!!onSort}
+            onApplySortInfo={applySortInfo}
+            onApplyFilters={applyFilters}
+            onEnableAllFilters={applyAllFiltersEnabled}
+            onDisableAllFilters={applyAllFiltersDisabled}
+            onClearFiltersAndSorts={clearAllFiltersAndSorts}
+        />
 
 	       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0, display: 'flex', flexDirection: 'column', background: bgContent, borderRadius: panelRadius, border: `1px solid ${panelFrameColor}`, boxSizing: 'border-box' }}>
 	        {contextHolder}
-            <Modal
-                title="编辑行"
-                open={rowEditorOpen}
-                onCancel={closeRowEditor}
-                width={980}
-                destroyOnHidden
-                maskClosable={false}
-                footer={[
-                    <Button key="cancel" onClick={closeRowEditor}>取消</Button>,
-                    <Button key="ok" type="primary" onClick={applyRowEditor}>应用</Button>,
-                ]}
-            >
-                <div style={{ marginBottom: 8, color: '#888', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span>{tableName ? `${tableName}` : ''}</span>
-                    <span>{rowEditorRowKey ? `rowKey: ${rowEditorRowKey}` : ''}</span>
-                </div>
-                <Form form={rowEditorForm} layout="vertical">
-                    <div className="custom-scrollbar" style={{ maxHeight: '62vh', overflow: 'auto', paddingRight: 8 }}>
-                        {displayColumnNames.map((col: string) => {
-                            const sample = rowEditorDisplayRef.current?.[col] ?? '';
-                            const placeholder = rowEditorNullColsRef.current?.has(col) ? '(NULL)' : undefined;
-                            const isJson = looksLikeJsonText(sample);
-                            const useArea = isJson || sample.includes('\n') || sample.length >= 160;
-                            const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-                            const rowPickerType = getTemporalPickerType(colMeta?.type);
-                            const isRowDateTimeField = !!rowPickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
-                            const isWritable = isWritableResultColumn(col, effectiveEditLocator);
-
-                            return (
-                                <Form.Item key={col} label={col} style={{ marginBottom: 12 }}>
-                                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                                        <Form.Item name={col} noStyle>
-                                            {isRowDateTimeField ? (
-                                                rowPickerType === 'time' ? (
-                                                    <TimePicker
-                                                        style={{ flex: 1, width: '100%' }}
-                                                        format={TEMPORAL_FORMATS[rowPickerType]}
-                                                        placeholder={placeholder}
-                                                        needConfirm={false}
-                                                        disabled={!isWritable}
-                                                    />
-                                                ) : rowPickerType === 'datetime' ? (
-                                                    <DatePicker
-                                                        style={{ flex: 1, width: '100%' }}
-                                                        showTime
-                                                        format={TEMPORAL_FORMATS[rowPickerType]}
-                                                        placeholder={placeholder}
-                                                        needConfirm
-                                                        disabled={!isWritable}
-                                                    />
-                                                ) : (
-                                                    <DatePicker
-                                                        style={{ flex: 1, width: '100%' }}
-                                                        format={TEMPORAL_FORMATS[rowPickerType]}
-                                                        picker={rowPickerType as any}
-                                                        placeholder={placeholder}
-                                                        needConfirm={false}
-                                                        disabled={!isWritable}
-                                                    />
-                                                )
-                                            ) : useArea ? (
-                                                <Input.TextArea
-                                                    style={{ flex: 1 }}
-                                                    autoSize={{ minRows: isJson ? 4 : 1, maxRows: 10 }}
-                                                    placeholder={placeholder}
-                                                    disabled={!isWritable}
-                                                />
-                                            ) : (
-                                                <Input style={{ flex: 1 }} placeholder={placeholder} disabled={!isWritable} />
-                                            )}
-                                        </Form.Item>
-                                        <Button size="small" onClick={() => openRowEditorFieldEditor(col)} title="弹窗编辑" disabled={!isWritable}>...</Button>
-                                    </div>
-                                </Form.Item>
-                            );
-                        })}
-                    </div>
-                </Form>
-            </Modal>
-	        <Modal
-	            title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
-	            open={cellEditorOpen}
-	            onCancel={closeCellEditor}
-            destroyOnHidden
-            width={960}
-            maskClosable={false}
-            footer={[
-                <Button key="format" onClick={handleFormatJsonInEditor} disabled={!cellEditorIsJson}>
-                    格式化 JSON
-                </Button>,
-                <Button key="cancel" onClick={closeCellEditor}>取消</Button>,
-                <Button key="ok" type="primary" onClick={handleCellEditorSave}>保存</Button>,
-            ]}
-        >
-            <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-                {cellEditorMeta ? `${tableName || ''}${tableName ? '.' : ''}${cellEditorMeta.dataIndex}` : ''}
-            </div>
-            {cellEditorOpen && (
-                <Editor
-                    height="56vh"
-                    language={cellEditorIsJson ? "json" : "plaintext"}
-                    theme={darkMode ? "transparent-dark" : "transparent-light"}
-                    value={cellEditorValue}
-                    onChange={(val) => setCellEditorValue(val || '')}
-                    options={{
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: "on",
-                        fontSize: 14,
-                        tabSize: 2,
-                        automaticLayout: true,
-                    }}
-                />
-            )}
-        </Modal>
-
-        {/* 批量编辑弹窗 */}
-        <Modal
-            title={`批量填充 (${selectedCells.size} 个单元格)`}
-            open={batchEditModalOpen}
-            onCancel={() => setBatchEditModalOpen(false)}
-            onOk={handleBatchFillCells}
-            width={500}
-        >
-            <div style={{ marginBottom: 16 }}>
-                <Checkbox
-                    checked={batchEditSetNull}
-                    onChange={(e) => setBatchEditSetNull(e.target.checked)}
-                >
-                    设置为 NULL
-                </Checkbox>
-            </div>
-            {!batchEditSetNull && (
-                <Input.TextArea
-                    value={batchEditValue}
-                    onChange={(e) => setBatchEditValue(e.target.value)}
-                    placeholder="输入要填充的值"
-                    autoSize={{ minRows: 3, maxRows: 10 }}
-                    autoFocus
-                />
-            )}
-        </Modal>
-        <Modal
-            title="编辑 JSON 结果集"
-            open={jsonEditorOpen}
-            onCancel={() => setJsonEditorOpen(false)}
-            destroyOnHidden
-            width={980}
-            maskClosable={false}
-            footer={[
-                <Button key="format" onClick={handleFormatJsonEditor}>格式化 JSON</Button>,
-                <Button key="cancel" onClick={() => setJsonEditorOpen(false)}>取消</Button>,
-                <Button key="ok" type="primary" onClick={applyJsonEditor}>应用修改</Button>,
-            ]}
-        >
-            <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-                说明：此处按当前结果集顺序编辑，不支持在 JSON 模式增删记录（可在表格模式操作）。
-            </div>
-            {jsonEditorOpen && (
-                <Editor
-                    height="56vh"
-                    language="json"
-                    theme={darkMode ? "transparent-dark" : "transparent-light"}
-                    value={jsonEditorValue}
-                    onChange={(val) => setJsonEditorValue(val || '')}
-                    options={{
-                        readOnly: false,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: "off",
-                        fontSize: 12,
-                        tabSize: 2,
-                        automaticLayout: true,
-                    }}
-                />
-            )}
-        </Modal>
-        <Modal
-            title={tableName ? `DDL - ${tableName}` : 'DDL'}
-            open={ddlModalOpen}
-            onCancel={() => setDdlModalOpen(false)}
-            destroyOnHidden
-            width={960}
-            footer={[
-                <Button key="copy" icon={<CopyOutlined />} onClick={handleCopyDdl} disabled={!ddlText.trim()}>
-                    复制 DDL
-                </Button>,
-                <Button key="close" type="primary" onClick={() => setDdlModalOpen(false)}>
-                    关闭
-                </Button>,
-            ]}
-        >
-            {ddlModalOpen && (
-                <Editor
-                    height="56vh"
-                    language="sql"
-                    theme={darkMode ? "transparent-dark" : "transparent-light"}
-                    value={ddlLoading ? '正在加载 DDL...' : ddlText}
-                    options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: "off",
-                        fontSize: 12,
-                        tabSize: 2,
-                        automaticLayout: true,
-                    }}
-                />
-            )}
-        </Modal>
+            <DataGridModals
+                tableName={tableName}
+                darkMode={darkMode}
+                displayColumnNames={displayColumnNames}
+                rowEditorOpen={rowEditorOpen}
+                rowEditorRowKey={rowEditorRowKey}
+                rowEditorForm={rowEditorForm}
+                rowEditorFields={rowEditorFields}
+                onCloseRowEditor={closeRowEditor}
+                onApplyRowEditor={applyRowEditor}
+                onOpenRowEditorFieldEditor={openRowEditorFieldEditor}
+                cellEditorOpen={cellEditorOpen}
+                cellEditorMeta={cellEditorMeta}
+                cellEditorIsJson={cellEditorIsJson}
+                cellEditorValue={cellEditorValue}
+                onCloseCellEditor={closeCellEditor}
+                onFormatJsonInEditor={handleFormatJsonInEditor}
+                onSaveCellEditor={handleCellEditorSave}
+                onCellEditorValueChange={setCellEditorValue}
+                batchEditModalOpen={batchEditModalOpen}
+                selectedCellsSize={selectedCells.size}
+                batchEditSetNull={batchEditSetNull}
+                batchEditValue={batchEditValue}
+                onCloseBatchEditModal={closeBatchEditModal}
+                onApplyBatchFill={handleBatchFillCells}
+                onBatchEditSetNullChange={setBatchEditSetNull}
+                onBatchEditValueChange={setBatchEditValue}
+                jsonEditorOpen={jsonEditorOpen}
+                jsonEditorValue={jsonEditorValue}
+                onCloseJsonEditor={closeJsonEditor}
+                onFormatJsonEditor={handleFormatJsonEditor}
+                onApplyJsonEditor={applyJsonEditor}
+                onJsonEditorValueChange={setJsonEditorValue}
+                ddlModalOpen={ddlModalOpen}
+                ddlLoading={ddlLoading}
+                ddlText={ddlText}
+                onCloseDdlModal={() => setDdlModalOpen(false)}
+                onCopyDdl={handleCopyDdl}
+            />
 
         {viewMode === 'table' ? (
             renderDataTableView()
         ) : isV2Ui && viewMode === 'fields' ? (
-            renderV2FieldsView()
+            <DataGridV2FieldsView
+                tableName={tableName}
+                displayOutputColumnNames={displayOutputColumnNames}
+                pkColumns={pkColumns}
+                locatorColumns={effectiveEditLocator?.columns}
+                columnMetaMap={columnMetaMap}
+                columnMetaMapByLowerName={columnMetaMapByLowerName}
+            />
         ) : isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side' ? (
-            renderV2DdlSideWorkspace()
+            <DataGridV2DdlSideWorkspace
+                tableContent={renderDataTableView()}
+                tableName={tableName}
+                ddlViewLayout={ddlViewLayout}
+                ddlLoading={ddlLoading}
+                ddlText={ddlText}
+                darkMode={darkMode}
+                onDdlViewLayoutChange={setDdlViewLayout}
+                onReload={() => {
+                    void handleOpenTableDdl({ asView: true });
+                }}
+                onCopy={handleCopyDdl}
+                ddlSidebarWidth={ddlSidebarWidth}
+                ddlSidebarResizePreviewX={ddlSidebarResizePreviewX}
+                onResizeStart={handleDdlSidebarResizeStart}
+            />
         ) : isV2Ui && viewMode === 'ddl' ? (
-            renderV2DdlView('bottom')
+            <DataGridV2DdlView
+                layout="bottom"
+                tableName={tableName}
+                ddlViewLayout={ddlViewLayout}
+                ddlLoading={ddlLoading}
+                ddlText={ddlText}
+                darkMode={darkMode}
+                onDdlViewLayoutChange={setDdlViewLayout}
+                onReload={() => {
+                    void handleOpenTableDdl({ asView: true });
+                }}
+                onCopy={handleCopyDdl}
+            />
         ) : isV2Ui && viewMode === 'er' ? (
-            renderV2ErView()
+            <DataGridV2ErView
+                tableName={tableName}
+                displayOutputColumnNames={displayOutputColumnNames}
+                columnMetaMap={columnMetaMap}
+                columnMetaMapByLowerName={columnMetaMapByLowerName}
+            />
         ) : viewMode === 'json' ? (
-            <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: '8px 10px', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>
-                        {mergedDisplayData.length === 0 ? '当前结果集无数据' : `当前结果集 ${mergedDisplayData.length} 条记录`}
-                    </span>
-                    {canModifyData && (
-                        <Button size="small" type="primary" onClick={openJsonEditor} disabled={mergedDisplayData.length === 0}>
-                            编辑 JSON
-                        </Button>
-                    )}
-                </div>
-                <div style={{ flex: 1, minHeight: 0, padding: '8px 10px 10px 10px' }}>
-                    <Editor
-                        height="100%"
-                        defaultLanguage="json"
-                        language="json"
-                        theme={darkMode ? "transparent-dark" : "transparent-light"}
-                        value={jsonViewText}
-                        options={{
-                            readOnly: true,
-                            minimap: { enabled: false },
-                            scrollBeyondLastLine: false,
-                            wordWrap: "off",
-                            fontSize: 12,
-                            tabSize: 2,
-                            automaticLayout: true,
-                        }}
-                    />
-                </div>
-            </div>
+            <DataGridJsonView
+                darkMode={darkMode}
+                rowCount={mergedDisplayData.length}
+                canModifyData={canModifyData}
+                jsonViewText={jsonViewText}
+                onOpenJsonEditor={handleOpenJsonEditor}
+            />
 	        ) : (
-	            <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: '8px 12px', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Button size="small" onClick={() => setTextRecordIndex(i => Math.max(0, i - 1))} disabled={textViewRows.length === 0 || textRecordIndex <= 0}>
-                        上一条
-                    </Button>
-                    <Button size="small" onClick={() => setTextRecordIndex(i => Math.min(textViewRows.length - 1, i + 1))} disabled={textViewRows.length === 0 || textRecordIndex >= textViewRows.length - 1}>
-                        下一条
-                    </Button>
-                    <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>
-                        {textViewRows.length === 0 ? '当前结果集无数据' : `记录 ${textRecordIndex + 1} / ${textViewRows.length}`}
-                    </span>
-                    {canModifyData && (
-                        <Button size="small" type="primary" onClick={openCurrentViewRowEditor} disabled={textViewRows.length === 0}>
-                            编辑当前记录
-                        </Button>
-                    )}
-                </div>
-	                <div className="custom-scrollbar" style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '8px 12px' }}>
-                    {currentTextRow ? displayOutputColumnNames.map((col) => (
-                        <div key={col} style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 10, padding: '6px 0', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)', alignItems: 'start' }}>
-                            <div style={{ fontWeight: 600, color: darkMode ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.88)', wordBreak: 'break-all' }}>
-                                {col} :
-                            </div>
-                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: darkMode ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.88)' }}>
-                                {formatTextViewValue((currentTextRow as any)[col], col)}
-                            </div>
-                        </div>
-                    )) : (
-                        <div style={{ fontSize: 12, color: darkMode ? '#999' : '#666', paddingTop: 4 }}>
-                            当前结果集无数据
-                        </div>
-                    )}
-                </div>
-            </div>
+	            <DataGridTextView
+                darkMode={darkMode}
+                rowCount={textViewRows.length}
+                textRecordIndex={textRecordIndex}
+                canModifyData={canModifyData}
+                currentTextRow={currentTextRow}
+                displayOutputColumnNames={displayOutputColumnNames}
+                onPrev={() => setTextRecordIndex(i => Math.max(0, i - 1))}
+                onNext={() => setTextRecordIndex(i => Math.min(textViewRows.length - 1, i + 1))}
+                onEditCurrent={openCurrentViewRowEditor}
+                formatTextViewValue={formatTextViewValue}
+            />
         )}
 
-        {/* Data Preview Panel */}
-        {dataPanelOpen && isTableSurfaceActive && (
-            <div style={{
-                height: 200,
-                borderTop: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.12)',
-                display: 'flex',
-                flexDirection: 'column',
-                background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.6)',
-                flexShrink: 0,
-            }}>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '4px 10px',
-                    fontSize: 12,
-                    borderBottom: darkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(0,0,0,0.06)',
-                    flexShrink: 0,
-                }}>
-                    <span style={{ color: darkMode ? '#aaa' : '#666', fontWeight: 500 }}>
-                        {focusedCellInfo ? focusedCellInfo.dataIndex : '点击单元格查看数据'}
-                    </span>
-                    {focusedCellInfo && (() => {
-                        const meta = columnMetaMap[focusedCellInfo.dataIndex] || columnMetaMapByLowerName[focusedCellInfo.dataIndex.toLowerCase()];
-                        return meta?.type ? <span style={{ color: '#888', fontSize: 11 }}>({meta.type})</span> : null;
-                    })()}
-                    <div style={{ flex: 1 }} />
-                    {dataPanelIsJson && (
-                        <Button size="small" onClick={handleDataPanelFormatJson}>格式化 JSON</Button>
-                    )}
-                    {focusedCellWritable && (
-                        <Button size="small" type="primary" onClick={handleDataPanelSave}>保存</Button>
-                    )}
-                </div>
-                <div style={{ flex: 1, minHeight: 0 }}>
-                    {focusedCellInfo ? (
-                        <Editor
-                            height="100%"
-                            language={dataPanelIsJson ? 'json' : 'plaintext'}
-                            theme={darkMode ? 'transparent-dark' : 'transparent-light'}
-                            value={dataPanelValue}
-                            onChange={(val) => {
-                                const newVal = val || '';
-                                setDataPanelValue(newVal);
-                                // 只有值真正与原始值不同时才标记 dirty
-                                dataPanelDirtyRef.current = newVal !== dataPanelOriginalRef.current;
-                            }}
-                            options={{
-                                minimap: { enabled: false },
-                                scrollBeyondLastLine: false,
-                                wordWrap: 'on',
-                                fontSize: 13,
-                                tabSize: 2,
-                                automaticLayout: true,
-                                readOnly: !focusedCellWritable,
-                                lineNumbers: 'off',
-                                glyphMargin: false,
-                                folding: false,
-                                lineDecorationsWidth: 4,
-                                padding: { top: 6, bottom: 6 },
-                            }}
-                        />
-                    ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', fontSize: 13 }}>
-                            点击表格中的单元格以预览完整数据
-                        </div>
-                    )}
-                </div>
-            </div>
-        )}
+        <DataGridPreviewPanel
+            visible={dataPanelOpen}
+            isTableSurfaceActive={isTableSurfaceActive}
+            darkMode={darkMode}
+            focusedCellInfo={focusedCellInfo}
+            dataPanelIsJson={dataPanelIsJson}
+            focusedCellWritable={focusedCellWritable}
+            dataPanelValue={dataPanelValue}
+            columnMetaMap={columnMetaMap}
+            columnMetaMapByLowerName={columnMetaMapByLowerName}
+            onFormatJson={() => {
+                handleDataPanelFormatJson((errorMessage) => {
+                    void message.error('JSON 格式无效：' + errorMessage);
+                });
+            }}
+            onSave={handleDataPanelSave}
+            onValueChange={setDataPanelValue}
+            onDirtyChange={(dirty) => {
+                dataPanelDirtyRef.current = dirty;
+            }}
+            isDirtyComparedToOriginal={(value) => value !== dataPanelOriginalRef.current}
+        />
 
         {isTableSurfaceActive && isV2Ui && cellContextMenu.visible && createPortal(
             <div
@@ -8007,277 +7118,89 @@ const DataGrid: React.FC<DataGridProps> = ({
             document.body
         )}
 
-        {/* Cell Context Menu - 使用 Portal 渲染到 body，避免 backdropFilter 影响 fixed 定位 */}
-        {isTableSurfaceActive && !isV2Ui && cellContextMenu.visible && createPortal(
-            <div
-                style={{
-                    position: 'fixed',
-                    left: cellContextMenu.x,
-                    top: cellContextMenu.y,
-                    zIndex: 10000,
-                    background: bgContextMenu,
-                    border: darkMode ? '1px solid #303030' : '1px solid #d9d9d9',
-                    borderRadius: 4,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                    minWidth: 160,
-                    maxHeight: `calc(100vh - ${cellContextMenu.y}px - 8px)`,
-                    overflowY: 'auto',
-                    color: darkMode ? '#fff' : 'rgba(0, 0, 0, 0.88)'
-                }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={handleCopyContextMenuFieldName}
-                >
-                    <CopyOutlined style={{ marginRight: 8 }} />
-                    复制字段名称
-                </div>
-                <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
-                {canModifyData && (
-                    <>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={handleCellSetNull}
-                >
-                    设置为 NULL
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={handleOpenContextMenuRowEditor}
-                >
-                    <EditOutlined style={{ marginRight: 8 }} />
-                    编辑本行
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: selectedRowKeys.length > 0 ? 'pointer' : 'not-allowed',
-                        transition: 'background 0.2s',
-                        opacity: selectedRowKeys.length > 0 ? 1 : 0.5,
-                    }}
-                    onMouseEnter={(e) => {
-                        if (selectedRowKeys.length > 0) e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5';
-                    }}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (selectedRowKeys.length > 0 && cellContextMenu.record) {
-                            handleBatchFillToSelected(cellContextMenu.record, cellContextMenu.dataIndex);
-                        }
-                    }}
-                >
-                    <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
-                    填充到选中行 ({selectedRowKeys.length})
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: copiedCellPatch ? 'pointer' : 'not-allowed',
-                        transition: 'background 0.2s',
-                        opacity: copiedCellPatch ? 1 : 0.5,
-                    }}
-                    onMouseEnter={(e) => {
-                        if (copiedCellPatch) e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5';
-                    }}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (!copiedCellPatch) return;
-                        const fallbackKey = cellContextMenu.record?.[GONAVI_ROW_KEY];
-                        handlePasteCopiedColumnsToSelectedRows(fallbackKey);
-                    }}
-                >
-                    <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
-                    粘贴已复制列（同名列）
-                </div>
-                <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
-                    </>
-                )}
-                {supportsCopyInsert && (
-                    <>
-                        <div
-                            style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                            onClick={() => {
-                                if (cellContextMenu.record) handleCopyInsert(cellContextMenu.record);
-                                setCellContextMenu(prev => ({ ...prev, visible: false }));
-                            }}
-                        >
-                            复制为 INSERT
-                        </div>
-                        <div
-                            style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                            onClick={() => {
-                                if (cellContextMenu.record) handleCopyUpdate(cellContextMenu.record);
-                                setCellContextMenu(prev => ({ ...prev, visible: false }));
-                            }}
-                        >
-                            复制为 UPDATE
-                        </div>
-                        <div
-                            style={{
-                                padding: '8px 12px',
-                                cursor: 'pointer',
-                                transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                            onClick={() => {
-                                if (cellContextMenu.record) handleCopyDelete(cellContextMenu.record);
-                                setCellContextMenu(prev => ({ ...prev, visible: false }));
-                            }}
-                        >
-                            复制为 DELETE
-                        </div>
-                    </>
-                )}
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleCopyJson(cellContextMenu.record);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    复制为 JSON
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleCopyCsv(cellContextMenu.record);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    复制为 CSV
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) {
-                            const records = getTargets(cellContextMenu.record);
-                            const lines = records.map((r: any) => {
-                                const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
-                                return `| ${Object.values(vals).join(' | ')} |`;
-                            });
-                            copyToClipboard(lines.join('\n'));
-                        }
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    复制为 Markdown
-                </div>
-                <div style={{ height: 1, background: darkMode ? '#303030' : '#f0f0f0', margin: '4px 0' }} />
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleExportSelected('csv', cellContextMenu.record).catch(console.error);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    导出为 CSV
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleExportSelected('xlsx', cellContextMenu.record).catch(console.error);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    导出为 Excel
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleExportSelected('json', cellContextMenu.record).catch(console.error);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    导出为 JSON
-                </div>
-                <div
-                    style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = darkMode ? '#303030' : '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                    onClick={() => {
-                        if (cellContextMenu.record) handleExportSelected('html', cellContextMenu.record).catch(console.error);
-                        setCellContextMenu(prev => ({ ...prev, visible: false }));
-                    }}
-                >
-                    导出为 HTML
-                </div>
-            </div>,
-            document.body
-        )}
+        <DataGridLegacyCellContextMenu
+            visible={isTableSurfaceActive && !isV2Ui && cellContextMenu.visible}
+            darkMode={darkMode}
+            bgContextMenu={bgContextMenu}
+            cellContextMenu={cellContextMenu}
+            canModifyData={canModifyData}
+            selectedRowKeysLength={selectedRowKeys.length}
+            copiedCellPatchAvailable={!!copiedCellPatch}
+            supportsCopyInsert={supportsCopyInsert}
+            onClose={() => setCellContextMenu(prev => ({ ...prev, visible: false }))}
+            onCopyFieldName={handleCopyContextMenuFieldName}
+            onSetNull={handleCellSetNull}
+            onEditRow={handleOpenContextMenuRowEditor}
+            onFillToSelected={() => {
+                if (selectedRowKeys.length > 0 && cellContextMenu.record) {
+                    handleBatchFillToSelected(cellContextMenu.record, cellContextMenu.dataIndex);
+                }
+            }}
+            onPasteCopiedColumns={() => {
+                const fallbackKey = cellContextMenu.record?.[GONAVI_ROW_KEY];
+                handlePasteCopiedColumnsToSelectedRows(fallbackKey);
+            }}
+            onCopyInsert={() => {
+                if (cellContextMenu.record) handleCopyInsert(cellContextMenu.record);
+            }}
+            onCopyUpdate={() => {
+                if (cellContextMenu.record) handleCopyUpdate(cellContextMenu.record);
+            }}
+            onCopyDelete={() => {
+                if (cellContextMenu.record) handleCopyDelete(cellContextMenu.record);
+            }}
+            onCopyJson={() => {
+                if (cellContextMenu.record) handleCopyJson(cellContextMenu.record);
+            }}
+            onCopyCsv={() => {
+                if (cellContextMenu.record) handleCopyCsv(cellContextMenu.record);
+            }}
+            onCopyMarkdown={() => {
+                if (cellContextMenu.record) {
+                    const records = getTargets(cellContextMenu.record);
+                    const lines = records.map((r: any) => {
+                        const { [GONAVI_ROW_KEY]: _rowKey, ...vals } = r;
+                        return `| ${Object.values(vals).join(' | ')} |`;
+                    });
+                    copyToClipboard(lines.join('\n'));
+                }
+            }}
+            onExportCsv={() => {
+                if (cellContextMenu.record) handleExportSelected('csv', cellContextMenu.record).catch(console.error);
+            }}
+            onExportXlsx={() => {
+                if (cellContextMenu.record) handleExportSelected('xlsx', cellContextMenu.record).catch(console.error);
+            }}
+            onExportJson={() => {
+                if (cellContextMenu.record) handleExportSelected('json', cellContextMenu.record).catch(console.error);
+            }}
+            onExportHtml={() => {
+                if (cellContextMenu.record) handleExportSelected('html', cellContextMenu.record).catch(console.error);
+            }}
+        />
        </div>
 
-	       {renderSecondaryActions()}
+	       <DataGridSecondaryActions
+                isV2Ui={isV2Ui}
+                canViewDdl={canViewDdl}
+                viewMode={viewMode}
+                ddlLoading={ddlLoading}
+                showColumnComment={showColumnComment}
+                showColumnType={showColumnType}
+                mergedDisplayCount={mergedDisplayData.length}
+                pendingChangeCount={pendingChangeCount}
+                resultViewSwitcher={resultViewSwitcher}
+                columnInfoSettingContent={columnInfoSettingContent}
+                pageFindContent={pageFindContent}
+                paginationContent={paginationContent}
+                onViewModeChange={handleViewModeChange}
+                dataPanelOpen={dataPanelOpen}
+                isTableSurfaceActive={isTableSurfaceActive}
+                onToggleDataPanel={toggleDataPanel}
+                onOpenTableDdl={() => {
+                    void handleOpenTableDdl();
+                }}
+            />
 
 		        <style>{gridCssText}</style>
        

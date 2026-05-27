@@ -2,7 +2,12 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import DataGrid, { buildDataGridCommitChangeSet, GONAVI_ROW_KEY } from './DataGrid';
+import DataGrid, {
+  attachDataGridVirtualEditRenderVersion,
+  buildDataGridCommitChangeSet,
+  GONAVI_ROW_KEY,
+  hasDataGridVirtualEditRenderVersionChanged,
+} from './DataGrid';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 
 const storeState = vi.hoisted(() => ({
@@ -478,6 +483,20 @@ describe('DataGrid commit change set', () => {
 
     expect(result).toEqual({ ok: false, error: '定位列 EMAIL 的值为空，无法安全提交修改。' });
   });
+
+  it('marks the active virtual editing row so shouldCellUpdate can reopen inline editors', () => {
+    const rows = [
+      { [GONAVI_ROW_KEY]: 'row-1', id: 1, name: 'alpha' },
+      { [GONAVI_ROW_KEY]: 'row-2', id: 2, name: 'beta' },
+    ];
+
+    const nextRows = attachDataGridVirtualEditRenderVersion(rows, { rowKey: 'row-1', dataIndex: 'name', title: 'name' });
+
+    expect(nextRows[0]).not.toBe(rows[0]);
+    expect(nextRows[1]).toBe(rows[1]);
+    expect(hasDataGridVirtualEditRenderVersionChanged(nextRows[0], rows[0])).toBe(true);
+    expect(hasDataGridVirtualEditRenderVersionChanged(nextRows[1], rows[1])).toBe(false);
+  });
 });
 
 describe('DataGrid DDL interactions', () => {
@@ -632,37 +651,6 @@ describe('DataGrid DDL interactions', () => {
       });
     },
   );
-
-  it('marks v2 table headers as single-line when column type and comment rows are hidden', async () => {
-    storeState.appearance.uiVersion = 'v2';
-    storeState.queryOptions.showColumnComment = false;
-    storeState.queryOptions.showColumnType = false;
-
-    let renderer: ReactTestRenderer;
-    await act(async () => {
-      renderer = create(
-        <DataGrid
-          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
-          columnNames={['id']}
-          loading={false}
-          tableName="users"
-          dbName="main"
-          connectionId="conn-1"
-        />,
-      );
-    });
-    await waitForEffects();
-
-    const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
-    expect(idColumn).toBeTruthy();
-    expect(idColumn.onHeaderCell(idColumn).className).toContain('is-single-line-title');
-
-    const headerRenderer = create(<>{idColumn.title}</>);
-    expect(headerRenderer.root.findByProps({ 'data-grid-column-title-single-line': 'true' })).toBeTruthy();
-    expect(headerRenderer.root.findAllByProps({ className: 'gn-v2-column-title-type' })).toHaveLength(0);
-    expect(headerRenderer.root.findAllByProps({ className: 'gn-v2-column-title-comment' })).toHaveLength(0);
-    renderer!.unmount();
-  });
 
   it('opens the v2 column header context menu from table headers', async () => {
     storeState.appearance.uiVersion = 'v2';

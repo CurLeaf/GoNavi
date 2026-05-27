@@ -346,17 +346,19 @@ describe('DataGrid layout', () => {
 
   it('keeps quick WHERE input clipboard editing isolated from grid shortcuts', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const toolbarSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
+    const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
-    expect(source).toContain('const handleQuickWherePaste = useCallback');
-    expect(source).toContain("event.clipboardData.getData('text/plain')");
-    expect(source).toContain('const currentValue = input.value ?? quickWhereDraft;');
-    expect(source).toContain('event.stopPropagation();');
-    expect(source).toContain('data-grid-quick-where-input="true"');
-    expect(source).toContain('{...noAutoCapInputProps}');
-    expect(source).toContain('onCopy={stopQuickWhereClipboardPropagation}');
-    expect(source).toContain('onCut={stopQuickWhereClipboardPropagation}');
-    expect(source).toContain('onPaste={handleQuickWherePaste}');
+    expect(filterHookSource).toContain('const handleQuickWherePaste = React.useCallback');
+    expect(filterHookSource).toContain("event.clipboardData.getData('text/plain')");
+    expect(filterHookSource).toContain('const currentValue = input.value ?? quickWhereDraft;');
+    expect(filterHookSource).toContain('event.stopPropagation();');
+    expect(toolbarSource).toContain('data-grid-quick-where-input="true"');
+    expect(toolbarSource).toContain('{...noAutoCapInputProps}');
+    expect(toolbarSource).toContain('onCopy={onQuickWhereCopy}');
+    expect(toolbarSource).toContain('onCut={onQuickWhereCut}');
+    expect(toolbarSource).toContain('onPaste={onQuickWherePaste}');
     expect(source).toContain("['c', 'v', 'x'].includes");
     expect(css).toContain('[data-grid-quick-where-input="true"]');
     expect(css).toContain('font-size: var(--gn-font-size, 14px) !important;');
@@ -367,12 +369,30 @@ describe('DataGrid layout', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('virtualHorizontalElementsRef');
+    expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
     expect(source).toContain('if (externalSyncRafRef.current !== null)');
     expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
+    expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');
+    expect(source).toContain('tableTargetSyncRafRef.current = requestAnimationFrame');
+    expect(source).toContain("boundHorizontalTargets = externalScroll ? [] : pickHorizontalScrollTargets(tableContainer);");
+    expect(source).toContain('const useInlineEditableBodyCell = enableInlineEditableCell && !enableVirtual;');
+    expect(source).toContain('if (useInlineEditableBodyCell) {');
+    expect(source).toContain('}, areEditableCellPropsEqual);');
+    expect(source).toContain('const [virtualEditingCell, setVirtualEditingCell] = useState<VirtualEditingCellState | null>(null);');
+    expect(source).toContain('const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {');
+    expect(source).toContain('if (isVirtualInlineEditingCell && virtualEditable) {');
+    expect(source).toContain('const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol(\'DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION\');');
+    expect(source).toContain('const attachDataGridVirtualEditRenderVersion = <T extends Item>(');
+    expect(source).toContain('hasDataGridVirtualEditRenderVersionChanged(record, prevRecord)');
+    expect(source).not.toContain('if (enableVirtual && enableInlineEditableCell) {\n                  return (\n                      <EditableCell');
+    expect(source).toContain("content-visibility: ${useAggressiveVirtualPaintHints ? 'auto' : 'visible'};");
+    expect(source).toContain("contain-intrinsic-size: ${useAggressiveVirtualPaintHints ? '24px 160px' : 'auto'};");
+    expect(source).toContain("contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'layout style'};");
     expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
+    expect(source).toContain("const dataGridBackdropFilter = isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
   });
 });
