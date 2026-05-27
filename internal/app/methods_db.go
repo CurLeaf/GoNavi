@@ -1285,12 +1285,24 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		logger.Error(err, "DBGetColumns 获取连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	columns, err := dbInst.GetColumns(schemaName, pureTableName)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetColumns 重建连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			columns, err = retryInst.GetColumns(schemaName, pureTableName)
+		}
+	}
 	if err != nil {
+		logger.Error(err, "DBGetColumns 获取列定义失败：%s 表=%s.%s schema=%s pureTable=%s", formatConnSummary(runConfig), dbName, tableName, schemaName, pureTableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -1302,12 +1314,24 @@ func (a *App) DBGetIndexes(config connection.ConnectionConfig, dbName string, ta
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		logger.Error(err, "DBGetIndexes 获取连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	indexes, err := dbInst.GetIndexes(schemaName, pureTableName)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetIndexes 重建连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			indexes, err = retryInst.GetIndexes(schemaName, pureTableName)
+		}
+	}
 	if err != nil {
+		logger.Error(err, "DBGetIndexes 获取索引定义失败：%s 表=%s.%s schema=%s pureTable=%s", formatConnSummary(runConfig), dbName, tableName, schemaName, pureTableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
