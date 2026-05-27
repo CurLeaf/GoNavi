@@ -158,6 +158,13 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
     expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
   });
+
+  it('listens for command search query-tab events and routes them through handleNewQuery', () => {
+    expect(appSource).toContain("window.addEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);");
+    expect(appSource).toContain("window.removeEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);");
+    expect(appSource).toContain('const handleCreateQueryTabEvent = () => {');
+    expect(appSource).toContain('handleNewQuery();');
+  });
 });
 
 describe('global appearance tokens', () => {

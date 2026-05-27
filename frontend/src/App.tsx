@@ -2666,6 +2666,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+      const handleCreateQueryTabEvent = () => {
+          handleNewQuery();
+      };
+      window.addEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);
+      };
+  }, [handleNewQuery]);
+
+  useEffect(() => {
       if (!isMacRuntime || !useNativeMacWindowControls) {
           return;
       }
