@@ -89,11 +89,11 @@ import {
   resolveLegacyAIEdgeHandleDockStyle,
   resolveLegacyAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
+import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
+import { safeWindowRuntimeCall } from './utils/wailsRuntime';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 import './v2-theme.css';
-
-const AIChatPanel = React.lazy(() => import('./components/AIChatPanel'));
 
 const { Sider, Content } = Layout;
 const SIDEBAR_RESIZE_MIN_WIDTH = 200;
@@ -187,6 +187,45 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
+const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
+
+interface AIPanelErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback: (error: Error | null) => React.ReactNode;
+  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+}
+
+interface AIPanelErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class AIPanelErrorBoundary extends React.Component<
+  AIPanelErrorBoundaryProps,
+  AIPanelErrorBoundaryState
+> {
+  constructor(props: AIPanelErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): AIPanelErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    this.props.onError?.(error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback(this.state.error);
+    }
+
+    return this.props.children;
+  }
+}
+
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -244,6 +283,7 @@ function App() {
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
   const [securityUpdateStatus, setSecurityUpdateStatus] = useState<SecurityUpdateStatus>(() => createEmptySecurityUpdateStatus());
   const [securityUpdateRawPayload, setSecurityUpdateRawPayload] = useState<string | null>(null);
   const [securityUpdateHasLegacySensitiveItems, setSecurityUpdateHasLegacySensitiveItems] = useState(false);
@@ -258,6 +298,7 @@ function App() {
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
+  const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
@@ -269,6 +310,7 @@ function App() {
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
+  const LazyAIChatPanel = useMemo(() => createLazyAIChatPanel(), [aiPanelRenderNonce]);
   const securityUpdateStatusMeta = useMemo(
       () => getSecurityUpdateStatusMeta(securityUpdateStatus),
       [securityUpdateStatus],
@@ -279,6 +321,18 @@ function App() {
   );
 
   const windowCornerRadius = 14;
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const syncViewportWidth = () => {
+      setViewportWidth(window.innerWidth || document.documentElement?.clientWidth || 1280);
+    };
+    syncViewportWidth();
+    window.addEventListener('resize', syncViewportWidth);
+    return () => window.removeEventListener('resize', syncViewportWidth);
+  }, []);
+
   useEffect(()=>{
     if (typeof document === 'undefined' || !document.body) {
         return;
@@ -629,8 +683,8 @@ function App() {
       const saveWindowState = async () => {
           try {
               const [isFs, isMax] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
 
               // 保存窗口状态
@@ -648,8 +702,8 @@ function App() {
               if (isFs || isMax) return;
 
               const [size, pos] = await Promise.all([
-                  WindowGetSize().catch(() => null),
-                  WindowGetPosition().catch(() => null),
+                  safeWindowRuntimeCall(() => WindowGetSize(), null),
+                  safeWindowRuntimeCall(() => WindowGetPosition(), null),
               ]);
               if (!size || !pos) return;
               const w = Math.trunc(Number(size.w || 0));
@@ -697,8 +751,8 @@ function App() {
           inFlight = true;
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
 
               // 全屏状态下只广播 resize，避免破坏用户的全屏上下文。
@@ -708,7 +762,7 @@ function App() {
                   return;
               }
 
-              const size = await WindowGetSize().catch(() => null);
+              const size = await safeWindowRuntimeCall(() => WindowGetSize(), null);
               const width = Math.trunc(Number(size?.w || 0));
               const height = Math.trunc(Number(size?.h || 0));
               const hasViewportScaleDrift = hasWindowsViewportScaleDrift({
@@ -782,7 +836,7 @@ function App() {
 
       const rememberMinimisedState = async (): Promise<boolean> => {
           if (cancelled) return false;
-          const isMinimised = await WindowIsMinimised().catch(() => false);
+          const isMinimised = await safeWindowRuntimeCall(() => WindowIsMinimised(), false);
           if (isMinimised) {
               minimisedSeen = true;
           }
@@ -1336,12 +1390,12 @@ function App() {
       }
       try {
           const [isFullscreen, isMaximised, isMinimised, isNormal, size, position] = await Promise.all([
-              WindowIsFullscreen().catch(() => false),
-              WindowIsMaximised().catch(() => false),
-              WindowIsMinimised().catch(() => false),
-              WindowIsNormal().catch(() => false),
-              WindowGetSize().catch(() => null),
-              WindowGetPosition().catch(() => null),
+              safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+              safeWindowRuntimeCall(() => WindowIsMaximised(), false),
+              safeWindowRuntimeCall(() => WindowIsMinimised(), false),
+              safeWindowRuntimeCall(() => WindowIsNormal(), false),
+              safeWindowRuntimeCall(() => WindowGetSize(), null),
+              safeWindowRuntimeCall(() => WindowGetPosition(), null),
           ]);
           const payload = {
               seq: ++windowDiagSequenceRef.current,
@@ -2024,6 +2078,19 @@ function App() {
   const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
   const aiEntryPlacement = resolveAIEntryPlacement();
   const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
+  const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
+      isV2Ui,
+      viewportWidth,
+      sidebarWidth,
+      panelWidth: DEFAULT_AI_PANEL_WIDTH,
+  });
+  const aiPanelRenderWidth = aiPanelOverlayActive
+      ? resolveOverlayAIPanelWidth({
+          viewportWidth,
+          sidebarWidth,
+          panelWidth: DEFAULT_AI_PANEL_WIDTH,
+      })
+      : DEFAULT_AI_PANEL_WIDTH;
   const legacyAiEdgeHandleDockStyle = useMemo(
       () => resolveLegacyAIEdgeHandleDockStyle(legacyAiEdgeHandleAttachment),
       [legacyAiEdgeHandleAttachment],
@@ -2332,6 +2399,14 @@ function App() {
       setIsAISettingsOpen(true);
   }, []);
 
+  const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
+      console.error('AIChatPanel render error:', error, errorInfo);
+  }, []);
+
+  const handleRetryAIPanelRender = useCallback(() => {
+      setAiPanelRenderNonce((current) => current + 1);
+  }, []);
+
   const handleCloseAISettings = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsAISettingsOpen(false);
@@ -2346,8 +2421,8 @@ function App() {
       const syncWindowStateFromRuntime = async () => {
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
               useStore.getState().setWindowState(isFullscreen ? 'fullscreen' : (isMaximised ? 'maximized' : 'normal'));
           } catch {
@@ -2369,7 +2444,7 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
-          const isMaximised = await WindowIsMaximised().catch(() => false);
+          const isMaximised = await safeWindowRuntimeCall(() => WindowIsMaximised(), false);
           if (isMaximised) {
               WindowUnmaximise();
           } else {
@@ -2413,19 +2488,19 @@ function App() {
           console.warn('ResetWebViewZoom backend unavailable, falling back to maximise toggle', e);
       }
       try {
-          const isFullscreen = await WindowIsFullscreen().catch(() => false);
+          const isFullscreen = await safeWindowRuntimeCall(() => WindowIsFullscreen(), false);
           if (isFullscreen) {
               message.info('全屏状态下无法重置缩放，请先退出全屏');
               return;
           }
-          const isMaximised = await WindowIsMaximised().catch(() => false);
+          const isMaximised = await safeWindowRuntimeCall(() => WindowIsMaximised(), false);
           if (isMaximised) {
               WindowUnmaximise();
               await new Promise((resolve) => window.setTimeout(resolve, 96));
               WindowMaximise();
               await new Promise((resolve) => window.setTimeout(resolve, 96));
           } else {
-              const size = await WindowGetSize().catch(() => null);
+              const size = await safeWindowRuntimeCall(() => WindowGetSize(), null);
               const width = Math.trunc(Number(size?.w) || 0);
               const height = Math.trunc(Number(size?.h) || 0);
               if (width > 0 && height > 0) {
@@ -3157,7 +3232,42 @@ function App() {
                </>
                )}
                {aiPanelVisible && (
-                  <div style={{ position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}>
+                  <div
+                    className={aiPanelOverlayActive ? 'gn-v2-ai-panel-overlay' : undefined}
+                    style={aiPanelOverlayActive
+                      ? { position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none', zIndex: 14 }
+                      : { position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}
+                  >
+                      {aiPanelOverlayActive && (
+                          <button
+                            type="button"
+                            className="gn-v2-ai-panel-backdrop"
+                            aria-label="关闭 AI 面板"
+                            onClick={() => setAIPanelVisible(false)}
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              border: 0,
+                              padding: 0,
+                              background: darkMode ? 'rgba(3, 7, 18, 0.26)' : 'rgba(248, 250, 252, 0.38)',
+                              backdropFilter: 'blur(2px)',
+                              pointerEvents: 'auto',
+                            }}
+                          />
+                      )}
+                      <div
+                        className={`gn-v2-ai-panel-dock${aiPanelOverlayActive ? ' is-overlay' : ''}`}
+                        style={aiPanelOverlayActive
+                          ? {
+                              position: 'relative',
+                              display: 'flex',
+                              height: '100%',
+                              pointerEvents: 'auto',
+                              zIndex: 1,
+                              boxShadow: '0 18px 48px rgba(15, 23, 42, 0.18)',
+                            }
+                          : undefined}
+                      >
                       {!isV2Ui && (
                       <>
                       {aiEntryPlacement === 'content-edge' && legacyAiEdgeHandleAttachment === 'panel-shell' && (
@@ -3167,11 +3277,69 @@ function App() {
                       )}
                       </>
                       )}
-                      <React.Suspense fallback={<div style={{ width: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
-                          <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                            handleOpenAISettings();
-                          }} overlayTheme={overlayTheme} />
-                      </React.Suspense>
+                      <AIPanelErrorBoundary
+                        onError={handleAIPanelRenderError}
+                        fallback={(error) => (
+                          <div
+                            style={{
+                              width: aiPanelRenderWidth,
+                              minWidth: 0,
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 20,
+                              background: bgContent,
+                              color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: '100%',
+                                maxWidth: 360,
+                                display: 'grid',
+                                gap: 12,
+                                padding: 18,
+                                borderRadius: 16,
+                                border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.08)',
+                                background: darkMode ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.94)',
+                                boxShadow: darkMode ? '0 16px 36px rgba(0,0,0,0.32)' : '0 16px 36px rgba(15,23,42,0.12)',
+                              }}
+                            >
+                              <div style={{ fontSize: 15, fontWeight: 600 }}>AI 面板加载失败</div>
+                              <div style={{ fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.68)' : '#526075' }}>
+                                这通常是开发环境热更新后懒加载资源失效导致的。已阻止整页白屏，你可以直接重试。
+                              </div>
+                              {error?.message && (
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    lineHeight: 1.5,
+                                    wordBreak: 'break-word',
+                                    padding: '10px 12px',
+                                    borderRadius: 10,
+                                    background: darkMode ? 'rgba(2,6,23,0.7)' : 'rgba(248,250,252,0.92)',
+                                    border: darkMode ? '1px solid rgba(148,163,184,0.18)' : '1px solid rgba(148,163,184,0.22)',
+                                  }}
+                                >
+                                  {error.message}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                                <Button onClick={() => setAIPanelVisible(false)}>关闭面板</Button>
+                                <Button type="primary" onClick={handleRetryAIPanelRender}>重新加载</Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      >
+                        <React.Suspense fallback={<div style={{ width: aiPanelRenderWidth, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
+                            <LazyAIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                              handleOpenAISettings();
+                            }} overlayTheme={overlayTheme} />
+                        </React.Suspense>
+                      </AIPanelErrorBoundary>
+                      </div>
                   </div>
                )}
              </div>

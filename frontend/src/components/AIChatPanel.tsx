@@ -246,6 +246,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const pendingJVMPlanContextRef = useRef<JVMAIPlanContext | undefined>(undefined);
     const pendingJVMDiagnosticPlanContextRef = useRef<JVMDiagnosticPlanContext | undefined>(undefined);
 
+    useEffect(() => {
+        setPanelWidth(width);
+        dragWidthRef.current = width;
+    }, [width]);
+
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
     const appearance = useStore(state => state.appearance);

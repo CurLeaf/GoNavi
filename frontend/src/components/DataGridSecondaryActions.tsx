@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Popover } from 'antd';
 import {
+  AimOutlined,
   ConsoleSqlOutlined,
   EditOutlined,
   FileTextOutlined,
@@ -21,6 +22,7 @@ export interface DataGridSecondaryActionsProps {
   pendingChangeCount: number;
   resultViewSwitcher: React.ReactNode;
   columnInfoSettingContent: React.ReactNode;
+  columnQuickFindContent: React.ReactNode;
   pageFindContent: React.ReactNode;
   paginationContent: React.ReactNode;
   onViewModeChange: (nextMode: GridViewMode) => void;
@@ -41,6 +43,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   pendingChangeCount,
   resultViewSwitcher,
   columnInfoSettingContent,
+  columnQuickFindContent,
   pageFindContent,
   paginationContent,
   onViewModeChange,
@@ -59,48 +62,61 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
 
     return (
       <div data-grid-secondary-actions="true" className="gn-v2-data-grid-statusbar">
-        <div className="gn-v2-data-grid-view-tabs">
-          {viewTabItems.map((item) => (
+        <div className="gn-v2-data-grid-status-main">
+          <div className="gn-v2-data-grid-view-tabs">
+            {viewTabItems.map((item) => (
+              <Button
+                data-grid-ddl-action={item.key === 'ddl' && canViewDdl ? 'true' : undefined}
+                key={item.key}
+                size="small"
+                type={viewMode === item.key || (item.key === 'table' && (viewMode === 'json' || viewMode === 'text')) ? 'primary' : 'text'}
+                icon={item.icon}
+                disabled={item.disabled}
+                loading={item.key === 'ddl' && ddlLoading}
+                onClick={() => {
+                  if (item.key === 'table') {
+                    onViewModeChange('table');
+                    return;
+                  }
+                  onViewModeChange(item.key);
+                }}
+              >
+                {item.label}
+              </Button>
+            ))}
+          </div>
+          <div className="gn-v2-toolbar-divider" />
+          {resultViewSwitcher}
+          <Popover trigger="click" placement="topRight" content={columnInfoSettingContent}>
             <Button
-              data-grid-ddl-action={item.key === 'ddl' && canViewDdl ? 'true' : undefined}
-              key={item.key}
+              data-grid-column-display-action="true"
               size="small"
-              type={viewMode === item.key || (item.key === 'table' && (viewMode === 'json' || viewMode === 'text')) ? 'primary' : 'text'}
-              icon={item.icon}
-              disabled={item.disabled}
-              loading={item.key === 'ddl' && ddlLoading}
-              onClick={() => {
-                if (item.key === 'table') {
-                  onViewModeChange('table');
-                  return;
-                }
-                onViewModeChange(item.key);
-              }}
+              type={showColumnComment || showColumnType ? 'primary' : 'text'}
+              icon={<FileTextOutlined />}
             >
-              {item.label}
+              字段显示
             </Button>
-          ))}
+          </Popover>
+          <Popover trigger="click" placement="topRight" content={<div style={{ padding: 4 }}>{columnQuickFindContent}</div>}>
+            <Button
+              data-grid-column-quick-find-action="true"
+              size="small"
+              type="text"
+              icon={<AimOutlined />}
+            >
+              跳列
+            </Button>
+          </Popover>
+          {pageFindContent}
+          <div className="gn-v2-data-grid-status-center">
+            <span className="gn-v2-data-grid-live">live</span>
+            <span>{mergedDisplayCount} 行</span>
+            <span>未提交 {pendingChangeCount}</span>
+          </div>
         </div>
-        <div className="gn-v2-toolbar-divider" />
-        {resultViewSwitcher}
-        <Popover trigger="click" placement="topRight" content={columnInfoSettingContent}>
-          <Button
-            data-grid-column-display-action="true"
-            size="small"
-            type={showColumnComment || showColumnType ? 'primary' : 'text'}
-            icon={<FileTextOutlined />}
-          >
-            字段显示
-          </Button>
-        </Popover>
-        <div className="gn-v2-data-grid-status-center">
-          <span className="gn-v2-data-grid-live">live</span>
-          <span>{mergedDisplayCount} 行</span>
-          <span>未提交 {pendingChangeCount}</span>
+        <div className="gn-v2-data-grid-status-right">
+          {paginationContent}
         </div>
-        {pageFindContent}
-        <div className="gn-v2-data-grid-pagination-spacer" aria-hidden="true" />
-        {paginationContent}
       </div>
     );
   }
@@ -130,6 +146,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
           <Popover trigger="click" placement="bottomRight" content={columnInfoSettingContent}>
             <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>字段信息</Button>
           </Popover>
+          {columnQuickFindContent}
           {canViewDdl && (
             <Button
               data-grid-ddl-action="true"

@@ -42,6 +42,7 @@ import {
     calculateExternalHorizontalScrollInnerWidth,
     calculateTableBodyBottomPadding,
     calculateVirtualTableScrollX,
+    resolveDataGridColumnQuickFindScrollLeft,
     resolveDataGridHorizontalWheelDelta,
 } from './dataGridLayout';
 import {
@@ -110,6 +111,7 @@ import {
 } from './V2TableContextMenu';
 import DataGridColumnTitle from './DataGridColumnTitle';
 import DataGridColumnInfoPopoverContent from './DataGridColumnInfoPopoverContent';
+import DataGridColumnQuickFind from './DataGridColumnQuickFind';
 import DataGridPageFind from './DataGridPageFind';
 import DataGridPaginationBar from './DataGridPaginationBar';
 import DataGridResultViewSwitcher from './DataGridResultViewSwitcher';
@@ -1559,15 +1561,31 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [displayColumnNames, setDisplayColumnNames] = useState<string[]>([]);
   const [localHiddenColumns, setLocalHiddenColumns] = useState<string[]>([]);
   const [columnSearchText, setColumnSearchText] = useState('');
+  const [columnQuickFindText, setColumnQuickFindText] = useState('');
+  const [highlightedColumnName, setHighlightedColumnName] = useState('');
   const [pageFindText, setPageFindText] = useState('');
   const [activePageFindMatchIndex, setActivePageFindMatchIndex] = useState(-1);
+  const columnQuickFindHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deferredPageFindText = useDeferredValue(pageFindText);
+  const deferredColumnQuickFindText = useDeferredValue(columnQuickFindText);
   const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);
+  const normalizedColumnQuickFindText = useMemo(
+      () => normalizeDataGridFindQuery(deferredColumnQuickFindText),
+      [deferredColumnQuickFindText],
+  );
 
   useEffect(() => {
+      setColumnQuickFindText('');
+      setHighlightedColumnName('');
       setPageFindText('');
       setActivePageFindMatchIndex(-1);
   }, [connectionId, dbName, tableName]);
+
+  useEffect(() => () => {
+      if (columnQuickFindHighlightTimerRef.current) {
+          clearTimeout(columnQuickFindHighlightTimerRef.current);
+      }
+  }, []);
 
   // Sync hidden columns from store
   useEffect(() => {
@@ -2349,10 +2367,11 @@ const DataGrid: React.FC<DataGridProps> = ({
               columnMetaHintColor={columnMetaHintColor}
               columnMetaTooltipColor={columnMetaTooltipColor}
               darkMode={darkMode}
+              highlighted={highlightedColumnName === normalizedName}
               onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
           />
       );
-  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, openForeignKeyTarget, showColumnComment, showColumnType]);
+  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, highlightedColumnName, openForeignKeyTarget, showColumnComment, showColumnType]);
 
   const lockVirtualInlineTableScroll = useCallback((lock: boolean) => {
       if (lock) {
@@ -2875,13 +2894,18 @@ const DataGrid: React.FC<DataGridProps> = ({
                     height: 100%;
                 }
                 .${gridId} .data-grid-pagination-size-select {
-                    min-width: 112px;
+                    width: 72px;
+                    min-width: 72px;
+                    max-width: 72px;
                     height: 34px;
                     display: inline-flex;
                     align-items: stretch;
                 }
                 .${gridId} .data-grid-pagination-size-select.ant-select-single,
                 .${gridId} .data-grid-pagination-size-select.ant-select-single.ant-select-sm {
+                    width: 72px;
+                    min-width: 72px;
+                    max-width: 72px;
                     height: 34px;
                 }
                 .${gridId} .data-grid-pagination-size-select .ant-select-selector {
@@ -2890,7 +2914,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     border: 1px solid ${paginationChipBorderColor} !important;
                     background: ${paginationChipBg} !important;
                     box-shadow: none !important;
-                    padding: 0 12px !important;
+                    padding: 0 24px 0 10px !important;
                     display: flex !important;
                     align-items: center !important;
                 }
@@ -2911,15 +2935,16 @@ const DataGrid: React.FC<DataGridProps> = ({
                     line-height: 34px !important;
                     color: ${paginationPrimaryTextColor};
                     font-weight: 600;
+                    justify-content: flex-start;
                     font-variant-numeric: tabular-nums;
                 }
                 .${gridId} .data-grid-pagination-size-select .ant-select-selection-search {
-                    inset-inline-start: 12px !important;
-                    inset-inline-end: 32px !important;
+                    inset-inline-start: 10px !important;
+                    inset-inline-end: 24px !important;
                 }
                 .${gridId} .data-grid-pagination-size-select .ant-select-arrow {
                     color: ${paginationSecondaryTextColor};
-                    inset-inline-end: 12px;
+                    inset-inline-end: 10px;
                     top: 50%;
                     transform: translateY(-50%);
                     margin-top: 0;
@@ -6246,6 +6271,37 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (match) focusPageFindMatch(match);
   }, [activePageFindMatchIndex, pageFindMatches, focusPageFindMatch]);
 
+  const visibleColumnQuickFindMatches = useMemo(() => {
+      if (!normalizedColumnQuickFindText) return [];
+      return displayColumnNames.filter((columnName) => (
+          normalizeDataGridFindQuery(columnName).includes(normalizedColumnQuickFindText)
+      ));
+  }, [displayColumnNames, normalizedColumnQuickFindText]);
+
+  const columnQuickFindOptions = useMemo(
+      () => visibleColumnQuickFindMatches.slice(0, 12).map((columnName) => ({ value: columnName, label: columnName })),
+      [visibleColumnQuickFindMatches],
+  );
+
+  const resolveColumnQuickFindTarget = useCallback((): string => {
+      const exactMatch = displayColumnNames.find((columnName) => (
+          normalizeDataGridFindQuery(columnName) === normalizedColumnQuickFindText
+      ));
+      if (exactMatch) return exactMatch;
+      return visibleColumnQuickFindMatches[0] || '';
+  }, [displayColumnNames, normalizedColumnQuickFindText, visibleColumnQuickFindMatches]);
+
+  const highlightColumnQuickFindTarget = useCallback((columnName: string) => {
+      setHighlightedColumnName(columnName);
+      if (columnQuickFindHighlightTimerRef.current) {
+          clearTimeout(columnQuickFindHighlightTimerRef.current);
+      }
+      columnQuickFindHighlightTimerRef.current = setTimeout(() => {
+          setHighlightedColumnName((prev) => (prev === columnName ? '' : prev));
+          columnQuickFindHighlightTimerRef.current = null;
+      }, 1600);
+  }, []);
+
   const syncExternalScrollFromTargets = useCallback((targets?: HTMLElement[], source?: HTMLElement | null) => {
       const externalScroll = externalHorizontalScrollRef.current;
       if (!(externalScroll instanceof HTMLDivElement) || horizontalSyncSourceRef.current === 'external') {
@@ -6391,6 +6447,107 @@ const DataGrid: React.FC<DataGridProps> = ({
           horizontalSyncSourceRef.current = '';
       });
   }, [applyVirtualHorizontalOffset, enableVirtual, readVirtualHorizontalOffset, syncVirtualHorizontalVisualOffset]);
+
+  const focusColumnQuickFindTarget = useCallback((columnName: string): boolean => {
+      const root = rootRef.current;
+      const tableContainer = tableContainerRef.current;
+      if (!(root instanceof HTMLElement) || !(tableContainer instanceof HTMLElement)) return false;
+      const headerTarget = Array.from(root.querySelectorAll('[data-column-name]')).find((node) => {
+          const el = node as HTMLElement;
+          return el.getAttribute('data-column-name') === columnName;
+      }) as HTMLElement | undefined;
+      if (!headerTarget) return false;
+
+      const externalScroll = externalHorizontalScrollRef.current;
+      const tableToExternalTargets = pickTableToExternalSyncTargets(tableContainer);
+      const referenceScrollTarget =
+          tableToExternalTargets.find((target) => target.scrollWidth > target.clientWidth + 1)
+          || tableToExternalTargets[0]
+          || (tableContainer.querySelector('.ant-table-header') as HTMLElement | null);
+      if (!(referenceScrollTarget instanceof HTMLElement)) {
+          return false;
+      }
+
+      const currentScrollLeft = enableVirtual
+          ? readVirtualHorizontalOffset(tableContainer)
+          : referenceScrollTarget.scrollLeft;
+      const targetRect = headerTarget.getBoundingClientRect();
+      const viewportRect = referenceScrollTarget.getBoundingClientRect();
+      const nextScrollLeft = resolveDataGridColumnQuickFindScrollLeft({
+          currentScrollLeft,
+          columnLeft: currentScrollLeft + (targetRect.left - viewportRect.left),
+          columnWidth: targetRect.width,
+          viewportWidth: referenceScrollTarget.clientWidth,
+          scrollWidth: referenceScrollTarget.scrollWidth,
+      });
+
+      if (enableVirtual) {
+          const applied = applyVirtualHorizontalOffset(tableContainer, nextScrollLeft);
+          if (applied) {
+              lastTableScrollLeftRef.current = readVirtualHorizontalOffset(tableContainer);
+              syncExternalScrollFromTargets();
+              requestAnimationFrame(() => {
+                  syncExternalScrollFromTargets();
+              });
+          } else {
+              tableToExternalTargets.forEach((target) => {
+                  if (target.scrollWidth <= target.clientWidth + 1) {
+                      return;
+                  }
+                  if (Math.abs(target.scrollLeft - nextScrollLeft) > 1) {
+                      target.scrollLeft = nextScrollLeft;
+                  }
+              });
+              lastTableScrollLeftRef.current = nextScrollLeft;
+              syncExternalScrollFromTargets(tableToExternalTargets, tableToExternalTargets[0] ?? referenceScrollTarget);
+          }
+      } else {
+          const targets = pickHorizontalScrollTargets(tableContainer);
+          const liveTargets = targets.length > 0 ? targets : tableToExternalTargets;
+          liveTargets.forEach((target) => {
+              if (target.scrollWidth <= target.clientWidth + 1) {
+                  return;
+              }
+              if (Math.abs(target.scrollLeft - nextScrollLeft) > 1) {
+                  target.scrollLeft = nextScrollLeft;
+              }
+          });
+          lastTableScrollLeftRef.current = nextScrollLeft;
+          scheduleSyncExternalScrollFromTargets(liveTargets[0] ?? referenceScrollTarget);
+      }
+
+      highlightColumnQuickFindTarget(columnName);
+      return true;
+  }, [
+      applyVirtualHorizontalOffset,
+      enableVirtual,
+      highlightColumnQuickFindTarget,
+      pickHorizontalScrollTargets,
+      pickTableToExternalSyncTargets,
+      readVirtualHorizontalOffset,
+      scheduleSyncExternalScrollFromTargets,
+      syncExternalScrollFromTargets,
+  ]);
+
+  const handleSubmitColumnQuickFind = useCallback(() => {
+      const targetColumnName = resolveColumnQuickFindTarget();
+      if (!targetColumnName) {
+          if (columnQuickFindText.trim()) {
+              void message.warning(`未找到字段列：${columnQuickFindText.trim()}`);
+          }
+          return;
+      }
+      setColumnQuickFindText(targetColumnName);
+      const tryFocus = () => focusColumnQuickFindTarget(targetColumnName);
+      if (tryFocus()) return;
+      requestAnimationFrame(() => {
+          if (tryFocus()) return;
+          requestAnimationFrame(() => {
+              if (tryFocus()) return;
+              void message.warning(`字段列“${targetColumnName}”当前未渲染，无法定位`);
+          });
+      });
+  }, [columnQuickFindText, focusColumnQuickFindTarget, resolveColumnQuickFindTarget]);
 
   // 外部水平滚动条的 wheel 处理（通过原生事件绑定，确保 preventDefault 生效）
   useEffect(() => {
@@ -6872,6 +7029,18 @@ const DataGrid: React.FC<DataGridProps> = ({
           onNavigateNext={() => handleNavigatePageFind('next')}
       />
   );
+  const columnQuickFindContent = isTableSurfaceActive ? (
+      <DataGridColumnQuickFind
+          isV2Ui={isV2Ui}
+          darkMode={darkMode}
+          inputProps={noAutoCapInputProps as Record<string, unknown>}
+          value={columnQuickFindText}
+          options={columnQuickFindOptions}
+          hasTarget={!!resolveColumnQuickFindTarget()}
+          onChange={setColumnQuickFindText}
+          onSubmit={handleSubmitColumnQuickFind}
+      />
+  ) : null;
   const resultViewSwitcher = (
       <DataGridResultViewSwitcher
           isV2Ui={isV2Ui}
@@ -7344,6 +7513,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 pendingChangeCount={pendingChangeCount}
                 resultViewSwitcher={resultViewSwitcher}
                 columnInfoSettingContent={columnInfoSettingContent}
+                columnQuickFindContent={columnQuickFindContent}
                 pageFindContent={pageFindContent}
                 paginationContent={paginationContent}
                 onViewModeChange={handleViewModeChange}

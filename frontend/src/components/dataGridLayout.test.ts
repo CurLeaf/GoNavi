@@ -4,6 +4,7 @@ import {
   calculateExternalHorizontalScrollInnerWidth,
   calculateTableBodyBottomPadding,
   calculateVirtualTableScrollX,
+  resolveDataGridColumnQuickFindScrollLeft,
   resolveDataGridHorizontalWheelDelta,
 } from './dataGridLayout';
 
@@ -45,6 +46,50 @@ describe('dataGridLayout helpers', () => {
       tableScrollWidth: 18,
       trackInset: 10,
     })).toBe(1);
+  });
+
+  it('resolves quick-find target scrollLeft by centering the target column when possible', () => {
+    expect(resolveDataGridColumnQuickFindScrollLeft({
+      currentScrollLeft: 0,
+      columnLeft: 900,
+      columnWidth: 120,
+      viewportWidth: 600,
+      scrollWidth: 2000,
+    })).toBe(660);
+
+    expect(resolveDataGridColumnQuickFindScrollLeft({
+      currentScrollLeft: 0,
+      columnLeft: 40,
+      columnWidth: 120,
+      viewportWidth: 600,
+      scrollWidth: 2000,
+    })).toBe(0);
+
+    expect(resolveDataGridColumnQuickFindScrollLeft({
+      currentScrollLeft: 200,
+      columnLeft: 1750,
+      columnWidth: 140,
+      viewportWidth: 600,
+      scrollWidth: 2000,
+    })).toBe(1400);
+  });
+
+  it('falls back safely when quick-find scroll metrics are degenerate', () => {
+    expect(resolveDataGridColumnQuickFindScrollLeft({
+      currentScrollLeft: 120,
+      columnLeft: 900,
+      columnWidth: 720,
+      viewportWidth: 600,
+      scrollWidth: 2000,
+    })).toBe(900);
+
+    expect(resolveDataGridColumnQuickFindScrollLeft({
+      currentScrollLeft: 120,
+      columnLeft: Number.NaN,
+      columnWidth: Number.NaN,
+      viewportWidth: 0,
+      scrollWidth: 2000,
+    })).toBe(0);
   });
 
   it('only treats wheel gestures as horizontal when the horizontal intent is strong enough', () => {

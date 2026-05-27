@@ -18,6 +18,7 @@ export interface DataGridColumnTitleProps {
   columnMetaHintColor: string;
   columnMetaTooltipColor: string;
   darkMode: boolean;
+  highlighted?: boolean;
   onOpenForeignKey?: () => void;
 }
 
@@ -31,6 +32,7 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   columnMetaHintColor,
   columnMetaTooltipColor,
   darkMode,
+  highlighted = false,
   onOpenForeignKey,
 }) => {
   const normalizedName = String(columnName || '');
@@ -90,6 +92,8 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   const titleNode = (
     <div
       className={isSingleLineColumnTitle ? 'gn-v2-column-title is-single-line' : 'gn-v2-column-title'}
+      data-grid-column-highlighted={highlighted ? 'true' : undefined}
+      data-column-name={normalizedName}
       data-grid-column-title-single-line={isSingleLineColumnTitle ? 'true' : undefined}
       style={{
         display: 'flex',
@@ -99,6 +103,11 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
         minWidth: 0,
         maxWidth: '100%',
         lineHeight: 1.2,
+        borderRadius: highlighted ? 8 : undefined,
+        background: highlighted ? (darkMode ? 'rgba(250, 173, 20, 0.18)' : 'rgba(250, 173, 20, 0.16)') : undefined,
+        boxShadow: highlighted ? `inset 0 0 0 1px ${darkMode ? 'rgba(250, 173, 20, 0.5)' : 'rgba(250, 173, 20, 0.55)'}` : undefined,
+        padding: highlighted ? '4px 6px' : undefined,
+        transition: 'background 160ms ease, box-shadow 160ms ease',
       }}
     >
       {fieldLabel}

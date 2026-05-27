@@ -14,7 +14,7 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 
   const afterCase = appSource.slice(start + caseToken.length);
   const nextCaseIndex = afterCase.search(/\n\s+case '[^']+':/);
-  const switchEndIndex = afterCase.search(/\n\s+}\n\s+};\n\n\s+window\.addEventListener\('keydown', handleGlobalShortcut\);/);
+  const switchEndIndex = afterCase.indexOf("window.addEventListener('keydown', handleGlobalShortcut);");
   const endIndex = nextCaseIndex >= 0 ? nextCaseIndex : switchEndIndex;
 
   expect(endIndex).toBeGreaterThan(-1);

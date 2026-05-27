@@ -78,7 +78,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             popupMatchSelectWidth={false}
             value={String(pagination.pageSize)}
             onChange={onPageSizeChange}
-            options={paginationPageSizeOptions.map((value) => ({ value, label: `${value} /页` }))}
+            options={paginationPageSizeOptions.map((value) => ({ value, label: `${value}/页` }))}
             className="data-grid-pagination-size-select"
             aria-label="每页条数"
           />

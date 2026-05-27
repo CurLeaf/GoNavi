@@ -39,34 +39,40 @@ const DataGridPageFind: React.FC<DataGridPageFindProps> = ({
       className={isV2Ui ? 'gn-v2-data-grid-page-find' : undefined}
       style={isV2Ui ? undefined : { display: 'flex', alignItems: 'center', gap: 6 }}
     >
-      <Input
-        {...inputProps}
-        allowClear
-        size="small"
-        prefix={<SearchOutlined />}
-        placeholder="当前页查找..."
-        value={pageFindText}
-        onChange={(event) => onPageFindTextChange(event.target.value)}
-        style={isV2Ui ? undefined : { width: 220 }}
-      />
-      <Button
-        data-grid-page-find-prev="true"
-        size="small"
-        icon={<LeftOutlined />}
-        disabled={!hasMatches}
-        onClick={onNavigatePrevious}
-      >
-        {isV2Ui ? null : '上一个'}
-      </Button>
-      <Button
-        data-grid-page-find-next="true"
-        size="small"
-        icon={<RightOutlined />}
-        disabled={!hasMatches}
-        onClick={onNavigateNext}
-      >
-        {isV2Ui ? null : '下一个'}
-      </Button>
+      <div className={isV2Ui ? 'gn-v2-data-grid-page-find-row' : undefined}>
+        <Input
+          className={isV2Ui ? 'gn-v2-data-grid-page-find-input' : undefined}
+          {...inputProps}
+          allowClear
+          size="small"
+          variant="borderless"
+          prefix={<SearchOutlined />}
+          placeholder="当前页查找..."
+          value={pageFindText}
+          onChange={(event) => onPageFindTextChange(event.target.value)}
+          style={isV2Ui ? undefined : { width: 220 }}
+        />
+        <Button
+          data-grid-page-find-prev="true"
+          className={isV2Ui ? 'gn-v2-data-grid-page-find-prev' : undefined}
+          size="small"
+          icon={<LeftOutlined />}
+          disabled={!hasMatches}
+          onClick={onNavigatePrevious}
+        >
+          {isV2Ui ? null : '上一个'}
+        </Button>
+        <Button
+          data-grid-page-find-next="true"
+          className={isV2Ui ? 'gn-v2-data-grid-page-find-next' : undefined}
+          size="small"
+          icon={<RightOutlined />}
+          disabled={!hasMatches}
+          onClick={onNavigateNext}
+        >
+          {isV2Ui ? null : '下一个'}
+        </Button>
+      </div>
       {normalizedPageFindText && (
         <span aria-live="polite" style={isV2Ui ? undefined : { fontSize: 12, color: darkMode ? '#999' : '#666', whiteSpace: 'nowrap' }}>
           {hasMatches ? `${activePageFindPosition} / ${matchCount} · ` : ''}匹配 {occurrenceCount} 处 / {matchedCellCount} 个单元格

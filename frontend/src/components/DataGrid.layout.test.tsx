@@ -91,13 +91,14 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-secondary-actions="true"');
     expect(markup).toContain('data-grid-view-switcher="true"');
     expect(markup).toContain('data-grid-column-display-action="true"');
+    expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
+    expect(markup).toContain('跳列');
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
-    expect(markup).not.toContain('gn-v2-data-grid-status-right');
-    expect(markup).not.toContain('gn-v2-data-grid-status-spacer');
-    expect(markup).toContain('gn-v2-data-grid-pagination-spacer');
+    expect(markup).toContain('gn-v2-data-grid-status-main');
+    expect(markup).toContain('gn-v2-data-grid-status-right');
     expect(markup).toContain('data-grid-v2-pagination="true"');
     expect(markup).toContain('data-grid-v2-page-chip="true"');
     expect(markup).toContain('data-grid-v2-pagination-prev="true"');
@@ -367,8 +368,19 @@ describe('DataGrid layout', () => {
 
   it('keeps DataGrid scroll synchronization throttled to animation frames', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const secondaryActionsSource = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+    const columnTitleSource = readFileSync(new URL('./DataGridColumnTitle.tsx', import.meta.url), 'utf8');
+    const columnQuickFindSource = readFileSync(new URL('./DataGridColumnQuickFind.tsx', import.meta.url), 'utf8');
+    const paginationBarSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain('virtualHorizontalElementsRef');
+    expect(source).toContain('const handleSubmitColumnQuickFind = useCallback(() => {');
+    expect(source).toContain('resolveDataGridColumnQuickFindScrollLeft({');
+    expect(source).toContain('const applied = applyVirtualHorizontalOffset(tableContainer, nextScrollLeft);');
+    expect(source).toContain('syncExternalScrollFromTargets();');
+    expect(source).toContain("const columnQuickFindContent = isTableSurfaceActive ? (");
+    expect(secondaryActionsSource).toContain('data-grid-column-quick-find-action="true"');
     expect(source).toContain('type VirtualTableScrollReference = TableReference & {');
     expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
     expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
@@ -406,6 +418,17 @@ describe('DataGrid layout', () => {
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
     expect(source).toContain("const dataGridBackdropFilter = isV2Ui || isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
     expect(source).toContain('rowHoverable={!enableVirtual}');
+    expect(columnTitleSource).toContain("data-grid-column-highlighted={highlighted ? 'true' : undefined}");
+    expect(columnTitleSource).toContain('data-column-name={normalizedName}');
+    expect(columnQuickFindSource).toContain('AutoComplete');
+    expect(columnQuickFindSource).toContain('placeholder="跳到字段列..."');
+    expect(secondaryActionsSource.indexOf('{pageFindContent}')).toBeLessThan(secondaryActionsSource.indexOf('gn-v2-data-grid-status-center'));
+    expect(css).toContain('width: 66px !important;');
+    expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
+    expect(css).toContain('.data-grid-pagination-size-select.ant-select-focused .ant-select-selector');
+    expect(css).toContain('overflow-x: auto;');
+    expect(paginationBarSource).toContain("label: `${value}/页`");
+    expect(css).toContain('background: transparent !important;');
   });
 
   it('keeps the DataGrid performance harness aligned with legacy and v2 comparison controls', () => {
