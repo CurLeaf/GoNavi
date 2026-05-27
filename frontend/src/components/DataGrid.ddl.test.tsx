@@ -237,13 +237,17 @@ vi.mock('antd', () => {
     </div>
   );
 
-  return {
-    Table: (props: any) => {
+  const MockTable = React.forwardRef((_props: any, _ref) => {
+      const props = _props;
       const { columns } = props;
       testRenderState.latestColumns = Array.isArray(columns) ? columns : [];
       testRenderState.latestTableProps = props;
       return <table />;
-    },
+    });
+  MockTable.displayName = 'MockTable';
+
+  return {
+    Table: MockTable,
     message: messageApi,
     Input,
     Button,
@@ -719,12 +723,25 @@ describe('DataGrid DDL interactions', () => {
 
     const idColumn = testRenderState.latestColumns.find((column) => column.key === 'id');
     const cellProps = idColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1 });
+    const contextTarget = {
+      closest: (selector: string) => selector === '[data-row-key][data-col-name]'
+        ? {
+            getAttribute: (name: string) => {
+              if (name === 'data-row-key') return 'row-1';
+              if (name === 'data-col-name') return 'id';
+              return null;
+            },
+          }
+        : null,
+    } as unknown as HTMLElement;
     await act(async () => {
       cellProps.onContextMenu({
         preventDefault: vi.fn(),
         stopPropagation: vi.fn(),
         clientX: 160,
         clientY: 120,
+        currentTarget: contextTarget,
+        target: contextTarget,
       });
     });
 
@@ -803,12 +820,25 @@ describe('DataGrid DDL interactions', () => {
 
     const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
     const cellProps = nameColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' });
+    const contextTarget = {
+      closest: (selector: string) => selector === '[data-row-key][data-col-name]'
+        ? {
+            getAttribute: (name: string) => {
+              if (name === 'data-row-key') return 'row-1';
+              if (name === 'data-col-name') return 'name';
+              return null;
+            },
+          }
+        : null,
+    } as unknown as HTMLElement;
     await act(async () => {
       cellProps.onContextMenu({
         preventDefault: vi.fn(),
         stopPropagation: vi.fn(),
         clientX: 160,
         clientY: 120,
+        currentTarget: contextTarget,
+        target: contextTarget,
       });
     });
 
@@ -827,6 +857,8 @@ describe('DataGrid DDL interactions', () => {
         stopPropagation: vi.fn(),
         clientX: 160,
         clientY: 120,
+        currentTarget: contextTarget,
+        target: contextTarget,
       });
     });
     await act(async () => {

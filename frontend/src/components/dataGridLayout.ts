@@ -16,6 +16,11 @@ export interface DataGridHorizontalWheelIntentOptions {
   shiftKey: boolean;
 }
 
+export interface ExternalHorizontalScrollInnerWidthOptions {
+  tableScrollWidth: number;
+  trackInset: number;
+}
+
 const MIN_SCROLLBAR_CLEARANCE = 8;
 const FLOATING_SCROLLBAR_VISUAL_EXTRA = 4;
 const HORIZONTAL_WHEEL_MIN_DELTA = 0.5;
@@ -53,6 +58,16 @@ export const calculateVirtualTableScrollX = ({
   }
 
   return safeTotalWidth;
+};
+
+export const calculateExternalHorizontalScrollInnerWidth = ({
+  tableScrollWidth,
+  trackInset,
+}: ExternalHorizontalScrollInnerWidthOptions): number => {
+  const safeTableScrollWidth = Math.max(0, Math.ceil(tableScrollWidth));
+  const safeTrackInset = Math.max(0, Math.ceil(trackInset));
+
+  return Math.max(1, safeTableScrollWidth - safeTrackInset * 2);
 };
 
 export const resolveDataGridHorizontalWheelDelta = ({

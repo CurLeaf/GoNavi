@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import {
+  createJSONStorage,
+  persist,
+  type PersistStorage,
+  type StateStorage,
+} from "zustand/middleware";
 import {
   ConnectionConfig,
   ProxyConfig,
@@ -76,6 +81,7 @@ const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 9;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
+const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
 const MAX_PERSISTED_QUERY_LENGTH = 1024 * 1024;
 const MAX_SQL_LOGS = 1000;
@@ -93,6 +99,100 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   password: "",
   hasPassword: false,
 };
+
+const isFrontendTestRuntime = (): boolean => {
+  const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
+  return env.MODE === "test" || env.VITEST === true || env.VITEST === "true";
+};
+
+const createDebouncedPersistStorage = <S>(
+  getStorage: () => StateStorage,
+  debounceMs = PERSIST_WRITE_DEBOUNCE_MS,
+): PersistStorage<S> | undefined => {
+  const baseStorage = createJSONStorage<S>(getStorage);
+  if (!baseStorage || isFrontendTestRuntime()) {
+    return baseStorage;
+  }
+
+  type PersistedValue = Parameters<PersistStorage<S>["setItem"]>[1];
+  let pendingWrite: { name: string; value: PersistedValue } | null = null;
+  let pendingTimer: number | null = null;
+  let listenersBound = false;
+  let pendingResolves: Array<() => void> = [];
+  let pendingRejects: Array<(error: unknown) => void> = [];
+
+  const settlePending = (error?: unknown) => {
+    const resolves = pendingResolves;
+    const rejects = pendingRejects;
+    pendingResolves = [];
+    pendingRejects = [];
+    if (error !== undefined) {
+      rejects.forEach((reject) => reject(error));
+      return;
+    }
+    resolves.forEach((resolve) => resolve());
+  };
+
+  const flushPendingWrite = async (): Promise<void> => {
+    if (pendingTimer !== null) {
+      window.clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    const nextWrite = pendingWrite;
+    pendingWrite = null;
+    if (!nextWrite) {
+      settlePending();
+      return;
+    }
+    try {
+      await baseStorage.setItem(nextWrite.name, nextWrite.value);
+      settlePending();
+    } catch (error) {
+      settlePending(error);
+      throw error;
+    }
+  };
+
+  const bindFlushListeners = () => {
+    if (listenersBound || typeof window === "undefined") {
+      return;
+    }
+    listenersBound = true;
+    const handleFlush = () => {
+      void flushPendingWrite();
+    };
+    window.addEventListener("pagehide", handleFlush, { capture: true });
+    window.addEventListener("beforeunload", handleFlush, { capture: true });
+  };
+
+  return {
+    getItem: baseStorage.getItem,
+    setItem: (name, value) => {
+      bindFlushListeners();
+      pendingWrite = { name, value };
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+      }
+      return new Promise<void>((resolve, reject) => {
+        pendingResolves.push(resolve);
+        pendingRejects.push(reject);
+        pendingTimer = window.setTimeout(() => {
+          void flushPendingWrite();
+        }, debounceMs);
+      });
+    },
+    removeItem: async (name) => {
+      pendingWrite = null;
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+        pendingTimer = null;
+      }
+      settlePending();
+      await baseStorage.removeItem(name);
+    },
+  };
+};
+
 const resolveOceanBaseProtocol = (
   raw: Record<string, unknown>,
   normalizedConnectionParams: string,
@@ -2384,6 +2484,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
+      storage: createDebouncedPersistStorage(() => localStorage),
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(

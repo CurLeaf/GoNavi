@@ -275,6 +275,52 @@ const DraggableTabNode: React.FC<DraggableTabNodeProps> = ({ node }) => {
   });
 };
 
+const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ tab, isActive }) => {
+  if (tab.type === 'query') {
+    return <QueryEditor tab={tab} isActive={isActive} />;
+  }
+  if (tab.type === 'table') {
+    return <DataViewer tab={tab} isActive={isActive} />;
+  }
+  if (tab.type === 'design') {
+    return <TableDesigner tab={tab} />;
+  }
+  if (tab.type === 'redis-keys') {
+    return <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  }
+  if (tab.type === 'redis-command') {
+    return <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  }
+  if (tab.type === 'redis-monitor') {
+    return <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
+  }
+  if (tab.type === 'trigger') {
+    return <TriggerViewer tab={tab} />;
+  }
+  if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def') {
+    return <DefinitionViewer tab={tab} />;
+  }
+  if (tab.type === 'table-overview') {
+    return <TableOverview tab={tab} />;
+  }
+  if (tab.type === 'jvm-overview') {
+    return <JVMOverview tab={tab} />;
+  }
+  if (tab.type === 'jvm-resource') {
+    return <JVMResourceBrowser tab={tab} />;
+  }
+  if (tab.type === 'jvm-audit') {
+    return <JVMAuditViewer tab={tab} />;
+  }
+  if (tab.type === 'jvm-diagnostic') {
+    return <JVMDiagnosticConsole tab={tab} />;
+  }
+  if (tab.type === 'jvm-monitoring') {
+    return <JVMMonitoringDashboard tab={tab} />;
+  }
+  return null;
+});
+
 const TabManager: React.FC = React.memo(() => {
   const tabs = useStore(state => state.tabs);
   const connections = useStore(state => state.connections);
@@ -398,36 +444,6 @@ const TabManager: React.FC = React.memo(() => {
     const accentColor = connection ? resolveConnectionAccentColor(connection) : undefined;
     const hostSummary = resolveConnectionHostSummary(connection?.config);
     const tabIsActive = tab.id === activeTabId;
-    let content;
-    if (tab.type === 'query') {
-      content = <QueryEditor tab={tab} isActive={tabIsActive} />;
-    } else if (tab.type === 'table') {
-      content = <DataViewer tab={tab} isActive={tabIsActive} />;
-    } else if (tab.type === 'design') {
-      content = <TableDesigner tab={tab} />;
-    } else if (tab.type === 'redis-keys') {
-      content = <RedisViewer connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-    } else if (tab.type === 'redis-command') {
-      content = <RedisCommandEditor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-    } else if (tab.type === 'redis-monitor') {
-      content = <RedisMonitor connectionId={tab.connectionId} redisDB={tab.redisDB ?? 0} />;
-    } else if (tab.type === 'trigger') {
-      content = <TriggerViewer tab={tab} />;
-    } else if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def') {
-      content = <DefinitionViewer tab={tab} />;
-    } else if (tab.type === 'table-overview') {
-      content = <TableOverview tab={tab} />;
-    } else if (tab.type === 'jvm-overview') {
-      content = <JVMOverview tab={tab} />;
-    } else if (tab.type === 'jvm-resource') {
-      content = <JVMResourceBrowser tab={tab} />;
-    } else if (tab.type === 'jvm-audit') {
-      content = <JVMAuditViewer tab={tab} />;
-    } else if (tab.type === 'jvm-diagnostic') {
-      content = <JVMDiagnosticConsole tab={tab} />;
-    } else if (tab.type === 'jvm-monitoring') {
-      content = <JVMMonitoringDashboard tab={tab} />;
-    }
 
     const menuItems: MenuProps['items'] = [
       {
@@ -472,7 +488,7 @@ const TabManager: React.FC = React.memo(() => {
       ),
       key: tab.id,
       closable: !isV2Ui,
-      children: content,
+      children: <TabContent tab={tab} isActive={tabIsActive} />,
     };
   }), [tabs, connections, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, isV2Ui]);
 

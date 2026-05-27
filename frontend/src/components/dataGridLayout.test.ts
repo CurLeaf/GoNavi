@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  calculateExternalHorizontalScrollInnerWidth,
   calculateTableBodyBottomPadding,
   calculateVirtualTableScrollX,
   resolveDataGridHorizontalWheelDelta,
@@ -32,6 +33,18 @@ describe('dataGridLayout helpers', () => {
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 1200, isMacLike: false })).toBe(1200);
     expect(calculateVirtualTableScrollX({ totalWidth: 646, tableViewportWidth: 0, isMacLike: false })).toBe(646);
     expect(calculateVirtualTableScrollX({ totalWidth: 1200, tableViewportWidth: 800, isMacLike: true })).toBe(1202);
+  });
+
+  it('keeps external horizontal scrollbar range aligned with table content range', () => {
+    expect(calculateExternalHorizontalScrollInnerWidth({
+      tableScrollWidth: 4563,
+      trackInset: 10,
+    })).toBe(4543);
+
+    expect(calculateExternalHorizontalScrollInnerWidth({
+      tableScrollWidth: 18,
+      trackInset: 10,
+    })).toBe(1);
   });
 
   it('only treats wheel gestures as horizontal when the horizontal intent is strong enough', () => {

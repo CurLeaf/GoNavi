@@ -862,7 +862,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'selectCurrentStatement', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
-  const activeTabId = useStore(state => state.activeTabId);
   const autoFetchVisible = useAutoFetchVisibility();
 
   const currentSavedQuery = useMemo(() => {
@@ -916,7 +915,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   // 当此 Tab 成为活跃 Tab 时，将本实例的状态同步到模块级共享变量
   // 确保 completion provider 始终使用当前活跃 Tab 的上下文
   useEffect(() => {
-      if (activeTabId !== tab.id) return;
+      if (!isActive) return;
       sharedCurrentDb = currentDb;
       sharedCurrentConnectionId = currentConnectionId;
       sharedConnections = connections;
@@ -924,7 +923,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sharedAllColumnsData = allColumnsRef.current;
       sharedVisibleDbs = visibleDbsRef.current;
       sharedColumnsCacheData = columnsCacheRef.current;
-  }, [activeTabId, tab.id, currentDb, currentConnectionId, connections]);
+  }, [isActive, currentDb, currentConnectionId, connections]);
 
   useEffect(() => {
       connectionsRef.current = connections;
@@ -1011,7 +1010,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               // 存储可见数据库列表用于跨库智能提示
               visibleDbsRef.current = dbs;
-              if (activeTabId === tab.id) {
+              if (isActive) {
                   sharedVisibleDbs = dbs;
               }
 
@@ -1022,7 +1021,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
           } else {
               visibleDbsRef.current = [];
-              if (activeTabId === tab.id) {
+              if (isActive) {
                   sharedVisibleDbs = [];
               }
               setDbList([]);
@@ -1110,13 +1109,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           tablesRef.current = allTables;
           allColumnsRef.current = allColumns;
           // 如果当前 Tab 是活跃 Tab，同步更新共享变量
-          if (activeTabId === tab.id) {
+          if (isActive) {
               sharedTablesData = allTables;
               sharedAllColumnsData = allColumns;
           }
       };
       void fetchMetadata();
-  }, [autoFetchVisible, currentConnectionId, connections, dbList]); // dbList 变化时触发重新加载
+  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive]); // dbList 变化时触发重新加载
 
   // Query ID management helpers
   const setQueryId = (id: string) => {
@@ -2504,7 +2503,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   useEffect(() => {
       const handleSelectAllInEditor = (event: KeyboardEvent) => {
-          if (activeTabId !== tab.id) {
+          if (!isActive) {
               return;
           }
           if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
@@ -2540,7 +2539,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return () => {
           window.removeEventListener('keydown', handleSelectAllInEditor, true);
       };
-  }, [activeTabId, tab.id]);
+  }, [isActive]);
 
   useEffect(() => {
       const binding = runQueryShortcutBinding;
@@ -2549,7 +2548,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
 
       const handleRunShortcut = (event: KeyboardEvent) => {
-          if (activeTabId !== tab.id) {
+          if (!isActive) {
               return;
           }
           if (!isShortcutMatch(event, binding.combo)) {
@@ -2568,7 +2567,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return () => {
           window.removeEventListener('keydown', handleRunShortcut, true);
       };
-  }, [activeTabId, tab.id, runQueryShortcutBinding, handleRun]);
+  }, [isActive, runQueryShortcutBinding, handleRun]);
 
   // Re-register Monaco internal keybinding when runQuery shortcut changes
   useEffect(() => {
@@ -2637,7 +2636,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
-          if (activeTabId !== tab.id) {
+          if (!isActive) {
               return;
           }
           void handleRun();
@@ -2647,7 +2646,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return () => {
           window.removeEventListener('gonavi:run-active-query', handleRunActiveQuery as EventListener);
       };
-  }, [activeTabId, tab.id, handleRun]);
+  }, [isActive, handleRun]);
 
   // 监听由 TabManager 分发的专用注入事件
   useEffect(() => {
@@ -3130,4 +3129,4 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
 };
 
-export default QueryEditor;
+export default React.memo(QueryEditor);

@@ -3049,6 +3049,43 @@ body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-tbody .ant-table-row > .a
   padding: 0 calc(10px * var(--gn-ui-scale, 1)) !important;
   font-family: var(--gn-font-mono) !important;
   font-size: var(--gn-data-table-font-size, var(--gn-font-size-mono, 12px)) !important;
+  line-height: calc(28px * var(--gn-ui-scale, 1)) !important;
+  vertical-align: middle !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-tbody > tr > td .editable-cell-value-wrap,
+body[data-ui-version="v2"] .gn-v2-data-grid .ant-table-tbody .ant-table-row > .ant-table-cell .editable-cell-value-wrap {
+  min-height: calc(28px * var(--gn-ui-scale, 1));
+  line-height: calc(28px * var(--gn-ui-scale, 1));
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item-row,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item-control,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item-control-input,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item-control-input-content {
+  display: flex !important;
+  align-items: center !important;
+  height: 24px !important;
+  min-height: 24px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-form-item {
+  margin: 0 !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-input,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-input-affix-wrapper,
+body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .ant-picker {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  line-height: 24px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  position: static !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-statusbar {

@@ -369,10 +369,13 @@ describe('DataGrid layout', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('virtualHorizontalElementsRef');
+    expect(source).toContain('type VirtualTableScrollReference = TableReference & {');
+    expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
     expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
+    expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
     expect(source).toContain('if (externalSyncRafRef.current !== null)');
     expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
     expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');
@@ -388,11 +391,33 @@ describe('DataGrid layout', () => {
     expect(source).toContain('const attachDataGridVirtualEditRenderVersion = <T extends Item>(');
     expect(source).toContain('hasDataGridVirtualEditRenderVersionChanged(record, prevRecord)');
     expect(source).not.toContain('if (enableVirtual && enableInlineEditableCell) {\n                  return (\n                      <EditableCell');
-    expect(source).toContain("content-visibility: ${useAggressiveVirtualPaintHints ? 'auto' : 'visible'};");
-    expect(source).toContain("contain-intrinsic-size: ${useAggressiveVirtualPaintHints ? '24px 160px' : 'auto'};");
-    expect(source).toContain("contain: ${useAggressiveVirtualPaintHints ? 'layout paint style' : 'layout style'};");
+    expect(source).toContain("content-visibility: ${useVirtualHolderPaintHints ? 'auto' : 'visible'};");
+    expect(source).toContain("content-visibility: ${useVirtualEditableVisibilityHints ? 'auto' : 'visible'};");
+    expect(source).toContain("contain-intrinsic-size: ${useVirtualEditableVisibilityHints ? '24px 160px' : 'auto'};");
+    expect(source).toContain("const useVirtualHolderPaintHints = !isMacLike && !isV2Ui;");
+    expect(source).toContain("const useVirtualCellContentContain = false;");
+    expect(source).toContain("const useVirtualEditableVisibilityHints = !isMacLike && !isV2Ui;");
+    expect(source).toContain("contain: ${useVirtualRowCellContain ? 'layout paint style' : 'none'};");
+    expect(source).toContain('const handleSharedCellContextMenu = useCallback');
+    expect(source).toContain('const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;');
+    expect(source).toContain('if (shouldUsePlainVirtualContent) {');
+    expect(source).toContain('return originalRenderContent;');
     expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
-    expect(source).toContain("const dataGridBackdropFilter = isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
+    expect(source).toContain("const dataGridBackdropFilter = isV2Ui || isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
+    expect(source).toContain('rowHoverable={!enableVirtual}');
+  });
+
+  it('keeps the DataGrid performance harness aligned with legacy and v2 comparison controls', () => {
+    const harnessSource = readFileSync(new URL('../dev/PerfDataGridHarness.tsx', import.meta.url), 'utf8');
+    expect(harnessSource).toContain("options={[");
+    expect(harnessSource).toContain("{ label: '旧版 UI', value: 'legacy' }");
+    expect(harnessSource).toContain("{ label: '新版 UI', value: 'v2' }");
+    expect(harnessSource).toContain("{ value: 'comfortable', label: '标准' }");
+    expect(harnessSource).toContain("{ value: 'standard', label: '紧凑' }");
+    expect(harnessSource).toContain("{ value: 'compact', label: '极紧凑' }");
+    expect(harnessSource).toContain("document.body.setAttribute('data-ui-version', uiVersion);");
+    expect(harnessSource).toContain("if (value === null || value === undefined || value === '') {");
+    expect(harnessSource).toContain("const currentState = useStore.getState();");
   });
 });
