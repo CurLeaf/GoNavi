@@ -304,12 +304,16 @@ export const V2DatabaseContextMenuView: React.FC<{
   dialect?: string;
   supportsSchemaActions?: boolean;
   supportsStarRocksActions?: boolean;
+  supportsRenameDatabase?: boolean;
+  supportsDropDatabase?: boolean;
   onAction?: (action: V2DatabaseContextMenuActionKey) => void;
 }> = ({
   dbName,
   dialect,
   supportsSchemaActions = false,
   supportsStarRocksActions = false,
+  supportsRenameDatabase = true,
+  supportsDropDatabase = true,
   onAction,
 }) => {
   const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
@@ -346,7 +350,7 @@ export const V2DatabaseContextMenuView: React.FC<{
 
         <div className="gn-v2-context-menu-section-title">维护</div>
         {renderItems([
-          { action: 'rename-db', icon: <EditOutlined />, title: '重命名数据库', kbd: 'F2' },
+          ...(supportsRenameDatabase ? [{ action: 'rename-db', icon: <EditOutlined />, title: '重命名数据库', kbd: 'F2' }] : []),
           { action: 'refresh', icon: <ReloadOutlined />, title: '刷新对象树' },
           { action: 'disconnect-db', icon: <DisconnectOutlined />, title: '关闭数据库' },
         ])}
@@ -358,7 +362,7 @@ export const V2DatabaseContextMenuView: React.FC<{
         ])}
 
         <div className="gn-v2-context-menu-divider" />
-        {renderItems([
+        {supportsDropDatabase && renderItems([
           { action: 'drop-db', icon: <DeleteOutlined />, title: '删除数据库 · DROP', tone: 'danger', kbd: '⌫' },
         ])}
       </div>
@@ -431,6 +435,7 @@ export const V2ConnectionContextMenuView: React.FC<{
   hostSummary?: string;
   driverLabel?: string;
   isRedis?: boolean;
+  supportsCreateDatabase?: boolean;
   tags?: V2ConnectionContextMenuTagItem[];
   onAction?: (action: V2ConnectionContextMenuActionKey) => void;
 }> = ({
@@ -438,6 +443,7 @@ export const V2ConnectionContextMenuView: React.FC<{
   hostSummary,
   driverLabel,
   isRedis = false,
+  supportsCreateDatabase = true,
   tags = [],
   onAction,
 }) => {
@@ -466,7 +472,7 @@ export const V2ConnectionContextMenuView: React.FC<{
           { action: 'new-command', icon: <ConsoleSqlOutlined />, title: '新建命令窗口', featured: true },
           { action: 'open-monitor', icon: <DashboardOutlined />, title: 'Redis 实例监控' },
         ]) : renderItems([
-          { action: 'new-db', icon: <DatabaseOutlined />, title: '新建数据库', kbd: '⌘N', featured: true },
+          ...(supportsCreateDatabase ? [{ action: 'new-db' as const, icon: <DatabaseOutlined />, title: '新建数据库', kbd: '⌘N', featured: true }] : []),
           { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: '⌘R' },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
           { action: 'open-sql-file', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },

@@ -76,4 +76,28 @@ describe('dataSourceCapabilities', () => {
       supportsApproximateTableCount: true,
     });
   });
+
+  it('hides database-level DDL actions for Dameng and Oracle-like datasources', () => {
+    expect(getDataSourceCapabilities({ type: 'dameng' })).toMatchObject({
+      type: 'dameng',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'oracle' })).toMatchObject({
+      type: 'oracle',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+    });
+    expect(getDataSourceCapabilities({
+      type: 'oceanbase',
+      oceanBaseProtocol: 'oracle',
+    })).toMatchObject({
+      type: 'oracle',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+    });
+  });
 });

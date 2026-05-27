@@ -99,11 +99,54 @@ export type DataSourceCapabilities = {
   supportsQueryEditor: boolean;
   supportsSqlQueryExport: boolean;
   supportsCopyInsert: boolean;
+  supportsCreateDatabase: boolean;
+  supportsRenameDatabase: boolean;
+  supportsDropDatabase: boolean;
   forceReadOnlyQueryResult: boolean;
   preferManualTotalCount: boolean;
   supportsApproximateTableCount: boolean;
   supportsApproximateTotalPages: boolean;
 };
+
+const CREATE_DATABASE_TYPES = new Set([
+  'mysql',
+  'mariadb',
+  'oceanbase',
+  'diros',
+  'starrocks',
+  'postgres',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'opengauss',
+  'sqlserver',
+  'tdengine',
+  'clickhouse',
+]);
+
+const RENAME_DATABASE_TYPES = new Set([
+  'diros',
+  'postgres',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'opengauss',
+]);
+
+const DROP_DATABASE_TYPES = new Set([
+  'mysql',
+  'mariadb',
+  'oceanbase',
+  'diros',
+  'starrocks',
+  'postgres',
+  'kingbase',
+  'highgo',
+  'vastbase',
+  'opengauss',
+  'tdengine',
+  'clickhouse',
+]);
 
 export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCapabilities => {
   const type = resolveDataSourceType(config);
@@ -112,6 +155,9 @@ export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCap
     supportsQueryEditor: !QUERY_EDITOR_DISABLED_TYPES.has(type),
     supportsSqlQueryExport: SQL_QUERY_EXPORT_TYPES.has(type),
     supportsCopyInsert: COPY_INSERT_TYPES.has(type),
+    supportsCreateDatabase: CREATE_DATABASE_TYPES.has(type),
+    supportsRenameDatabase: RENAME_DATABASE_TYPES.has(type),
+    supportsDropDatabase: DROP_DATABASE_TYPES.has(type),
     forceReadOnlyQueryResult: FORCE_READ_ONLY_QUERY_TYPES.has(type),
     preferManualTotalCount: MANUAL_TOTAL_COUNT_TYPES.has(type),
     supportsApproximateTableCount: APPROXIMATE_TABLE_COUNT_TYPES.has(type),

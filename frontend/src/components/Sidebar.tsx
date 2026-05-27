@@ -55,6 +55,7 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
@@ -5422,12 +5423,15 @@ const Sidebar: React.FC<{
 
   const renderV2DatabaseContextMenu = (node: any) => {
       const dialect = getMetadataDialect(node.dataRef as SavedConnection);
+      const capabilities = getDataSourceCapabilities((node.dataRef as SavedConnection)?.config);
       return (
           <V2DatabaseContextMenuView
               dbName={String(node.dataRef?.dbName || node.title || '')}
               dialect={dialect}
               supportsSchemaActions={isPostgresSchemaDialect(dialect)}
               supportsStarRocksActions={dialect === 'starrocks'}
+              supportsRenameDatabase={capabilities.supportsRenameDatabase}
+              supportsDropDatabase={capabilities.supportsDropDatabase}
               onAction={(action) => {
                   setContextMenu(null);
                   handleV2DatabaseContextMenuAction(node, action);
@@ -5438,6 +5442,7 @@ const Sidebar: React.FC<{
 
   const renderV2ConnectionContextMenu = (node: any) => {
       const conn = node.dataRef as SavedConnection;
+      const capabilities = getDataSourceCapabilities(conn?.config);
       const currentTagId = connectionTags.find((tag) => tag.connectionIds.includes(String(conn.id || node.key)))?.id || '';
       return (
           <V2ConnectionContextMenuView
@@ -5445,6 +5450,7 @@ const Sidebar: React.FC<{
               hostSummary={resolveConnectionHostSummary(conn?.config)}
               driverLabel={resolveConnectionIconType(conn)}
               isRedis={conn?.config?.type === 'redis'}
+              supportsCreateDatabase={capabilities.supportsCreateDatabase}
               tags={connectionTags.map((tag) => ({
                   id: tag.id,
                   name: tag.name,
@@ -6056,8 +6062,9 @@ const Sidebar: React.FC<{
         });
 
         // Regular database connection menu
+        const connectionCapabilities = getDataSourceCapabilities((node.dataRef as SavedConnection)?.config);
         return [
-            {
+            ...(connectionCapabilities.supportsCreateDatabase ? [{
                 key: 'new-db',
                 label: '新建数据库',
                 icon: <DatabaseOutlined />,
@@ -6065,7 +6072,7 @@ const Sidebar: React.FC<{
                     setTargetConnection(node);
                     setIsCreateDbModalOpen(true);
                 }
-            },
+            }] : []),
             {
                 key: 'refresh',
                 label: '刷新',
@@ -6235,8 +6242,11 @@ const Sidebar: React.FC<{
             }
         ];
     } else if (node.type === 'database') {
-       const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
-       const supportsSchemaActions = isPostgresSchemaDialect(getMetadataDialect(node.dataRef as SavedConnection));
+       const databaseConn = node.dataRef as SavedConnection;
+       const dialect = getMetadataDialect(databaseConn);
+       const capabilities = getDataSourceCapabilities(databaseConn?.config);
+       const isStarRocks = dialect === 'starrocks';
+       const supportsSchemaActions = isPostgresSchemaDialect(dialect);
        return [
            {
                key: 'new-table',
@@ -6266,13 +6276,13 @@ const Sidebar: React.FC<{
                    onClick: () => openCreateStarRocksExternalCatalog(node)
                },
            ] : []),
-           {
+           ...(capabilities.supportsRenameDatabase ? [{
                key: 'rename-db',
                label: '重命名数据库',
                icon: <EditOutlined />,
                onClick: () => handleV2DatabaseContextMenuAction(node, 'rename-db')
-           },
-           {
+           }] : []),
+           ...(capabilities.supportsDropDatabase ? [{
                key: 'danger-zone',
                label: '危险操作',
                icon: <WarningOutlined />,
@@ -6285,7 +6295,7 @@ const Sidebar: React.FC<{
                        onClick: () => handleV2DatabaseContextMenuAction(node, 'drop-db')
                    }
                ]
-           },
+           }] : []),
            {
                key: 'refresh',
                label: '刷新',

@@ -762,6 +762,31 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('删除连接');
   });
 
+  it('omits unsupported database management actions for Oracle-like connection and database menus', () => {
+    const connectionMarkup = renderToStaticMarkup(
+      <V2ConnectionContextMenuView
+        connectionName="dm-prod"
+        hostSummary="10.0.0.10:5236"
+        driverLabel="dameng"
+        supportsCreateDatabase={false}
+      />,
+    );
+    const databaseMarkup = renderToStaticMarkup(
+      <V2DatabaseContextMenuView
+        dbName="SYSDBA"
+        dialect="dm"
+        supportsRenameDatabase={false}
+        supportsDropDatabase={false}
+      />,
+    );
+
+    expect(connectionMarkup).not.toContain('新建数据库');
+    expect(databaseMarkup).not.toContain('重命名数据库');
+    expect(databaseMarkup).not.toContain('删除数据库 · DROP');
+    expect(databaseMarkup).toContain('刷新对象树');
+    expect(databaseMarkup).toContain('关闭数据库');
+  });
+
   it('renders the v2 table group menu with sort state', () => {
     const markup = renderToStaticMarkup(
       <V2TableGroupContextMenuView
