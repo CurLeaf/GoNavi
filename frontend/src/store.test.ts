@@ -497,6 +497,147 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('reorders connections inside tags and ungrouped roots independently', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-d',
+        name: 'D',
+        config: { id: 'conn-d', type: 'mysql', host: 'd.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b', 'conn-d'],
+    });
+
+    useStore.getState().reorderConnections('conn-d', 'conn-b', 'tag-dev', true);
+    expect(useStore.getState().connectionTags[0]?.connectionIds).toEqual(['conn-d', 'conn-b']);
+
+    useStore.getState().reorderConnections('conn-c', 'conn-a', null, true);
+    expect(useStore.getState().connections.map((conn) => conn.id)).toEqual([
+      'conn-c',
+      'conn-a',
+      'conn-b',
+      'conn-d',
+    ]);
+  });
+
+  it('reorders sidebar root items across tags and ungrouped hosts', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b'],
+    });
+
+    const initialOrder = resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    );
+    expect(initialOrder).toEqual([
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+    ]);
+
+    useStore.getState().reorderSidebarRoot(
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-c'),
+      false,
+    );
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-dev'),
+    ]);
+  });
+
+  it('restores ungrouped host root order after moving a host out of a tag', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b'],
+    });
+
+    useStore.getState().moveConnectionToTag('conn-a', 'tag-dev');
+    useStore.getState().moveConnectionToTag('conn-a', null);
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-a'),
+    ]);
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

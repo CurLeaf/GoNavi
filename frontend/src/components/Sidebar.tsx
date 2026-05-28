@@ -44,7 +44,13 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   StarFilled,
   StarOutlined
 	} from '@ant-design/icons';
-import { buildSidebarTablePinKey, useStore } from '../store';
+import {
+    buildSidebarRootConnectionToken,
+    buildSidebarRootTagToken,
+    buildSidebarTablePinKey,
+    resolveSidebarRootOrderTokens,
+    useStore,
+} from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { SavedConnection, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
@@ -236,15 +242,17 @@ export interface V2RailConnectionGroup {
   name: string;
   connections: SavedConnection[];
   isUngrouped?: boolean;
+  rootToken: string;
 }
 
 export const buildV2RailConnectionGroups = (
   connections: SavedConnection[],
   connectionTags: ConnectionTag[],
+  sidebarRootOrder: string[] = [],
 ): V2RailConnectionGroup[] => {
   const connectionById = new Map(connections.map((conn) => [conn.id, conn]));
   const groupedConnectionIds = new Set<string>();
-  const groups: V2RailConnectionGroup[] = [];
+  const tagGroups = new Map<string, V2RailConnectionGroup>();
 
   connectionTags.forEach((tag) => {
     const tagConnections: SavedConnection[] = [];
@@ -255,22 +263,62 @@ export const buildV2RailConnectionGroups = (
       tagConnections.push(conn);
     });
     if (tagConnections.length === 0) return;
-    groups.push({
+    tagGroups.set(tag.id, {
       id: tag.id,
       name: tag.name || '未命名分组',
       connections: tagConnections,
+      rootToken: buildSidebarRootTagToken(tag.id),
     });
   });
 
-  const ungroupedConnections = connections.filter((conn) => !groupedConnectionIds.has(conn.id));
-  if (ungroupedConnections.length > 0) {
+  const ungroupedConnectionMap = new Map(
+    connections
+      .filter((conn) => !groupedConnectionIds.has(conn.id))
+      .map((conn) => [conn.id, conn]),
+  );
+  const orderedRootTokens = resolveSidebarRootOrderTokens(
+    sidebarRootOrder,
+    connectionTags,
+    connections,
+  );
+  const groups: V2RailConnectionGroup[] = [];
+
+  orderedRootTokens.forEach((token) => {
+    if (token.startsWith('tag:')) {
+      const tagId = token.slice('tag:'.length);
+      const group = tagGroups.get(tagId);
+      if (!group) return;
+      groups.push(group);
+      tagGroups.delete(tagId);
+      return;
+    }
+    if (token.startsWith('connection:')) {
+      const connectionId = token.slice('connection:'.length);
+      const conn = ungroupedConnectionMap.get(connectionId);
+      if (!conn) return;
+      groups.push({
+        id: connectionId,
+        name: conn.name,
+        connections: [conn],
+        isUngrouped: true,
+        rootToken: buildSidebarRootConnectionToken(connectionId),
+      });
+      ungroupedConnectionMap.delete(connectionId);
+    }
+  });
+
+  tagGroups.forEach((group) => {
+    groups.push(group);
+  });
+  ungroupedConnectionMap.forEach((conn) => {
     groups.push({
-      id: V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
-      name: groups.length > 0 ? '未分组' : '',
-      connections: ungroupedConnections,
+      id: conn.id,
+      name: conn.name,
+      connections: [conn],
       isUngrouped: true,
+      rootToken: buildSidebarRootConnectionToken(conn.id),
     });
-  }
+  });
 
   return groups;
 };
@@ -278,9 +326,29 @@ export const buildV2RailConnectionGroups = (
 export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组'): string => {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) return fallback;
-  const ascii = trimmed.replace(/[^a-z0-9]/gi, '');
-  if (ascii.length >= 2) return ascii.slice(0, 2).toUpperCase();
-  return trimmed.slice(0, 1);
+  const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
+  if (cjkParts && cjkParts.length > 0) {
+    return cjkParts.slice(0, 1).join('');
+  }
+  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
+  if (latinTokens.length >= 2) {
+    const firstToken = latinTokens[0] || '';
+    const secondToken = latinTokens[1] || '';
+    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
+  }
+  if (latinTokens.length === 1) {
+    const token = latinTokens[0] || '';
+    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
+    if (alphaPrefix) {
+      return alphaPrefix.slice(0, 2).toUpperCase();
+    }
+    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
+    if (trailingDigits) {
+      return trailingDigits.slice(-2).toUpperCase();
+    }
+    return token.slice(0, 2).toUpperCase();
+  }
+  return trimmed.slice(0, 2);
 };
 
 const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
@@ -441,6 +509,168 @@ export const resolveSidebarNodeConnectionId = (
   return resolveSidebarConnectionIdFromKey(node?.key, connectionIds);
 };
 
+export const normalizeSidebarTreeRelativeDropPosition = (
+  absoluteDropPosition: number,
+  nodePos: unknown,
+): number => {
+  const segments = String(nodePos || '').split('-');
+  const tailIndex = Number(segments[segments.length - 1] || 0);
+  return absoluteDropPosition - tailIndex;
+};
+
+export const resolveSidebarDropInsertBefore = (
+  relativeDropPosition: number,
+  metrics?: {
+    clientY?: number;
+    top?: number;
+    height?: number;
+  } | null,
+): boolean => {
+  if (relativeDropPosition < 0) return true;
+  if (relativeDropPosition > 0) return false;
+  const clientY = metrics?.clientY;
+  const top = metrics?.top;
+  const height = metrics?.height;
+  if (
+    typeof clientY !== 'number'
+    || typeof top !== 'number'
+    || typeof height !== 'number'
+    || !Number.isFinite(clientY)
+    || !Number.isFinite(top)
+    || !Number.isFinite(height)
+    || height <= 0
+  ) {
+    return false;
+  }
+  return clientY < (top + height / 2);
+};
+
+const resolveSidebarDropBaseElementFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): Element | null => {
+  if (typeof document === 'undefined') return null;
+  const fallbackTarget = event?.target && typeof (event.target as any).closest === 'function'
+    ? (event.target as unknown as Element)
+    : null;
+  const pointTarget = (
+    typeof event?.clientX === 'number'
+    && typeof event?.clientY === 'number'
+  )
+    ? document.elementFromPoint(event.clientX, event.clientY)
+    : null;
+  const baseElement = pointTarget || fallbackTarget;
+  if (!baseElement || typeof baseElement.closest !== 'function') return null;
+  return baseElement;
+};
+
+export const resolveSidebarDropNodeFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): { key: string; type: string } | null => {
+  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
+  if (!baseElement) return null;
+  const marker = baseElement.closest('[data-sidebar-node-key]') as HTMLElement | null;
+  if (!marker) return null;
+  const key = String(marker.getAttribute('data-sidebar-node-key') || '').trim();
+  const type = String(marker.getAttribute('data-sidebar-node-type') || '').trim();
+  if (!key || !type) return null;
+  return { key, type };
+};
+
+export const resolveSidebarDropTargetMetricsFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): { top: number; height: number } | null => {
+  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
+  if (!baseElement) return null;
+  const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;
+  if (!treeNode || typeof treeNode.getBoundingClientRect !== 'function') return null;
+  const rect = treeNode.getBoundingClientRect();
+  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) {
+    return null;
+  }
+  return {
+    top: rect.top,
+    height: rect.height,
+  };
+};
+
+export const resolveSidebarTagDropInsertBefore = (options: {
+  currentTagOrder: string[];
+  dragTagId: string;
+  dropTagId: string;
+  relativeDropPosition: number;
+  fallbackInsertBefore: boolean;
+  metrics?: {
+    clientY?: number;
+    top?: number;
+    height?: number;
+  } | null;
+}): boolean => {
+  const {
+    currentTagOrder,
+    dragTagId,
+    dropTagId,
+    relativeDropPosition,
+    fallbackInsertBefore,
+    metrics,
+  } = options;
+
+  if (relativeDropPosition !== 0) {
+    return fallbackInsertBefore;
+  }
+
+  const clientY = metrics?.clientY;
+  const top = metrics?.top;
+  const height = metrics?.height;
+  if (
+    typeof clientY !== 'number'
+    || typeof top !== 'number'
+    || typeof height !== 'number'
+    || !Number.isFinite(clientY)
+    || !Number.isFinite(top)
+    || !Number.isFinite(height)
+    || height <= 0
+  ) {
+    return fallbackInsertBefore;
+  }
+
+  const ratio = (clientY - top) / height;
+  if (ratio < 0.35) return true;
+  if (ratio > 0.65) return false;
+
+  const dragIndex = currentTagOrder.indexOf(dragTagId);
+  const dropIndex = currentTagOrder.indexOf(dropTagId);
+  if (dragIndex === -1 || dropIndex === -1 || dragIndex === dropIndex) {
+    return fallbackInsertBefore;
+  }
+  return dragIndex > dropIndex;
+};
+
+export const shouldSkipSidebarSelectWhileDragging = (
+  isTreeDragging: boolean,
+  info: { selected?: boolean } | null | undefined,
+): boolean => isTreeDragging || !info?.selected;
+
+export const shouldSkipSidebarLoadOnExpandWhileDragging = (
+  isTreeDragging: boolean,
+  info: { expanded?: boolean; node?: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null } | null | undefined,
+): boolean => {
+  if (isTreeDragging) return true;
+  if (!info?.expanded) return true;
+  return !shouldLoadSidebarNodeOnExpand(info.node);
+};
+
 export const resolveV2ActiveConnectionId = ({
   activeContextConnectionId,
   activeTabConnectionId,
@@ -467,7 +697,6 @@ export const resolveV2ActiveConnectionId = ({
       || selectedConnectionId
       || normalizeDirectId(fallbackConnectionId)
       || normalizeDirectId(activeTabConnectionId)
-      || connectionIds[0]
       || '';
 };
 
@@ -602,11 +831,14 @@ const Sidebar: React.FC<{
   const setActiveContext = useStore(state => state.setActiveContext);
   const removeConnection = useStore(state => state.removeConnection);
   const connectionTags = useStore(state => state.connectionTags);
+  const sidebarRootOrder = useStore(state => state.sidebarRootOrder);
   const addConnectionTag = useStore(state => state.addConnectionTag);
   const updateConnectionTag = useStore(state => state.updateConnectionTag);
   const removeConnectionTag = useStore(state => state.removeConnectionTag);
   const moveConnectionToTag = useStore(state => state.moveConnectionToTag);
+  const reorderConnections = useStore(state => state.reorderConnections);
   const reorderTags = useStore(state => state.reorderTags);
+  const reorderSidebarRoot = useStore(state => state.reorderSidebarRoot);
   const closeTabsByConnection = useStore(state => state.closeTabsByConnection);
   const closeTabsByDatabase = useStore(state => state.closeTabsByDatabase);
   const theme = useStore(state => state.theme);
@@ -701,6 +933,16 @@ const Sidebar: React.FC<{
   const selectedNodesRef = useRef<any[]>([]);
   const loadingNodesRef = useRef<Set<string>>(new Set());
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const treeDragSelectSuppressUntilRef = useRef(0);
+  const treeDragSelectionSnapshotRef = useRef<{
+      selectedKeys: React.Key[];
+      selectedNodes: any[];
+      activeContext: { connectionId: string; dbName: string } | null;
+  }>({
+      selectedKeys: [],
+      selectedNodes: [],
+      activeContext: null,
+  });
   const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
   const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
   const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
@@ -708,8 +950,8 @@ const Sidebar: React.FC<{
   const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
   const v2RailConnectionGroups = useMemo(
-      () => buildV2RailConnectionGroups(connections, connectionTags),
-      [connections, connectionTags],
+      () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder),
+      [connections, connectionTags, sidebarRootOrder],
   );
   const [collapsedV2RailGroupIds, setCollapsedV2RailGroupIds] = useState<string[]>([]);
   const collapsedV2RailGroupIdSet = useMemo(
@@ -717,6 +959,23 @@ const Sidebar: React.FC<{
       [collapsedV2RailGroupIds],
   );
   const hasV2RailConnectionGroups = v2RailConnectionGroups.some((group) => !group.isUngrouped);
+  const [draggingV2RailRootToken, setDraggingV2RailRootToken] = useState('');
+
+  const snapshotTreeSelectionBeforeDrag = useCallback(() => {
+      treeDragSelectionSnapshotRef.current = {
+          selectedKeys: [...selectedKeys],
+          selectedNodes: [...selectedNodesRef.current],
+          activeContext: activeContext ? { ...activeContext } : null,
+      };
+  }, [activeContext, selectedKeys]);
+
+  const restoreTreeSelectionAfterDrag = useCallback(() => {
+      const snapshot = treeDragSelectionSnapshotRef.current;
+      treeDragSelectSuppressUntilRef.current = Date.now() + 1000;
+      setSelectedKeys(snapshot.selectedKeys);
+      selectedNodesRef.current = snapshot.selectedNodes;
+      setActiveContext(snapshot.activeContext);
+  }, [setActiveContext]);
 
   const openV2CommandSearch = useCallback(() => {
       setIsV2CommandSearchOpen(true);
@@ -782,6 +1041,7 @@ const Sidebar: React.FC<{
   
   // Connection Status State: key -> 'success' | 'error'
   const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
+  const [isTreeDragging, setIsTreeDragging] = useState(false);
 
   // Create Database Modal
   const [isCreateDbModalOpen, setIsCreateDbModalOpen] = useState(false);
@@ -952,12 +1212,20 @@ const Sidebar: React.FC<{
       };
 
       const taggedConnIds = new Set<string>();
-      const tagNodes: TreeNode[] = connectionTags.map((tag) => {
+      const tagNodesById = new Map<string, TreeNode>();
+      connectionTags.forEach((tag) => {
         tag.connectionIds.forEach(id => taggedConnIds.add(id));
-        return {
+        tagNodesById.set(tag.id, {
           title: tag.name,
           key: `tag-${tag.id}`,
-          icon: <FolderOutlined style={{ color: '#faad14' }} />,
+          icon: (
+            <span
+              className="gn-v2-tree-folder-icon"
+              data-sidebar-tree-folder-icon="true"
+            >
+              <FolderOutlined />
+            </span>
+          ),
           type: 'tag',
           dataRef: tag,
           isLeaf: false,
@@ -965,16 +1233,43 @@ const Sidebar: React.FC<{
             .map(cid => connections.find(c => c.id === cid))
             .filter(Boolean)
             .map(conn => buildConnectionNode(conn!)),
-        } as TreeNode;
+        } as TreeNode);
       });
 
-      const ungroupedNodes: TreeNode[] = connections
+      const ungroupedNodesById = new Map<string, TreeNode>();
+      connections
         .filter(c => !taggedConnIds.has(c.id))
-        .map(conn => buildConnectionNode(conn));
+        .forEach((conn) => {
+          ungroupedNodesById.set(conn.id, buildConnectionNode(conn));
+        });
 
-      return [...tagNodes, ...ungroupedNodes];
+      const orderedRootTokens = resolveSidebarRootOrderTokens(
+        sidebarRootOrder,
+        connectionTags,
+        connections,
+      );
+      const orderedNodes: TreeNode[] = [];
+      orderedRootTokens.forEach((token) => {
+        if (token.startsWith('tag:')) {
+          const tagNode = tagNodesById.get(token.slice('tag:'.length));
+          if (!tagNode) return;
+          orderedNodes.push(tagNode);
+          tagNodesById.delete(token.slice('tag:'.length));
+          return;
+        }
+        if (token.startsWith('connection:')) {
+          const connectionNode = ungroupedNodesById.get(token.slice('connection:'.length));
+          if (!connectionNode) return;
+          orderedNodes.push(connectionNode);
+          ungroupedNodesById.delete(token.slice('connection:'.length));
+        }
+      });
+
+      orderedNodes.push(...Array.from(tagNodesById.values()));
+      orderedNodes.push(...Array.from(ungroupedNodesById.values()));
+      return orderedNodes;
     });
-  }, [connections, connectionTags]);
+  }, [connections, connectionTags, sidebarRootOrder]);
 
   const handleDuplicateConnection = async (conn: SavedConnection) => {
     if (!conn?.id) return;
@@ -2559,6 +2854,12 @@ const Sidebar: React.FC<{
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
           return;
       }
+      if (Date.now() < treeDragSelectSuppressUntilRef.current) {
+          return;
+      }
+      if (isTreeDragging) {
+          return;
+      }
       setSelectedKeys(keys);
       selectedNodesRef.current = info.selectedNodes || [];
 
@@ -2568,7 +2869,7 @@ const Sidebar: React.FC<{
           }
           return;
       }
-      if (!info.selected) return;
+      if (shouldSkipSidebarSelectWhileDragging(isTreeDragging, info)) return;
 
       const { type, dataRef, key, title } = info.node;
       const nodeConnectionId = resolveSidebarNodeConnectionId(info.node, connectionIds);
@@ -2617,7 +2918,7 @@ const Sidebar: React.FC<{
   const onExpand = (newExpandedKeys: React.Key[], info?: any) => {
     setExpandedKeys(newExpandedKeys);
     setAutoExpandParent(false);
-    if (info?.expanded && shouldLoadSidebarNodeOnExpand(info.node)) {
+    if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info)) {
         void onLoadData(info.node);
     }
   };
@@ -5146,8 +5447,14 @@ const Sidebar: React.FC<{
           .map((node) => resolveSidebarNodeConnectionId(node, connectionIds))
           .find(Boolean),
   });
-  const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || connections[0] || null;
-  const activeConnectionHostSummary = resolveConnectionHostSummary(activeConnection?.config) || '未配置地址';
+  const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || null;
+  const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || '未选择 Host';
+  const activeDatabaseDisplayName = useMemo(() => {
+      if (activeContext && typeof activeContext === 'object' && 'dbName' in activeContext) {
+          return String(activeContext.dbName || '').trim();
+      }
+      return String(activeTab?.dbName || '').trim();
+  }, [activeContext, activeTab?.dbName]);
   const activeConnectionTreeData = useMemo(() => {
       if (!activeConnection) return displayTreeData;
       const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
@@ -5170,10 +5477,12 @@ const Sidebar: React.FC<{
       const filtered = filterTree(displayTreeData);
       return filtered;
   }, [activeConnection, displayTreeData]);
-  const v2VisibleTreeData = useMemo(
-      () => filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter),
-      [activeConnectionTreeData, v2ExplorerFilter],
-  );
+  const v2VisibleTreeData = useMemo(() => {
+      if (v2ExplorerFilter === 'all') {
+          return displayTreeData;
+      }
+      return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
+  }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
   const v2TreeMetrics = useMemo(() => {
       const databaseObjectCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
@@ -5235,7 +5544,18 @@ const Sidebar: React.FC<{
       ));
   }, []);
 
-  const getRailConnectionLabel = (conn: SavedConnection): string => {
+  const handleV2RailRootDrop = useCallback((
+      sourceToken: string,
+      targetToken: string,
+      insertBefore: boolean,
+  ) => {
+      if (!sourceToken || !targetToken || sourceToken === targetToken) {
+          return;
+      }
+      reorderSidebarRoot(sourceToken, targetToken, insertBefore);
+  }, [reorderSidebarRoot]);
+
+  const getRailConnectionTypeLabel = (conn: SavedConnection): string => {
       const iconType = resolveConnectionIconType(conn);
       if (iconType === 'mysql' || iconType === 'mariadb' || iconType === 'oceanbase') return 'MY';
       if (iconType === 'postgres') return 'PG';
@@ -5247,6 +5567,67 @@ const Sidebar: React.FC<{
       if (iconType === 'sqlite') return 'SQ';
       if (iconType === 'jvm') return 'JV';
       return iconType.slice(0, 2).toUpperCase() || 'DB';
+  };
+
+  const getRailConnectionHostLabel = (conn: SavedConnection): string => {
+      const hostTokens = resolveConnectionHostTokens(conn.config);
+      const primaryHost = String(hostTokens[0] || '').trim().replace(/^\[|\]$/g, '');
+      if (primaryHost) {
+          if (/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(primaryHost)) {
+              return 'LO';
+          }
+          if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(primaryHost)) {
+              const lastSegment = primaryHost.split('.').pop() || '';
+              return lastSegment.slice(-3).toUpperCase() || 'IP';
+          }
+          if (primaryHost.includes(':') && /^[a-f0-9:]+$/i.test(primaryHost)) {
+              const lastSegment = primaryHost.split(':').filter(Boolean).pop() || '';
+              return lastSegment.slice(-3).toUpperCase() || 'IP';
+          }
+
+          const hostFragments = primaryHost
+              .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+          if (hostFragments.length >= 2) {
+              return `${hostFragments[0][0] || ''}${hostFragments[1][0] || ''}`.toUpperCase();
+          }
+          const hostToken = hostFragments[0] || primaryHost.split('.')[0] || '';
+          if (hostToken) {
+              return hostToken.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '').slice(0, 3).toUpperCase() || 'DB';
+          }
+      }
+
+      return getRailConnectionTypeLabel(conn);
+  };
+
+  const getRailConnectionBadgeLabel = (conn: SavedConnection): string => {
+      const connectionName = String(conn.name || '').trim();
+      const cjkParts = connectionName.match(/[\u4e00-\u9fa5]/g);
+      if (cjkParts && cjkParts.length > 0) {
+          return cjkParts.slice(0, 2).join('');
+      }
+
+      const latinTokens = connectionName.match(/[a-z0-9]+/gi) || [];
+      if (latinTokens.length >= 2) {
+          const firstToken = latinTokens[0] || '';
+          const secondToken = latinTokens[1] || '';
+          return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
+      }
+      if (latinTokens.length === 1) {
+          const token = latinTokens[0];
+          const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
+          if (alphaPrefix) {
+              return alphaPrefix.slice(0, 3).toUpperCase();
+          }
+          const trailingDigits = token.match(/(\d{2,})$/)?.[1];
+          if (trailingDigits) {
+              return trailingDigits.slice(-3).toUpperCase();
+          }
+          return token.slice(0, 3).toUpperCase();
+      }
+
+      return getRailConnectionTypeLabel(conn);
   };
 
   const openV2ConnectionContextMenu = (
@@ -5271,6 +5652,10 @@ const Sidebar: React.FC<{
   };
 
   const getV2TreeMetaText = (node: any): string => {
+      if (node.type === 'tag') {
+          const count = flattenConnectionNodes(node.children || []).length;
+          return count > 0 ? count.toLocaleString() : '';
+      }
       if (node.type === 'database') {
           const count = v2TreeMetrics.databaseObjectCounts.get(node.key) || 0;
           return count > 0 ? count.toLocaleString() : '';
@@ -5601,6 +5986,22 @@ const Sidebar: React.FC<{
               {node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />}
           </button>
       ) : null;
+      if (node.type === 'connection') {
+          return (
+            <span
+                className={`${titleClassName} is-connection`}
+                title={hoverTitle}
+                data-node-type={node.type}
+                data-sidebar-node-key={String(node.key || '')}
+                data-sidebar-node-type={String(node.type || '')}
+            >
+                {statusBadge}
+                <span className="gn-v2-tree-connection-copy">
+                    <span className="gn-v2-tree-label">{displayTitle}</span>
+                </span>
+            </span>
+          );
+      }
       return (
         <>
           <span
@@ -5608,6 +6009,8 @@ const Sidebar: React.FC<{
               title={hoverTitle}
               data-node-type={node.type}
               data-group-key={groupKey || undefined}
+              data-sidebar-node-key={String(node.key || '')}
+              data-sidebar-node-type={String(node.type || '')}
           >
               {statusBadge}
               <span className="gn-v2-tree-label">{displayTitle}</span>
@@ -6767,37 +7170,98 @@ const Sidebar: React.FC<{
   };
 
   const handleDrop = (info: any) => {
-      const dropKey = info.node.key;
-      const dragKey = info.dragNode.key;
-      const dropPos = info.node.pos.split('-');
-      const dropPosition = info.dropPosition - Number(dropPos[dropPos.length - 1]);
+      setIsTreeDragging(false);
+      const dropPosition = normalizeSidebarTreeRelativeDropPosition(
+          Number(info.dropPosition || 0),
+          info?.node?.pos,
+      );
+      const domDropNode = resolveSidebarDropNodeFromDomEvent(info?.event);
+      const dropTargetMetrics = resolveSidebarDropTargetMetricsFromDomEvent(info?.event);
+      const insertBefore = resolveSidebarDropInsertBefore(dropPosition, dropTargetMetrics ? {
+          clientY: info?.event?.clientY,
+          top: dropTargetMetrics.top,
+          height: dropTargetMetrics.height,
+      } : null);
 
       const dragNode = info.dragNode;
-      const dropNode = info.node;
+      const dropNode = domDropNode && domDropNode.key === String(info?.node?.key || '')
+          ? info.node
+          : (domDropNode
+              ? findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key) || info.node
+              : info.node);
 
-      // Tag to Tag reordering
+      const getDropRootToken = (node: any): string => {
+          if (!node) return '';
+          if (node.type === 'tag') {
+              return buildSidebarRootTagToken(String(node?.dataRef?.id || ''));
+          }
+          if (node.type === 'connection') {
+              const groupedTagId = connectionTags.find((tag) =>
+                  tag.connectionIds.includes(String(node.key)),
+              )?.id || '';
+              return groupedTagId
+                  ? buildSidebarRootTagToken(groupedTagId)
+                  : buildSidebarRootConnectionToken(String(node.key));
+          }
+          return '';
+      };
+
+      // Root tag or ungrouped connection reordering
       if (dragNode.type === 'tag') {
-          // You can only drop tags onto the root level (before/after other tags or connections at root)
           if (dropNode.type === 'tag' || dropNode.type === 'connection') {
-              // Get current order
               const currentTagOrder = connectionTags.map(t => t.id);
               const dragTagId = dragNode.dataRef.id;
+              const dropTagId = dropNode.type === 'tag'
+                  ? dropNode.dataRef.id
+                  : (connectionTags.find(t => t.connectionIds.includes(String(dropNode.key)))?.id || '');
+              const dragRootToken = buildSidebarRootTagToken(String(dragTagId));
+              const dropRootToken = getDropRootToken(dropNode);
 
-              // Filter out the dragging tag
+              if (dropRootToken && dropRootToken !== dragRootToken) {
+                  if (dropTagId) {
+                      const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
+                          currentTagOrder,
+                          dragTagId,
+                          dropTagId,
+                          relativeDropPosition: dropPosition,
+                          fallbackInsertBefore: insertBefore,
+                          metrics: dropTargetMetrics ? {
+                              clientY: info?.event?.clientY,
+                              top: dropTargetMetrics.top,
+                              height: dropTargetMetrics.height,
+                          } : null,
+                      });
+                      reorderSidebarRoot(dragRootToken, dropRootToken, resolvedInsertBefore);
+                  } else {
+                      reorderSidebarRoot(dragRootToken, dropRootToken, insertBefore);
+                  }
+                  return;
+              }
+
               const newOrder = currentTagOrder.filter(id => id !== dragTagId);
-
               let insertIndex = newOrder.length;
-              if (dropNode.type === 'tag') {
-                  const dropTagId = dropNode.dataRef.id;
+              if (dropTagId) {
                   const dropIndex = newOrder.indexOf(dropTagId);
+                  const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
+                      currentTagOrder,
+                      dragTagId,
+                      dropTagId,
+                      relativeDropPosition: dropPosition,
+                      fallbackInsertBefore: insertBefore,
+                      metrics: dropTargetMetrics ? {
+                          clientY: info?.event?.clientY,
+                          top: dropTargetMetrics.top,
+                          height: dropTargetMetrics.height,
+                      } : null,
+                  });
 
-                  if (dropPosition === -1) {
+                  if (resolvedInsertBefore) {
                       insertIndex = dropIndex;
                   } else {
                       insertIndex = dropIndex + 1;
                   }
               } else {
-                  // Dropped onto a root connection, usually meaning moving to the end of tags
+                  // Dropped onto an ungrouped root connection, usually meaning moving to the end of tags
                   // Since tags are always displayed before ungrouped connections, just put it at the end
                   insertIndex = newOrder.length;
               }
@@ -6808,27 +7272,38 @@ const Sidebar: React.FC<{
           return;
       }
 
+      if (dragNode.type === 'connection') {
+          const dragTagId = connectionTags.find((tag) =>
+              tag.connectionIds.includes(String(dragNode.key)),
+          )?.id || '';
+          const dragIsUngroupedRoot = !dragTagId;
+          const dropRootToken = getDropRootToken(dropNode);
+          if (dragIsUngroupedRoot && dropNode.type === 'connection' && dropRootToken) {
+              reorderSidebarRoot(
+                  buildSidebarRootConnectionToken(String(dragNode.key)),
+                  dropRootToken,
+                  insertBefore,
+              );
+              return;
+          }
+      }
+
       // Connection moving to tag (any drop position on a tag node counts as "into")
       if (dragNode.type === 'connection' && dropNode.type === 'tag') {
           moveConnectionToTag(dragNode.key, dropNode.dataRef.id);
           return;
       }
 
-      // Connection moving to another connection inside a tag
+      // Connection reordering against another connection
       if (dragNode.type === 'connection' && dropNode.type === 'connection') {
-          // Find if drop target is under a tag
           const targetTag = connectionTags.find(t => t.connectionIds.includes(dropNode.key));
-          if (targetTag) {
-              moveConnectionToTag(dragNode.key, targetTag.id);
-              return;
-          }
-
-          // Drop target is NOT under a tag (ungrouped) -> move OUT of tag
-          const sourceTag = connectionTags.find(t => t.connectionIds.includes(dragNode.key));
-          if (sourceTag) {
-              moveConnectionToTag(dragNode.key, null);
-              return;
-          }
+          reorderConnections(
+              String(dragNode.key),
+              String(dropNode.key),
+              targetTag?.id || null,
+              insertBefore,
+          );
+          return;
       }
   };
 
@@ -6891,14 +7366,51 @@ const Sidebar: React.FC<{
   const renderV2RailConnectionButton = (conn: SavedConnection) => {
       const accent = resolveConnectionAccentColor(conn);
       const status = buildRailConnectionStatus(conn.id);
-      const label = getRailConnectionLabel(conn);
+      const badgeLabel = getRailConnectionBadgeLabel(conn);
+      const hostLabel = getRailConnectionHostLabel(conn);
       const title = `${conn.name} · ${resolveConnectionHostSummary(conn.config) || conn.config.type}`;
+      const rootToken = buildSidebarRootConnectionToken(conn.id);
 
       return (
           <Tooltip key={conn.id} title={title}>
               <button
                   type="button"
                   className={`gn-v2-rail-item${conn.id === activeConnectionId ? ' is-active' : ''}`}
+                  draggable
+                  onDragStart={(event) => {
+                      snapshotTreeSelectionBeforeDrag();
+                      treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                      setDraggingV2RailRootToken(rootToken);
+                      setIsTreeDragging(true);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', rootToken);
+                  }}
+                  onDragEnd={() => {
+                      restoreTreeSelectionAfterDrag();
+                      setDraggingV2RailRootToken('');
+                      setIsTreeDragging(false);
+                  }}
+                  onDragOver={(event) => {
+                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                          return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => {
+                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                          return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const insertBefore = event.clientY < rect.top + rect.height / 2;
+                      handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
+                      restoreTreeSelectionAfterDrag();
+                      setDraggingV2RailRootToken('');
+                      setIsTreeDragging(false);
+                  }}
                   onClick={() => selectConnectionFromRail(conn)}
                   onContextMenu={(event) => openV2ConnectionContextMenu(event, conn)}
                   aria-label={`切换到连接 ${conn.name}`}
@@ -6906,11 +7418,13 @@ const Sidebar: React.FC<{
                   data-v2-rail-host-context-menu-trigger="true"
               >
                   <span className="gn-v2-rail-active-bar" />
-                  <span className="gn-v2-rail-badge" style={{ background: accent }}>
-                      {label}
+                  <span className="gn-v2-rail-badge-wrap">
+                      <span className="gn-v2-rail-badge" style={{ background: accent }}>
+                          {badgeLabel}
+                      </span>
+                      <span className={`gn-v2-rail-status is-${status}`} />
                   </span>
-                  <span className={`gn-v2-rail-status is-${status}`} />
-                  <span className="gn-v2-rail-fallback">{label}</span>
+                  <span className="gn-v2-rail-fallback">{hostLabel}</span>
               </button>
           </Tooltip>
       );
@@ -6919,19 +7433,54 @@ const Sidebar: React.FC<{
   const renderV2RailConnectionGroup = (group: V2RailConnectionGroup) => {
       const collapsed = collapsedV2RailGroupIdSet.has(group.id);
       const groupTitle = group.name || '连接';
-      const groupLabel = getV2RailConnectionGroupBadgeText(group.name, group.isUngrouped ? '未' : '组');
+      const rootToken = group.rootToken;
 
       return (
           <div
               key={group.id}
               className={`gn-v2-rail-group${group.isUngrouped ? ' is-ungrouped' : ''}${collapsed ? ' is-collapsed' : ''}`}
               data-v2-rail-connection-group="true"
+              draggable
+              onDragStart={(event) => {
+                  snapshotTreeSelectionBeforeDrag();
+                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                  setDraggingV2RailRootToken(rootToken);
+                  setIsTreeDragging(true);
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', rootToken);
+              }}
+              onDragEnd={() => {
+                  restoreTreeSelectionAfterDrag();
+                  setDraggingV2RailRootToken('');
+                  setIsTreeDragging(false);
+              }}
+              onDragOver={(event) => {
+                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                      return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                      return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const insertBefore = event.clientY < rect.top + rect.height / 2;
+                  handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
+                  restoreTreeSelectionAfterDrag();
+                  setDraggingV2RailRootToken('');
+                  setIsTreeDragging(false);
+              }}
           >
               {hasV2RailConnectionGroups && (
                   <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`}>
                       <button
                           type="button"
-                          className="gn-v2-rail-group-header"
+                          className={`gn-v2-rail-group-header${group.isUngrouped ? ' is-ungrouped' : ''}`}
                           onClick={() => toggleV2RailConnectionGroup(group.id)}
                           onContextMenu={(event) => {
                               if (group.isUngrouped) return;
@@ -6955,7 +7504,7 @@ const Sidebar: React.FC<{
                           <span className="gn-v2-rail-group-chevron">
                               <DownOutlined />
                           </span>
-                          <span className="gn-v2-rail-group-badge">{groupLabel}</span>
+                          <span className="gn-v2-rail-group-title">{groupTitle}</span>
                           <span className="gn-v2-rail-group-count">{group.connections.length}</span>
                       </button>
                   </Tooltip>
@@ -6970,23 +7519,9 @@ const Sidebar: React.FC<{
   };
 
   const renderV2ConnectionRail = () => (
-      <div className="gn-v2-connection-rail" aria-label="连接切换">
-          <div className="gn-v2-rail-items">
-              {v2RailConnectionGroups.map(renderV2RailConnectionGroup)}
-              <Tooltip title="新建连接">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-item gn-v2-rail-add"
-                      onClick={onCreateConnection}
-                      aria-label="新建连接"
-                      data-gonavi-create-connection-action="true"
-                  >
-                      <PlusOutlined />
-                  </button>
-              </Tooltip>
-          </div>
+      <div className="gn-v2-connection-rail" aria-label="系统操作">
           <div className="gn-v2-rail-footer">
-              <div className="gn-v2-rail-action-group" aria-label="左侧快捷操作">
+              <div className="gn-v2-rail-action-group" aria-label="对象区快捷操作">
                   <Tooltip title="新建组">
                       <button
                           type="button"
@@ -7085,25 +7620,41 @@ const Sidebar: React.FC<{
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
-                <span className={`gn-v2-live-dot is-${activeConnection ? buildRailConnectionStatus(activeConnection.id) : 'idle'}`} />
-                <div className="gn-v2-active-connection-copy">
-                    <strong>{activeConnection?.name || '未选择连接'}</strong>
-                    <span>{activeConnectionHostSummary}</span>
+                <div className="gn-v2-active-connection-trigger" aria-label="当前 Host 与数据库">
+                    <span className={`gn-v2-live-dot is-${activeConnection ? buildRailConnectionStatus(activeConnection.id) : 'idle'}`} />
+                    <div className="gn-v2-active-connection-copy">
+                        <strong>{activeConnectionDisplayName}</strong>
+                        <span>{activeDatabaseDisplayName || '未选择数据库'}</span>
+                    </div>
                 </div>
-                <Tooltip title="连接操作">
-                    <Button
-                        size="small"
-                        type="text"
-                        icon={<MoreOutlined />}
-                        aria-label="连接操作"
-                        disabled={!activeConnection}
-                        onClick={(event) => {
-                            if (activeConnection) {
-                                openV2ConnectionContextMenu(event, activeConnection);
-                            }
-                        }}
-                    />
-                </Tooltip>
+                <div className="gn-v2-active-connection-actions">
+                    {onCreateConnection && (
+                        <Tooltip title="新建连接">
+                            <Button
+                                size="small"
+                                type="text"
+                                icon={<PlusOutlined />}
+                                aria-label="新建连接"
+                                data-gonavi-create-connection-action="true"
+                                onClick={onCreateConnection}
+                            />
+                        </Tooltip>
+                    )}
+                    <Tooltip title="连接操作">
+                        <Button
+                            size="small"
+                            type="text"
+                            icon={<MoreOutlined />}
+                            aria-label="连接操作"
+                            disabled={!activeConnection}
+                            onClick={(event) => {
+                                if (activeConnection) {
+                                    openV2ConnectionContextMenu(event, activeConnection);
+                                }
+                            }}
+                        />
+                    </Tooltip>
+                </div>
             </div>
         )}
         <div className={isV2Ui ? 'gn-v2-explorer-search' : undefined} style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
@@ -7281,6 +7832,19 @@ const Sidebar: React.FC<{
                     draggable={{
                         icon: false,
                         nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
+                    }}
+                    onDragStart={() => {
+                        snapshotTreeSelectionBeforeDrag();
+                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                        setIsTreeDragging(true);
+                    }}
+                    onDragEnter={() => {
+                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                        setIsTreeDragging(true);
+                    }}
+                    onDragEnd={() => {
+                        restoreTreeSelectionAfterDrag();
+                        setIsTreeDragging(false);
                     }}
                     onDrop={handleDrop}
                     loadData={onLoadData}
