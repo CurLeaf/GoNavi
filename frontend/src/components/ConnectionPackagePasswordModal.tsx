@@ -58,7 +58,7 @@ export default function ConnectionPackagePasswordModal({
       confirmLoading={confirmLoading}
       onOk={onConfirm}
       onCancel={onCancel}
-      destroyOnClose={false}
+      destroyOnHidden={false}
       maskClosable={false}
     >
       {isExportMode ? (

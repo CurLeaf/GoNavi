@@ -1,6 +1,6 @@
 import React from 'react';
-import { Input, Select, AutoComplete, Tooltip, Modal, Checkbox, Spin, message, Button, Tag } from 'antd';
-import { DatabaseOutlined, SendOutlined, TableOutlined, SearchOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
+import { Input, Select, Tooltip, Modal, Checkbox, Spin, message, Button, Tag } from 'antd';
+import { CodeOutlined, DatabaseOutlined, DownOutlined, PlusOutlined, SendOutlined, StopOutlined, TableOutlined, SearchOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
@@ -8,7 +8,7 @@ import type { AIComposerNotice } from '../../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
-import type { ShortcutBinding } from '../../utils/shortcuts';
+import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shortcuts';
 
 interface AIChatInputProps {
     input: string;
@@ -24,7 +24,8 @@ interface AIChatInputProps {
     activeProvider: any;
     dynamicModels: string[];
     loadingModels: boolean;
-    sendShortcutBinding: ShortcutBinding;
+    sendShortcutBinding: ShortcutPlatformBinding;
+    shortcutPlatform?: ShortcutPlatform;
     composerNotice?: AIComposerNotice | null;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
@@ -35,14 +36,15 @@ interface AIChatInputProps {
     overlayTheme: OverlayWorkbenchTheme;
     contextUsageChars?: number;
     maxContextChars?: number;
+    isV2Ui?: boolean;
 }
 
 export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
-    sendShortcutBinding, composerNotice,
+    sendShortcutBinding, shortcutPlatform = 'windows', composerNotice,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
-    contextUsageChars, maxContextChars
+    contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
     const [contextOpen, setContextOpen] = React.useState(false);
     const [contextLoading, setContextLoading] = React.useState(false);
@@ -245,10 +247,397 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         }
     };
 
+    if (!isV2Ui) {
+        return (
+            <div className="ai-chat-input-area" style={{ borderTop: 'none', padding: '12px 16px 20px' }}>
+                <div className="ai-chat-input-wrapper" style={{
+                    borderColor: 'transparent',
+                    background: 'transparent',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    gap: 8,
+                    padding: '8px 4px 8px'
+                }}>
+                    <div className="ai-chat-input-preview-area" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {activeContextItems.length > 0 && (
+                            <Tag
+                                onClick={() => setContextExpanded(!contextExpanded)}
+                                style={{ background: darkMode ? 'rgba(24, 144, 255, 0.15)' : 'rgba(24, 144, 255, 0.08)', border: 'none', color: '#1890ff', borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0, cursor: 'pointer', transition: 'all 0.3s' }}
+                            >
+                                <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <DatabaseOutlined /> 关联上下文 ({activeContextItems.length}) {contextExpanded ? '▴' : '▾'}
+                                </span>
+                            </Tag>
+                        )}
+
+                        {contextExpanded && activeContextItems.map((ctx, idx) => (
+                            <Tag
+                                key={`ctx-${idx}`}
+                                closable
+                                onClose={(e) => { e.preventDefault(); removeAIContext(connectionKey, ctx.dbName, ctx.tableName); }}
+                                style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)', border: 'none', color: textColor, borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}
+                            >
+                                <span style={{ fontSize: 13 }}>🗄️ {ctx.tableName}</span>
+                            </Tag>
+                        ))}
+                        {draftImages.map((b64, i) => (
+                            <div key={i} style={{ position: 'relative', width: 60, height: 60, borderRadius: 6, overflow: 'hidden', border: overlayTheme.shellBorder }}>
+                                <img src={b64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Draft ${i}`} />
+                                <div
+                                    onClick={() => setDraftImages(prev => prev.filter((_, idx) => idx !== i))}
+                                    style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10 }}
+                                >
+                                    ✕
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    {composerNotice && (
+                        <div
+                            data-ai-chat-composer-notice="true"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: 8,
+                                padding: '8px 10px',
+                                borderRadius: 12,
+                                background: composerNoticePalette.background,
+                                border: `1px solid ${composerNoticePalette.borderColor}`,
+                            }}
+                        >
+                            <ExclamationCircleFilled style={{ color: composerNoticePalette.iconColor, fontSize: 14, marginTop: 1, flexShrink: 0 }} />
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: textColor, lineHeight: 1.4 }}>
+                                    {composerNotice.title}
+                                </div>
+                                <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
+                                    {composerNotice.description}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
+                        {showSlashMenu && filteredSlashCmds.length > 0 && (
+                            <div style={{
+                                position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
+                                background: darkMode ? '#2a2a2a' : '#fff',
+                                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
+                                borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)', zIndex: 100,
+                                maxHeight: 220, overflowY: 'auto', padding: 4
+                            }}>
+                                {filteredSlashCmds.map(cmd => (
+                                    <div
+                                        key={cmd.cmd}
+                                        style={{
+                                            padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                                            display: 'flex', alignItems: 'center', gap: 10,
+                                            transition: 'background 0.15s'
+                                        }}
+                                        onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'}
+                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                        onClick={() => {
+                                            setInput(cmd.prompt);
+                                            setShowSlashMenu(false);
+                                            setSlashFilter('');
+                                            textareaRef.current?.focus();
+                                        }}
+                                    >
+                                        <span style={{ fontSize: 14, fontWeight: 600, color: textColor, minWidth: 80 }}>{cmd.cmd}</span>
+                                        <span style={{ fontSize: 13, fontWeight: 500, color: textColor }}>{cmd.label}</span>
+                                        <span style={{ fontSize: 11, color: mutedColor, marginLeft: 'auto' }}>{cmd.desc}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <Input.TextArea
+                            onPaste={(e) => {
+                                const items = e.clipboardData?.items;
+                                if (!items) return;
+                                for (let i = 0; i < items.length; i++) {
+                                    if (items[i].type.indexOf('image') !== -1) {
+                                        e.preventDefault();
+                                        const blob = items[i].getAsFile();
+                                        if (blob) {
+                                            const reader = new FileReader();
+                                            reader.onload = (event) => {
+                                                if (event.target?.result) {
+                                                    setDraftImages(prev => [...prev, event.target!.result as string]);
+                                                }
+                                            };
+                                            reader.readAsDataURL(blob);
+                                        }
+                                    }
+                                }
+                            }}
+                            ref={textareaRef as any}
+                            value={input}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                setInput(val);
+                                if (val.startsWith('/')) {
+                                    setSlashFilter(val.split(/\s/)[0]);
+                                    setShowSlashMenu(true);
+                                } else {
+                                    setShowSlashMenu(false);
+                                    setSlashFilter('');
+                                }
+                            }}
+                            onKeyDown={handleKeyDown as any}
+                            placeholder={`输入消息... (${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)}，Shift+Enter 换行，/ 快捷命令)`}
+                            variant="borderless"
+                            autoSize={{ minRows: 1, maxRows: 8 }}
+                            style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
+                        />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {activeConnName && (
+                                <Tooltip title="当前数据查询上下文">
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4,
+                                        fontSize: 11, padding: '2px 8px', borderRadius: 12,
+                                        background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                                        color: overlayTheme.mutedText, cursor: 'default'
+                                    }}>
+                                        <DatabaseOutlined style={{ fontSize: 10 }} />
+                                        <span style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}
+                                        </span>
+                                    </div>
+                                </Tooltip>
+                            )}
+
+                            {activeProvider && (
+                                <Select
+                                    size="small"
+                                    variant="filled"
+                                    value={activeProvider.model || undefined}
+                                    onChange={onModelChange}
+                                    onOpenChange={(open) => {
+                                        if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
+                                            onFetchModels();
+                                        }
+                                    }}
+                                    loading={loadingModels}
+                                    options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
+                                    style={{ width: 130, fontSize: 11, background: 'transparent' }}
+                                    styles={{ popup: { root: { minWidth: 200 } } }}
+                                    showSearch
+                                    placeholder="选择模型"
+                                />
+                            )}
+
+                            {contextUsageChars !== undefined && maxContextChars !== undefined && (
+                                <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
+                                    <div style={{
+                                        display: 'flex', alignItems: 'center', gap: 4,
+                                        fontSize: 10, padding: '2px 6px', borderRadius: 12, border: '1px solid transparent',
+                                        background: contextUsageChars > maxContextChars * 0.8 ? (darkMode ? 'rgba(250, 173, 20, 0.1)' : 'rgba(250, 173, 20, 0.08)') : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
+                                        borderColor: contextUsageChars > maxContextChars * 0.8 ? 'rgba(250, 173, 20, 0.3)' : 'transparent',
+                                        color: contextUsageChars > maxContextChars * 0.8 ? '#faad14' : overlayTheme.mutedText, cursor: 'default',
+                                        transition: 'all 0.3s'
+                                    }}>
+                                        <span>🧠 {(contextUsageChars / 1000).toFixed(1)}k / {(maxContextChars / 1000).toFixed(0)}k</span>
+                                    </div>
+                                </Tooltip>
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                            <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                ref={fileInputRef}
+                                style={{ display: 'none' }}
+                                onChange={handleImageUpload}
+                            />
+                            <Tooltip title="上传图片/截图">
+                                <Button
+                                    type="text"
+                                    icon={<PictureOutlined style={{ fontSize: 16 }} />}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }}
+                                    onMouseEnter={e => e.currentTarget.style.color = textColor}
+                                    onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText}
+                                />
+                            </Tooltip>
+                            <Tooltip title="关联附带数据库表上下文">
+                                <Button
+                                    type="text"
+                                    icon={<TableOutlined style={{ fontSize: 16 }} />}
+                                    onClick={handleOpenContext}
+                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }}
+                                    onMouseEnter={e => e.currentTarget.style.color = textColor}
+                                    onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText}
+                                />
+                            </Tooltip>
+                            {sending ? (
+                                <button
+                                    className="ai-chat-send-btn ai-chat-stop-btn"
+                                    onClick={onStop}
+                                    title="停止生成"
+                                    style={{
+                                        background: 'rgba(255,77,79,0.1)',
+                                        color: '#ff4d4f', border: '1px solid rgba(255,77,79,0.2)',
+                                        width: 26, height: 26, borderRadius: 6, padding: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0
+                                    }}
+                                >
+                                    <div style={{ width: 10, height: 10, background: 'currentColor', borderRadius: 2 }} />
+                                </button>
+                            ) : (
+                                <button
+                                    className="ai-chat-send-btn"
+                                    onClick={() => onSend()}
+                                    disabled={!input.trim() && draftImages.length === 0}
+                                    title="发送"
+                                    style={{
+                                        background: (input.trim() || draftImages.length > 0) ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                                        color: (input.trim() || draftImages.length > 0) ? overlayTheme.iconColor : mutedColor,
+                                        width: 26, height: 26, borderRadius: 6, border: 'none', padding: 0,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: (input.trim() || draftImages.length > 0) ? 'pointer' : 'not-allowed', flexShrink: 0
+                                    }}
+                                >
+                                    <SendOutlined />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <Modal
+                    title={<span style={{ color: textColor }}>关联数据库表结构上下文</span>}
+                    open={contextOpen}
+                    onCancel={() => setContextOpen(false)}
+                    onOk={handleAppendContext}
+                    confirmLoading={appendingContext}
+                    okText="同步所选表至上下文"
+                    cancelText="取消"
+                    centered
+                    styles={{
+                        content: { background: darkMode ? '#1e1e1e' : '#ffffff', border: overlayTheme.shellBorder },
+                        header: { background: darkMode ? '#1e1e1e' : '#ffffff', borderBottom: overlayTheme.shellBorder },
+                        body: { padding: '20px 24px' }
+                    }}
+                >
+                    <Spin spinning={contextLoading}>
+                        <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
+                            {dbList.length > 0 && (
+                                <Select
+                                    value={selectedDbName}
+                                    onChange={val => {
+                                        const c = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
+                                        if (c) fetchTablesForDb(val, c.config);
+                                    }}
+                                    options={dbList.map(d => ({ label: d, value: d }))}
+                                    style={{ width: 160, flexShrink: 0 }}
+                                    placeholder="切换数据库"
+                                    showSearch
+                                />
+                            )}
+                            <Input
+                                placeholder="在当前库搜索表名..."
+                                prefix={<SearchOutlined style={{ color: overlayTheme.mutedText }} />}
+                                value={searchText}
+                                onChange={e => setSearchText(e.target.value)}
+                                style={{ background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: 'none', flexGrow: 1 }}
+                            />
+                        </div>
+                        {filteredTables.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, paddingBottom: 12, marginBottom: 8 }}>
+                                    <Checkbox
+                                        indeterminate={
+                                            filteredTables.length > 0 &&
+                                            filteredTables.some(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`)) &&
+                                            !filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))
+                                        }
+                                        checked={filteredTables.length > 0 && filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))}
+                                        onChange={(e) => {
+                                            if (e.target.checked) {
+                                                const newSelected = new Set([...selectedTableKeys, ...filteredTables.map(t => `${selectedDbName}::${t.name}`)]);
+                                                setSelectedTableKeys(Array.from(newSelected));
+                                            } else {
+                                                const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
+                                                setSelectedTableKeys(selectedTableKeys.filter(key => !filteredKeys.includes(key)));
+                                            }
+                                        }}
+                                        style={{ color: textColor, fontWeight: 'bold' }}
+                                    >
+                                        全选匹配的表 ({filteredTables.length})
+                                    </Checkbox>
+                                    <Button
+                                        type="link"
+                                        size="small"
+                                        style={{ padding: 0, height: 'auto', fontSize: 13 }}
+                                        onClick={() => {
+                                            const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
+                                            const remainingSelected = selectedTableKeys.filter(key => !filteredKeys.includes(key));
+                                            const toAdd = filteredKeys.filter(key => !selectedTableKeys.includes(key));
+                                            setSelectedTableKeys([...remainingSelected, ...toAdd]);
+                                        }}
+                                    >
+                                        反选匹配结果
+                                    </Button>
+                                </div>
+                                <div style={{ maxHeight: 300, overflowY: 'auto', margin: '0 -24px', padding: '0 24px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                        {filteredTables.map(t => {
+                                            const key = `${selectedDbName}::${t.name}`;
+                                            const isSelected = selectedTableKeys.includes(key);
+                                            return (
+                                                <div
+                                                    key={key}
+                                                    style={{
+                                                        padding: '6px 10px',
+                                                        borderRadius: 6,
+                                                        transition: 'background 0.2s',
+                                                        cursor: 'pointer'
+                                                    }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                                    onClick={(e) => {
+                                                        if ((e.target as HTMLElement).tagName.toLowerCase() === 'input') return;
+                                                        if (isSelected) {
+                                                            setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
+                                                        } else {
+                                                            setSelectedTableKeys([...selectedTableKeys, key]);
+                                                        }
+                                                    }}
+                                                >
+                                                    <Checkbox
+                                                        checked={isSelected}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) setSelectedTableKeys([...selectedTableKeys, key]);
+                                                            else setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
+                                                        }}
+                                                        style={{ color: textColor, width: '100%' }}
+                                                    >
+                                                        <span style={{ fontSize: 13, userSelect: 'none' }}>{t.name}</span>
+                                                    </Checkbox>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div style={{ padding: '40px 0', textAlign: 'center', color: overlayTheme.mutedText }}>
+                                没有找到匹配 '{searchText}' 的表
+                            </div>
+                        )}
+                    </Spin>
+                </Modal>
+            </div>
+        );
+    }
+
     return (
-        <div className="ai-chat-input-area" style={{ borderTop: 'none', padding: '12px 16px 20px' }}>
-            <div className="ai-chat-input-wrapper" style={{ 
-                borderColor: 'transparent', 
+        <div className="ai-chat-input-area gn-v2-ai-composer" style={{ borderTop: 'none', padding: '12px 16px 20px' }}>
+            <div className="ai-chat-input-wrapper" style={{
+                borderColor: 'transparent',
                 background: 'transparent',
                 display: 'flex',
                 flexDirection: 'column',
@@ -256,40 +645,62 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 gap: 8,
                 padding: '8px 4px 8px'
             }}>
-                <div className="ai-chat-input-preview-area" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {activeContextItems.length > 0 && (
-                        <Tag 
-                            onClick={() => setContextExpanded(!contextExpanded)}
-                            style={{ background: darkMode ? 'rgba(24, 144, 255, 0.15)' : 'rgba(24, 144, 255, 0.08)', border: 'none', color: '#1890ff', borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0, cursor: 'pointer', transition: 'all 0.3s' }}
-                        >
-                            <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <DatabaseOutlined /> 关联上下文 ({activeContextItems.length}) {contextExpanded ? '▴' : '▾'}
-                            </span>
-                        </Tag>
-                    )}
-
-                    {contextExpanded && activeContextItems.map((ctx, idx) => (
-                        <Tag 
-                            key={`ctx-${idx}`} 
-                            closable 
-                            onClose={(e) => { e.preventDefault(); removeAIContext(connectionKey, ctx.dbName, ctx.tableName); }}
-                            style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)', border: 'none', color: textColor, borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}
-                        >
-                            <span style={{ fontSize: 13 }}>🗄️ {ctx.tableName}</span>
-                        </Tag>
-                    ))}
-                    {draftImages.map((b64, i) => (
-                        <div key={i} style={{ position: 'relative', width: 60, height: 60, borderRadius: 6, overflow: 'hidden', border: overlayTheme.shellBorder }}>
-                            <img src={b64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Draft ${i}`} />
-                            <div 
-                                onClick={() => setDraftImages(prev => prev.filter((_, idx) => idx !== i))}
-                                style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10 }}
-                            >
-                                ✕
-                            </div>
-                        </div>
-                    ))}
+                <div className="ai-chat-input-preview-area gn-v2-ai-context-row">
+                    <button
+                        type="button"
+                        className={`gn-v2-ai-context-toggle${contextExpanded ? ' is-expanded' : ''}`}
+                        onClick={() => setContextExpanded(!contextExpanded)}
+                        aria-expanded={contextExpanded}
+                    >
+                        <TableOutlined />
+                        <span>关联上下文</span>
+                        <strong>{activeContextItems.length}</strong>
+                        <DownOutlined />
+                    </button>
+                    <button
+                        type="button"
+                        className="gn-v2-ai-context-add"
+                        onClick={handleOpenContext}
+                    >
+                        <PlusOutlined />
+                        <span>添加</span>
+                    </button>
                 </div>
+
+                {contextExpanded && activeContextItems.length > 0 && (
+                    <div className="gn-v2-ai-context-detail" data-ai-context-detail="true">
+                        <div className="gn-v2-ai-context-detail-title">当前上下文 · {activeContextItems.length}</div>
+                        {activeContextItems.map((ctx, idx) => (
+                            <Tag
+                                key={`ctx-${idx}`}
+                                closable
+                                onClose={(e) => { e.preventDefault(); removeAIContext(connectionKey, ctx.dbName, ctx.tableName); }}
+                                className="gn-v2-ai-context-table-chip"
+                                style={{ margin: 0 }}
+                            >
+                                <TableOutlined />
+                                <span>{ctx.tableName}</span>
+                            </Tag>
+                        ))}
+                    </div>
+                )}
+
+                {draftImages.length > 0 && (
+                    <div className="gn-v2-ai-attachment-row">
+                        {draftImages.map((b64, i) => (
+                            <div key={i} className="gn-v2-ai-attachment-thumb">
+                                <img src={b64} alt={`Draft ${i}`} />
+                                <button
+                                    type="button"
+                                    onClick={() => setDraftImages(prev => prev.filter((_, idx) => idx !== i))}
+                                    aria-label="移除图片"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
                 {composerNotice && (
                     <div
                         data-ai-chat-composer-notice="true"
@@ -314,14 +725,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         </div>
                     </div>
                 )}
-                <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
+                <div className="gn-v2-ai-input-box" data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                     {showSlashMenu && filteredSlashCmds.length > 0 && (
-                        <div style={{
-                            position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
+                        <div className="gn-v2-ai-slash-menu" style={{
                             background: darkMode ? '#2a2a2a' : '#fff',
                             border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
-                            borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)', zIndex: 100,
-                            maxHeight: 220, overflowY: 'auto', padding: 4
                         }}>
                             {filteredSlashCmds.map(cmd => (
                                 <div
@@ -347,161 +755,150 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             ))}
                         </div>
                     )}
-                    <Input.TextArea
-                        onPaste={(e) => {
-                            const items = e.clipboardData?.items;
-                            if (!items) return;
-                            for (let i = 0; i < items.length; i++) {
-                                if (items[i].type.indexOf('image') !== -1) {
-                                    e.preventDefault();
-                                    const blob = items[i].getAsFile();
-                                    if (blob) {
-                                        const reader = new FileReader();
-                                        reader.onload = (event) => {
-                                            if (event.target?.result) {
-                                                setDraftImages(prev => [...prev, event.target!.result as string]);
-                                            }
-                                        };
-                                        reader.readAsDataURL(blob);
+                    <div className="gn-v2-ai-input-surface">
+                        <Input.TextArea
+                            onPaste={(e) => {
+                                const items = e.clipboardData?.items;
+                                if (!items) return;
+                                for (let i = 0; i < items.length; i++) {
+                                    if (items[i].type.indexOf('image') !== -1) {
+                                        e.preventDefault();
+                                        const blob = items[i].getAsFile();
+                                        if (blob) {
+                                            const reader = new FileReader();
+                                            reader.onload = (event) => {
+                                                if (event.target?.result) {
+                                                    setDraftImages(prev => [...prev, event.target!.result as string]);
+                                                }
+                                            };
+                                            reader.readAsDataURL(blob);
+                                        }
                                     }
                                 }
-                            }
-                        }}
-                        ref={textareaRef as any}
-                        value={input}
-                        onChange={(e) => {
-                            const val = e.target.value;
-                            setInput(val);
-                            // Slash command detection
-                            if (val.startsWith('/')) {
-                                setSlashFilter(val.split(/\s/)[0]);
-                                setShowSlashMenu(true);
-                            } else {
-                                setShowSlashMenu(false);
-                                setSlashFilter('');
-                            }
-                        }}
-                        onKeyDown={handleKeyDown as any}
-                        placeholder={`输入消息... (${getAIChatSendShortcutLabel(sendShortcutBinding)}，Shift+Enter 换行，/ 快捷命令)`}
-                        variant="borderless"
-                        autoSize={{ minRows: 1, maxRows: 8 }}
-                        style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
-                    />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {activeConnName && (
-                            <Tooltip title="当前数据查询上下文">
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                    fontSize: 11, padding: '2px 8px', borderRadius: 12,
-                                    background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                                    color: overlayTheme.mutedText, cursor: 'default'
-                                }}>
-                                    <DatabaseOutlined style={{ fontSize: 10 }} />
-                                    <span style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}
-                                    </span>
-                                </div>
-                            </Tooltip>
-                        )}
-
-                        {activeProvider && (
-                            <Select
-                                size="small"
-                                variant="filled"
-                                value={activeProvider.model || undefined}
-                                onChange={onModelChange}
-                                onDropdownVisibleChange={(open) => {
-                                    if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
-                                        onFetchModels();
-                                    }
-                                }}
-                                loading={loadingModels}
-                                options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
-                                style={{ width: 130, fontSize: 11, background: 'transparent' }}
-                                dropdownStyle={{ minWidth: 200 }}
-                                showSearch
-                                placeholder="选择模型"
-                            />
-                        )}
-
-                        {contextUsageChars !== undefined && maxContextChars !== undefined && (
-                            <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: 4,
-                                    fontSize: 10, padding: '2px 6px', borderRadius: 12, border: '1px solid transparent',
-                                    background: contextUsageChars > maxContextChars * 0.8 ? (darkMode ? 'rgba(250, 173, 20, 0.1)' : 'rgba(250, 173, 20, 0.08)') : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'),
-                                    borderColor: contextUsageChars > maxContextChars * 0.8 ? 'rgba(250, 173, 20, 0.3)' : 'transparent',
-                                    color: contextUsageChars > maxContextChars * 0.8 ? '#faad14' : overlayTheme.mutedText, cursor: 'default',
-                                    transition: 'all 0.3s'
-                                }}>
-                                    <span>🧠 {(contextUsageChars / 1000).toFixed(1)}k / {(maxContextChars / 1000).toFixed(0)}k</span>
-                                </div>
-                            </Tooltip>
-                        )}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                        <input 
-                            type="file" 
-                            accept="image/*" 
-                            multiple 
-                            ref={fileInputRef} 
-                            style={{ display: 'none' }} 
-                            onChange={handleImageUpload} 
+                            }}
+                            ref={textareaRef as any}
+                            value={input}
+                            onChange={(e) => {
+                                const val = e.target.value;
+                                setInput(val);
+                                // Slash command detection
+                                if (val.startsWith('/')) {
+                                    setSlashFilter(val.split(/\s/)[0]);
+                                    setShowSlashMenu(true);
+                                } else {
+                                    setShowSlashMenu(false);
+                                    setSlashFilter('');
+                                }
+                            }}
+                            onKeyDown={handleKeyDown as any}
+                            placeholder={`输入消息... ${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)} · / 命令`}
+                            variant="borderless"
+                            autoSize={{ minRows: 1, maxRows: 8 }}
+                            style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
                         />
-                        <Tooltip title="上传图片/截图">
-                            <Button 
-                                type="text" 
-                                icon={<PictureOutlined style={{ fontSize: 16 }} />} 
-                                onClick={() => fileInputRef.current?.click()} 
-                                style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }} 
-                                onMouseEnter={e => e.currentTarget.style.color = textColor} 
-                                onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText} 
+                        <div className="gn-v2-ai-input-actions">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                ref={fileInputRef}
+                                style={{ display: 'none' }}
+                                onChange={handleImageUpload}
                             />
-                        </Tooltip>
-                        <Tooltip title="关联附带数据库表上下文">
-                            <Button 
-                                type="text" 
-                                icon={<TableOutlined style={{ fontSize: 16 }} />} 
-                                onClick={handleOpenContext} 
-                                style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }} 
-                                onMouseEnter={e => e.currentTarget.style.color = textColor} 
-                                onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText} 
-                            />
-                        </Tooltip>
-                        {sending ? (
-                        <button
-                            className="ai-chat-send-btn ai-chat-stop-btn"
-                            onClick={onStop}
-                            title="停止生成"
-                            style={{
-                                background: 'rgba(255,77,79,0.1)',
-                                color: '#ff4d4f', border: '1px solid rgba(255,77,79,0.2)',
-                                width: 26, height: 26, borderRadius: 6, padding: 0,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0
-                            }}
-                        >
-                            <div style={{ width: 10, height: 10, background: 'currentColor', borderRadius: 2 }} />
-                        </button>
-                    ) : (
-                        <button
-                            className="ai-chat-send-btn"
-                            onClick={() => onSend()}
-                            disabled={!input.trim() && draftImages.length === 0}
-                            title="发送"
-                            style={{
-                                background: (input.trim() || draftImages.length > 0) ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
-                                color: (input.trim() || draftImages.length > 0) ? overlayTheme.iconColor : mutedColor,
-                                width: 26, height: 26, borderRadius: 6, border: 'none', padding: 0,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: (input.trim() || draftImages.length > 0) ? 'pointer' : 'not-allowed', flexShrink: 0
-                            }}
-                        >
-                            <SendOutlined />
-                        </button>
-                    )}
+                            <Tooltip title="上传图片/截图">
+                                <Button
+                                    type="text"
+                                    icon={<PictureOutlined />}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
+                                />
+                            </Tooltip>
+                            <Tooltip title="关联附带数据库表上下文">
+                                <Button
+                                    type="text"
+                                    icon={<TableOutlined />}
+                                    onClick={handleOpenContext}
+                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
+                                />
+                            </Tooltip>
+                            <Tooltip title="快捷命令">
+                                <Button
+                                    type="text"
+                                    icon={<CodeOutlined />}
+                                    onClick={() => {
+                                        setInput('/');
+                                        setSlashFilter('/');
+                                        setShowSlashMenu(true);
+                                        textareaRef.current?.focus();
+                                    }}
+                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
+                                />
+                            </Tooltip>
+                            {sending ? (
+                                <button
+                                    type="button"
+                                    className="ai-chat-send-btn ai-chat-stop-btn gn-v2-ai-send"
+                                    onClick={onStop}
+                                    title="停止生成"
+                                >
+                                    <StopOutlined />
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="ai-chat-send-btn gn-v2-ai-send"
+                                    onClick={() => onSend()}
+                                    disabled={!input.trim() && draftImages.length === 0}
+                                    title="发送"
+                                >
+                                    <SendOutlined />
+                                </button>
+                            )}
+                        </div>
                     </div>
+                </div>
+                <div className="gn-v2-ai-model-bar">
+                    {activeConnName && (
+                        <Tooltip title="当前数据查询上下文">
+                            <div className="gn-v2-ai-context-chip">
+                                <span className="gn-v2-ai-context-live-dot" />
+                                <DatabaseOutlined />
+                                <span>{activeConnName}{activeContext?.dbName ? ` / ${activeContext.dbName}` : ''}</span>
+                            </div>
+                        </Tooltip>
+                    )}
+
+                    {activeProvider && (
+                        <Select
+                            size="small"
+                            value={activeProvider.model || undefined}
+                            onChange={onModelChange}
+                            onOpenChange={(open) => {
+                                if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
+                                    onFetchModels();
+                                }
+                            }}
+                            loading={loadingModels}
+                            options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
+                            styles={{ popup: { root: { minWidth: 200 } } }}
+                            placeholder="选择模型"
+                            className="gn-v2-ai-model-select"
+                            suffixIcon={<DownOutlined />}
+                        />
+                    )}
+
+                    <div className="gn-v2-ai-model-spacer" />
+
+                    {contextUsageChars !== undefined && maxContextChars !== undefined && (
+                        <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
+                            <div className={`gn-v2-ai-token-meter${contextUsageChars > maxContextChars * 0.8 ? ' is-warn' : ''}`}>
+                                <span className="gn-v2-ai-token-bar" aria-hidden="true">
+                                    <span style={{ width: `${Math.min(100, (contextUsageChars / Math.max(1, maxContextChars)) * 100)}%` }} />
+                                </span>
+                                <span>{(contextUsageChars / 1000).toFixed(1)}k/{(maxContextChars / 1000).toFixed(0)}k</span>
+                            </div>
+                        </Tooltip>
+                    )}
                 </div>
             </div>
 

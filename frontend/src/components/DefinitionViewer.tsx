@@ -225,6 +225,27 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
     };
 
+    const buildShowEventQueries = (dialect: string, eventName: string, dbName: string): string[] => {
+        const { schema, name } = parseSchemaAndName(eventName);
+        const safeName = escapeSQLLiteral(name);
+        const safeSchema = escapeSQLLiteral(schema || dbName);
+        const eventRef = schema
+            ? `\`${schema.replace(/`/g, '``')}\`.\`${name.replace(/`/g, '``')}\``
+            : `\`${name.replace(/`/g, '``')}\``;
+
+        switch (dialect) {
+            case 'mysql':
+                return [
+                    `SHOW CREATE EVENT ${eventRef}`,
+                    safeSchema
+                        ? `SELECT EVENT_SCHEMA AS schema_name, EVENT_NAME AS event_name, EVENT_DEFINITION AS event_definition, EVENT_TYPE AS event_type, EXECUTE_AT AS execute_at, INTERVAL_VALUE AS interval_value, INTERVAL_FIELD AS interval_field, STARTS AS starts, ENDS AS ends, STATUS AS status, ON_COMPLETION AS on_completion, EVENT_COMMENT AS event_comment FROM information_schema.events WHERE event_schema = '${safeSchema}' AND event_name = '${safeName}' LIMIT 1`
+                        : '',
+                ].filter(Boolean);
+            default:
+                return [`-- 暂不支持该数据库类型的事件定义查看`];
+        }
+    };
+
     const runQueryCandidates = async (
         config: Record<string, any>,
         dbName: string,
@@ -366,6 +387,30 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
     };
 
+    const extractEventDefinition = (dialect: string, data: any[]): string => {
+        if (!data || data.length === 0) return '-- 未找到事件定义';
+
+        switch (dialect) {
+            case 'mysql': {
+                const row = data[0];
+                const keys = Object.keys(row);
+                const sqlKey = keys.find(k => k.toLowerCase().includes('create event'));
+                if (sqlKey && row[sqlKey]) return String(row[sqlKey]);
+
+                const definition = row.event_definition || row.EVENT_DEFINITION;
+                const eventName = row.event_name || row.EVENT_NAME || row.Name || row.name;
+                if (definition && eventName) {
+                    return `-- 当前数据源未返回完整 CREATE EVENT 语句，已返回事件定义片段\n-- 名称: ${eventName}\n${String(definition)}`;
+                }
+                return JSON.stringify(row, null, 2);
+            }
+            default: {
+                const row = data[0];
+                return row.event_definition || row.EVENT_DEFINITION || Object.values(row)[0] || '';
+            }
+        }
+    };
+
     useEffect(() => {
         const loadDefinition = async () => {
             setLoading(true);
@@ -396,6 +441,16 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 queries = buildShowViewQueries(dialect, viewName, dbName, tab.viewKind);
                 extractFn = extractViewDefinition;
                 objectLabel = tab.viewKind === 'materialized' ? '物化视图' : '视图';
+            } else if (tab.type === 'event-def') {
+                const eventName = tab.eventName || '';
+                if (!eventName) {
+                    setError('事件名称为空');
+                    setLoading(false);
+                    return;
+                }
+                queries = buildShowEventQueries(dialect, eventName, dbName);
+                extractFn = extractEventDefinition;
+                objectLabel = '事件';
             } else {
                 const routineName = tab.routineName || '';
                 const routineType = tab.routineType || 'FUNCTION';
@@ -456,10 +511,14 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         };
 
         loadDefinition();
-    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.routineName, tab.routineType, tab.type, connections]);
+    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections]);
 
-    const objectLabel = tab.type === 'view-def' ? (tab.viewKind === 'materialized' ? '物化视图' : '视图') : '函数/存储过程';
-    const objectName = tab.type === 'view-def' ? tab.viewName : tab.routineName;
+    const objectLabel = tab.type === 'view-def'
+        ? (tab.viewKind === 'materialized' ? '物化视图' : '视图')
+        : (tab.type === 'event-def' ? '事件' : '函数/存储过程');
+    const objectName = tab.type === 'view-def'
+        ? tab.viewName
+        : (tab.type === 'event-def' ? tab.eventName : tab.routineName);
 
     if (loading) {
         return (

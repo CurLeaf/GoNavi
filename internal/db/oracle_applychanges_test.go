@@ -27,6 +27,7 @@ type oracleRecordingState struct {
 	mu           sync.Mutex
 	execQueries  []string
 	execArgs     [][]driver.NamedValue
+	queries      []string
 	rowsAffected int64
 	queryResults map[string]oracleRecordingQueryResult
 	queryError   error
@@ -52,6 +53,12 @@ func (s *oracleRecordingState) snapshotExecArgs() [][]driver.NamedValue {
 		result[i] = append([]driver.NamedValue(nil), args...)
 	}
 	return result
+}
+
+func (s *oracleRecordingState) snapshotQueries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.queries...)
 }
 
 type oracleRecordingDriver struct{}
@@ -88,6 +95,7 @@ func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args 
 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
+	c.state.queries = append(c.state.queries, query)
 	if err := c.state.queryError; err != nil {
 		c.state.mu.Unlock()
 		return nil, err
@@ -103,10 +111,10 @@ func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []
 
 	if strings.Contains(strings.ToLower(query), "tab_columns") {
 		return &oracleRecordingRows{
-			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT"},
+			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT", "COLUMN_KEY", "COMMENT"},
 			rows: [][]driver.Value{
-				{"UPDATED_AT", "TIMESTAMP", "YES", nil},
-				{"CREATED_AT", "DATE", "NO", nil},
+				{"UPDATED_AT", "TIMESTAMP", "YES", nil, "", "更新时间"},
+				{"CREATED_AT", "DATE", "NO", nil, "", nil},
 			},
 		}, nil
 	}
@@ -355,6 +363,59 @@ func TestMySQLApplyChangesReturnsErrorWhenUpdateAffectsMultipleRows(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "影响了 2 行") {
 		t.Fatalf("错误信息应提示影响多行，实际=%v", err)
+	}
+}
+
+func TestMySQLApplyChangesBatchesLargeInsertRows(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 1000
+	mysqlDB := &MySQLDB{conn: dbConn}
+
+	rows := make([]map[string]interface{}, 1201)
+	for i := range rows {
+		rows[i] = map[string]interface{}{
+			"id":   i + 1,
+			"name": fmt.Sprintf("name-%d", i+1),
+		}
+	}
+
+	if err := mysqlDB.ApplyChanges("users", connection.ChangeSet{Inserts: rows}); err != nil {
+		t.Fatalf("ApplyChanges() unexpected error: %v", err)
+	}
+
+	executions := state.snapshotExecQueries()
+	if len(executions) != 2 {
+		t.Fatalf("期望 1201 行插入拆成 2 条批量 INSERT，实际 %d 条：%v", len(executions), executions)
+	}
+	for _, query := range executions {
+		if !strings.HasPrefix(query, "INSERT INTO `users` (`id`, `name`) VALUES ") {
+			t.Fatalf("批量 INSERT 语句格式不正确: %s", query)
+		}
+		if got := strings.Count(query, "(?, ?)"); got == 0 || got > defaultMySQLInsertBatchSize {
+			t.Fatalf("批量 INSERT values 数量异常，got=%d query=%s", got, query)
+		}
+	}
+	if got := strings.Count(executions[0], "(?, ?)"); got != defaultMySQLInsertBatchSize {
+		t.Fatalf("第一批 values=%d, want %d", got, defaultMySQLInsertBatchSize)
+	}
+	if got := strings.Count(executions[1], "(?, ?)"); got != 201 {
+		t.Fatalf("第二批 values=%d, want 201", got)
+	}
+}
+
+func TestMySQLInsertBatchSizeRespectsArgumentLimit(t *testing.T) {
+	t.Parallel()
+
+	if got := batchInsertRowLimit(2, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != defaultMySQLInsertBatchSize {
+		t.Fatalf("2 列批大小=%d, want %d", got, defaultMySQLInsertBatchSize)
+	}
+	if got := batchInsertRowLimit(100, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != 600 {
+		t.Fatalf("100 列批大小=%d, want 600", got)
+	}
+	if got := batchInsertRowLimit(70000, defaultMySQLInsertBatchSize, maxMySQLInsertBatchArgs); got != 1 {
+		t.Fatalf("超宽表批大小=%d, want 1", got)
 	}
 }
 

@@ -101,6 +101,17 @@ func (d *DuckDB) ExecBatchContext(ctx context.Context, query string) (int64, err
 	return res.RowsAffected()
 }
 
+func (d *DuckDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if d.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := d.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -387,24 +398,17 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		}
 	}
 
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, "?")
-			args = append(args, v)
-		}
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteIdent,
+		Placeholder: func(int) string { return "?" },
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxArgs: sqliteBatchInsertArgs,
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()

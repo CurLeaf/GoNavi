@@ -270,6 +270,30 @@ func TestMySQLDSN_MapsAdditionalJDBCAliases(t *testing.T) {
 	}
 }
 
+func TestMySQLDSN_MapsAllowMultiQueriesTrueWithoutLeakingKey(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:             "db.local",
+		Port:             3306,
+		User:             "root",
+		Database:         "app",
+		ConnectionParams: "allowMultiQueries=true",
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	if got := query.Get("multiStatements"); got != "true" {
+		t.Fatalf("allowMultiQueries=true should map to multiStatements=true, got=%q; query=%v", got, query)
+	}
+	if _, exists := query["allowMultiQueries"]; exists {
+		t.Fatalf("allowMultiQueries should not be passed to Go MySQL driver: %v", query)
+	}
+}
+
 func TestMySQLDSN_AsiaShanghaiLocationAcceptedByDriver(t *testing.T) {
 	t.Parallel()
 

@@ -30,8 +30,52 @@ import (
 const minExportQueryTimeout = 5 * time.Minute
 const minClickHouseExportQueryTimeout = 2 * time.Hour
 const maxSQLFileSizeBytes int64 = 50 * 1024 * 1024
+const sqlFileBatchMaxStatements = 1000
+const sqlFileBatchMaxBytes = 4 * 1024 * 1024
+const sqlFileProgressStatementInterval = 100
+const sqlFileProgressTimeInterval = time.Second
 
 var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
+
+type sqlFileExecutionProgress struct {
+	Status     string
+	Executed   int
+	Failed     int
+	Total      int
+	BytesRead  int64
+	CurrentSQL string
+	Error      string
+}
+
+type sqlFileExecutionOptions struct {
+	DBType             string
+	BatchMaxStatements int
+	BatchMaxBytes      int
+	OnProgress         func(sqlFileExecutionProgress)
+}
+
+type sqlFileExecutionResult struct {
+	Executed int
+	Failed   int
+	Errors   []string
+}
+
+type sqlFilePendingStatement struct {
+	Index int
+	SQL   string
+}
+
+type sqlFileStatementExecer interface {
+	Exec(query string) (int64, error)
+}
+
+type sqlFileContextStatementExecer interface {
+	ExecContext(ctx context.Context, query string) (int64, error)
+}
+
+type sqlFileBatchStatementExecer interface {
+	ExecBatchContext(ctx context.Context, query string) (int64, error)
+}
 
 type SQLDirectoryEntry struct {
 	Name     string              `json:"name"`
@@ -242,6 +286,313 @@ func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResu
 	return writeSQLFileByPath(filePath, content)
 }
 
+func normalizeSQLFileExecutionOptions(options sqlFileExecutionOptions) sqlFileExecutionOptions {
+	if options.BatchMaxStatements <= 0 {
+		options.BatchMaxStatements = sqlFileBatchMaxStatements
+	}
+	if options.BatchMaxBytes <= 0 {
+		options.BatchMaxBytes = sqlFileBatchMaxBytes
+	}
+	return options
+}
+
+func appendSQLFileBatchStatement(batch []sqlFilePendingStatement, index int, stmt string) []sqlFilePendingStatement {
+	return append(batch, sqlFilePendingStatement{
+		Index: index,
+		SQL:   stmt,
+	})
+}
+
+func joinSQLFileBatchStatements(batch []sqlFilePendingStatement) string {
+	if len(batch) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	for i, item := range batch {
+		if i > 0 {
+			builder.WriteString(";\n")
+		}
+		builder.WriteString(item.SQL)
+	}
+	return builder.String()
+}
+
+func sqlFileStatementSnippet(stmt string, maxLen int) string {
+	snippet := strings.TrimSpace(stmt)
+	if maxLen > 0 && len(snippet) > maxLen {
+		return snippet[:maxLen] + "..."
+	}
+	return snippet
+}
+
+func execSQLFileStatement(ctx context.Context, execer sqlFileStatementExecer, stmt string) (int64, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, ctxErr
+	}
+	if e, ok := execer.(sqlFileContextStatementExecer); ok {
+		return e.ExecContext(ctx, stmt)
+	}
+	return execer.Exec(stmt)
+}
+
+func isSQLFileBatchableWriteStatement(dbType string, stmt string) bool {
+	if isReadOnlySQLQuery(dbType, stmt) {
+		return false
+	}
+	switch leadingSQLKeyword(stmt) {
+	case "insert", "update", "delete", "replace", "merge", "upsert":
+		return true
+	default:
+		return false
+	}
+}
+
+func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL string, rollbackSQL string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "oceanbase":
+		return "START TRANSACTION", "COMMIT", "ROLLBACK", true
+	case "sqlserver":
+		return "BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", true
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlite", "duckdb", "iris":
+		return "BEGIN", "COMMIT", "ROLLBACK", true
+	default:
+		return "", "", "", false
+	}
+}
+
+func updateSQLFileTransactionState(inTransaction bool, stmt string) bool {
+	switch leadingSQLKeyword(stmt) {
+	case "begin":
+		return true
+	case "start":
+		return strings.Contains(strings.ToLower(stmt), "transaction")
+	case "commit":
+		return false
+	case "rollback":
+		lower := strings.ToLower(stmt)
+		if strings.Contains(lower, " rollback to ") || strings.Contains(lower, "rollback to ") {
+			return inTransaction
+		}
+		return false
+	default:
+		return inTransaction
+	}
+}
+
+func executeSQLFileBatch(ctx context.Context, execer sqlFileStatementExecer, batcher sqlFileBatchStatementExecer, dbType string, batchSQL string, useTransaction bool) (bool, error) {
+	if !useTransaction {
+		_, err := batcher.ExecBatchContext(ctx, batchSQL)
+		return false, err
+	}
+
+	beginSQL, commitSQL, rollbackSQL, ok := sqlFileBatchTransactionSQL(dbType)
+	if !ok {
+		_, err := batcher.ExecBatchContext(ctx, batchSQL)
+		return false, err
+	}
+
+	if _, err := execSQLFileStatement(ctx, execer, beginSQL); err != nil {
+		return true, err
+	}
+	if _, err := batcher.ExecBatchContext(ctx, batchSQL); err != nil {
+		if _, rollbackErr := execSQLFileStatement(ctx, execer, rollbackSQL); rollbackErr != nil {
+			return false, fmt.Errorf("批量执行失败: %v；回滚失败: %w", err, rollbackErr)
+		}
+		return true, err
+	}
+	if _, err := execSQLFileStatement(ctx, execer, commitSQL); err != nil {
+		_, _ = execSQLFileStatement(ctx, execer, rollbackSQL)
+		return false, err
+	}
+	return false, nil
+}
+
+func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Reader, options sqlFileExecutionOptions, bytesRead func() int64) (sqlFileExecutionResult, error) {
+	options = normalizeSQLFileExecutionOptions(options)
+	var result sqlFileExecutionResult
+	var batch []sqlFilePendingStatement
+	var batchBytes int
+	var lastProgressAt time.Time
+	var inUserTransaction bool
+	var useTransactionalBatch bool
+	execer := sqlFileStatementExecer(dbInst)
+	batcher, supportsBatch := dbInst.(sqlFileBatchStatementExecer)
+	if provider, ok := dbInst.(db.SessionExecerProvider); ok {
+		sessionExecer, err := provider.OpenSessionExecer(ctx)
+		if err != nil {
+			return result, err
+		}
+		defer sessionExecer.Close()
+		execer = sessionExecer
+		if supportsBatch {
+			var ok bool
+			batcher, ok = sessionExecer.(sqlFileBatchStatementExecer)
+			supportsBatch = ok
+		}
+		useTransactionalBatch = supportsBatch
+	}
+
+	readBytes := func() int64 {
+		if bytesRead == nil {
+			return 0
+		}
+		return bytesRead()
+	}
+
+	emitProgress := func(currentSQL string) {
+		if options.OnProgress == nil {
+			return
+		}
+		total := result.Executed + result.Failed
+		options.OnProgress(sqlFileExecutionProgress{
+			Status:     "running",
+			Executed:   result.Executed,
+			Failed:     result.Failed,
+			Total:      total,
+			BytesRead:  readBytes(),
+			CurrentSQL: currentSQL,
+		})
+		lastProgressAt = time.Now()
+	}
+
+	shouldEmitProgress := func() bool {
+		total := result.Executed + result.Failed
+		if total <= 10 {
+			return true
+		}
+		if total%sqlFileProgressStatementInterval == 0 {
+			return true
+		}
+		return !lastProgressAt.IsZero() && time.Since(lastProgressAt) >= sqlFileProgressTimeInterval
+	}
+
+	recordError := func(index int, stmt string, err error) {
+		result.Failed++
+		errLog := fmt.Sprintf("第 %d 条语句执行失败: %v\n  SQL: %s", index+1, err, sqlFileStatementSnippet(stmt, 200))
+		result.Errors = append(result.Errors, errLog)
+		logger.Warnf("ExecuteSQLFile %s", errLog)
+	}
+
+	executeSingle := func(item sqlFilePendingStatement) error {
+		if _, err := execSQLFileStatement(ctx, execer, item.SQL); err != nil {
+			if ctx.Err() != nil {
+				return fmt.Errorf("已取消")
+			}
+			recordError(item.Index, item.SQL, err)
+		} else {
+			result.Executed++
+		}
+		if shouldEmitProgress() {
+			emitProgress(sqlFileStatementSnippet(item.SQL, 100))
+		}
+		return nil
+	}
+
+	executeBatchSequentially := func(items []sqlFilePendingStatement) error {
+		for _, item := range items {
+			if err := executeSingle(item); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	flushBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("已取消")
+		default:
+		}
+
+		startIndex := batch[0].Index
+		batchSQL := joinSQLFileBatchStatements(batch)
+		canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, batchSQL, useTransactionalBatch)
+		if err != nil {
+			logger.Warnf("ExecuteSQLFile 批量执行 %d 条语句失败，将降级逐条执行：第 %d 条起: %v", len(batch), startIndex+1, err)
+			pending := append([]sqlFilePendingStatement(nil), batch...)
+			batch = batch[:0]
+			batchBytes = 0
+			if !canFallback {
+				return fmt.Errorf("第 %d 条起的批量语句执行失败: %w", startIndex+1, err)
+			}
+			return executeBatchSequentially(pending)
+		}
+		result.Executed += len(batch)
+		if shouldEmitProgress() {
+			emitProgress(sqlFileStatementSnippet(batch[len(batch)-1].SQL, 100))
+		}
+		batch = batch[:0]
+		batchBytes = 0
+		return nil
+	}
+
+	_, streamErr := streamSQLFile(reader, func(index int, stmt string) error {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("已取消")
+		default:
+		}
+
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			return nil
+		}
+
+		if supportsBatch && !inUserTransaction && isSQLFileBatchableWriteStatement(options.DBType, stmt) {
+			stmtBytes := len(stmt)
+			if len(batch) > 0 && (len(batch) >= options.BatchMaxStatements || batchBytes+2+stmtBytes > options.BatchMaxBytes) {
+				if err := flushBatch(); err != nil {
+					return err
+				}
+			}
+			if stmtBytes > options.BatchMaxBytes {
+				if err := flushBatch(); err != nil {
+					return err
+				}
+				canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, stmt, useTransactionalBatch)
+				if err != nil {
+					logger.Warnf("ExecuteSQLFile 超大语句批量执行失败，将降级单条执行：第 %d 条: %v", index+1, err)
+					if !canFallback {
+						return fmt.Errorf("第 %d 条语句执行失败: %w", index+1, err)
+					}
+					return executeSingle(sqlFilePendingStatement{Index: index, SQL: stmt})
+				}
+				result.Executed++
+				if shouldEmitProgress() {
+					emitProgress(sqlFileStatementSnippet(stmt, 100))
+				}
+				return nil
+			}
+			batch = appendSQLFileBatchStatement(batch, index, stmt)
+			if batchBytes == 0 {
+				batchBytes = stmtBytes
+			} else {
+				batchBytes += 2 + stmtBytes
+			}
+			return nil
+		}
+
+		if err := flushBatch(); err != nil {
+			return err
+		}
+		if err := executeSingle(sqlFilePendingStatement{Index: index, SQL: stmt}); err != nil {
+			return err
+		}
+		inUserTransaction = updateSQLFileTransactionState(inUserTransaction, stmt)
+		return nil
+	})
+	if streamErr != nil {
+		return result, streamErr
+	}
+	if err := flushBatch(); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 // ExecuteSQLFile 在后端流式读取并执行大 SQL 文件，通过事件推送进度。
 // 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
 func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) connection.QueryResult {
@@ -317,48 +668,28 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	// 使用 countingReader 追踪已读取字节数
 	cr := &countingReader{r: f}
 
-	var executedCount int
-	var failedCount int
-	var errorLogs []string
 	startTime := time.Now()
-
-	_, streamErr := streamSQLFile(cr, func(index int, stmt string) error {
-		// 检查是否已取消
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("已取消")
-		default:
-		}
-
-		// 执行语句
-		_, execErr := dbInst.Exec(stmt)
-		if execErr != nil {
-			failedCount++
-			snippet := stmt
-			if len(snippet) > 200 {
-				snippet = snippet[:200] + "..."
-			}
-			errLog := fmt.Sprintf("第 %d 条语句执行失败: %v\n  SQL: %s", index+1, execErr, snippet)
-			errorLogs = append(errorLogs, errLog)
-			logger.Warnf("ExecuteSQLFile %s", errLog)
-		} else {
-			executedCount++
-		}
-
-		// 每条语句执行后推送进度（但限频：每 100 条或每秒推一次）
-		total := executedCount + failedCount
-		if total%100 == 0 || total <= 10 {
-			snippet := stmt
-			if len(snippet) > 100 {
-				snippet = snippet[:100] + "..."
-			}
-			emitProgress("running", executedCount, failedCount, total, cr.n, snippet, "")
-		}
-
-		return nil
+	execResult, streamErr := executeSQLFileStream(ctx, dbInst, cr, sqlFileExecutionOptions{
+		DBType: resolveDDLDBType(runConfig),
+		OnProgress: func(progress sqlFileExecutionProgress) {
+			emitProgress(
+				progress.Status,
+				progress.Executed,
+				progress.Failed,
+				progress.Total,
+				progress.BytesRead,
+				progress.CurrentSQL,
+				progress.Error,
+			)
+		},
+	}, func() int64 {
+		return cr.n
 	})
 
 	duration := time.Since(startTime)
+	executedCount := execResult.Executed
+	failedCount := execResult.Failed
+	errorLogs := execResult.Errors
 
 	if streamErr != nil && streamErr.Error() == "已取消" {
 		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", "用户取消执行")
@@ -1424,7 +1755,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false

@@ -565,7 +565,7 @@ const ConnectionModal: React.FC<{
       buildOverlayWorkbenchTheme(darkMode, {
         disableBackdropFilter: disableLocalBackdropFilter,
       }),
-    [darkMode, disableLocalBackdropFilter],
+    [darkMode, disableLocalBackdropFilter, appearance.uiVersion],
   );
 
   const tunnelSectionStyle: React.CSSProperties = {

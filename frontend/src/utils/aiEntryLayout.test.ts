@@ -1,31 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
-  resolveAIEntryPlacement,
-  resolveAIEdgeHandleAttachment,
-  resolveAIEdgeHandleDockStyle,
-  resolveAIEdgeHandleStyle,
+  resolveLegacyAIEdgeHandleAttachment,
+  resolveLegacyAIEdgeHandleDockStyle,
+  resolveLegacyAIEdgeHandleStyle,
 } from './aiEntryLayout';
 
 describe('ai entry layout', () => {
-  it('keeps the sidebar utility group compact and free of the AI entry', () => {
+  it('keeps legacy sidebar utility buttons limited to tools and settings', () => {
     expect(SIDEBAR_UTILITY_ITEM_KEYS).toEqual(['tools', 'settings']);
   });
 
-  it('anchors the AI entry to the content edge', () => {
-    expect(resolveAIEntryPlacement()).toBe('content-edge');
+  it('attaches the legacy closed AI handle to the content shell', () => {
+    expect(resolveLegacyAIEdgeHandleAttachment(false)).toBe('content-shell');
   });
 
-  it('attaches the closed handle to the content shell', () => {
-    expect(resolveAIEdgeHandleAttachment(false)).toBe('content-shell');
+  it('attaches the legacy open AI handle to the panel shell', () => {
+    expect(resolveLegacyAIEdgeHandleAttachment(true)).toBe('panel-shell');
   });
 
-  it('attaches the open handle to the panel shell', () => {
-    expect(resolveAIEdgeHandleAttachment(true)).toBe('panel-shell');
-  });
-
-  it('keeps the closed handle docked on the content edge', () => {
-    expect(resolveAIEdgeHandleDockStyle('content-shell')).toMatchObject({
+  it('keeps the legacy closed handle docked on the content edge', () => {
+    expect(resolveLegacyAIEdgeHandleDockStyle('content-shell')).toMatchObject({
       position: 'absolute',
       top: 16,
       right: 0,
@@ -33,8 +28,8 @@ describe('ai entry layout', () => {
     });
   });
 
-  it('keeps the open handle outside the panel shell to avoid header overlap', () => {
-    expect(resolveAIEdgeHandleDockStyle('panel-shell')).toMatchObject({
+  it('keeps the legacy open handle outside the panel shell to avoid header overlap', () => {
+    expect(resolveLegacyAIEdgeHandleDockStyle('panel-shell')).toMatchObject({
       position: 'absolute',
       top: 16,
       right: '100%',
@@ -42,8 +37,8 @@ describe('ai entry layout', () => {
     });
   });
 
-  it('uses the attached active appearance when the AI panel is open', () => {
-    const style = resolveAIEdgeHandleStyle({
+  it('uses the attached active appearance when the legacy AI panel is open', () => {
+    const style = resolveLegacyAIEdgeHandleStyle({
       darkMode: true,
       aiPanelVisible: true,
       effectiveUiScale: 1,
@@ -54,18 +49,5 @@ describe('ai entry layout', () => {
     expect(style.borderRadius).toBe('10px 0 0 10px');
     expect(style.borderRight).toBe('none');
     expect(style.height).toBe(24);
-  });
-
-  it('uses the subdued attached appearance when the AI panel is closed', () => {
-    const style = resolveAIEdgeHandleStyle({
-      darkMode: false,
-      aiPanelVisible: false,
-      effectiveUiScale: 1,
-    });
-
-    expect(style.color).toBe('rgba(22,32,51,0.82)');
-    expect(style.background).toBe('rgba(15,23,42,0.04)');
-    expect(style.paddingInline).toBe(8);
-    expect(style.borderRadius).toBe('10px 0 0 10px');
   });
 });

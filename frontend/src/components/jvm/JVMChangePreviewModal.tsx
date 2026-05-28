@@ -59,7 +59,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
       cancelText="关闭"
       okButtonProps={{ disabled: !preview?.allowed, loading: applying }}
       width={880}
-      destroyOnClose
+      destroyOnHidden
     >
       {!preview ? (
         <Alert type="info" showIcon message="暂无预览结果" />

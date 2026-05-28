@@ -216,7 +216,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
   const driverManagerTheme = useMemo(
     () => buildDriverManagerWorkbenchTheme(darkMode, opacity),
-    [darkMode, opacity],
+    [darkMode, opacity, appearance.uiVersion],
   );
   const [loading, setLoading] = useState(false);
   const [downloadDir, setDownloadDir] = useState('');

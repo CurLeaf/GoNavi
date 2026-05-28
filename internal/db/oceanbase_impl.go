@@ -797,6 +797,13 @@ func (o *OceanBaseDB) ExecBatchContext(ctx context.Context, query string) (int64
 	return o.ExecContext(ctx, query)
 }
 
+func (o *OceanBaseDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if p, ok := o.activeDatabase().(SessionExecerProvider); ok {
+		return p.OpenSessionExecer(ctx)
+	}
+	return nil, fmt.Errorf("当前 OceanBase %s 协议不支持独立导入会话", o.protocol)
+}
+
 func (o *OceanBaseDB) GetDatabases() ([]string, error) {
 	return o.activeDatabase().GetDatabases()
 }

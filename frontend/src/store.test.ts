@@ -64,12 +64,17 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
     const appearance = useStore.getState().appearance;
 
+    expect(appearance.uiVersion).toBe('legacy');
     expect(appearance.enabled).toBe(false);
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.dataTableDensity).toBe('comfortable');
+    expect(appearance.dataTableFontSize).toBeNull();
+    expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
+    expect(appearance.sidebarTreeFontSize).toBeNull();
+    expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -260,6 +265,62 @@ describe('store appearance persistence', () => {
     const config = useStore.getState().connections[0]?.config;
     expect(config?.type).toBe('starrocks');
     expect(config?.port).toBe(9030);
+  });
+
+  it('keeps InterSystems IRIS saved connections as independent datasource type', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'iris-user',
+        name: 'IRIS USER',
+        config: {
+          id: 'iris-user',
+          type: 'iris',
+          host: 'iris.local',
+          port: 1972,
+          user: '_SYSTEM',
+          database: 'USER',
+        },
+      },
+      {
+        id: 'iris-alias',
+        name: 'IRIS Alias',
+        config: {
+          id: 'iris-alias',
+          type: 'InterSystemsIRIS',
+          host: 'iris-alias.local',
+          port: 1972,
+          user: '_SYSTEM',
+          database: 'USER',
+        },
+      },
+    ]);
+
+    const connections = useStore.getState().connections;
+    expect(connections[0]?.config.type).toBe('iris');
+    expect(connections[0]?.config.port).toBe(1972);
+    expect(connections[1]?.config.type).toBe('iris');
+  });
+
+  it('normalizes saved connection type aliases without falling back to mysql', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      { id: 'pg', name: 'Postgres', config: { id: 'pg', type: 'PostgreSQL', host: 'pg.local', port: 5432, user: 'postgres' } },
+      { id: 'mssql', name: 'MSSQL', config: { id: 'mssql', type: 'mssql', host: 'sql.local', port: 1433, user: 'sa' } },
+      { id: 'kingbase', name: 'Kingbase', config: { id: 'kingbase', type: 'kingbase8', host: 'kingbase.local', port: 54321, user: 'system' } },
+      { id: 'dm', name: 'Dameng', config: { id: 'dm', type: 'dm8', host: 'dm.local', port: 5236, user: 'SYSDBA' } },
+      { id: 'sqlite', name: 'SQLite', config: { id: 'sqlite', type: 'sqlite3', host: 'D:/db/app.sqlite', port: 0, user: '' } },
+    ]);
+
+    expect(useStore.getState().connections.map((conn) => conn.config.type)).toEqual([
+      'postgres',
+      'sqlserver',
+      'kingbase',
+      'dameng',
+      'sqlite',
+    ]);
   });
 
   it('preserves SSL certificate paths for SSL-capable saved connections', async () => {
@@ -505,12 +566,131 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('persists open query tab drafts and restores them after reload', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-tab-1',
+      title: '临时 SQL',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      query: 'select * from users where id = 1;',
+    });
+    useStore.getState().updateQueryTabDraft('query-tab-1', {
+      query: 'select * from orders where status = "paid";',
+      connectionId: 'conn-2',
+      dbName: 'reporting',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-tab-1',
+        title: '临时 SQL',
+        type: 'query',
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+        query: 'select * from orders where status = "paid";',
+      }),
+    ]);
+    expect(persisted.state.activeTabId).toBe('query-tab-1');
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-tab-1',
+        type: 'query',
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+        query: 'select * from orders where status = "paid";',
+      }),
+    ]);
+    expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+  });
+
+  it('only restores persisted query tabs with useful SQL state', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        tabs: [
+          {
+            id: 'query-1',
+            title: '有效 SQL',
+            type: 'query',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            query: 'select 1;',
+          },
+          {
+            id: 'table-1',
+            title: 'users',
+            type: 'table',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            tableName: 'users',
+          },
+          {
+            id: 'empty-query',
+            title: '空查询',
+            type: 'query',
+            connectionId: 'conn-1',
+            dbName: 'main',
+            query: '   ',
+          },
+        ],
+        activeTabId: 'table-1',
+      },
+      version: 9,
+    }));
+
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        id: 'query-1',
+        type: 'query',
+        query: 'select 1;',
+      }),
+    ]);
+    expect(useStore.getState().activeTabId).toBe('query-1');
+  });
+
+  it('persists recent SQL execution logs and trims oversized entries', async () => {
+    const { useStore } = await importStore();
+    const longSql = `select '${'x'.repeat(120 * 1024)}'`;
+
+    useStore.getState().addSqlLog({
+      id: 'log-1',
+      timestamp: 100,
+      sql: longSql,
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.sqlLogs).toHaveLength(1);
+    expect(persisted.state.sqlLogs[0].sql.length).toBe(100 * 1024);
+    expect(persisted.state.sqlLogs[0].dbName).toBe('main');
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'log-1',
+      status: 'success',
+      duration: 12,
+      dbName: 'main',
+    }));
+    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(100 * 1024);
+  });
+
   it('defaults AI chat send shortcut to Enter in shared shortcut options', async () => {
     const { useStore } = await importStore();
 
     expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -520,19 +700,19 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Meta+Enter',
       enabled: true,
-    });
+    }, 'mac');
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
 
     vi.resetModules();
     const reloaded = await importStore();
     expect(reloaded.useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -552,8 +732,8 @@ describe('store appearance persistence', () => {
     const { useStore } = await importStore();
 
     expect(useStore.getState().shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 
@@ -562,14 +742,14 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Ctrl+Enter',
       enabled: true,
-    });
+    }, 'windows');
 
     useStore.getState().replaceConnections([]);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Ctrl+Enter',
-      enabled: true,
+      mac: { combo: 'Enter', enabled: true },
+      windows: { combo: 'Ctrl+Enter', enabled: true },
     });
   });
 
@@ -581,8 +761,8 @@ describe('store appearance persistence', () => {
         shortcutOptions: {
           ...shortcutOptions,
           sendAIChatMessage: {
-            combo: 'Meta+Enter',
-            enabled: true,
+            mac: { combo: 'Meta+Enter', enabled: true },
+            windows: { combo: 'Ctrl+Enter', enabled: true },
           },
         },
       },
@@ -592,8 +772,8 @@ describe('store appearance persistence', () => {
       shortcutOptions: {
         ...shortcutOptions,
         sendAIChatMessage: {
-          combo: 'Enter',
-          enabled: true,
+          mac: { combo: 'Enter', enabled: true },
+          windows: { combo: 'Enter', enabled: true },
         },
       },
     });
@@ -602,8 +782,8 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Ctrl+Enter', enabled: true },
     });
   });
 
@@ -614,13 +794,13 @@ describe('store appearance persistence', () => {
     useStore.getState().updateShortcut('sendAIChatMessage', {
       combo: 'Meta+Enter',
       enabled: true,
-    });
+    }, 'mac');
     useStore.setState({
       shortcutOptions: {
         ...shortcutOptions,
         sendAIChatMessage: {
-          combo: 'Enter',
-          enabled: true,
+          mac: { combo: 'Enter', enabled: true },
+          windows: { combo: 'Enter', enabled: true },
         },
       },
     });
@@ -628,8 +808,8 @@ describe('store appearance persistence', () => {
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.shortcutOptions.sendAIChatMessage).toEqual({
-      combo: 'Meta+Enter',
-      enabled: true,
+      mac: { combo: 'Meta+Enter', enabled: true },
+      windows: { combo: 'Enter', enabled: true },
     });
   });
 });

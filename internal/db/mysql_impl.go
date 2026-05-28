@@ -25,7 +25,11 @@ type MySQLDB struct {
 	pingTimeout time.Duration
 }
 
-const defaultMySQLPort = 3306
+const (
+	defaultMySQLPort            = 3306
+	defaultMySQLInsertBatchSize = 1000
+	maxMySQLInsertBatchArgs     = 60000
+)
 
 func parseMySQLCompatibleURI(raw string, allowedSchemes ...string) (*url.URL, bool) {
 	return parseConnectionURI(raw, allowedSchemes...)
@@ -317,6 +321,70 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 		"%s:%s@%s(%s)/%s?%s",
 		config.User, config.Password, protocol, address, database, params.Encode(),
 	), nil
+}
+
+func normalizeMySQLRawDSNCompatibilityParams(raw string) string {
+	text := strings.TrimSpace(raw)
+	queryIndex := strings.Index(text, "?")
+	if text == "" || queryIndex < 0 {
+		return raw
+	}
+
+	prefix := text[:queryIndex]
+	queryText := text[queryIndex+1:]
+	suffix := ""
+	if fragmentIndex := strings.Index(queryText, "#"); fragmentIndex >= 0 {
+		suffix = queryText[fragmentIndex:]
+		queryText = queryText[:fragmentIndex]
+	}
+	values, err := url.ParseQuery(queryText)
+	if err != nil {
+		return raw
+	}
+
+	changed := false
+	explicitMultiStatements := ""
+	hasExplicitMultiStatements := false
+	allowMultiQueries := ""
+	hasAllowMultiQueries := false
+
+	for key, items := range values {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "multistatements":
+			delete(values, key)
+			changed = true
+			for _, item := range items {
+				if enabled, ok := parseMySQLBoolParam(item); ok {
+					explicitMultiStatements = strconv.FormatBool(enabled)
+					hasExplicitMultiStatements = true
+				}
+			}
+		case "allowmultiqueries":
+			delete(values, key)
+			changed = true
+			for _, item := range items {
+				if enabled, ok := parseMySQLBoolParam(item); ok {
+					allowMultiQueries = strconv.FormatBool(enabled)
+					hasAllowMultiQueries = true
+				}
+			}
+		}
+	}
+
+	if hasExplicitMultiStatements {
+		values.Set("multiStatements", explicitMultiStatements)
+	} else if hasAllowMultiQueries {
+		values.Set("multiStatements", allowMultiQueries)
+	}
+
+	if !changed {
+		return raw
+	}
+	encoded := values.Encode()
+	if encoded == "" {
+		return prefix + suffix
+	}
+	return prefix + "?" + encoded + suffix
 }
 
 func parseHostPortWithDefault(raw string, defaultPort int) (string, int, bool) {
@@ -679,6 +747,17 @@ func (m *MySQLDB) ExecBatchContext(ctx context.Context, query string) (int64, er
 	return res.RowsAffected()
 }
 
+func (m *MySQLDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if m.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := m.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (m *MySQLDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -726,7 +805,7 @@ func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
 			break
 		}
 	}
-	return tables, nil
+	return resolveShardingSphereLogicalTables(tables, m.Query), nil
 }
 
 func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
@@ -945,45 +1024,38 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			normalizedValue, omit := normalizeMySQLValueForInsert(k, v, columnTypeMap)
-			if omit {
-				continue
-			}
-			cols = append(cols, fmt.Sprintf("`%s`", k))
-			placeholders = append(placeholders, "?")
-			args = append(args, normalizedValue)
-		}
-
-		if len(cols) == 0 {
-			query := fmt.Sprintf("INSERT INTO `%s` () VALUES ()", tableName)
-			res, err := tx.Exec(query)
-			if err != nil {
-				return fmt.Errorf("插入失败：%v", err)
-			}
-			if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-				return fmt.Errorf("插入未生效：未影响任何行")
-			}
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", tableName, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		res, err := tx.Exec(query, args...)
-		if err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
-		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
-			return fmt.Errorf("插入未生效：未影响任何行")
-		}
+	if err := m.applyInsertChanges(tx, tableName, changes.Inserts, columnTypeMap); err != nil {
+		return err
 	}
 
 	return tx.Commit()
+}
+
+func (m *MySQLDB) applyInsertChanges(tx *sql.Tx, tableName string, rows []map[string]interface{}, columnTypeMap map[string]string) error {
+	return execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table: fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(tableName)),
+		Rows:  rows,
+		QuoteColumn: func(column string) string {
+			return fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(column))
+		},
+		Placeholder: func(int) string { return "?" },
+		Value: func(column string, value interface{}) (interface{}, bool) {
+			return normalizeMySQLValueForInsert(column, value, columnTypeMap)
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxRows:         defaultMySQLInsertBatchSize,
+		MaxArgs:         maxMySQLInsertBatchArgs,
+		RequireAffected: true,
+		EmptyInsertSQL: func(table string) string {
+			return fmt.Sprintf("INSERT INTO %s () VALUES ()", table)
+		},
+	})
+}
+
+func escapeMySQLBacktickIdent(ident string) string {
+	return strings.ReplaceAll(strings.TrimSpace(ident), "`", "``")
 }
 
 func normalizeMySQLComplexValue(value interface{}) interface{} {
@@ -1291,10 +1363,10 @@ func formatMySQLDateTime(t time.Time) string {
 }
 
 func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
-	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", dbName)
 	if dbName == "" {
 		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
 	}
+	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", strings.ReplaceAll(dbName, "'", "''"))
 
 	data, _, err := m.Query(query)
 	if err != nil {
@@ -1307,6 +1379,7 @@ func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWit
 			TableName: fmt.Sprintf("%v", row["TABLE_NAME"]),
 			Name:      fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:      fmt.Sprintf("%v", row["COLUMN_TYPE"]),
+			Comment:   fmt.Sprintf("%v", row["COLUMN_COMMENT"]),
 		}
 		cols = append(cols, col)
 	}

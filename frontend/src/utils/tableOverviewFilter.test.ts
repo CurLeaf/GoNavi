@@ -4,6 +4,7 @@ import {
   TABLE_OVERVIEW_RENDER_BATCH_SIZE,
   buildTableOverviewSearchIndex,
   filterAndSortTableOverviewRows,
+  prioritizePinnedTableOverviewRows,
   resolveTableOverviewVisibleRows,
 } from './tableOverviewFilter';
 
@@ -44,5 +45,32 @@ describe('tableOverviewFilter', () => {
       'A_table',
       'z_table',
     ]);
+  });
+
+  it('keeps pinned overview rows in a dedicated leading group without changing inner sort order', () => {
+    const rows = [
+      { name: 'audit_log', comment: '', rows: 1, dataSize: 1, indexSize: 0 },
+      { name: 'users', comment: '', rows: 2, dataSize: 2, indexSize: 0 },
+      { name: 'orders', comment: '', rows: 3, dataSize: 3, indexSize: 0 },
+    ];
+
+    const grouped = prioritizePinnedTableOverviewRows(rows, (row) => row.name === 'orders');
+
+    expect(grouped.pinnedRows.map((item) => item.name)).toEqual(['orders']);
+    expect(grouped.regularRows.map((item) => item.name)).toEqual(['audit_log', 'users']);
+    expect(grouped.orderedRows.map((item) => item.name)).toEqual(['orders', 'audit_log', 'users']);
+  });
+
+  it('keeps the overview order unchanged when no table is pinned', () => {
+    const rows = [
+      { name: 'audit_log', comment: '', rows: 1, dataSize: 1, indexSize: 0 },
+      { name: 'users', comment: '', rows: 2, dataSize: 2, indexSize: 0 },
+    ];
+
+    const grouped = prioritizePinnedTableOverviewRows(rows, () => false);
+
+    expect(grouped.pinnedRows).toEqual([]);
+    expect(grouped.regularRows.map((item) => item.name)).toEqual(['audit_log', 'users']);
+    expect(grouped.orderedRows.map((item) => item.name)).toEqual(['audit_log', 'users']);
   });
 });

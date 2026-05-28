@@ -4,6 +4,13 @@ export interface SqlStatementRange {
   text: string;
 }
 
+export type SqlExecutionSelectionSource = 'selection' | 'statement' | 'line';
+
+export interface SqlExecutionSelection {
+  sql: string;
+  source: SqlExecutionSelectionSource;
+}
+
 const isWhitespace = (ch: string): boolean => (
   ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
 );
@@ -156,4 +163,39 @@ export const resolveCurrentSqlStatementRange = (sql: string, cursorOffset: numbe
   }
 
   return ranges[ranges.length - 1];
+};
+
+export const resolveExecutableSql = (
+  sql: string,
+  cursorOffset: number,
+  selectedSql = '',
+): SqlExecutionSelection | null => {
+  const selected = String(selectedSql || '').trim();
+  if (selected) {
+    return { sql: selectedSql, source: 'selection' };
+  }
+
+  const text = String(sql || '').replace(/\r\n/g, '\n');
+  const offset = Math.max(0, Math.min(text.length, Number.isFinite(cursorOffset) ? cursorOffset : 0));
+  const ranges = findSqlStatementRanges(text);
+  const statement = ranges.find((range) => offset >= range.start && offset <= range.end);
+  if (statement?.text.trim()) {
+    return { sql: statement.text, source: 'statement' };
+  }
+
+  const lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
+  const nextLineBreak = text.indexOf('\n', offset);
+  const lineEnd = nextLineBreak === -1 ? text.length : nextLineBreak;
+  const line = text.slice(lineStart, lineEnd).trim();
+  if (line) {
+    const lineStatement = [...ranges].reverse().find((range) => range.start < lineEnd && range.end >= lineStart);
+    if (lineStatement?.text.trim()) {
+      return { sql: lineStatement.text, source: 'statement' };
+    }
+  }
+  if (line) {
+    return { sql: line, source: 'line' };
+  }
+
+  return null;
 };

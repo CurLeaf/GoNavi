@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import {
+  createJSONStorage,
+  persist,
+  type PersistStorage,
+  type StateStorage,
+} from "zustand/middleware";
 import {
   ConnectionConfig,
   ProxyConfig,
@@ -17,11 +22,13 @@ import {
 } from "./types";
 import {
   ShortcutAction,
-  ShortcutBinding,
   ShortcutOptions,
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
+  getShortcutPlatform,
   sanitizeShortcutOptions,
+  type ShortcutPlatformBinding,
+  type ShortcutPlatform,
 } from "./utils/shortcuts";
 import { buildExternalSQLDirectoryId } from "./utils/externalSqlTree";
 import {
@@ -41,6 +48,7 @@ import {
 } from "./utils/oceanBaseProtocol";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
+  uiVersion: "legacy" | "v2";
   enabled: boolean;
   opacity: number;
   blur: number;
@@ -48,6 +56,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  uiVersion: "legacy",
   enabled: true,
   opacity: 1.0,
   blur: 0,
@@ -72,6 +81,13 @@ const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 9;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
+const PERSIST_WRITE_DEBOUNCE_MS = 160;
+const MAX_PERSISTED_QUERY_TABS = 20;
+const MAX_PERSISTED_QUERY_LENGTH = 1024 * 1024;
+const MAX_SQL_LOGS = 1000;
+const MAX_PERSISTED_SQL_LOGS = 200;
+const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
+const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
@@ -83,6 +99,100 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   password: "",
   hasPassword: false,
 };
+
+const isFrontendTestRuntime = (): boolean => {
+  const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
+  return env.MODE === "test" || env.VITEST === true || env.VITEST === "true";
+};
+
+const createDebouncedPersistStorage = <S>(
+  getStorage: () => StateStorage,
+  debounceMs = PERSIST_WRITE_DEBOUNCE_MS,
+): PersistStorage<S> | undefined => {
+  const baseStorage = createJSONStorage<S>(getStorage);
+  if (!baseStorage || isFrontendTestRuntime()) {
+    return baseStorage;
+  }
+
+  type PersistedValue = Parameters<PersistStorage<S>["setItem"]>[1];
+  let pendingWrite: { name: string; value: PersistedValue } | null = null;
+  let pendingTimer: number | null = null;
+  let listenersBound = false;
+  let pendingResolves: Array<() => void> = [];
+  let pendingRejects: Array<(error: unknown) => void> = [];
+
+  const settlePending = (error?: unknown) => {
+    const resolves = pendingResolves;
+    const rejects = pendingRejects;
+    pendingResolves = [];
+    pendingRejects = [];
+    if (error !== undefined) {
+      rejects.forEach((reject) => reject(error));
+      return;
+    }
+    resolves.forEach((resolve) => resolve());
+  };
+
+  const flushPendingWrite = async (): Promise<void> => {
+    if (pendingTimer !== null) {
+      window.clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    const nextWrite = pendingWrite;
+    pendingWrite = null;
+    if (!nextWrite) {
+      settlePending();
+      return;
+    }
+    try {
+      await baseStorage.setItem(nextWrite.name, nextWrite.value);
+      settlePending();
+    } catch (error) {
+      settlePending(error);
+      throw error;
+    }
+  };
+
+  const bindFlushListeners = () => {
+    if (listenersBound || typeof window === "undefined") {
+      return;
+    }
+    listenersBound = true;
+    const handleFlush = () => {
+      void flushPendingWrite();
+    };
+    window.addEventListener("pagehide", handleFlush, { capture: true });
+    window.addEventListener("beforeunload", handleFlush, { capture: true });
+  };
+
+  return {
+    getItem: baseStorage.getItem,
+    setItem: (name, value) => {
+      bindFlushListeners();
+      pendingWrite = { name, value };
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+      }
+      return new Promise<void>((resolve, reject) => {
+        pendingResolves.push(resolve);
+        pendingRejects.push(reject);
+        pendingTimer = window.setTimeout(() => {
+          void flushPendingWrite();
+        }, debounceMs);
+      });
+    },
+    removeItem: async (name) => {
+      pendingWrite = null;
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+        pendingTimer = null;
+      }
+      settlePending();
+      await baseStorage.removeItem(name);
+    },
+  };
+};
+
 const resolveOceanBaseProtocol = (
   raw: Record<string, unknown>,
   normalizedConnectionParams: string,
@@ -120,6 +230,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "dameng",
   "kingbase",
   "sqlserver",
+  "iris",
   "mongodb",
   "highgo",
   "vastbase",
@@ -185,6 +296,8 @@ const getDefaultPortByType = (type: string): number => {
       return 54321;
     case "sqlserver":
       return 1433;
+    case "iris":
+      return 1972;
     case "mongodb":
       return 27017;
     case "highgo":
@@ -311,12 +424,40 @@ const normalizeConnectionType = (value: unknown): string => {
   if (type === "doris") {
     return "diros";
   }
+  if (type === "postgresql") {
+    return "postgres";
+  }
+  if (type === "mssql" || type === "sql_server" || type === "sql-server") {
+    return "sqlserver";
+  }
+  if (type === "kingbase8" || type === "kingbasees" || type === "kingbasev8") {
+    return "kingbase";
+  }
+  if (type === "dm" || type === "dm8") {
+    return "dameng";
+  }
+  if (type === "sqlite3") {
+    return "sqlite";
+  }
+  if (type === "sphinxql") {
+    return "sphinx";
+  }
   if (
     type === "open_gauss" ||
     type === "open-gauss" ||
     type === "opengauss"
   ) {
     return "opengauss";
+  }
+  if (
+    type === "inter-systems" ||
+    type === "inter-systems-iris" ||
+    type === "intersystems" ||
+    type === "intersystems iris" ||
+    type === "intersystemsiris" ||
+    type.includes("iris")
+  ) {
+    return "iris";
   }
   return SUPPORTED_CONNECTION_TYPES.has(type) ? type : DEFAULT_CONNECTION_TYPE;
 };
@@ -768,6 +909,7 @@ interface AppState {
   enableColumnOrderMemory: boolean;
   tableHiddenColumns: Record<string, string[]>;
   enableHiddenColumnMemory: boolean;
+  pinnedSidebarTables: string[];
   windowBounds: { width: number; height: number; x: number; y: number } | null;
   windowState: "normal" | "fullscreen" | "maximized";
   sidebarWidth: number;
@@ -816,6 +958,10 @@ interface AppState {
   reorderTags: (tagIds: string[]) => void;
 
   addTab: (tab: TabData) => void;
+  updateQueryTabDraft: (
+    id: string,
+    draft: Partial<Pick<TabData, "query" | "connectionId" | "dbName" | "title">>,
+  ) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
   closeTabsToLeft: (id: string) => void;
@@ -845,7 +991,8 @@ interface AppState {
   setQueryOptions: (options: Partial<QueryOptions>) => void;
   updateShortcut: (
     action: ShortcutAction,
-    binding: Partial<ShortcutBinding>,
+    binding: Partial<ShortcutPlatformBinding>,
+    platform?: ShortcutPlatform,
   ) => void;
   resetShortcutOptions: () => void;
   saveSqlSnippet: (snippet: SqlSnippet) => void;
@@ -864,6 +1011,13 @@ interface AppState {
     connectionId: string,
     dbName: string,
     sortBy: "name" | "frequency",
+  ) => void;
+  setSidebarTablePinned: (
+    connectionId: string,
+    dbName: string,
+    tableName: string,
+    schemaName: string | undefined,
+    pinned: boolean,
   ) => void;
   setTableColumnOrder: (
     connectionId: string,
@@ -1006,6 +1160,97 @@ const sanitizeExternalSQLDirectories = (
   return result;
 };
 
+const sanitizeQueryTabs = (value: unknown): TabData[] => {
+  if (!Array.isArray(value)) return [];
+  const result: TabData[] = [];
+  const seenIds = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    if (raw.type !== "query") return;
+
+    const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
+    const filePath = toTrimmedString(raw.filePath);
+    const savedQueryId = toTrimmedString(raw.savedQueryId);
+    if (!query.trim() && !filePath && !savedQueryId) return;
+
+    let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
+    if (seenIds.has(id)) {
+      id = `${id}-${index + 1}`;
+    }
+    seenIds.add(id);
+
+    result.push({
+      id,
+      title: toTrimmedString(raw.title, "新建查询") || "新建查询",
+      type: "query",
+      connectionId: toTrimmedString(raw.connectionId),
+      dbName: toTrimmedString(raw.dbName),
+      query,
+      filePath: filePath || undefined,
+      savedQueryId: savedQueryId || undefined,
+      readOnly: raw.readOnly === true,
+    });
+  });
+
+  return result.slice(0, MAX_PERSISTED_QUERY_TABS);
+};
+
+const sanitizeActiveTabId = (activeTabId: unknown, tabs: TabData[]): string | null => {
+  const id = toTrimmedString(activeTabId);
+  if (id && tabs.some((tab) => tab.id === id)) {
+    return id;
+  }
+  return tabs[0]?.id || null;
+};
+
+const sanitizeSqlLogs = (value: unknown, limit = MAX_PERSISTED_SQL_LOGS): SqlLog[] => {
+  if (!Array.isArray(value)) return [];
+  const result: SqlLog[] = [];
+  const seenIds = new Set<string>();
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const raw = entry as Record<string, unknown>;
+    const sql = typeof raw.sql === "string" ? raw.sql.slice(0, MAX_PERSISTED_SQL_LOG_LENGTH) : "";
+    if (!sql.trim()) return;
+
+    let id = toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`;
+    if (seenIds.has(id)) {
+      id = `${id}-${index + 1}`;
+    }
+    seenIds.add(id);
+
+    const status = raw.status === "error" ? "error" : "success";
+    const timestamp = Number(raw.timestamp);
+    const duration = Number(raw.duration);
+    const affectedRows = Number(raw.affectedRows);
+    const log: SqlLog = {
+      id,
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+      sql,
+      status,
+      duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
+      dbName: toTrimmedString(raw.dbName) || undefined,
+    };
+
+    const message = typeof raw.message === "string"
+      ? raw.message.slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH)
+      : "";
+    if (message) {
+      log.message = message;
+    }
+    if (Number.isFinite(affectedRows)) {
+      log.affectedRows = affectedRows;
+    }
+
+    result.push(log);
+  });
+
+  return result.slice(0, limit);
+};
+
 const hasLegacyConnectionSecrets = (
   connections: SavedConnection[],
 ): boolean => {
@@ -1133,6 +1378,17 @@ const sanitizeTableHiddenColumns = (
   return result;
 };
 
+const sanitizePinnedSidebarTables = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => toTrimmedString(entry))
+        .filter(Boolean),
+    ),
+  );
+};
+
 const sanitizeAppearance = (
   appearance: Partial<AppearanceSettings> | undefined,
   version: number,
@@ -1142,6 +1398,10 @@ const sanitizeAppearance = (
   }
   const dataGridDisplaySettings = sanitizeDataGridDisplaySettings(appearance);
   const nextAppearance = {
+    uiVersion:
+      appearance.uiVersion === "v2" || appearance.uiVersion === "legacy"
+        ? appearance.uiVersion
+        : DEFAULT_APPEARANCE.uiVersion,
     enabled:
       typeof appearance.enabled === "boolean"
         ? appearance.enabled
@@ -1161,6 +1421,12 @@ const sanitizeAppearance = (
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
+    dataTableFontSize: dataGridDisplaySettings.dataTableFontSize,
+    dataTableFontSizeFollowGlobal:
+      dataGridDisplaySettings.dataTableFontSizeFollowGlobal,
+    sidebarTreeFontSize: dataGridDisplaySettings.sidebarTreeFontSize,
+    sidebarTreeFontSizeFollowGlobal:
+      dataGridDisplaySettings.sidebarTreeFontSizeFollowGlobal,
   };
   if (version < 2 && isLegacyDefaultAppearance(appearance)) {
     return { ...DEFAULT_APPEARANCE };
@@ -1308,6 +1574,21 @@ const runWithExplicitShortcutPersistence = (callback: () => void): void => {
   }
 };
 
+export const buildSidebarTablePinKey = (
+  connectionId: string,
+  dbName: string,
+  tableName: string,
+  schemaName = "",
+): string => {
+  const parts = [
+    toTrimmedString(connectionId),
+    toTrimmedString(dbName),
+    toTrimmedString(schemaName),
+    toTrimmedString(tableName),
+  ];
+  return parts[0] && parts[1] && parts[3] ? JSON.stringify(parts) : "";
+};
+
 // --- AI 会话文件持久化辅助函数 ---
 
 /** 每个 session 独立防抖定时器（2秒） */
@@ -1417,6 +1698,7 @@ export const useStore = create<AppState>()(
       enableColumnOrderMemory: true,
       tableHiddenColumns: {},
       enableHiddenColumnMemory: true,
+      pinnedSidebarTables: [],
       windowBounds: null,
       windowState: "normal" as const,
       sidebarWidth: 330,
@@ -1566,6 +1848,51 @@ export const useStore = create<AppState>()(
             }
           }
           return { tabs: [...state.tabs, tab], activeTabId: tab.id };
+        }),
+
+      updateQueryTabDraft: (id, draft) =>
+        set((state) => {
+          const tabId = toTrimmedString(id);
+          if (!tabId) return state;
+
+          let changed = false;
+          const nextTabs = state.tabs.map((tab) => {
+            if (tab.id !== tabId || tab.type !== "query") return tab;
+            const nextTab: TabData = { ...tab };
+
+            if (draft.query !== undefined) {
+              const nextQuery = typeof draft.query === "string" ? draft.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
+              if (nextTab.query !== nextQuery) {
+                nextTab.query = nextQuery;
+                changed = true;
+              }
+            }
+            if (draft.connectionId !== undefined) {
+              const nextConnectionId = toTrimmedString(draft.connectionId);
+              if (nextTab.connectionId !== nextConnectionId) {
+                nextTab.connectionId = nextConnectionId;
+                changed = true;
+              }
+            }
+            if (draft.dbName !== undefined) {
+              const nextDbName = toTrimmedString(draft.dbName);
+              if ((nextTab.dbName || "") !== nextDbName) {
+                nextTab.dbName = nextDbName;
+                changed = true;
+              }
+            }
+            if (draft.title !== undefined) {
+              const nextTitle = toTrimmedString(draft.title, nextTab.title) || nextTab.title;
+              if (nextTab.title !== nextTitle) {
+                nextTab.title = nextTitle;
+                changed = true;
+              }
+            }
+
+            return nextTab;
+          });
+
+          return changed ? { tabs: nextTabs } : state;
         }),
 
       closeTab: (id) =>
@@ -1792,14 +2119,18 @@ export const useStore = create<AppState>()(
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
         })),
-      updateShortcut: (action, binding) => {
+      updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
+          const targetPlatform = platform ?? getShortcutPlatform();
           set((state) => ({
             shortcutOptions: {
               ...state.shortcutOptions,
               [action]: {
                 ...state.shortcutOptions[action],
-                ...binding,
+                [targetPlatform]: {
+                  ...state.shortcutOptions[action][targetPlatform],
+                  ...binding,
+                },
               },
             },
           }));
@@ -1841,7 +2172,7 @@ export const useStore = create<AppState>()(
         }),
 
       addSqlLog: (log) =>
-        set((state) => ({ sqlLogs: [log, ...state.sqlLogs].slice(0, 1000) })), // Keep last 1000 logs
+        set((state) => ({ sqlLogs: sanitizeSqlLogs([log, ...state.sqlLogs], MAX_SQL_LOGS) })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
 
       recordTableAccess: (connectionId, dbName, tableName) =>
@@ -1865,6 +2196,19 @@ export const useStore = create<AppState>()(
               [key]: sortBy,
             },
           };
+        }),
+
+      setSidebarTablePinned: (connectionId, dbName, tableName, schemaName, pinned) =>
+        set((state) => {
+          const key = buildSidebarTablePinKey(connectionId, dbName, tableName, schemaName);
+          if (!key) return state;
+          const current = new Set(state.pinnedSidebarTables);
+          if (pinned) {
+            current.add(key);
+          } else {
+            current.delete(key);
+          }
+          return { pinnedSidebarTables: Array.from(current) };
         }),
 
       setTableColumnOrder: (connectionId, dbName, tableName, order) =>
@@ -2140,6 +2484,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: PERSIST_STORAGE_KEY, // name of the item in the storage (must be unique)
+      storage: createDebouncedPersistStorage(() => localStorage),
       version: PERSIST_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const state = unwrapPersistedAppState(
@@ -2147,6 +2492,9 @@ export const useStore = create<AppState>()(
         ) as Partial<AppState>;
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
+        const safeTabs = sanitizeQueryTabs(state.tabs);
+        nextState.tabs = safeTabs;
+        nextState.activeTabId = sanitizeActiveTabId(state.activeTabId, safeTabs);
         if (version < 5) {
           nextState.connectionTags = sanitizeConnectionTags(
             state.connectionTags,
@@ -2175,6 +2523,7 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
+        nextState.sqlLogs = sanitizeSqlLogs(state.sqlLogs);
         const existingSnippets = sanitizeSqlSnippets(state.sqlSnippets);
         const existingSnippetIds = new Set(existingSnippets.map((s) => s.id));
         const missingSnippets = DEFAULT_SQL_SNIPPETS.filter(
@@ -2199,6 +2548,9 @@ export const useStore = create<AppState>()(
         nextState.tableHiddenColumns = safeHidden;
         nextState.enableHiddenColumnMemory =
           state.enableHiddenColumnMemory !== false;
+        nextState.pinnedSidebarTables = sanitizePinnedSidebarTables(
+          state.pinnedSidebarTables,
+        );
         nextState.windowBounds = sanitizeWindowBounds(state.windowBounds);
         nextState.windowState = sanitizeWindowState(state.windowState);
         nextState.sidebarWidth = sanitizeSidebarWidth(state.sidebarWidth);
@@ -2217,11 +2569,14 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        const safeTabs = sanitizeQueryTabs(state.tabs);
         return {
           ...currentState,
           ...state,
           connections: sanitizeConnections(state.connections),
           connectionTags: sanitizeConnectionTags(state.connectionTags),
+          tabs: safeTabs,
+          activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
@@ -2241,6 +2596,9 @@ export const useStore = create<AppState>()(
             state.tableHiddenColumns,
           ),
           enableHiddenColumnMemory: state.enableHiddenColumnMemory !== false,
+          pinnedSidebarTables: sanitizePinnedSidebarTables(
+            state.pinnedSidebarTables,
+          ),
           windowBounds: sanitizeWindowBounds(state.windowBounds),
           windowState: sanitizeWindowState(state.windowState),
           sidebarWidth: sanitizeSidebarWidth(state.sidebarWidth),
@@ -2248,6 +2606,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
+          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
@@ -2257,7 +2616,10 @@ export const useStore = create<AppState>()(
         };
       },
       partialize: (state) => {
+        const tabs = sanitizeQueryTabs(state.tabs);
         const partialState: Partial<AppState> = {
+          tabs,
+          activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
           savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
@@ -2273,6 +2635,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
+          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,
@@ -2280,6 +2643,7 @@ export const useStore = create<AppState>()(
           enableColumnOrderMemory: state.enableColumnOrderMemory,
           tableHiddenColumns: state.tableHiddenColumns,
           enableHiddenColumnMemory: state.enableHiddenColumnMemory,
+          pinnedSidebarTables: state.pinnedSidebarTables,
           windowBounds: state.windowBounds,
           windowState: state.windowState,
           sidebarWidth: state.sidebarWidth,

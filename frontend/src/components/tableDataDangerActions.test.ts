@@ -8,8 +8,10 @@ describe('tableDataDangerActions', () => {
     expect(supportsTableTruncateAction('oceanbase')).toBe(true);
     expect(supportsTableTruncateAction('postgres')).toBe(true);
     expect(supportsTableTruncateAction('opengauss')).toBe(true);
+    expect(supportsTableTruncateAction('iris')).toBe(true);
     expect(supportsTableTruncateAction('custom', 'postgresql')).toBe(true);
     expect(supportsTableTruncateAction('custom', 'kingbase8')).toBe(true);
+    expect(supportsTableTruncateAction('custom', 'intersystemsiris')).toBe(true);
   });
 
   it('rejects truncate for unsupported or document-style backends', () => {

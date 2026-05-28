@@ -18,6 +18,8 @@ describe('applyQueryAutoLimit', () => {
     'highgo',
     'vastbase',
     'opengauss',
+    'iris',
+    'intersystemsiris',
     'sqlite',
     'sqlite3',
     'duckdb',

@@ -239,6 +239,17 @@ func (i *IrisDB) ExecBatchContext(ctx context.Context, query string) (int64, err
 	return i.ExecContext(ctx, query)
 }
 
+func (i *IrisDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if i.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := i.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (i *IrisDB) Exec(query string) (int64, error) {
 	if i.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -395,6 +406,7 @@ func (i *IrisDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWith
 			TableName: tableName,
 			Name:      name,
 			Type:      buildIRISColumnType(row),
+			Comment:   rowString(row, "DESCRIPTION", "description", "COMMENT", "comment"),
 		})
 	}
 	sort.SliceStable(cols, func(a, b int) bool {

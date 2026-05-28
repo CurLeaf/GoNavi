@@ -174,6 +174,129 @@ export const buildOrderBySQL = (
   return '';
 };
 
+const splitOrderByParts = (body: string): string[] => {
+  const text = String(body || '');
+  const parts: string[] = [];
+  let start = 0;
+  let parenDepth = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inBracket = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : '';
+
+    if (inSingle) {
+      if (ch === "'" && next === "'") {
+        i++;
+      } else if (ch === "'") {
+        inSingle = false;
+      }
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '"' && next === '"') {
+        i++;
+      } else if (ch === '"') {
+        inDouble = false;
+      }
+      continue;
+    }
+    if (inBracket) {
+      if (ch === ']' && next === ']') {
+        i++;
+      } else if (ch === ']') {
+        inBracket = false;
+      }
+      continue;
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      continue;
+    }
+    if (ch === '[') {
+      inBracket = true;
+      continue;
+    }
+    if (ch === '(') {
+      parenDepth++;
+      continue;
+    }
+    if (ch === ')') {
+      if (parenDepth > 0) parenDepth--;
+      continue;
+    }
+    if (ch === ',' && parenDepth === 0) {
+      const part = text.slice(start, i).trim();
+      if (part) parts.push(part);
+      start = i + 1;
+    }
+  }
+
+  const tail = text.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+};
+
+export const reverseOrderBySQL = (orderBySQL: string): string => {
+  const raw = String(orderBySQL || '').trim();
+  if (!raw) return '';
+  const body = raw.replace(/^order\s+by\s+/i, '').trim();
+  if (!body) return '';
+
+  const parts = splitOrderByParts(body)
+    .map((part) => {
+      if (/\s+asc$/i.test(part)) return part.replace(/\s+asc$/i, ' DESC');
+      if (/\s+desc$/i.test(part)) return part.replace(/\s+desc$/i, ' ASC');
+      return `${part} DESC`;
+    })
+    .filter(Boolean);
+  if (parts.length === 0) return '';
+  return ` ORDER BY ${parts.join(', ')}`;
+};
+
+const addSqlServerTopLimit = (sql: string, limit: number): string => {
+  const text = String(sql || '').trim();
+  if (!text) return text;
+  if (/^\s*select\s+(?:distinct\s+)?top\b/i.test(text)) {
+    return text;
+  }
+  return text.replace(
+    /^(\s*select\b)(\s+distinct\b)?/i,
+    (_match, selectKeyword: string, distinctKeyword = '') => `${selectKeyword}${distinctKeyword} TOP ${limit}`,
+  );
+};
+
+const buildSqlServerPaginatedSelectSQL = (
+  base: string,
+  orderBy: string,
+  limit: number,
+  offset: number,
+): string => {
+  if (offset <= 0) {
+    return `${addSqlServerTopLimit(base, limit)}${orderBy}`;
+  }
+
+  const effectiveOrderBy = orderBy.trim();
+  if (effectiveOrderBy) {
+    const reverseOrderBy = reverseOrderBySQL(effectiveOrderBy);
+    if (reverseOrderBy) {
+      const upperBound = offset + limit;
+      return `SELECT * FROM (SELECT TOP ${limit} * FROM (SELECT TOP ${upperBound} * FROM (${base}) AS [__gonavi_page_base__] ${effectiveOrderBy}) AS [__gonavi_page_window__] ${reverseOrderBy}) AS [__gonavi_page_slice__] ${effectiveOrderBy}`;
+    }
+  }
+
+  const rowNumberOrderBy = effectiveOrderBy || 'ORDER BY (SELECT NULL)';
+  const upperBound = offset + limit;
+  return `SELECT * FROM (SELECT [__gonavi_page__].*, ROW_NUMBER() OVER (${rowNumberOrderBy}) AS [__gonavi_rn__] FROM (${base}) AS [__gonavi_page__]) AS [__gonavi_page_result__] WHERE [__gonavi_rn__] > ${offset} AND [__gonavi_rn__] <= ${upperBound} ORDER BY [__gonavi_rn__]`;
+};
+
 export const buildPaginatedSelectSQL = (
   dbType: string,
   baseSql: string,
@@ -203,8 +326,7 @@ export const buildPaginatedSelectSQL = (
     }
     case 'sqlserver':
     case 'mssql': {
-      const effectiveOrderBy = orderBy.trim() ? orderBy : ' ORDER BY (SELECT NULL)';
-      return `${base}${effectiveOrderBy} OFFSET ${safeOffset} ROWS FETCH NEXT ${safeLimit} ROWS ONLY`;
+      return buildSqlServerPaginatedSelectSQL(base, orderBy, safeLimit, safeOffset);
     }
     default:
       return `${base}${orderBy} LIMIT ${safeLimit} OFFSET ${safeOffset}`;

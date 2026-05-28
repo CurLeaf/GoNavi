@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bufio"
 	"io"
 	"strings"
 )
@@ -10,20 +9,22 @@ import (
 // 调用方通过 Feed(chunk) 逐块喂入数据，通过 Flush() 获取最后一条残余语句。
 // 内部维护与 splitSQLStatements 完全一致的状态机逻辑。
 type sqlStreamSplitter struct {
-	cur          strings.Builder
-	inSingle     bool
-	inDouble     bool
-	inBacktick   bool
-	escaped      bool
+	cur            strings.Builder
+	pending        string
+	inSingle       bool
+	inDouble       bool
+	inBacktick     bool
+	escaped        bool
 	inLineComment  bool
 	inBlockComment bool
-	dollarTag    string
+	dollarTag      string
 }
 
 // Feed 将一个 chunk 喂入拆分器，返回在此 chunk 中完成的 SQL 语句列表。
 func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 	var statements []string
-	text := string(chunk)
+	text := s.pending + string(chunk)
+	s.pending = ""
 
 	for i := 0; i < len(text); i++ {
 		ch := text[i]
@@ -43,6 +44,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 
 		// 块注释
 		if s.inBlockComment {
+			if ch == '*' && i+1 >= len(text) {
+				s.pending = text[i:]
+				break
+			}
 			s.cur.WriteByte(ch)
 			if ch == '*' && next == '/' {
 				s.cur.WriteByte('/')
@@ -58,6 +63,9 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 				s.cur.WriteString(s.dollarTag)
 				i += len(s.dollarTag) - 1
 				s.dollarTag = ""
+			} else if ch == '$' && len(text[i:]) < len(s.dollarTag) && strings.HasPrefix(s.dollarTag, text[i:]) {
+				s.pending = text[i:]
+				break
 			} else {
 				s.cur.WriteByte(ch)
 			}
@@ -78,6 +86,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 
 		// 字符串开闭
 		if !s.inDouble && !s.inBacktick && ch == '\'' {
+			if s.inSingle && i+1 >= len(text) {
+				s.pending = text[i:]
+				break
+			}
 			if s.inSingle && next == '\'' {
 				// SQL 标准转义：两个连续单引号
 				s.cur.WriteByte(ch)
@@ -107,6 +119,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 		}
 
 		// 行注释开始
+		if ch == '-' && i+1 >= len(text) {
+			s.pending = text[i:]
+			break
+		}
 		if ch == '-' && next == '-' {
 			s.inLineComment = true
 			s.cur.WriteByte(ch)
@@ -119,6 +135,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 		}
 
 		// 块注释开始
+		if ch == '/' && i+1 >= len(text) {
+			s.pending = text[i:]
+			break
+		}
 		if ch == '/' && next == '*' {
 			s.inBlockComment = true
 			s.cur.WriteString("/*")
@@ -134,6 +154,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 				i += len(tag) - 1
 				continue
 			}
+			if isIncompleteSQLDollarTag(text[i:]) {
+				s.pending = text[i:]
+				break
+			}
 		}
 
 		// 分号分隔
@@ -146,6 +170,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 			continue
 		}
 		// 全角分号
+		if ch == 0xEF && i+2 >= len(text) {
+			s.pending = text[i:]
+			break
+		}
 		if ch == 0xEF && i+2 < len(text) && text[i+1] == 0xBC && text[i+2] == 0x9B {
 			stmt := strings.TrimSpace(s.cur.String())
 			if stmt != "" {
@@ -164,9 +192,29 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 
 // Flush 返回缓冲区中剩余的不完整语句（文件结束时调用）。
 func (s *sqlStreamSplitter) Flush() string {
+	if s.pending != "" {
+		s.cur.WriteString(s.pending)
+		s.pending = ""
+	}
 	stmt := strings.TrimSpace(s.cur.String())
 	s.cur.Reset()
 	return stmt
+}
+
+func isIncompleteSQLDollarTag(s string) bool {
+	if len(s) == 0 || s[0] != '$' {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c == '$' {
+			return false
+		}
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // streamSQLFile 从 reader 中流式读取 SQL 并逐条回调。
@@ -174,27 +222,29 @@ func (s *sqlStreamSplitter) Flush() string {
 // 返回总处理语句数和可能的错误。
 func streamSQLFile(reader io.Reader, onStatement func(index int, stmt string) error) (int, error) {
 	splitter := &sqlStreamSplitter{}
-	scanner := bufio.NewScanner(reader)
-	// 设置最大 token 为 4MB，处理超长单行
-	const maxLineSize = 4 * 1024 * 1024
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	buffer := make([]byte, 256*1024)
 
 	count := 0
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		// 保持换行符，因为行注释依赖 \n 来结束
-		lineWithNewline := append(line, '\n')
-		stmts := splitter.Feed(lineWithNewline)
-		for _, stmt := range stmts {
-			if err := onStatement(count, stmt); err != nil {
-				return count, err
+	for {
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			stmts := splitter.Feed(buffer[:n])
+			for _, stmt := range stmts {
+				if err := onStatement(count, stmt); err != nil {
+					return count, err
+				}
+				count++
 			}
-			count++
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return count, err
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return count, err
+		}
+		if n == 0 {
+			continue
+		}
 	}
 
 	// 处理文件末尾不以分号结尾的最后一条语句

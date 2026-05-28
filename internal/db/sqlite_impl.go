@@ -233,6 +233,17 @@ func (s *SQLiteDB) ExecBatchContext(ctx context.Context, query string) (int64, e
 	return res.RowsAffected()
 }
 
+func (s *SQLiteDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if s.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := s.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (s *SQLiteDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if s.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -679,26 +690,17 @@ func (s *SQLiteDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, "?")
-			args = append(args, v)
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteIdent,
+		Placeholder: func(int) string { return "?" },
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxArgs: sqliteBatchInsertArgs,
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()
@@ -725,6 +727,7 @@ func (s *SQLiteDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWi
 				TableName: table,
 				Name:      col.Name,
 				Type:      col.Type,
+				Comment:   col.Comment,
 			})
 		}
 	}

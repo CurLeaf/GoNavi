@@ -149,6 +149,56 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	return connection.QueryResult{Success: true, Message: "数据库创建成功"}
 }
 
+func isPostgresSchemaDDLDBType(dbType string) bool {
+	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
+	schemaName = strings.TrimSpace(schemaName)
+	if schemaName == "" {
+		return "", fmt.Errorf("模式名称不能为空")
+	}
+
+	if !isPostgresSchemaDDLDBType(dbType) {
+		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口新建模式", dbType)
+	}
+
+	return fmt.Sprintf("CREATE SCHEMA %s", quoteIdentByType(dbType, schemaName)), nil
+}
+
+func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName := strings.TrimSpace(dbName)
+	if targetDbName == "" {
+		targetDbName = strings.TrimSpace(config.Database)
+	}
+	if targetDbName == "" {
+		return connection.QueryResult{Success: false, Message: "目标数据库不能为空"}
+	}
+
+	query, err := buildCreateSchemaSQL(dbType, schemaName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, targetDbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if _, err := dbInst.Exec(query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: "模式创建成功"}
+}
+
 func resolveDDLDBType(config connection.ConnectionConfig) string {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "doris" {
@@ -1235,12 +1285,24 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		logger.Error(err, "DBGetColumns 获取连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	columns, err := dbInst.GetColumns(schemaName, pureTableName)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetColumns 重建连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			columns, err = retryInst.GetColumns(schemaName, pureTableName)
+		}
+	}
 	if err != nil {
+		logger.Error(err, "DBGetColumns 获取列定义失败：%s 表=%s.%s schema=%s pureTable=%s", formatConnSummary(runConfig), dbName, tableName, schemaName, pureTableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -1252,12 +1314,24 @@ func (a *App) DBGetIndexes(config connection.ConnectionConfig, dbName string, ta
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		logger.Error(err, "DBGetIndexes 获取连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
 	indexes, err := dbInst.GetIndexes(schemaName, pureTableName)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBGetIndexes 重建连接失败：%s 表=%s.%s", formatConnSummary(runConfig), dbName, tableName)
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			indexes, err = retryInst.GetIndexes(schemaName, pureTableName)
+		}
+	}
 	if err != nil {
+		logger.Error(err, "DBGetIndexes 获取索引定义失败：%s 表=%s.%s schema=%s pureTable=%s", formatConnSummary(runConfig), dbName, tableName, schemaName, pureTableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 

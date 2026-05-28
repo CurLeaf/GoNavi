@@ -85,6 +85,19 @@ func TestBuildTableDataClearSQL_KingbaseClearNormalizesQuotedQualifiedTable(t *t
 	}
 }
 
+func TestBuildTableDataClearSQL_IRISTruncateUsesNativeStatement(t *testing.T) {
+	t.Parallel()
+
+	sql, err := buildTableDataClearSQL(connection.ConnectionConfig{Type: "InterSystemsIRIS"}, "Sample.Person", tableDataClearModeTruncate)
+	if err != nil {
+		t.Fatalf("buildTableDataClearSQL() unexpected error: %v", err)
+	}
+
+	if sql != `TRUNCATE TABLE "Sample"."Person"` {
+		t.Fatalf("unexpected iris truncate sql: %s", sql)
+	}
+}
+
 func TestBuildTableDataClearSQL_TruncateRejectsUnsupportedDialect(t *testing.T) {
 	t.Parallel()
 

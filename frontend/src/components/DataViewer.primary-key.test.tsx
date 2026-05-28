@@ -1,4 +1,5 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -84,6 +85,12 @@ const createRows = (count: number) => Array.from({ length: count }, (_, i) => ({
 }));
 
 describe('DataViewer safe editing locator', () => {
+  it('memoizes the table data viewer so parent-only modal state does not repaint loaded data', () => {
+    const source = readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('React.memo(({ tab, isActive = true }) => {');
+  });
+
   const renderAndReload = async (tab: TabData = createTab()) => {
     let renderer: ReactTestRenderer;
     await act(async () => {

@@ -19,7 +19,12 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { DENSITY_OPTIONS, sanitizeDataTableDensity } from './utils/dataGridDisplay';
+import {
+  DENSITY_OPTIONS,
+  sanitizeDataTableDensity,
+  sanitizeDataTableFontSize,
+  sanitizeSidebarTreeFontSize,
+} from './utils/dataGridDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
@@ -66,9 +71,12 @@ import {
   eventToShortcut,
   findReservedConflicts,
   getShortcutDisplay,
+  getShortcutDisplayLabel,
+  getShortcutPlatform,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
+  resolveShortcutBinding,
   splitConflictsByContext,
   type ConflictInfo,
 } from './utils/shortcuts';
@@ -77,22 +85,53 @@ import { resolveVisibleStartupWindowBounds } from './utils/windowRestoreBounds';
 import {
   SIDEBAR_UTILITY_ITEM_KEYS,
   resolveAIEntryPlacement,
-  resolveAIEdgeHandleAttachment,
-  resolveAIEdgeHandleDockStyle,
-  resolveAIEdgeHandleStyle,
+  resolveLegacyAIEdgeHandleAttachment,
+  resolveLegacyAIEdgeHandleDockStyle,
+  resolveLegacyAIEdgeHandleStyle,
 } from './utils/aiEntryLayout';
+import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
+import { safeWindowRuntimeCall } from './utils/wailsRuntime';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
-
-const AIChatPanel = React.lazy(() => import('./components/AIChatPanel'));
+import './v2-theme.css';
 
 const { Sider, Content } = Layout;
+const SIDEBAR_RESIZE_MIN_WIDTH = 200;
+const SIDEBAR_RESIZE_MAX_WIDTH = 600;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
+type SidebarResizeBounds = { minWidth: number; maxWidth: number };
+type SidebarResizeDragState = SidebarResizeBounds & {
+  startX: number;
+  startWidth: number;
+  startGuideLeft: number;
+};
+
+const parseCssPixelValue = (value: string | null | undefined): number | null => {
+  const parsed = Number.parseFloat(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const resolveSidebarResizeBounds = (siderElement: Element | null): SidebarResizeBounds => {
+  if (typeof window === 'undefined' || !(siderElement instanceof HTMLElement)) {
+    return { minWidth: SIDEBAR_RESIZE_MIN_WIDTH, maxWidth: SIDEBAR_RESIZE_MAX_WIDTH };
+  }
+  const computed = window.getComputedStyle(siderElement);
+  const cssMinWidth = parseCssPixelValue(computed.minWidth);
+  const cssMaxWidth = parseCssPixelValue(computed.maxWidth);
+  const minWidth = Math.max(SIDEBAR_RESIZE_MIN_WIDTH, cssMinWidth && cssMinWidth > 0 ? cssMinWidth : SIDEBAR_RESIZE_MIN_WIDTH);
+  const maxWidth = Math.max(minWidth, Math.min(SIDEBAR_RESIZE_MAX_WIDTH, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : SIDEBAR_RESIZE_MAX_WIDTH));
+  return { minWidth, maxWidth };
+};
+
+const clampSidebarResizeWidth = (width: number, bounds: SidebarResizeBounds): number => (
+  Math.max(bounds.minWidth, Math.min(bounds.maxWidth, width))
+);
+
 const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
   overallStatus: 'not_detected',
   summary: {
@@ -148,6 +187,45 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
+const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
+
+interface AIPanelErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback: (error: Error | null) => React.ReactNode;
+  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+}
+
+interface AIPanelErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class AIPanelErrorBoundary extends React.Component<
+  AIPanelErrorBoundaryProps,
+  AIPanelErrorBoundaryState
+> {
+  constructor(props: AIPanelErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): AIPanelErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    this.props.onError?.(error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback(this.state.error);
+    }
+
+    return this.props.children;
+  }
+}
+
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -172,6 +250,7 @@ function App() {
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
   const darkMode = themeMode === 'dark';
+  const isV2Ui = appearance.uiVersion === 'v2';
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
   const effectiveFontSize = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(Number(fontSize) || DEFAULT_FONT_SIZE)));
   const tokenFontSize = Math.round(effectiveFontSize * effectiveUiScale);
@@ -183,6 +262,14 @@ function App() {
   const tokenControlHeight = Math.max(24, Math.round(32 * effectiveUiScale));
   const tokenControlHeightSM = Math.max(20, Math.round(24 * effectiveUiScale));
   const tokenControlHeightLG = Math.max(30, Math.round(40 * effectiveUiScale));
+  const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;
+  const sidebarTreeFontSizeFollowsGlobal = appearance.sidebarTreeFontSizeFollowGlobal !== false;
+  const effectiveDataTableFontSize = dataTableFontSizeFollowsGlobal
+      ? effectiveFontSize
+      : (sanitizeDataTableFontSize(appearance.dataTableFontSize) ?? effectiveFontSize);
+  const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
+      ? effectiveFontSize
+      : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
   const titleBarHeight = Math.max(28, Math.round(32 * effectiveUiScale));
   const titleBarButtonWidth = Math.max(40, Math.round(46 * effectiveUiScale));
@@ -196,6 +283,7 @@ function App() {
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
   const [securityUpdateStatus, setSecurityUpdateStatus] = useState<SecurityUpdateStatus>(() => createEmptySecurityUpdateStatus());
   const [securityUpdateRawPayload, setSecurityUpdateRawPayload] = useState<string | null>(null);
   const [securityUpdateHasLegacySensitiveItems, setSecurityUpdateHasLegacySensitiveItems] = useState(false);
@@ -210,16 +298,19 @@ function App() {
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
+  const [aiPanelRenderNonce, setAiPanelRenderNonce] = useState(0);
   const sidebarWidth = useStore(state => state.sidebarWidth);
   const setSidebarWidth = useStore(state => state.setSidebarWidth);
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
+  const sqlLogCount = useStore(state => state.sqlLogs.length);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
+  const LazyAIChatPanel = useMemo(() => createLazyAIChatPanel(), [aiPanelRenderNonce]);
   const securityUpdateStatusMeta = useMemo(
       () => getSecurityUpdateStatusMeta(securityUpdateStatus),
       [securityUpdateStatus],
@@ -230,6 +321,18 @@ function App() {
   );
 
   const windowCornerRadius = 14;
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const syncViewportWidth = () => {
+      setViewportWidth(window.innerWidth || document.documentElement?.clientWidth || 1280);
+    };
+    syncViewportWidth();
+    window.addEventListener('resize', syncViewportWidth);
+    return () => window.removeEventListener('resize', syncViewportWidth);
+  }, []);
+
   useEffect(()=>{
     if (typeof document === 'undefined' || !document.body) {
         return;
@@ -580,8 +683,8 @@ function App() {
       const saveWindowState = async () => {
           try {
               const [isFs, isMax] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
 
               // 保存窗口状态
@@ -599,8 +702,8 @@ function App() {
               if (isFs || isMax) return;
 
               const [size, pos] = await Promise.all([
-                  WindowGetSize().catch(() => null),
-                  WindowGetPosition().catch(() => null),
+                  safeWindowRuntimeCall(() => WindowGetSize(), null),
+                  safeWindowRuntimeCall(() => WindowGetPosition(), null),
               ]);
               if (!size || !pos) return;
               const w = Math.trunc(Number(size.w || 0));
@@ -648,8 +751,8 @@ function App() {
           inFlight = true;
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
 
               // 全屏状态下只广播 resize，避免破坏用户的全屏上下文。
@@ -659,7 +762,7 @@ function App() {
                   return;
               }
 
-              const size = await WindowGetSize().catch(() => null);
+              const size = await safeWindowRuntimeCall(() => WindowGetSize(), null);
               const width = Math.trunc(Number(size?.w || 0));
               const height = Math.trunc(Number(size?.h || 0));
               const hasViewportScaleDrift = hasWindowsViewportScaleDrift({
@@ -733,7 +836,7 @@ function App() {
 
       const rememberMinimisedState = async (): Promise<boolean> => {
           if (cancelled) return false;
-          const isMinimised = await WindowIsMinimised().catch(() => false);
+          const isMinimised = await safeWindowRuntimeCall(() => WindowIsMinimised(), false);
           if (isMinimised) {
               minimisedSeen = true;
           }
@@ -1270,6 +1373,7 @@ function App() {
   const isWindowsRuntime = runtimePlatform === 'windows'
       || (runtimePlatform === '' && isWindowsPlatform());
   const useNativeMacWindowControls = isMacRuntime && appearance.useNativeMacWindowControls === true;
+  const activeShortcutPlatform = getShortcutPlatform(isMacRuntime);
   const macWindowDiagnosticsEnabled = shouldEnableMacWindowDiagnostics(
       isMacRuntime,
       import.meta.env.DEV,
@@ -1286,12 +1390,12 @@ function App() {
       }
       try {
           const [isFullscreen, isMaximised, isMinimised, isNormal, size, position] = await Promise.all([
-              WindowIsFullscreen().catch(() => false),
-              WindowIsMaximised().catch(() => false),
-              WindowIsMinimised().catch(() => false),
-              WindowIsNormal().catch(() => false),
-              WindowGetSize().catch(() => null),
-              WindowGetPosition().catch(() => null),
+              safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+              safeWindowRuntimeCall(() => WindowIsMaximised(), false),
+              safeWindowRuntimeCall(() => WindowIsMinimised(), false),
+              safeWindowRuntimeCall(() => WindowIsNormal(), false),
+              safeWindowRuntimeCall(() => WindowGetSize(), null),
+              safeWindowRuntimeCall(() => WindowGetPosition(), null),
           ]);
           const payload = {
               seq: ++windowDiagSequenceRef.current,
@@ -1956,7 +2060,7 @@ function App() {
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
       for (const action of SHORTCUT_ACTION_ORDER) {
-          const binding = shortcutOptions[action];
+          const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
           if (!binding?.enabled || !binding.combo) continue;
           const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo));
           if (conflicts.length > 0) {
@@ -1964,7 +2068,7 @@ function App() {
           }
       }
       return map;
-  }, [shortcutOptions]);
+  }, [activeShortcutPlatform, shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
@@ -1973,13 +2077,26 @@ function App() {
   const [dataRootApplying, setDataRootApplying] = useState(false);
   const [isAISettingsOpen, setIsAISettingsOpen] = useState(false);
   const aiEntryPlacement = resolveAIEntryPlacement();
-  const aiEdgeHandleAttachment = resolveAIEdgeHandleAttachment(aiPanelVisible);
-  const aiEdgeHandleDockStyle = useMemo(
-      () => resolveAIEdgeHandleDockStyle(aiEdgeHandleAttachment),
-      [aiEdgeHandleAttachment],
+  const legacyAiEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment(aiPanelVisible);
+  const aiPanelOverlayActive = aiPanelVisible && shouldOverlayAIPanel({
+      isV2Ui,
+      viewportWidth,
+      sidebarWidth,
+      panelWidth: DEFAULT_AI_PANEL_WIDTH,
+  });
+  const aiPanelRenderWidth = aiPanelOverlayActive
+      ? resolveOverlayAIPanelWidth({
+          viewportWidth,
+          sidebarWidth,
+          panelWidth: DEFAULT_AI_PANEL_WIDTH,
+      })
+      : DEFAULT_AI_PANEL_WIDTH;
+  const legacyAiEdgeHandleDockStyle = useMemo(
+      () => resolveLegacyAIEdgeHandleDockStyle(legacyAiEdgeHandleAttachment),
+      [legacyAiEdgeHandleAttachment],
   );
-  const aiEdgeHandleStyle = useMemo(() => (
-      resolveAIEdgeHandleStyle({
+  const legacyAiEdgeHandleStyle = useMemo(() => (
+      resolveLegacyAIEdgeHandleStyle({
           darkMode,
           aiPanelVisible,
           effectiveUiScale,
@@ -2003,13 +2120,23 @@ function App() {
 
       return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
   }, []);
-  const renderAIEdgeHandle = () => (
+  const handleOpenToolsModal = useCallback(() => {
+      setIsToolsModalOpen(true);
+  }, []);
+  const handleOpenSettingsModal = useCallback(() => {
+      setIsSettingsModalOpen(true);
+  }, []);
+  const handleFocusSidebarSearch = useCallback(() => {
+      window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
+  }, []);
+  const renderLegacyAIEdgeHandle = () => (
       <Tooltip title="AI 助手">
           <Button
               type="text"
               icon={<RobotOutlined />}
               onClick={toggleAIPanel}
-              style={aiEdgeHandleStyle}
+              style={legacyAiEdgeHandleStyle}
+              data-gonavi-legacy-ai-edge-action="true"
           >
               AI
           </Button>
@@ -2105,6 +2232,9 @@ function App() {
   const [isLogPanelOpen, setIsLogPanelOpen] = useState(false);
   const logResizeRef = React.useRef<{ startY: number, startHeight: number } | null>(null);
   const logGhostRef = React.useRef<HTMLDivElement>(null);
+  const handleToggleLogPanel = useCallback(() => {
+      setIsLogPanelOpen((prev) => !prev);
+  }, []);
 
   const handleLogResizeStart = (e: React.MouseEvent) => {
       e.preventDefault();
@@ -2146,11 +2276,11 @@ function App() {
       document.removeEventListener('mouseup', handleLogResizeUp);
   };
   
-  const handleCreateConnection = () => {
+  const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(null);
       setIsModalOpen(true);
-  };
+  }, []);
 
   const handleEditConnection = (conn: SavedConnection) => {
       setSecurityUpdateRepairSource(null);
@@ -2269,6 +2399,14 @@ function App() {
       setIsAISettingsOpen(true);
   }, []);
 
+  const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
+      console.error('AIChatPanel render error:', error, errorInfo);
+  }, []);
+
+  const handleRetryAIPanelRender = useCallback(() => {
+      setAiPanelRenderNonce((current) => current + 1);
+  }, []);
+
   const handleCloseAISettings = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsAISettingsOpen(false);
@@ -2283,8 +2421,8 @@ function App() {
       const syncWindowStateFromRuntime = async () => {
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
-                  WindowIsFullscreen().catch(() => false),
-                  WindowIsMaximised().catch(() => false),
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
               ]);
               useStore.getState().setWindowState(isFullscreen ? 'fullscreen' : (isMaximised ? 'maximized' : 'normal'));
           } catch {
@@ -2306,7 +2444,7 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
               return;
           }
-          const isMaximised = await WindowIsMaximised().catch(() => false);
+          const isMaximised = await safeWindowRuntimeCall(() => WindowIsMaximised(), false);
           if (isMaximised) {
               WindowUnmaximise();
           } else {
@@ -2350,19 +2488,19 @@ function App() {
           console.warn('ResetWebViewZoom backend unavailable, falling back to maximise toggle', e);
       }
       try {
-          const isFullscreen = await WindowIsFullscreen().catch(() => false);
+          const isFullscreen = await safeWindowRuntimeCall(() => WindowIsFullscreen(), false);
           if (isFullscreen) {
               message.info('全屏状态下无法重置缩放，请先退出全屏');
               return;
           }
-          const isMaximised = await WindowIsMaximised().catch(() => false);
+          const isMaximised = await safeWindowRuntimeCall(() => WindowIsMaximised(), false);
           if (isMaximised) {
               WindowUnmaximise();
               await new Promise((resolve) => window.setTimeout(resolve, 96));
               WindowMaximise();
               await new Promise((resolve) => window.setTimeout(resolve, 96));
           } else {
-              const size = await WindowGetSize().catch(() => null);
+              const size = await safeWindowRuntimeCall(() => WindowGetSize(), null);
               const width = Math.trunc(Number(size?.w) || 0);
               const height = Math.trunc(Number(size?.h) || 0);
               if (width > 0 && height > 0) {
@@ -2380,9 +2518,10 @@ function App() {
   }, []);
   
   // Sidebar Resizing
-  const sidebarDragRef = React.useRef<{ startX: number, startWidth: number } | null>(null);
+  const sidebarDragRef = React.useRef<SidebarResizeDragState | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const ghostRef = React.useRef<HTMLDivElement>(null);
+  const siderRef = React.useRef<HTMLDivElement | null>(null);
   const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
   const latestMouseX = React.useRef<number>(0); // Store latest mouse position
   const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
@@ -2401,6 +2540,12 @@ function App() {
   };
 
   const handleSidebarMouseDown = (e: React.MouseEvent) => {
+      if (e.button !== 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+      }
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -2415,12 +2560,22 @@ function App() {
           (document.body.style as any).WebkitUserSelect = 'none';
       }
       
+      const siderRect = siderRef.current?.getBoundingClientRect();
+      const startGuideLeft = siderRect?.right ?? sidebarWidth;
+      const startWidth = siderRect?.width ?? sidebarWidth;
+      const resizeBounds = resolveSidebarResizeBounds(siderRef.current);
+
       if (ghostRef.current) {
-          ghostRef.current.style.left = `${sidebarWidth}px`;
+          ghostRef.current.style.left = `${startGuideLeft}px`;
           ghostRef.current.style.display = 'block';
       }
-      
-      sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+
+      sidebarDragRef.current = {
+          startX: e.clientX,
+          startWidth,
+          startGuideLeft,
+          ...resizeBounds,
+      };
       latestMouseX.current = e.clientX; // Init
       document.addEventListener('mousemove', handleSidebarMouseMove);
       document.addEventListener('mouseup', handleSidebarMouseUp);
@@ -2436,9 +2591,10 @@ function App() {
       rafRef.current = requestAnimationFrame(() => {
           if (!sidebarDragRef.current || !ghostRef.current) return;
           // Use latestMouseX.current instead of stale closure 'e.clientX'
-          const delta = latestMouseX.current - sidebarDragRef.current.startX;
-          const newWidth = Math.max(200, Math.min(600, sidebarDragRef.current.startWidth + delta));
-          ghostRef.current.style.left = `${newWidth}px`;
+          const { startX, startWidth, startGuideLeft, minWidth, maxWidth } = sidebarDragRef.current;
+          const delta = latestMouseX.current - startX;
+          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
+          ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;
           rafRef.current = null;
       });
   };
@@ -2451,8 +2607,9 @@ function App() {
       
       if (sidebarDragRef.current) {
           // Use latest position for final commit too
-          const delta = e.clientX - sidebarDragRef.current.startX;
-          const newWidth = Math.max(200, Math.min(600, sidebarDragRef.current.startWidth + delta));
+          const { startX, startWidth, minWidth, maxWidth } = sidebarDragRef.current;
+          const delta = e.clientX - startX;
+          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
           setSidebarWidth(newWidth);
       }
 
@@ -2470,9 +2627,28 @@ function App() {
     document.body.style.backgroundColor = 'transparent';
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    document.body.setAttribute('data-ui-version', appearance.uiVersion);
     document.body.style.fontSize = `${effectiveFontSize}px`;
     document.documentElement.style.setProperty('--gonavi-font-size', `${effectiveFontSize}px`);
-  }, [darkMode, effectiveFontSize]);
+    document.documentElement.style.setProperty('--gn-ui-scale', `${effectiveUiScale}`);
+    document.documentElement.style.setProperty('--gn-font-size', `${effectiveFontSize}px`);
+    document.documentElement.style.setProperty('--gn-font-size-sm', `${Math.max(10, Math.round(effectiveFontSize * 0.86))}px`);
+    document.documentElement.style.setProperty('--gn-font-size-xs', `${Math.max(9, Math.round(effectiveFontSize * 0.76))}px`);
+    document.documentElement.style.setProperty('--gn-font-size-mono', `${Math.max(10, Math.round(effectiveDataTableFontSize * 0.92))}px`);
+    document.documentElement.style.setProperty('--gn-data-table-font-size', `${effectiveDataTableFontSize}px`);
+    document.documentElement.style.setProperty('--gn-sidebar-tree-font-size', `${effectiveSidebarTreeFontSize}px`);
+    document.documentElement.style.setProperty('--gn-control-height', `${tokenControlHeight}px`);
+    document.documentElement.style.setProperty('--gn-control-height-sm', `${tokenControlHeightSM}px`);
+  }, [
+    appearance.uiVersion,
+    darkMode,
+    effectiveDataTableFontSize,
+    effectiveFontSize,
+    effectiveSidebarTreeFontSize,
+    effectiveUiScale,
+    tokenControlHeight,
+    tokenControlHeightSM,
+  ]);
 
   useEffect(() => {
       isAboutOpenRef.current = isAboutOpen;
@@ -2565,6 +2741,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+      const handleCreateQueryTabEvent = () => {
+          handleNewQuery();
+      };
+      window.addEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);
+      };
+  }, [handleNewQuery]);
+
+  useEffect(() => {
       if (!isMacRuntime || !useNativeMacWindowControls) {
           return;
       }
@@ -2596,7 +2782,7 @@ function App() {
               if (meta.scope && meta.scope !== 'global') {
                   return false;
               }
-              const binding = shortcutOptions[action];
+              const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
               if (!binding?.enabled) {
                   return false;
               }
@@ -2623,8 +2809,14 @@ function App() {
               case 'newQueryTab':
                   handleNewQuery();
                   break;
+              case 'newConnection':
+                  handleCreateConnection();
+                  break;
+              case 'toggleAIPanel':
+                  toggleAIPanel();
+                  break;
               case 'toggleLogPanel':
-                  setIsLogPanelOpen((prev) => !prev);
+                  handleToggleLogPanel();
                   break;
               case 'toggleTheme':
                   setTheme(themeMode === 'dark' ? 'light' : 'dark');
@@ -2647,7 +2839,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut);
       };
-  }, [handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, isMacRuntime, shortcutOptions, themeMode, setTheme, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -2680,7 +2872,7 @@ function App() {
               if (action === capturingShortcutAction) {
                   return false;
               }
-              const binding = shortcutOptions[action];
+              const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
               if (!binding?.enabled) {
                   return false;
               }
@@ -2702,7 +2894,7 @@ function App() {
               }
           }
 
-          updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true });
+          updateShortcut(capturingShortcutAction, { combo: normalizedCombo, enabled: true }, activeShortcutPlatform);
           setCapturingShortcutAction(null);
       };
 
@@ -2710,7 +2902,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleShortcutCapture, true);
       };
-  }, [capturingShortcutAction, shortcutOptions, updateShortcut]);
+  }, [activeShortcutPlatform, capturingShortcutAction, shortcutOptions, updateShortcut]);
 
   const linuxResizeHandleStyleBase = {
       position: 'fixed',
@@ -2722,66 +2914,78 @@ function App() {
   } as any;
 
   const showLinuxResizeHandles = isLinuxRuntime;
-  const resizeGuideColor = darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)';
+  const resizeGuideColor = isV2Ui
+      ? 'var(--gn-accent, #16a34a)'
+      : (darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)');
+  const antdTheme = useMemo(() => ({
+      algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+      token: {
+          fontSize: tokenFontSize,
+          fontSizeSM: tokenFontSizeSM,
+          fontSizeLG: tokenFontSizeLG,
+          controlHeight: tokenControlHeight,
+          controlHeightSM: tokenControlHeightSM,
+          controlHeightLG: tokenControlHeightLG,
+          colorBgLayout: 'transparent',
+          colorBgContainer: darkMode
+              ? `rgba(29, 29, 29, ${effectiveOpacity})`
+              : `rgba(255, 255, 255, ${effectiveOpacity})`,
+          colorBgElevated: darkMode
+              ? '#1f1f1f'
+              : '#ffffff',
+          colorFillAlter: darkMode
+              ? `rgba(38, 38, 38, ${effectiveOpacity})`
+              : `rgba(250, 250, 250, ${effectiveOpacity})`,
+          colorPrimary: darkMode ? '#f6c453' : '#1677ff',
+          colorPrimaryHover: darkMode ? '#ffd666' : '#4096ff',
+          colorPrimaryActive: darkMode ? '#d8a93b' : '#0958d9',
+          colorInfo: darkMode ? '#f6c453' : '#1677ff',
+          colorLink: darkMode ? '#ffd666' : '#1677ff',
+          colorLinkHover: darkMode ? '#ffe58f' : '#4096ff',
+          colorLinkActive: darkMode ? '#d8a93b' : '#0958d9',
+          colorPrimaryBg: darkMode ? 'rgba(246, 196, 83, 0.22)' : '#e6f4ff',
+          colorPrimaryBgHover: darkMode ? 'rgba(246, 196, 83, 0.30)' : '#bae0ff',
+          colorPrimaryBorder: darkMode ? 'rgba(246, 196, 83, 0.45)' : '#91caff',
+          colorPrimaryBorderHover: darkMode ? 'rgba(246, 196, 83, 0.60)' : '#69b1ff',
+          controlItemBgActive: darkMode ? 'rgba(246, 196, 83, 0.20)' : 'rgba(22, 119, 255, 0.12)',
+          controlItemBgActiveHover: darkMode ? 'rgba(246, 196, 83, 0.28)' : 'rgba(22, 119, 255, 0.18)',
+          controlOutline: darkMode ? 'rgba(246, 196, 83, 0.50)' : 'rgba(5, 145, 255, 0.24)',
+      },
+      components: {
+          Layout: {
+              bodyBg: 'transparent',
+              headerBg: 'transparent',
+              siderBg: 'transparent',
+              triggerBg: 'transparent'
+          },
+          Table: {
+              headerBg: 'transparent',
+              rowHoverBg: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)',
+          },
+          Tabs: {
+              cardBg: 'transparent',
+              itemActiveColor: darkMode ? '#ffd666' : '#1890ff',
+              itemHoverColor: darkMode ? '#ffe58f' : '#40a9ff',
+              itemSelectedColor: darkMode ? '#ffd666' : '#1677ff',
+              inkBarColor: darkMode ? '#ffd666' : '#1677ff',
+          }
+      }
+  }), [
+      darkMode,
+      effectiveOpacity,
+      tokenControlHeight,
+      tokenControlHeightLG,
+      tokenControlHeightSM,
+      tokenFontSize,
+      tokenFontSizeLG,
+      tokenFontSizeSM,
+  ]);
 
   return (
     <ConfigProvider
         locale={zhCN}
         componentSize={appComponentSize}
-        theme={{
-            algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
-            token: {
-                fontSize: tokenFontSize,
-                fontSizeSM: tokenFontSizeSM,
-                fontSizeLG: tokenFontSizeLG,
-                controlHeight: tokenControlHeight,
-                controlHeightSM: tokenControlHeightSM,
-                controlHeightLG: tokenControlHeightLG,
-                colorBgLayout: 'transparent',
-                colorBgContainer: darkMode 
-                    ? `rgba(29, 29, 29, ${effectiveOpacity})` 
-                    : `rgba(255, 255, 255, ${effectiveOpacity})`,
-                colorBgElevated: darkMode 
-                    ? '#1f1f1f' 
-                    : '#ffffff',
-                colorFillAlter: darkMode
-                    ? `rgba(38, 38, 38, ${effectiveOpacity})`
-                    : `rgba(250, 250, 250, ${effectiveOpacity})`,
-                colorPrimary: darkMode ? '#f6c453' : '#1677ff',
-                colorPrimaryHover: darkMode ? '#ffd666' : '#4096ff',
-                colorPrimaryActive: darkMode ? '#d8a93b' : '#0958d9',
-                colorInfo: darkMode ? '#f6c453' : '#1677ff',
-                colorLink: darkMode ? '#ffd666' : '#1677ff',
-                colorLinkHover: darkMode ? '#ffe58f' : '#4096ff',
-                colorLinkActive: darkMode ? '#d8a93b' : '#0958d9',
-                colorPrimaryBg: darkMode ? 'rgba(246, 196, 83, 0.22)' : '#e6f4ff',
-                colorPrimaryBgHover: darkMode ? 'rgba(246, 196, 83, 0.30)' : '#bae0ff',
-                colorPrimaryBorder: darkMode ? 'rgba(246, 196, 83, 0.45)' : '#91caff',
-                colorPrimaryBorderHover: darkMode ? 'rgba(246, 196, 83, 0.60)' : '#69b1ff',
-                controlItemBgActive: darkMode ? 'rgba(246, 196, 83, 0.20)' : 'rgba(22, 119, 255, 0.12)',
-                controlItemBgActiveHover: darkMode ? 'rgba(246, 196, 83, 0.28)' : 'rgba(22, 119, 255, 0.18)',
-                controlOutline: darkMode ? 'rgba(246, 196, 83, 0.50)' : 'rgba(5, 145, 255, 0.24)',
-            },
-            components: {
-                Layout: {
-                    bodyBg: 'transparent',
-                    headerBg: 'transparent',
-                    siderBg: 'transparent',
-                    triggerBg: 'transparent'
-                },
-                Table: {
-                    headerBg: 'transparent',
-                    rowHoverBg: darkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.02)',
-                },
-                Tabs: {
-                    cardBg: 'transparent',
-                    itemActiveColor: darkMode ? '#ffd666' : '#1890ff',
-                    itemHoverColor: darkMode ? '#ffe58f' : '#40a9ff',
-                    itemSelectedColor: darkMode ? '#ffd666' : '#1677ff',
-                    inkBarColor: darkMode ? '#ffd666' : '#1677ff',
-                }
-            }
-        }}
+        theme={antdTheme}
     >
         <Layout style={{ 
             height: '100vh', 
@@ -2851,14 +3055,18 @@ function App() {
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Sider 
+            ref={siderRef}
             width={sidebarWidth} 
+            className={isV2Ui ? 'gn-v2-app-sider' : undefined}
             style={{ 
-                borderRight: '1px solid rgba(128,128,128,0.2)',
+                borderRight: isV2Ui ? 'none' : '1px solid rgba(128,128,128,0.2)',
                 position: 'relative',
-                background: bgMain
+                background: isV2Ui ? 'var(--gn-bg-panel-2)' : bgMain
             }}
           >
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                {!isV2Ui && (
+                <>
                 <div style={{ padding: `12px ${sidebarHorizontalPadding}px 8px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: `repeat(${sidebarUtilityItems.length}, minmax(0, 1fr))`, gap: 8, width: '100%' }}>
                         {sidebarUtilityItems.map((item) => (
@@ -2878,10 +3086,22 @@ function App() {
                         </Button>
                     </div>
                 </div>
+                </>
+                )}
                 
-                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
+                <div style={{ flex: 1, overflow: 'hidden', paddingBottom: isV2Ui ? 0 : 58, paddingRight: sidebarResizeHandleWidth, position: 'relative' }}>
                     <div style={{ height: '100%', opacity: connectionWorkbenchState.ready ? 1 : 0.72, pointerEvents: connectionWorkbenchState.ready ? 'auto' : 'none' }}>
-                        <Sidebar onEditConnection={handleEditConnection} />
+                        <Sidebar
+                            onCreateConnection={handleCreateConnection}
+                            onEditConnection={handleEditConnection}
+                            onOpenTools={handleOpenToolsModal}
+                            onOpenSettings={handleOpenSettingsModal}
+                            onToggleAI={toggleAIPanel}
+                            onToggleLogPanel={handleToggleLogPanel}
+                            sqlLogCount={sqlLogCount}
+                            uiVersion={appearance.uiVersion}
+                            onFocusCommandSearch={handleFocusSidebarSearch}
+                        />
                     </div>
                     {!connectionWorkbenchState.ready && (
                         <div
@@ -2919,6 +3139,10 @@ function App() {
                     )}
                     <div
                         onMouseDown={handleSidebarMouseDown}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }}
                         role="separator"
                         aria-orientation="vertical"
                         title="拖动调整宽度"
@@ -2939,6 +3163,7 @@ function App() {
                 </div>
 
                 {/* Floating SQL Log Toggle */}
+                {!isV2Ui && (
                 <div
                     style={{
                         position: 'absolute',
@@ -2952,7 +3177,7 @@ function App() {
                     <Button
                         type={isLogPanelOpen ? "primary" : "text"}
                         icon={<BugOutlined />}
-                        onClick={() => setIsLogPanelOpen(!isLogPanelOpen)}
+                        onClick={handleToggleLogPanel}
                         style={isLogPanelOpen ? {
                             width: '100%',
                             height: floatingLogButtonHeight,
@@ -2974,6 +3199,7 @@ function App() {
                         SQL 执行日志
                     </Button>
                 </div>
+                )}
             </div>
           </Sider>
            <Content style={{ background: bgContent, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
@@ -2996,23 +3222,124 @@ function App() {
                <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: bgContent, marginBottom: isLogPanelOpen ? 8 : 0, borderRadius: isLogPanelOpen ? 'var(--gonavi-border-radius)' : 0, clipPath: isLogPanelOpen ? 'inset(0 round var(--gonavi-border-radius))' : 'none' }}>
                   <TabManager />
                </div>
-               {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'content-shell' && (
-                  <div style={aiEdgeHandleDockStyle}>
-                      {renderAIEdgeHandle()}
+               {!isV2Ui && !aiPanelVisible && (
+               <>
+               {aiEntryPlacement === 'content-edge' && legacyAiEdgeHandleAttachment === 'content-shell' && (
+                  <div style={legacyAiEdgeHandleDockStyle}>
+                      {renderLegacyAIEdgeHandle()}
                   </div>
                )}
+               </>
+               )}
                {aiPanelVisible && (
-                  <div style={{ position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}>
-                      {aiEntryPlacement === 'content-edge' && aiEdgeHandleAttachment === 'panel-shell' && (
-                          <div style={aiEdgeHandleDockStyle}>
-                              {renderAIEdgeHandle()}
+                  <div
+                    className={aiPanelOverlayActive ? 'gn-v2-ai-panel-overlay' : undefined}
+                    style={aiPanelOverlayActive
+                      ? { position: 'absolute', inset: 0, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none', zIndex: 14 }
+                      : { position: 'relative', display: 'flex', flexShrink: 0, overflow: 'visible' }}
+                  >
+                      {aiPanelOverlayActive && (
+                          <button
+                            type="button"
+                            className="gn-v2-ai-panel-backdrop"
+                            aria-label="关闭 AI 面板"
+                            onClick={() => setAIPanelVisible(false)}
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              border: 0,
+                              padding: 0,
+                              background: darkMode ? 'rgba(3, 7, 18, 0.26)' : 'rgba(248, 250, 252, 0.38)',
+                              backdropFilter: 'blur(2px)',
+                              pointerEvents: 'auto',
+                            }}
+                          />
+                      )}
+                      <div
+                        className={`gn-v2-ai-panel-dock${aiPanelOverlayActive ? ' is-overlay' : ''}`}
+                        style={aiPanelOverlayActive
+                          ? {
+                              position: 'relative',
+                              display: 'flex',
+                              height: '100%',
+                              pointerEvents: 'auto',
+                              zIndex: 1,
+                              boxShadow: '0 18px 48px rgba(15, 23, 42, 0.18)',
+                            }
+                          : undefined}
+                      >
+                      {!isV2Ui && (
+                      <>
+                      {aiEntryPlacement === 'content-edge' && legacyAiEdgeHandleAttachment === 'panel-shell' && (
+                          <div style={legacyAiEdgeHandleDockStyle}>
+                              {renderLegacyAIEdgeHandle()}
                           </div>
                       )}
-                      <React.Suspense fallback={<div style={{ width: 360, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
-                          <AIChatPanel darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                            handleOpenAISettings();
-                          }} overlayTheme={overlayTheme} />
-                      </React.Suspense>
+                      </>
+                      )}
+                      <AIPanelErrorBoundary
+                        onError={handleAIPanelRenderError}
+                        fallback={(error) => (
+                          <div
+                            style={{
+                              width: aiPanelRenderWidth,
+                              minWidth: 0,
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 20,
+                              background: bgContent,
+                              color: darkMode ? 'rgba(255,255,255,0.88)' : '#162033',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: '100%',
+                                maxWidth: 360,
+                                display: 'grid',
+                                gap: 12,
+                                padding: 18,
+                                borderRadius: 16,
+                                border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(15,23,42,0.08)',
+                                background: darkMode ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.94)',
+                                boxShadow: darkMode ? '0 16px 36px rgba(0,0,0,0.32)' : '0 16px 36px rgba(15,23,42,0.12)',
+                              }}
+                            >
+                              <div style={{ fontSize: 15, fontWeight: 600 }}>AI 面板加载失败</div>
+                              <div style={{ fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.68)' : '#526075' }}>
+                                这通常是开发环境热更新后懒加载资源失效导致的。已阻止整页白屏，你可以直接重试。
+                              </div>
+                              {error?.message && (
+                                <div
+                                  style={{
+                                    fontSize: 12,
+                                    lineHeight: 1.5,
+                                    wordBreak: 'break-word',
+                                    padding: '10px 12px',
+                                    borderRadius: 10,
+                                    background: darkMode ? 'rgba(2,6,23,0.7)' : 'rgba(248,250,252,0.92)',
+                                    border: darkMode ? '1px solid rgba(148,163,184,0.18)' : '1px solid rgba(148,163,184,0.22)',
+                                  }}
+                                >
+                                  {error.message}
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                                <Button onClick={() => setAIPanelVisible(false)}>关闭面板</Button>
+                                <Button type="primary" onClick={handleRetryAIPanelRender}>重新加载</Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      >
+                        <React.Suspense fallback={<div style={{ width: aiPanelRenderWidth, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
+                            <LazyAIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                              handleOpenAISettings();
+                            }} overlayTheme={overlayTheme} />
+                        </React.Suspense>
+                      </AIPanelErrorBoundary>
+                      </div>
                   </div>
                )}
              </div>
@@ -3025,13 +3352,16 @@ function App() {
             )}
           </Content>
           </Layout>
-          <ConnectionModal 
+          {isModalOpen && (
+          <ConnectionModal
             open={isModalOpen} 
             onClose={handleCloseModal} 
             initialValues={editingConnection}
             onOpenDriverManager={handleOpenDriverManagerFromConnection}
             onSaved={handleConnectionSaved}
           />
+          )}
+          {isToolsModalOpen && (
           <Modal
             title={renderUtilityModalTitle(<ToolOutlined />, '工具中心', '集中处理连接配置、同步、驱动和快捷键相关操作。')}
             open={isToolsModalOpen}
@@ -3137,6 +3467,8 @@ function App() {
               ))}
             </div>
           </Modal>
+          )}
+          {isSettingsModalOpen && (
           <Modal
             title={renderUtilityModalTitle(<SettingOutlined />, '设置中心', '集中处理代理、主题、AI 与关于等通用配置入口。')}
             open={isSettingsModalOpen}
@@ -3202,6 +3534,8 @@ function App() {
               ))}
             </div>
           </Modal>
+          )}
+          {isDataRootModalOpen && (
           <Modal
             title={renderUtilityModalTitle(<HddOutlined />, '数据存储位置', '统一管理连接、代理、AI 配置与驱动等文件型数据的根目录。')}
             open={isDataRootModalOpen}
@@ -3270,15 +3604,20 @@ function App() {
               </div>
             )}
           </Modal>
+          )}
+          {isSyncModalOpen && (
           <DataSyncModal
             open={isSyncModalOpen}
             onClose={() => setIsSyncModalOpen(false)}
           />
+          )}
+          {isDriverModalOpen && (
           <DriverManagerModal
             open={isDriverModalOpen}
             onClose={handleCloseDriverManager}
             onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
           />
+          )}
           <SecurityUpdateIntroModal
             open={isSecurityUpdateIntroOpen}
             loading={isSecurityUpdateProgressOpen}
@@ -3309,6 +3648,7 @@ function App() {
             overlayTheme={overlayTheme}
             surfaceOpacity={effectiveOpacity}
           />
+          {isAISettingsOpen && (
           <AISettingsModal
             open={isAISettingsOpen}
             onClose={handleCloseAISettings}
@@ -3316,6 +3656,7 @@ function App() {
             overlayTheme={overlayTheme}
             focusProviderId={focusedAIProviderId}
           />
+          )}
           <ConnectionPackagePasswordModal
             open={connectionPackageDialog.open}
             title={connectionPackageDialog.mode === 'export' ? '导出连接' : '输入导入密码'}
@@ -3434,6 +3775,7 @@ function App() {
             )}
           </Modal>
 
+          {isThemeModalOpen && (
           <Modal
               title={renderUtilityModalTitle(
                   themeModalSection === 'theme' ? <SkinOutlined /> : <BgColorsOutlined />,
@@ -3491,6 +3833,98 @@ function App() {
                   <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
                       {themeModalSection === 'theme' ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span>界面版本</span>
+                                      <span style={{
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          padding: '1px 6px',
+                                          background: darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)',
+                                          color: darkMode ? '#7dd3fc' : '#0284c7',
+                                          borderRadius: 4,
+                                      }}>
+                                          NEW
+                                      </span>
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginBottom: 12 }}>
+                                      在保留全部功能的前提下切换整体外观，新版采用更紧凑的信息层级与更现代的视觉语言。
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                      {[
+                                          { key: 'legacy', label: '旧版 UI', description: '当前稳定界面，所有功能完整可用。', badge: '默认' },
+                                          { key: 'v2', label: '新版 UI', description: '重新设计的紧凑界面，强化 AI 入口与表概览。', badge: 'Beta' },
+                                      ].map((item) => {
+                                          const active = (appearance.uiVersion ?? 'legacy') === item.key;
+                                          return (
+                                              <button
+                                                  key={item.key}
+                                                  type="button"
+                                                  onClick={() => setAppearance({ uiVersion: item.key as 'legacy' | 'v2' })}
+                                                  style={{
+                                                      textAlign: 'left',
+                                                      padding: '14px 14px',
+                                                      borderRadius: 14,
+                                                      border: `1px solid ${active
+                                                          ? (darkMode ? 'rgba(34,197,94,0.36)' : 'rgba(22,163,74,0.32)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      background: active
+                                                          ? (darkMode ? 'linear-gradient(180deg, rgba(34,197,94,0.14) 0%, rgba(34,197,94,0.06) 100%)' : 'linear-gradient(180deg, rgba(22,163,74,0.10) 0%, rgba(22,163,74,0.05) 100%)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
+                                                      color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                                      cursor: 'pointer',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
+                                                          <span style={{
+                                                              fontSize: 10,
+                                                              fontWeight: 600,
+                                                              padding: '1px 6px',
+                                                              background: item.key === 'v2'
+                                                                  ? (darkMode ? 'rgba(56,189,248,0.18)' : 'rgba(2,132,199,0.10)')
+                                                                  : (darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(16,24,40,0.06)'),
+                                                              color: item.key === 'v2'
+                                                                  ? (darkMode ? '#7dd3fc' : '#0284c7')
+                                                                  : (darkMode ? 'rgba(255,255,255,0.7)' : 'rgba(16,24,40,0.6)'),
+                                                              borderRadius: 4,
+                                                          }}>
+                                                              {item.badge}
+                                                          </span>
+                                                      </span>
+                                                      {active ? <CheckOutlined style={{ color: darkMode ? '#4ade80' : '#16a34a' }} /> : null}
+                                                  </div>
+                                                  <div style={{
+                                                      marginTop: 6,
+                                                      fontSize: 12,
+                                                      lineHeight: 1.6,
+                                                      color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color,
+                                                  }}>
+                                                      {item.description}
+                                                  </div>
+                                              </button>
+                                          );
+                                      })}
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                                      Windows、macOS 与 Linux 均可切换；切换后立即生效，部分弹窗会在下次打开时使用新样式。
+                                  </div>
+                                  {appearance.uiVersion === 'v2' && (
+                                      <div style={{
+                                          marginTop: 10,
+                                          padding: '8px 10px',
+                                          background: darkMode ? 'rgba(245,158,11,0.10)' : 'rgba(245,158,11,0.08)',
+                                          border: `1px solid ${darkMode ? 'rgba(245,158,11,0.24)' : 'rgba(245,158,11,0.22)'}`,
+                                          borderRadius: 8,
+                                          fontSize: 11.5,
+                                          color: darkMode ? 'rgba(252,211,77,0.92)' : 'rgba(120,53,15,0.85)',
+                                          lineHeight: 1.55,
+                                      }}>
+                                          新版 UI 仍在 Beta，部分屏幕样式可能与旧版有差异，遇到问题可随时切回。
+                                      </div>
+                                  )}
+                              </div>
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 600 }}>主题模式</div>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
@@ -3641,6 +4075,70 @@ function App() {
                                               控制行高、列宽和内边距。舒适适合大屏细看；紧凑适合最大化信息密度。已手动拖拽的列宽优先保留。
                                           </div>
                                       </div>
+                                      <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                                              <div style={{ fontWeight: 500 }}>数据表字体大小</div>
+                                              <Button
+                                                  size="small"
+                                                  type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                  onClick={() => setAppearance({
+                                                      dataTableFontSizeFollowGlobal: !dataTableFontSizeFollowsGlobal,
+                                                      dataTableFontSize: dataTableFontSizeFollowsGlobal
+                                                          ? sanitizeDataTableFontSize(appearance.dataTableFontSize)
+                                                          : null,
+                                                  })}
+                                              >
+                                                  跟随全局
+                                              </Button>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  disabled={dataTableFontSizeFollowsGlobal}
+                                                  value={effectiveDataTableFontSize}
+                                                  onChange={(value) => setAppearance({
+                                                      dataTableFontSize: sanitizeDataTableFontSize(value),
+                                                      dataTableFontSizeFollowGlobal: false,
+                                                  })}
+                                                  style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 56 }}>{effectiveDataTableFontSize}px</span>
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                                              <div style={{ fontWeight: 500 }}>左侧库表字体大小</div>
+                                              <Button
+                                                  size="small"
+                                                  type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}
+                                                  onClick={() => setAppearance({
+                                                      sidebarTreeFontSizeFollowGlobal: !sidebarTreeFontSizeFollowsGlobal,
+                                                      sidebarTreeFontSize: sidebarTreeFontSizeFollowsGlobal
+                                                          ? sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize)
+                                                          : null,
+                                                  })}
+                                              >
+                                                  跟随全局
+                                              </Button>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                              <Slider
+                                                  min={10}
+                                                  max={18}
+                                                  step={1}
+                                                  disabled={sidebarTreeFontSizeFollowsGlobal}
+                                                  value={effectiveSidebarTreeFontSize}
+                                                  onChange={(value) => setAppearance({
+                                                      sidebarTreeFontSize: sanitizeSidebarTreeFontSize(value),
+                                                      sidebarTreeFontSizeFollowGlobal: false,
+                                                  })}
+                                                  style={{ flex: 1 }}
+                                              />
+                                              <span style={{ width: 56 }}>{effectiveSidebarTreeFontSize}px</span>
+                                          </div>
+                                      </div>
                                   </div>
                               </div>
                               {isMacRuntime ? (
@@ -3687,7 +4185,9 @@ function App() {
                   </div>
               </div>
           </Modal>
+          )}
 
+          {isShortcutModalOpen && (
           <Modal
               title={renderUtilityModalTitle(<LinkOutlined />, '快捷键管理', '统一查看、录制与启停常用快捷键，保持操作习惯一致。')}
               open={isShortcutModalOpen}
@@ -3696,7 +4196,19 @@ function App() {
                   setCapturingShortcutAction(null);
               }}
               width={760}
-              styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+              centered
+              style={{ top: 0, maxHeight: 'calc(100vh - 80px)' }}
+              styles={{
+                  content: {
+                      ...utilityModalShellStyle,
+                      height: 'min(760px, calc(100vh - 80px))',
+                      display: 'flex',
+                      flexDirection: 'column',
+                  },
+                  header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                  body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                  footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 }
+              }}
               footer={[
                   <Button
                       key="reset"
@@ -3720,7 +4232,7 @@ function App() {
                   </Button>,
               ]}
           >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
+              <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
                   <div style={utilityPanelStyle}>
                       <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
                           点击“录制”后按下快捷键。按 Esc 可取消录制。全局快捷键建议包含修饰键；AI 聊天发送仅支持 Enter 相关组合，Shift+Enter 保留换行。
@@ -3731,7 +4243,7 @@ function App() {
                       if (meta.platformOnly === 'mac' && !isMacRuntime) {
                           return null;
                       }
-                      const binding = shortcutOptions[action] ?? { combo: '', enabled: false };
+                      const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
                       const isCapturing = capturingShortcutAction === action;
                       const conflicts = shortcutConflictMap[action];
                       const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
@@ -3764,7 +4276,7 @@ function App() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <Input
                                       readOnly
-                                      value={isCapturing ? '请按下快捷键...' : getShortcutDisplay(binding.combo)}
+                                      value={isCapturing ? '请按下快捷键...' : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
                                       style={{ width: 180, fontFamily: 'Consolas, Menlo, Monaco, monospace' }}
                                   />
                                   <Button
@@ -3775,7 +4287,7 @@ function App() {
                                   </Button>
                                   <Switch
                                       checked={binding.enabled}
-                                      onChange={(checked) => updateShortcut(action, { enabled: checked })}
+                                      onChange={(checked) => updateShortcut(action, { enabled: checked }, activeShortcutPlatform)}
                                   />
                               </div>
                           </div>
@@ -3783,12 +4295,16 @@ function App() {
                   })}
               </div>
           </Modal>
+          )}
+          {isSnippetModalOpen && (
           <SnippetSettingsModal
               open={isSnippetModalOpen}
               onClose={() => setIsSnippetModalOpen(false)}
               darkMode={darkMode}
               overlayTheme={overlayTheme}
           />
+          )}
+          {isProxyModalOpen && (
           <Modal
               title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
               open={isProxyModalOpen}
@@ -3864,6 +4380,7 @@ function App() {
                   </div>
               </div>
           </Modal>
+          )}
 
           <Modal
               title={updateDownloadProgress.version ? `下载更新 ${updateDownloadProgress.version}` : '下载更新'}

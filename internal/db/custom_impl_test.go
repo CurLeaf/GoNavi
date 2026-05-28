@@ -1,11 +1,42 @@
 package db
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
 )
+
+const customMySQLDSNRecordingDriverName = "custom-mysql-dsn-recording"
+
+var customMySQLDSNRecordingLastDSN string
+
+type customMySQLDSNRecordingDriver struct{}
+
+func (d customMySQLDSNRecordingDriver) Open(name string) (driver.Conn, error) {
+	customMySQLDSNRecordingLastDSN = name
+	return customMySQLDSNRecordingConn{}, nil
+}
+
+type customMySQLDSNRecordingConn struct{}
+
+func (c customMySQLDSNRecordingConn) Prepare(query string) (driver.Stmt, error) {
+	return nil, driver.ErrSkip
+}
+
+func (c customMySQLDSNRecordingConn) Close() error {
+	return nil
+}
+
+func (c customMySQLDSNRecordingConn) Begin() (driver.Tx, error) {
+	return nil, driver.ErrSkip
+}
+
+func init() {
+	sql.Register(customMySQLDSNRecordingDriverName, customMySQLDSNRecordingDriver{})
+}
 
 func TestCustomDBConnectReportsUnsupportedODBCDriverName(t *testing.T) {
 	db := &CustomDB{}
@@ -50,5 +81,52 @@ func TestCustomDBConnectReportsUnregisteredGoDriver(t *testing.T) {
 		if !strings.Contains(message, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, message)
 		}
+	}
+}
+
+func TestNormalizeMySQLRawDSNCompatibilityParamsMapsAllowMultiQueries(t *testing.T) {
+	got := normalizeMySQLRawDSNCompatibilityParams(
+		"root:pass@tcp(127.0.0.1:3306)/app?charset=utf8mb4&allowMultiQueries=true#debug",
+	)
+	if strings.Contains(got, "allowMultiQueries") {
+		t.Fatalf("allowMultiQueries should not remain in DSN: %s", got)
+	}
+	if !strings.Contains(got, "multiStatements=true") {
+		t.Fatalf("allowMultiQueries=true should map to multiStatements=true: %s", got)
+	}
+	if !strings.HasSuffix(got, "#debug") {
+		t.Fatalf("fragment should be preserved: %s", got)
+	}
+}
+
+func TestNormalizeMySQLRawDSNCompatibilityParamsPreservesExplicitMultiStatements(t *testing.T) {
+	got := normalizeMySQLRawDSNCompatibilityParams(
+		"root:pass@tcp(127.0.0.1:3306)/app?allowMultiQueries=true&multiStatements=false",
+	)
+	if strings.Contains(got, "allowMultiQueries") {
+		t.Fatalf("allowMultiQueries should not remain in DSN: %s", got)
+	}
+	if !strings.Contains(got, "multiStatements=false") {
+		t.Fatalf("explicit multiStatements should win: %s", got)
+	}
+}
+
+func TestCustomDBOnlyNormalizesBuiltInMySQLDriverDSN(t *testing.T) {
+	customMySQLDSNRecordingLastDSN = ""
+	rawDSN := "root:pass@tcp(127.0.0.1:3306)/app?allowMultiQueries=true"
+
+	db := &CustomDB{}
+	err := db.Connect(connection.ConnectionConfig{
+		Driver: customMySQLDSNRecordingDriverName,
+		DSN:    rawDSN,
+	})
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	if customMySQLDSNRecordingLastDSN != rawDSN {
+		t.Fatalf("non-mysql custom driver DSN should stay untouched, got %q", customMySQLDSNRecordingLastDSN)
 	}
 }

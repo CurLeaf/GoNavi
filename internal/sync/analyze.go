@@ -101,7 +101,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 				HasSchema: syncSchema,
 			}
 
-			plan, cols, _, err := buildSchemaMigrationPlan(config, tableName, sourceDB, targetDB)
+			plan, cols, targetCols, err := buildSchemaMigrationPlan(config, tableName, sourceDB, targetDB)
 			if err != nil {
 				summary.Message = err.Error()
 				result.Tables = append(result.Tables, summary)
@@ -140,16 +140,27 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 				}
 			}
 
-			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.SourceConfig.Type, plan.SourceQueryTable)))
+			sourceType := resolveMigrationDBType(config.SourceConfig)
+			targetType := resolveMigrationDBType(config.TargetConfig)
+			sourceCount, counted, err := countTableRowsForSync(sourceDB, sourceType, plan.SourceQueryTable)
 			if err != nil {
 				summary.Message = "读取源表失败: " + err.Error()
 				result.Tables = append(result.Tables, summary)
 				return
 			}
+			if !counted {
+				sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, plan.SourceQueryTable)))
+				if err != nil {
+					summary.Message = "读取源表失败: " + err.Error()
+					result.Tables = append(result.Tables, summary)
+					return
+				}
+				sourceCount = len(sourceRows)
+			}
 
 			if !plan.TargetTableExists && plan.AutoCreate {
 				summary.CanSync = true
-				summary.Inserts = len(sourceRows)
+				summary.Inserts = sourceCount
 				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，执行时将自动建表并导入全部源数据")
 				result.Tables = append(result.Tables, summary)
 				return
@@ -157,7 +168,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 
 			if tableMode != "insert_update" {
 				summary.CanSync = true
-				summary.Inserts = len(sourceRows)
+				summary.Inserts = sourceCount
 				summary.Message = firstNonEmpty(plan.PlannedAction, "当前模式无需差异对比，将按源表数据执行导入")
 				result.Tables = append(result.Tables, summary)
 				return
@@ -175,6 +186,32 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			}
 			summary.PKColumn = pkCols[0]
 
+			targetColSet := buildTargetColumnSet(targetCols)
+			handled, counts, scanErr := scanTableDiffInPages(sourceDB, targetDB, sourceType, targetType, plan, cols, targetCols, summary.PKColumn, targetColSet, true, nil)
+			if handled {
+				if scanErr != nil {
+					summary.Message = scanErr.Error()
+					result.Tables = append(result.Tables, summary)
+					return
+				}
+				summary.CanSync = true
+				summary.Inserts = counts.Inserts
+				summary.Updates = counts.Updates
+				summary.Deletes = counts.Deletes
+				summary.Same = counts.Same
+				if strings.TrimSpace(summary.Message) == "" {
+					summary.Message = firstNonEmpty(plan.PlannedAction, "差异分析完成")
+				}
+				result.Tables = append(result.Tables, summary)
+				return
+			}
+
+			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, plan.SourceQueryTable)))
+			if err != nil {
+				summary.Message = "读取源表失败: " + err.Error()
+				result.Tables = append(result.Tables, summary)
+				return
+			}
 			targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.TargetConfig.Type, plan.TargetQueryTable)))
 			if err != nil {
 				summary.Message = "读取目标表失败: " + err.Error()

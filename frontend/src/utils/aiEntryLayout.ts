@@ -3,22 +3,27 @@ import type { CSSProperties } from 'react';
 export const SIDEBAR_UTILITY_ITEM_KEYS = ['tools', 'settings'] as const;
 
 export type AIEntryPlacement = 'content-edge';
-export type AIEdgeHandleAttachment = 'content-shell' | 'panel-shell';
+export type LegacyAIEdgeHandleAttachment = 'content-shell' | 'panel-shell';
+export type AIEdgeHandleAttachment = LegacyAIEdgeHandleAttachment;
 
-export interface ResolveAIEdgeHandleStyleInput {
+export interface ResolveLegacyAIEdgeHandleStyleInput {
   darkMode: boolean;
   aiPanelVisible: boolean;
   effectiveUiScale: number;
 }
 
+export type ResolveAIEdgeHandleStyleInput = ResolveLegacyAIEdgeHandleStyleInput;
+
 export const resolveAIEntryPlacement = (): AIEntryPlacement => 'content-edge';
 
-export const resolveAIEdgeHandleAttachment = (
+export const resolveLegacyAIEdgeHandleAttachment = (
   aiPanelVisible: boolean,
-): AIEdgeHandleAttachment => (aiPanelVisible ? 'panel-shell' : 'content-shell');
+): LegacyAIEdgeHandleAttachment => (aiPanelVisible ? 'panel-shell' : 'content-shell');
 
-export const resolveAIEdgeHandleDockStyle = (
-  attachment: AIEdgeHandleAttachment,
+export const resolveAIEdgeHandleAttachment = resolveLegacyAIEdgeHandleAttachment;
+
+export const resolveLegacyAIEdgeHandleDockStyle = (
+  attachment: LegacyAIEdgeHandleAttachment,
 ): CSSProperties => ({
   position: 'absolute',
   top: 16,
@@ -26,11 +31,13 @@ export const resolveAIEdgeHandleDockStyle = (
   zIndex: 12,
 });
 
-export const resolveAIEdgeHandleStyle = ({
+export const resolveAIEdgeHandleDockStyle = resolveLegacyAIEdgeHandleDockStyle;
+
+export const resolveLegacyAIEdgeHandleStyle = ({
   darkMode,
   aiPanelVisible,
   effectiveUiScale,
-}: ResolveAIEdgeHandleStyleInput): CSSProperties => {
+}: ResolveLegacyAIEdgeHandleStyleInput): CSSProperties => {
   const inactiveColor = darkMode ? 'rgba(255,255,255,0.86)' : 'rgba(22,32,51,0.82)';
   const inactiveBackground = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)';
   const inactiveBorder = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
@@ -57,3 +64,5 @@ export const resolveAIEdgeHandleStyle = ({
     flexShrink: 0,
   };
 };
+
+export const resolveAIEdgeHandleStyle = resolveLegacyAIEdgeHandleStyle;

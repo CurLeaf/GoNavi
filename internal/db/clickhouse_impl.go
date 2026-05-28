@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -168,6 +169,10 @@ func defaultClickHousePortForScheme(scheme string) int {
 }
 
 func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig) (*clickhouse.Options, error) {
+	return c.buildClickHouseOptionsWithHTTPCompatibility(config, false)
+}
+
+func (c *ClickHouseDB) buildClickHouseOptionsWithHTTPCompatibility(config connection.ConnectionConfig, stripHTTPClientProtocolVersion bool) (*clickhouse.Options, error) {
 	connectTimeout := getConnectTimeout(config)
 	readTimeout := connectTimeout
 	if readTimeout < minClickHouseReadTimeout {
@@ -195,7 +200,55 @@ func (c *ClickHouseDB) buildClickHouseOptions(config connection.ConnectionConfig
 		opts.TLS = tlsConfig
 	}
 	applyClickHouseConnectionParams(opts, config)
+	if stripHTTPClientProtocolVersion && protocol == clickhouse.HTTP {
+		installClickHouseHTTPClientProtocolVersionStripper(opts)
+	}
 	return opts, nil
+}
+
+type clickHouseHTTPClientProtocolVersionStripper struct {
+	next http.RoundTripper
+}
+
+func (rt clickHouseHTTPClientProtocolVersionStripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	next := rt.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	if req == nil || req.URL == nil {
+		return next.RoundTrip(req)
+	}
+	query := req.URL.Query()
+	if _, ok := query["client_protocol_version"]; !ok {
+		return next.RoundTrip(req)
+	}
+
+	cloned := req.Clone(req.Context())
+	clonedURL := *req.URL
+	query.Del("client_protocol_version")
+	clonedURL.RawQuery = query.Encode()
+	cloned.URL = &clonedURL
+	return next.RoundTrip(cloned)
+}
+
+func installClickHouseHTTPClientProtocolVersionStripper(opts *clickhouse.Options) {
+	if opts == nil {
+		return
+	}
+	previous := opts.TransportFunc
+	opts.TransportFunc = func(base *http.Transport) (http.RoundTripper, error) {
+		next := http.RoundTripper(base)
+		if previous != nil {
+			wrapped, err := previous(base)
+			if err != nil {
+				return nil, err
+			}
+			if wrapped != nil {
+				next = wrapped
+			}
+		}
+		return clickHouseHTTPClientProtocolVersionStripper{next: next}, nil
+	}
 }
 
 func parseClickHouseDurationParam(raw string) (time.Duration, bool) {
@@ -396,6 +449,24 @@ func isClickHouseProtocolMismatch(err error) bool {
 		strings.Contains(text, "malformed http response")
 }
 
+func isClickHouseHTTPClientProtocolVersionUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" || !strings.Contains(text, "client_protocol_version") {
+		return false
+	}
+	return strings.Contains(text, "unknown setting") ||
+		strings.Contains(text, "unknown_setting") ||
+		strings.Contains(text, "code: 115")
+}
+
+func shouldTryNextClickHouseProtocol(protocol clickhouse.Protocol, err error) bool {
+	return isClickHouseProtocolMismatch(err) ||
+		(protocol == clickhouse.HTTP && isClickHouseHTTPClientProtocolVersionUnsupported(err))
+}
+
 func clickHouseProtocolName(protocol clickhouse.Protocol) string {
 	if protocol == clickhouse.HTTP {
 		return "HTTP"
@@ -436,6 +507,9 @@ func sanitizeClickHouseErrorMessage(err error) string {
 }
 
 func clickHouseAttemptFailureMessage(protocol clickhouse.Protocol, err error) string {
+	if protocol == clickhouse.HTTP && isClickHouseHTTPClientProtocolVersionUnsupported(err) {
+		return "当前 ClickHouse HTTP 端口不支持 client_protocol_version（常见于 ClickHouse 22.8），将使用 HTTP 兼容模式重试；如仍失败请确认连接协议和端口"
+	}
 	if isClickHouseProtocolMismatch(err) {
 		if protocol == clickhouse.Native {
 			return "服务端响应不像 Native 握手，当前端口更像 HTTP/HTTPS 端口；请选择 HTTP 协议，或确认 ClickHouse Native 端口"
@@ -551,27 +625,52 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 		protocols := clickHouseProtocolsForAttempt(attempt)
 		for pIdx, protocol := range protocols {
 			protocolConfig := withClickHouseProtocol(attempt, protocol)
-			logger.Infof("ClickHouse 连接尝试：第%d组/%d 协议=%s 地址=%s:%d SSL=%t",
-				idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL)
-			opts, err := c.buildClickHouseOptions(protocolConfig)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败(protocol=%s): %v", idx+1, protocol.String(), err))
-				logger.Warnf("ClickHouse TLS 配置失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t 原因=%v",
-					idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, err)
-				continue
+			compatibilityModes := []bool{false}
+			if protocol == clickhouse.HTTP {
+				compatibilityModes = append(compatibilityModes, true)
 			}
-			c.conn = clickhouse.OpenDB(opts)
-			if err := c.Ping(); err != nil {
-				failureMessage := clickHouseAttemptFailureMessage(protocol, err)
-				failures = append(failures, fmt.Sprintf("第%d次连接验证失败(protocol=%s): %s", idx+1, protocol.String(), failureMessage))
-				logger.Warnf("ClickHouse 连接尝试失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t 原因=%s",
-					idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, failureMessage)
-				if c.conn != nil {
-					_ = c.conn.Close()
-					c.conn = nil
+			protocolSuccess := false
+			var lastProtocolErr error
+			for compatIdx, stripHTTPClientProtocolVersion := range compatibilityModes {
+				logger.Infof("ClickHouse 连接尝试：第%d组/%d 协议=%s 地址=%s:%d SSL=%t HTTP兼容=%t",
+					idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, stripHTTPClientProtocolVersion)
+				opts, err := c.buildClickHouseOptionsWithHTTPCompatibility(protocolConfig, stripHTTPClientProtocolVersion)
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败(protocol=%s): %v", idx+1, protocol.String(), err))
+					logger.Warnf("ClickHouse TLS 配置失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t 原因=%v",
+						idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, err)
+					lastProtocolErr = err
+					break
 				}
-				if pIdx == 0 && !isClickHouseProtocolMismatch(err) {
-					// 首次连接不是协议误配特征，避免无谓重试次协议。
+				c.conn = clickhouse.OpenDB(opts)
+				if err := c.Ping(); err != nil {
+					lastProtocolErr = err
+					failureMessage := clickHouseAttemptFailureMessage(protocol, err)
+					failures = append(failures, fmt.Sprintf("第%d次连接验证失败(protocol=%s): %s", idx+1, protocol.String(), failureMessage))
+					logger.Warnf("ClickHouse 连接尝试失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t HTTP兼容=%t 原因=%s",
+						idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, stripHTTPClientProtocolVersion, failureMessage)
+					if c.conn != nil {
+						_ = c.conn.Close()
+						c.conn = nil
+					}
+					if protocol == clickhouse.HTTP &&
+						!stripHTTPClientProtocolVersion &&
+						isClickHouseHTTPClientProtocolVersionUnsupported(err) &&
+						compatIdx+1 < len(compatibilityModes) {
+						logger.Warnf("ClickHouse HTTP 端口不支持 client_protocol_version，改用 HTTP 兼容模式重试")
+						continue
+					}
+					break
+				}
+				protocolSuccess = true
+				if stripHTTPClientProtocolVersion {
+					logger.Warnf("ClickHouse HTTP 兼容模式连接成功：已移除 client_protocol_version 参数")
+				}
+				break
+			}
+			if !protocolSuccess {
+				if pIdx == 0 && !shouldTryNextClickHouseProtocol(protocol, lastProtocolErr) {
+					// 首次连接不是协议误配或已知兼容性特征，避免无谓重试次协议。
 					break
 				}
 				continue
@@ -925,7 +1024,8 @@ SELECT
     database,
     table,
     name,
-    type
+    type,
+    comment
 FROM system.columns
 WHERE database = '%s'
 ORDER BY table, position`,
@@ -937,7 +1037,8 @@ SELECT
     database,
     table,
     name,
-    type
+    type,
+    comment
 FROM system.columns
 WHERE database NOT IN ('system', 'information_schema', 'INFORMATION_SCHEMA')
 ORDER BY database, table, position`
@@ -954,6 +1055,7 @@ ORDER BY database, table, position`
 		tableValue, hasTable := getClickHouseValueFromRow(row, "table", "table_name")
 		nameValue, hasName := getClickHouseValueFromRow(row, "name", "column_name")
 		typeValue, _ := getClickHouseValueFromRow(row, "type", "data_type")
+		commentValue, _ := getClickHouseValueFromRow(row, "comment")
 		if !hasTable || !hasName {
 			continue
 		}
@@ -970,6 +1072,7 @@ ORDER BY database, table, position`
 			TableName: tableName,
 			Name:      strings.TrimSpace(fmt.Sprintf("%v", nameValue)),
 			Type:      strings.TrimSpace(fmt.Sprintf("%v", typeValue)),
+			Comment:   strings.TrimSpace(fmt.Sprintf("%v", commentValue)),
 		})
 	}
 	return result, nil
@@ -1122,19 +1225,25 @@ func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeS
 		}
 	}
 
-	for _, row := range changes.Inserts {
-		query, err := buildClickHouseInsertSQL(qualifiedTable, row)
-		if err != nil {
-			return err
-		}
-		if query == "" {
-			continue
-		}
-		if _, err := c.conn.Exec(query); err != nil {
-			return fmt.Errorf("插入失败：%v; sql=%s", err, query)
-		}
+	if err := execClickHouseInsertBatches(c.conn, qualifiedTable, changes.Inserts); err != nil {
+		return err
 	}
 	return nil
+}
+
+func execClickHouseInsertBatches(conn *sql.DB, qualifiedTable string, rows []map[string]interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	return execLiteralInsertBatches(literalInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        rows,
+		QuoteColumn: quoteClickHouseIdentifier,
+		Literal:     clickHouseLiteral,
+		Exec: func(query string) (sql.Result, error) {
+			return conn.Exec(query)
+		},
+	})
 }
 
 func buildClickHouseInsertSQL(qualifiedTable string, row map[string]interface{}) (string, error) {

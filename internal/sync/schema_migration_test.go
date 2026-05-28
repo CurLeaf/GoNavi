@@ -14,12 +14,14 @@ type fakeMigrationDB struct {
 	tables    map[string][]string
 	queryData map[string][]map[string]interface{}
 	queryCols map[string][]string
+	queryLog  []string
 }
 
 func (f *fakeMigrationDB) Connect(config connection.ConnectionConfig) error { return nil }
 func (f *fakeMigrationDB) Close() error                                     { return nil }
 func (f *fakeMigrationDB) Ping() error                                      { return nil }
 func (f *fakeMigrationDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	f.queryLog = append(f.queryLog, query)
 	if rows, ok := f.queryData[query]; ok {
 		return rows, f.queryCols[query], nil
 	}

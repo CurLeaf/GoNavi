@@ -205,6 +205,17 @@ func (s *SqlServerDB) ExecBatchContext(ctx context.Context, query string) (int64
 	return res.RowsAffected()
 }
 
+func (s *SqlServerDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if s.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := s.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (s *SqlServerDB) Exec(query string) (int64, error) {
 	if s.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -344,13 +355,14 @@ ORDER BY c.column_id`,
 func (s *SqlServerDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	safeDB := quoteBracket(dbName)
 	query := fmt.Sprintf(`
-SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, tp.name AS data_type
+SELECT s.name AS schema_name, t.name AS table_name, c.name AS column_name, tp.name AS data_type, ep.value AS comment
 FROM [%s].sys.columns c
 JOIN [%s].sys.tables t ON c.object_id = t.object_id
 JOIN [%s].sys.schemas s ON t.schema_id = s.schema_id
 JOIN [%s].sys.types tp ON c.user_type_id = tp.user_type_id
+LEFT JOIN [%s].sys.extended_properties ep ON ep.major_id = c.object_id AND ep.minor_id = c.column_id AND ep.name = 'MS_Description'
 WHERE t.type = 'U'
-ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB)
+ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB, safeDB)
 
 	data, _, err := s.Query(query)
 	if err != nil {
@@ -367,6 +379,9 @@ ORDER BY s.name, t.name, c.column_id`, safeDB, safeDB, safeDB, safeDB)
 			TableName: tableName,
 			Name:      fmt.Sprintf("%v", row["column_name"]),
 			Type:      fmt.Sprintf("%v", row["data_type"]),
+		}
+		if v, ok := row["comment"]; ok && v != nil {
+			col.Comment = fmt.Sprintf("%v", v)
 		}
 		cols = append(cols, col)
 	}
@@ -649,28 +664,22 @@ func (s *SqlServerDB) ApplyChanges(tableName string, changes connection.ChangeSe
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-		idx := 0
-
-		for k, v := range row {
-			idx++
-			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, fmt.Sprintf("@p%d", idx))
-			args = append(args, sql.Named(fmt.Sprintf("p%d", idx), v))
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteIdent,
+		Placeholder: func(idx int) string {
+			return fmt.Sprintf("@p%d", idx)
+		},
+		Arg: func(idx int, _ string, value interface{}) interface{} {
+			return sql.Named(fmt.Sprintf("p%d", idx), value)
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxArgs: sqlServerBatchInsertArgs,
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()

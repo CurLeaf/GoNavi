@@ -140,6 +140,17 @@ func (m *MariaDB) ExecBatchContext(ctx context.Context, query string) (int64, er
 	return res.RowsAffected()
 }
 
+func (m *MariaDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if m.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := m.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (m *MariaDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if m.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -199,7 +210,7 @@ func (m *MariaDB) GetTables(dbName string) ([]string, error) {
 			break
 		}
 	}
-	return tables, nil
+	return resolveShardingSphereLogicalTables(tables, m.Query), nil
 }
 
 func (m *MariaDB) GetCreateStatement(dbName, tableName string) (string, error) {
@@ -408,36 +419,33 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-
-		for k, v := range row {
-			cols = append(cols, fmt.Sprintf("`%s`", k))
-			placeholders = append(placeholders, "?")
-			args = append(args, normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(v)))
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO `%s` (%s) VALUES (%s)", tableName, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table: fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(tableName)),
+		Rows:  changes.Inserts,
+		QuoteColumn: func(column string) string {
+			return fmt.Sprintf("`%s`", escapeMySQLBacktickIdent(column))
+		},
+		Placeholder: func(int) string { return "?" },
+		Value: func(_ string, value interface{}) (interface{}, bool) {
+			return normalizeMySQLComplexValue(normalizeMySQLDateTimeValue(value)), false
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+		MaxRows: defaultMySQLInsertBatchSize,
+		MaxArgs: maxMySQLInsertBatchArgs,
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()
 }
 
 func (m *MariaDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
-	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", dbName)
 	if dbName == "" {
 		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
 	}
+	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", strings.ReplaceAll(dbName, "'", "''"))
 
 	data, _, err := m.Query(query)
 	if err != nil {
@@ -450,6 +458,7 @@ func (m *MariaDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWit
 			TableName: fmt.Sprintf("%v", row["TABLE_NAME"]),
 			Name:      fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:      fmt.Sprintf("%v", row["COLUMN_TYPE"]),
+			Comment:   fmt.Sprintf("%v", row["COLUMN_COMMENT"]),
 		}
 		cols = append(cols, col)
 	}

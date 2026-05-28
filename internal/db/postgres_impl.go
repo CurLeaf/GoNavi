@@ -249,6 +249,17 @@ func (p *PostgresDB) ExecBatchContext(ctx context.Context, query string) (int64,
 	return res.RowsAffected()
 }
 
+func (p *PostgresDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if p.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := p.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if p.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
@@ -286,25 +297,57 @@ func (p *PostgresDB) GetDatabases() ([]string, error) {
 }
 
 func (p *PostgresDB) GetTables(dbName string) ([]string, error) {
-	query := "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, tablename"
+	query := buildPostgresTablesQuery()
 	data, _, err := p.Query(query)
 	if err != nil {
-		return nil, err
+		data, _, err = p.Query(buildPostgresLegacyTablesQuery())
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	var tables []string
+	tables := parsePostgresTableNames(data)
+	return resolveShardingSphereLogicalTables(tables, p.Query), nil
+}
+
+func buildPostgresTablesQuery() string {
+	return `
+SELECT DISTINCT
+	n.nspname AS schemaname,
+	c.relname AS tablename
+FROM pg_catalog.pg_class c
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p')
+  AND n.nspname != 'information_schema'
+  AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|'
+ORDER BY n.nspname, c.relname`
+}
+
+func buildPostgresLegacyTablesQuery() string {
+	return "SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, tablename"
+}
+
+func parsePostgresTableNames(data []map[string]interface{}) []string {
+	tables := make([]string, 0, len(data))
+	seen := make(map[string]struct{}, len(data))
 	for _, row := range data {
-		schema, okSchema := row["schemaname"]
-		name, okName := row["tablename"]
-		if okSchema && okName {
-			tables = append(tables, fmt.Sprintf("%v.%v", schema, name))
+		schema := getCaseInsensitiveRowString(row, "schemaname", "schema_name", "schema", "nspname")
+		name := getCaseInsensitiveRowString(row, "tablename", "table_name", "relname", "name")
+		if name == "" {
 			continue
 		}
-		if okName {
-			tables = append(tables, fmt.Sprintf("%v", name))
+		table := name
+		if schema != "" {
+			table = fmt.Sprintf("%s.%s", schema, name)
 		}
+		key := strings.ToLower(table)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		tables = append(tables, table)
 	}
-	return tables, nil
+	return tables
 }
 
 func (p *PostgresDB) GetCreateStatement(dbName, tableName string) (string, error) {
@@ -592,11 +635,19 @@ ORDER BY trigger_name, event_manipulation`, esc(table), esc(schema))
 
 func (p *PostgresDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	query := `
-SELECT table_schema, table_name, column_name, data_type
-FROM information_schema.columns
-WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-  AND table_schema NOT LIKE 'pg|_%' ESCAPE '|'
-ORDER BY table_schema, table_name, ordinal_position`
+SELECT
+	c.table_schema,
+	c.table_name,
+	c.column_name,
+	c.data_type,
+	col_description(cls.oid, a.attnum) AS comment
+FROM information_schema.columns c
+LEFT JOIN pg_namespace n ON n.nspname = c.table_schema
+LEFT JOIN pg_class cls ON cls.relnamespace = n.oid AND cls.relname = c.table_name
+LEFT JOIN pg_attribute a ON a.attrelid = cls.oid AND a.attname = c.column_name
+WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+  AND c.table_schema NOT LIKE 'pg|_%' ESCAPE '|'
+ORDER BY c.table_schema, c.table_name, c.ordinal_position`
 
 	data, _, err := p.Query(query)
 	if err != nil {
@@ -616,6 +667,7 @@ ORDER BY table_schema, table_name, ordinal_position`
 			TableName: tableName,
 			Name:      fmt.Sprintf("%v", row["column_name"]),
 			Type:      fmt.Sprintf("%v", row["data_type"]),
+			Comment:   fmt.Sprintf("%v", row["comment"]),
 		}
 		cols = append(cols, col)
 	}
@@ -812,28 +864,18 @@ func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		}
 	}
 
-	// 3. Inserts
-	for _, row := range changes.Inserts {
-		var cols []string
-		var placeholders []string
-		var args []interface{}
-		idx := 0
-
-		for k, v := range row {
-			idx++
-			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, fmt.Sprintf("$%d", idx))
-			args = append(args, v)
-		}
-
-		if len(cols) == 0 {
-			continue
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("插入失败：%v", err)
-		}
+	if err := execParameterizedInsertBatches(parameterizedInsertConfig{
+		Table:       qualifiedTable,
+		Rows:        changes.Inserts,
+		QuoteColumn: quoteIdent,
+		Placeholder: func(idx int) string {
+			return fmt.Sprintf("$%d", idx)
+		},
+		Exec: func(query string, args ...interface{}) (sql.Result, error) {
+			return tx.Exec(query, args...)
+		},
+	}); err != nil {
+		return err
 	}
 
 	return tx.Commit()

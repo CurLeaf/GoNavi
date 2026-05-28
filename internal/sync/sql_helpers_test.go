@@ -1,6 +1,9 @@
 package sync
 
-import "testing"
+import (
+	"GoNavi-Wails/internal/connection"
+	"testing"
+)
 
 func TestQuoteQualifiedIdentByType_KingbaseLeavesLowercaseQualifiedTableUnquoted(t *testing.T) {
 	t.Parallel()
@@ -56,5 +59,95 @@ func TestNormalizeMigrationDBType_KingbaseAliases(t *testing.T) {
 		if got := normalizeMigrationDBType(in); got != "kingbase" {
 			t.Fatalf("normalizeMigrationDBType(%q)=%q, want kingbase", in, got)
 		}
+	}
+}
+
+func TestBuildPagedSourceTableQuery_MySQLUsesStablePKPagination(t *testing.T) {
+	t.Parallel()
+
+	query := buildPagedSourceTableQuery("mysql", "app.events", []connection.ColumnDefinition{
+		{Name: "id"},
+		{Name: "name"},
+	}, "id", 1000, 2000)
+
+	want := "SELECT `id`, `name` FROM `app`.`events` ORDER BY `id` ASC LIMIT 1000 OFFSET 2000"
+	if query != want {
+		t.Fatalf("unexpected paged query:\n got: %s\nwant: %s", query, want)
+	}
+}
+
+func TestBuildPagedSourceTableQuery_SQLServerUsesOuterAliasColumns(t *testing.T) {
+	t.Parallel()
+
+	query := buildPagedSourceTableQuery("sqlserver", "dbo.events", []connection.ColumnDefinition{
+		{Name: "id"},
+		{Name: "name"},
+	}, "id", 1000, 2000)
+
+	want := "SELECT [__gonavi_page_result__].[id], [__gonavi_page_result__].[name] FROM (SELECT [__gonavi_page__].*, ROW_NUMBER() OVER (ORDER BY [id] ASC) AS [__gonavi_rn__] FROM (SELECT [id], [name] FROM [dbo].[events]) AS [__gonavi_page__]) AS [__gonavi_page_result__] WHERE [__gonavi_rn__] > 2000 AND [__gonavi_rn__] <= 3000 ORDER BY [__gonavi_rn__]"
+	if query != want {
+		t.Fatalf("unexpected paged query:\n got: %s\nwant: %s", query, want)
+	}
+}
+
+func TestIsSamePhysicalSyncTableDetectsFullOverwriteSelfTarget(t *testing.T) {
+	t.Parallel()
+
+	cfg := SyncConfig{
+		SourceConfig: connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, Database: "app"},
+		TargetConfig: connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, Database: "app"},
+	}
+	plan := SchemaMigrationPlan{SourceQueryTable: "app.events", TargetQueryTable: "app.events"}
+	if !isSamePhysicalSyncTable(cfg, plan, "mysql", "mysql") {
+		t.Fatal("expected identical connection/table to be detected")
+	}
+
+	cfg.TargetConfig.Database = "archive"
+	if isSamePhysicalSyncTable(cfg, plan, "mysql", "mysql") {
+		t.Fatal("different database should not be treated as same physical table")
+	}
+}
+
+func TestBuildPKInSelectQueryEscapesStringLiterals(t *testing.T) {
+	t.Parallel()
+
+	query := buildPKInSelectQuery("mysql", "app.users", []connection.ColumnDefinition{
+		{Name: "id"},
+		{Name: "name"},
+	}, "id", []interface{}{"a'1", "b2"})
+
+	want := "SELECT `id`, `name` FROM `app`.`users` WHERE `id` IN ('a''1', 'b2')"
+	if query != want {
+		t.Fatalf("unexpected PK IN query:\n got: %s\nwant: %s", query, want)
+	}
+}
+
+func TestBuildKeysetPagedTableQueryUsesLastPK(t *testing.T) {
+	t.Parallel()
+
+	query := buildKeysetPagedTableQuery("mysql", "app.users", []connection.ColumnDefinition{{Name: "id"}}, "id", 100, true, 50)
+
+	want := "SELECT `id` FROM `app`.`users` WHERE `id` > 100 ORDER BY `id` ASC LIMIT 50"
+	if query != want {
+		t.Fatalf("unexpected keyset query:\n got: %s\nwant: %s", query, want)
+	}
+}
+
+func TestBuildSourceQueryPageSQLWrapsSelect(t *testing.T) {
+	t.Parallel()
+
+	query := buildSourceQueryPageSQL("mysql", "SELECT id, name FROM active_users;", "id", 1000, 2000)
+
+	want := "SELECT * FROM (SELECT id, name FROM active_users) AS __gonavi_source_query__ ORDER BY `id` ASC LIMIT 1000 OFFSET 2000"
+	if query != want {
+		t.Fatalf("unexpected source query page SQL:\n got: %s\nwant: %s", query, want)
+	}
+}
+
+func TestNormalizeSourceQueryForPagingRejectsMultiStatement(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := normalizeSourceQueryForPaging("SELECT * FROM users; DELETE FROM users"); ok {
+		t.Fatal("expected multi-statement source query to be rejected for pagination")
 	}
 }

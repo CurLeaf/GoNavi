@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { findSqlStatementRanges, resolveCurrentSqlStatementRange } from './sqlStatementSelection';
+import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from './sqlStatementSelection';
 
 describe('sqlStatementSelection', () => {
   it('resolves the statement containing the cursor', () => {
@@ -37,5 +37,47 @@ describe('sqlStatementSelection', () => {
 
   it('returns null when there is no statement', () => {
     expect(resolveCurrentSqlStatementRange('  \n\t  ', 0)).toBeNull();
+  });
+
+  it('prefers a non-empty selection for executable SQL', () => {
+    const sql = 'select 1;\nselect 2;';
+
+    expect(resolveExecutableSql(sql, sql.indexOf('1'), '  select selected  ')?.sql).toBe('  select selected  ');
+    expect(resolveExecutableSql(sql, sql.indexOf('1'), '  select selected  ')?.source).toBe('selection');
+  });
+
+  it('uses the statement containing the cursor for executable SQL', () => {
+    const sql = 'select 1;\n\nselect 2 from users;\nselect 3';
+
+    expect(resolveExecutableSql(sql, sql.indexOf('users'))).toEqual({
+      sql: 'select 2 from users',
+      source: 'statement',
+    });
+  });
+
+  it('keeps execution on the statement when the cursor lands after its semicolon', () => {
+    const sql = 'select 1 as a;\nselect 2 as b;\n\nselect 3 as c;';
+    const afterSecondSemicolon = sql.indexOf('select 2 as b') + 'select 2 as b;'.length;
+
+    expect(resolveExecutableSql(sql, afterSecondSemicolon)).toEqual({
+      sql: 'select 2 as b',
+      source: 'statement',
+    });
+  });
+
+  it('falls back to the current line when the cursor is not inside a statement', () => {
+    const sql = 'select 1;\n\n  select 2';
+
+    expect(resolveExecutableSql(sql, sql.indexOf('\n\n') + 1)).toBeNull();
+    expect(resolveExecutableSql(sql, sql.indexOf('  select 2'))).toEqual({
+      sql: 'select 2',
+      source: 'statement',
+    });
+  });
+
+  it('does not jump to the next statement when executing from blank space', () => {
+    const sql = 'select 1;\n\nselect 2;';
+
+    expect(resolveExecutableSql(sql, sql.indexOf('\n\n') + 1)).toBeNull();
   });
 });

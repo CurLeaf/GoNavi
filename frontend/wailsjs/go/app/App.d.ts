@@ -28,6 +28,8 @@ export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):P
 
 export function CreateDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function CreateSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function DBGetAllColumns(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;

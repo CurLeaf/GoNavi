@@ -272,7 +272,7 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 	// 列别名用双引号包裹强制大写，避免不同驱动版本返回不一致 case 导致 row map 取值失败
 	var query string
 	if dbName != "" {
-		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, strings.ToUpper(dbName))
+		query = fmt.Sprintf(`SELECT owner AS "OWNER", table_name AS "TABLE_NAME" FROM all_tables WHERE owner = '%s' ORDER BY table_name`, escapeOracleMetadataLiteral(dbName))
 	} else {
 		query = `SELECT USER AS "OWNER", table_name AS "TABLE_NAME" FROM user_tables ORDER BY table_name`
 	}
@@ -300,11 +300,13 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	// Oracle provides DBMS_METADATA.GET_DDL
 	// Note: LONG type might be tricky, but basic string scan should work for smaller DDLs
+	metadataTableName := escapeOracleMetadataLiteral(tableName)
+	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
 	query := fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s', '%s') as ddl FROM DUAL",
-		strings.ToUpper(tableName), strings.ToUpper(dbName))
+		metadataTableName, metadataSchemaName)
 
 	if dbName == "" {
-		query = fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s') as ddl FROM DUAL", strings.ToUpper(tableName))
+		query = fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s') as ddl FROM DUAL", metadataTableName)
 	}
 
 	data, _, err := o.Query(query)
@@ -314,16 +316,21 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 
 	if len(data) > 0 {
 		if val, ok := data[0]["DDL"]; ok {
-			return fmt.Sprintf("%v", val), nil
+			return o.appendOracleCommentDDL(fmt.Sprintf("%v", val), dbName, tableName), nil
 		}
 	}
 	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+	metadataTableName := escapeOracleMetadataLiteral(tableName)
+	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
 	query := fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
-		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key,
+		cc.comments AS comment
 		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
 		LEFT JOIN (
 			SELECT cols.owner, cols.table_name, cols.column_name
 			FROM all_constraints cons
@@ -332,12 +339,15 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 			WHERE cons.constraint_type = 'P'
 		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
 		WHERE c.owner = '%s' AND c.table_name = '%s'
-		ORDER BY c.column_id`, strings.ToUpper(dbName), strings.ToUpper(tableName))
+		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
 
 	if dbName == "" {
 		query = fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
-			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key
+			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key,
+			cc.comments AS comment
 			FROM user_tab_columns c
+			LEFT JOIN user_col_comments cc
+			  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
 			LEFT JOIN (
 				SELECT cols.table_name, cols.column_name
 				FROM user_constraints cons
@@ -345,7 +355,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 				WHERE cons.constraint_type = 'P'
 			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
 			WHERE c.table_name = '%s'
-			ORDER BY c.column_id`, strings.ToUpper(tableName))
+			ORDER BY c.column_id`, metadataTableName)
 	}
 
 	data, _, err := o.Query(query)
@@ -356,20 +366,149 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 	var columns []connection.ColumnDefinition
 	for _, row := range data {
 		col := connection.ColumnDefinition{
-			Name:     fmt.Sprintf("%v", row["COLUMN_NAME"]),
-			Type:     fmt.Sprintf("%v", row["DATA_TYPE"]),
-			Nullable: fmt.Sprintf("%v", row["NULLABLE"]),
-			Key:      fmt.Sprintf("%v", row["COLUMN_KEY"]),
+			Name:     oracleRowString(row, "COLUMN_NAME"),
+			Type:     oracleRowString(row, "DATA_TYPE"),
+			Nullable: oracleRowString(row, "NULLABLE"),
+			Key:      oracleRowString(row, "COLUMN_KEY"),
+			Comment:  oracleRowString(row, "COMMENT"),
 		}
 
-		if row["DATA_DEFAULT"] != nil {
-			d := fmt.Sprintf("%v", row["DATA_DEFAULT"])
+		if defaultValue := oracleRowValue(row, "DATA_DEFAULT"); defaultValue != nil {
+			d := fmt.Sprintf("%v", defaultValue)
 			col.Default = &d
 		}
 
 		columns = append(columns, col)
 	}
 	return columns, nil
+}
+
+func oracleRowValue(row map[string]interface{}, names ...string) interface{} {
+	for _, name := range names {
+		if value, ok := row[name]; ok {
+			return value
+		}
+		for key, value := range row {
+			if strings.EqualFold(key, name) {
+				return value
+			}
+		}
+	}
+	return nil
+}
+
+func oracleRowString(row map[string]interface{}, names ...string) string {
+	value := oracleRowValue(row, names...)
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableName string) string {
+	table := strings.ToUpper(strings.TrimSpace(tableName))
+	if strings.TrimSpace(baseDDL) == "" || table == "" {
+		return baseDDL
+	}
+
+	schema := strings.ToUpper(strings.TrimSpace(dbName))
+	tableRef := quoteOracleDDLIdentifier(table)
+	if schema != "" {
+		tableRef = quoteOracleDDLIdentifier(schema) + "." + tableRef
+	}
+	existingDDLUpper := strings.ToUpper(baseDDL)
+	commentLines := make([]string, 0, 4)
+
+	if tableComment := strings.TrimSpace(o.fetchOracleTableComment(schema, table)); tableComment != "" {
+		marker := "COMMENT ON TABLE " + strings.ToUpper(tableRef)
+		if !strings.Contains(existingDDLUpper, marker) {
+			commentLines = append(commentLines, fmt.Sprintf("COMMENT ON TABLE %s IS '%s';", tableRef, escapeOracleCommentLiteral(tableComment)))
+		}
+	}
+
+	for _, colComment := range o.fetchOracleColumnComments(schema, table) {
+		columnName := strings.TrimSpace(colComment.columnName)
+		comment := strings.TrimSpace(colComment.comment)
+		if columnName == "" || comment == "" {
+			continue
+		}
+		columnRef := fmt.Sprintf("%s.%s", tableRef, quoteOracleDDLIdentifier(columnName))
+		marker := "COMMENT ON COLUMN " + strings.ToUpper(columnRef)
+		if strings.Contains(existingDDLUpper, marker) {
+			continue
+		}
+		commentLines = append(commentLines, fmt.Sprintf("COMMENT ON COLUMN %s IS '%s';", columnRef, escapeOracleCommentLiteral(comment)))
+	}
+
+	if len(commentLines) == 0 {
+		return baseDDL
+	}
+	return strings.TrimRight(baseDDL, " \t\r\n") + "\n" + strings.Join(commentLines, "\n")
+}
+
+func (o *OracleDB) fetchOracleTableComment(schema string, table string) string {
+	escapedTable := escapeOracleMetadataLiteral(table)
+	var query string
+	if strings.TrimSpace(schema) != "" {
+		query = fmt.Sprintf(`SELECT comments AS "COMMENT" FROM all_tab_comments WHERE owner = '%s' AND table_name = '%s' AND comments IS NOT NULL`, escapeOracleMetadataLiteral(schema), escapedTable)
+	} else {
+		query = fmt.Sprintf(`SELECT comments AS "COMMENT" FROM user_tab_comments WHERE table_name = '%s' AND comments IS NOT NULL`, escapedTable)
+	}
+	data, _, err := o.Query(query)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return oracleRowString(data[0], "COMMENT", "COMMENTS")
+}
+
+type oracleColumnComment struct {
+	columnName string
+	comment    string
+}
+
+func (o *OracleDB) fetchOracleColumnComments(schema string, table string) []oracleColumnComment {
+	escapedTable := escapeOracleMetadataLiteral(table)
+	var query string
+	if strings.TrimSpace(schema) != "" {
+		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", cc.comments AS "COMMENT"
+FROM all_tab_columns c
+JOIN all_col_comments cc
+  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
+WHERE c.owner = '%s' AND c.table_name = '%s' AND cc.comments IS NOT NULL
+ORDER BY c.column_id`, escapeOracleMetadataLiteral(schema), escapedTable)
+	} else {
+		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", cc.comments AS "COMMENT"
+FROM user_tab_columns c
+JOIN user_col_comments cc
+  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
+WHERE c.table_name = '%s' AND cc.comments IS NOT NULL
+ORDER BY c.column_id`, escapedTable)
+	}
+
+	data, _, err := o.Query(query)
+	if err != nil {
+		return nil
+	}
+	comments := make([]oracleColumnComment, 0, len(data))
+	for _, row := range data {
+		comments = append(comments, oracleColumnComment{
+			columnName: oracleRowString(row, "COLUMN_NAME"),
+			comment:    oracleRowString(row, "COMMENT", "COMMENTS"),
+		})
+	}
+	return comments
+}
+
+func quoteOracleDDLIdentifier(ident string) string {
+	return `"` + strings.ReplaceAll(strings.TrimSpace(ident), `"`, `""`) + `"`
+}
+
+func escapeOracleCommentLiteral(text string) string {
+	return strings.ReplaceAll(text, "'", "''")
+}
+
+func escapeOracleMetadataLiteral(text string) string {
+	return strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(text)), "'", "''")
 }
 
 func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
@@ -747,9 +886,11 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 }
 
 func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
-	query := fmt.Sprintf(`SELECT table_name, column_name, data_type 
-		FROM all_tab_columns 
-		WHERE owner = '%s'`, strings.ToUpper(dbName))
+	query := fmt.Sprintf(`SELECT c.table_name, c.column_name, c.data_type, cc.comments AS comment
+		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
+		WHERE c.owner = '%s'`, strings.ReplaceAll(strings.ToUpper(dbName), "'", "''"))
 
 	data, _, err := o.Query(query)
 	if err != nil {
@@ -762,6 +903,7 @@ func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWi
 			TableName: fmt.Sprintf("%v", row["TABLE_NAME"]),
 			Name:      fmt.Sprintf("%v", row["COLUMN_NAME"]),
 			Type:      fmt.Sprintf("%v", row["DATA_TYPE"]),
+			Comment:   fmt.Sprintf("%v", row["COMMENT"]),
 		}
 		cols = append(cols, col)
 	}

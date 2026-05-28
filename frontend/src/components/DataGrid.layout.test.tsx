@@ -1,8 +1,16 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import DataGrid, { formatCellDisplayText, resolveContextMenuFieldName } from './DataGrid';
+import DataGrid, {
+  buildGridFieldSelectOptions,
+  formatCellDisplayText,
+  resolveContextMenuFieldName,
+  resolveDefaultGridFilterOperator,
+  resolveNextGridFilterOperatorForColumnChange,
+} from './DataGrid';
+import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -15,12 +23,15 @@ vi.mock('../store', () => ({
       blur: 0,
       showDataTableVerticalBorders: false,
       dataTableDensity: 'comfortable',
+      uiVersion: 'v2',
     },
     queryOptions: {
       showColumnComment: false,
       showColumnType: false,
     },
     setQueryOptions: vi.fn(),
+    addTab: vi.fn(),
+    setActiveContext: vi.fn(),
     tableColumnOrders: {},
     enableColumnOrderMemory: false,
     setTableColumnOrder: vi.fn(),
@@ -31,6 +42,7 @@ vi.mock('../store', () => ({
     setTableHiddenColumns: vi.fn(),
     setEnableHiddenColumnMemory: vi.fn(),
     clearTableHiddenColumns: vi.fn(),
+    shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
     aiPanelVisible: false,
     setAIPanelVisible: vi.fn(),
   }),
@@ -44,6 +56,7 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   ApplyChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
+  DBGetForeignKeys: vi.fn(),
   DBShowCreateTable: vi.fn(),
 }));
 
@@ -77,19 +90,127 @@ describe('DataGrid layout', () => {
 
     expect(markup).toContain('data-grid-secondary-actions="true"');
     expect(markup).toContain('data-grid-view-switcher="true"');
+    expect(markup).toContain('data-grid-column-display-action="true"');
+    expect(markup).toContain('data-grid-column-quick-find-action="true"');
+    expect(markup).toContain('字段显示');
+    expect(markup).toContain('跳列');
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
+    expect(markup).toContain('gn-v2-data-grid-status-main');
+    expect(markup).toContain('gn-v2-data-grid-status-right');
+    expect(markup).toContain('data-grid-v2-pagination="true"');
+    expect(markup).toContain('data-grid-v2-page-chip="true"');
+    expect(markup).toContain('data-grid-v2-pagination-prev="true"');
+    expect(markup).toContain('data-grid-v2-pagination-next="true"');
+    expect(markup).not.toContain('class="ant-pagination');
+    expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+        editLocator={{
+          strategy: 'primary-key',
+          columns: ['id'],
+          valueColumns: ['id'],
+          readOnly: false,
+        }}
+        onReload={() => {}}
+        showFilter
+        onToggleFilter={() => {}}
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 1,
+        }}
+        onPageChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('gn-v2-data-grid');
+    expect(markup).toContain('gn-v2-data-grid-toolbar-frame');
+    expect(markup).toContain('gn-v2-data-grid-toolbar-title');
+    expect(markup).toContain('gn-v2-toolbar-divider');
+    expect(markup).toContain('gn-v2-commit-button');
+    expect(markup).toContain('gn-v2-ai-insight-button');
+    expect(markup).toContain('gn-v2-smart-filter-panel');
+    expect(markup).toContain('gn-v2-data-grid-table-shell');
+    expect(markup).toContain('gn-v2-data-grid-table-wrap');
+    expect(markup).toContain('· main');
+    expect(markup).toContain('提交事务');
+    expect(markup).toContain('AI 洞察');
   });
 
   it('preserves fractional seconds when rendering datetime values', () => {
     expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
   });
 
+  it('renders bit column hex values as decimal flags', () => {
+    expect(formatCellDisplayText('0x00', 'bit(1)')).toBe('0');
+    expect(formatCellDisplayText('0x01', 'bit(1)')).toBe('1');
+    expect(formatCellDisplayText('0x02', 'bit varying(8)')).toBe('2');
+    expect(formatCellDisplayText('0x01', 'bytea')).toBe('0x01');
+  });
+
   it('resolves the field name copied from the cell context menu', () => {
     expect(resolveContextMenuFieldName('created_at', '创建时间')).toBe('created_at');
     expect(resolveContextMenuFieldName('', 'fallback_name')).toBe('fallback_name');
+  });
+
+  it('uses contains as the default filter operator for string-like columns', () => {
+    expect(resolveDefaultGridFilterOperator('varchar(255)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('character varying(64)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('nvarchar(max)')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('Nullable(LowCardinality(String))')).toBe('CONTAINS');
+    expect(resolveDefaultGridFilterOperator('text')).toBe('CONTAINS');
+
+    expect(resolveDefaultGridFilterOperator('int')).toBe('=');
+    expect(resolveDefaultGridFilterOperator('decimal(10,2)')).toBe('=');
+    expect(resolveDefaultGridFilterOperator('datetime')).toBe('=');
+  });
+
+  it('updates only untouched default filter operators when the column changes', () => {
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: '=',
+      previousColumnType: 'int',
+      nextColumnType: 'varchar(64)',
+    })).toBe('CONTAINS');
+
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: 'CONTAINS',
+      previousColumnType: 'varchar(64)',
+      nextColumnType: 'bigint',
+    })).toBe('=');
+
+    expect(resolveNextGridFilterOperatorForColumnChange({
+      currentOperator: 'STARTS_WITH',
+      previousColumnType: 'varchar(64)',
+      nextColumnType: 'bigint',
+    })).toBe('STARTS_WITH');
+  });
+
+  it('keeps full field names in filter field select options', () => {
+    const [option] = buildGridFieldSelectOptions(['mes_manufacture_order_really_long_column_name']);
+
+    expect(option).toEqual({
+      value: 'mes_manufacture_order_really_long_column_name',
+      label: 'mes_manufacture_order_really_long_column_name',
+      title: 'mes_manufacture_order_really_long_column_name',
+    });
   });
 
   it('renders a DDL action for table data pages only', () => {
@@ -219,7 +340,107 @@ describe('DataGrid layout', () => {
     );
 
     expect(markup).toContain('data-grid-quick-where="true"');
+    expect(markup).toContain('data-grid-quick-where-input="true"');
     expect(markup).toContain('WHERE');
     expect(markup).toContain('输入 WHERE 后面的条件');
+  });
+
+  it('keeps quick WHERE input clipboard editing isolated from grid shortcuts', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const toolbarSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
+    const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(filterHookSource).toContain('const handleQuickWherePaste = React.useCallback');
+    expect(filterHookSource).toContain("event.clipboardData.getData('text/plain')");
+    expect(filterHookSource).toContain('const currentValue = input.value ?? quickWhereDraft;');
+    expect(filterHookSource).toContain('event.stopPropagation();');
+    expect(toolbarSource).toContain('data-grid-quick-where-input="true"');
+    expect(toolbarSource).toContain('{...noAutoCapInputProps}');
+    expect(toolbarSource).toContain('onCopy={onQuickWhereCopy}');
+    expect(toolbarSource).toContain('onCut={onQuickWhereCut}');
+    expect(toolbarSource).toContain('onPaste={onQuickWherePaste}');
+    expect(source).toContain("['c', 'v', 'x'].includes");
+    expect(css).toContain('[data-grid-quick-where-input="true"]');
+    expect(css).toContain('font-size: var(--gn-font-size, 14px) !important;');
+    expect(css).toContain('user-select: text !important;');
+  });
+
+  it('keeps DataGrid scroll synchronization throttled to animation frames', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const secondaryActionsSource = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+    const columnTitleSource = readFileSync(new URL('./DataGridColumnTitle.tsx', import.meta.url), 'utf8');
+    const columnQuickFindSource = readFileSync(new URL('./DataGridColumnQuickFind.tsx', import.meta.url), 'utf8');
+    const paginationBarSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(source).toContain('virtualHorizontalElementsRef');
+    expect(source).toContain('const handleSubmitColumnQuickFind = useCallback(() => {');
+    expect(source).toContain('resolveDataGridColumnQuickFindScrollLeft({');
+    expect(source).toContain('const applied = applyVirtualHorizontalOffset(tableContainer, nextScrollLeft);');
+    expect(source).toContain('syncExternalScrollFromTargets();');
+    expect(source).toContain("const columnQuickFindContent = isTableSurfaceActive ? (");
+    expect(secondaryActionsSource).toContain('data-grid-column-quick-find-action="true"');
+    expect(source).toContain('type VirtualTableScrollReference = TableReference & {');
+    expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
+    expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
+    expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
+    expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
+    expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
+    expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain('if (externalSyncRafRef.current !== null)');
+    expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
+    expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');
+    expect(source).toContain('tableTargetSyncRafRef.current = requestAnimationFrame');
+    expect(source).toContain("boundHorizontalTargets = externalScroll ? [] : pickHorizontalScrollTargets(tableContainer);");
+    expect(source).toContain('const useInlineEditableBodyCell = enableInlineEditableCell && !enableVirtual;');
+    expect(source).toContain('if (useInlineEditableBodyCell) {');
+    expect(source).toContain('}, areEditableCellPropsEqual);');
+    expect(source).toContain('const [virtualEditingCell, setVirtualEditingCell] = useState<VirtualEditingCellState | null>(null);');
+    expect(source).toContain('const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {');
+    expect(source).toContain('if (isVirtualInlineEditingCell && virtualEditable) {');
+    expect(source).toContain('const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol(\'DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION\');');
+    expect(source).toContain('const attachDataGridVirtualEditRenderVersion = <T extends Item>(');
+    expect(source).toContain('hasDataGridVirtualEditRenderVersionChanged(record, prevRecord)');
+    expect(source).not.toContain('if (enableVirtual && enableInlineEditableCell) {\n                  return (\n                      <EditableCell');
+    expect(source).toContain("content-visibility: ${useVirtualHolderPaintHints ? 'auto' : 'visible'};");
+    expect(source).toContain("content-visibility: ${useVirtualEditableVisibilityHints ? 'auto' : 'visible'};");
+    expect(source).toContain("contain-intrinsic-size: ${useVirtualEditableVisibilityHints ? '24px 160px' : 'auto'};");
+    expect(source).toContain("const useVirtualHolderPaintHints = !isMacLike && !isV2Ui;");
+    expect(source).toContain("const useVirtualCellContentContain = false;");
+    expect(source).toContain("const useVirtualEditableVisibilityHints = !isMacLike && !isV2Ui;");
+    expect(source).toContain("contain: ${useVirtualRowCellContain ? 'layout paint style' : 'none'};");
+    expect(source).toContain('const handleSharedCellContextMenu = useCallback');
+    expect(source).toContain('const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;');
+    expect(source).toContain('if (shouldUsePlainVirtualContent) {');
+    expect(source).toContain('return originalRenderContent;');
+    expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
+    expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
+    expect(source).toContain("const dataGridBackdropFilter = isV2Ui || isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
+    expect(source).toContain('rowHoverable={!enableVirtual}');
+    expect(columnTitleSource).toContain("data-grid-column-highlighted={highlighted ? 'true' : undefined}");
+    expect(columnTitleSource).toContain('data-column-name={normalizedName}');
+    expect(columnQuickFindSource).toContain('AutoComplete');
+    expect(columnQuickFindSource).toContain('placeholder="跳到字段列..."');
+    expect(secondaryActionsSource.indexOf('{pageFindContent}')).toBeLessThan(secondaryActionsSource.indexOf('gn-v2-data-grid-status-center'));
+    expect(css).toContain('width: 66px !important;');
+    expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
+    expect(css).toContain('.data-grid-pagination-size-select.ant-select-focused .ant-select-selector');
+    expect(css).toContain('overflow-x: auto;');
+    expect(paginationBarSource).toContain("label: `${value}/页`");
+    expect(css).toContain('background: transparent !important;');
+  });
+
+  it('keeps the DataGrid performance harness aligned with legacy and v2 comparison controls', () => {
+    const harnessSource = readFileSync(new URL('../dev/PerfDataGridHarness.tsx', import.meta.url), 'utf8');
+    expect(harnessSource).toContain("options={[");
+    expect(harnessSource).toContain("{ label: '旧版 UI', value: 'legacy' }");
+    expect(harnessSource).toContain("{ label: '新版 UI', value: 'v2' }");
+    expect(harnessSource).toContain("{ value: 'comfortable', label: '标准' }");
+    expect(harnessSource).toContain("{ value: 'standard', label: '紧凑' }");
+    expect(harnessSource).toContain("{ value: 'compact', label: '极紧凑' }");
+    expect(harnessSource).toContain("document.body.setAttribute('data-ui-version', uiVersion);");
+    expect(harnessSource).toContain("if (value === null || value === undefined || value === '') {");
+    expect(harnessSource).toContain("const currentState = useStore.getState();");
   });
 });
