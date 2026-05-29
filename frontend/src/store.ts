@@ -851,169 +851,6 @@ const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
   return result;
 };
 
-const SIDEBAR_ROOT_TAG_TOKEN_PREFIX = "tag:";
-const SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX = "connection:";
-
-export const buildSidebarRootTagToken = (tagId: string): string =>
-  `${SIDEBAR_ROOT_TAG_TOKEN_PREFIX}${toTrimmedString(tagId)}`;
-
-export const buildSidebarRootConnectionToken = (
-  connectionId: string,
-): string => `${SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX}${toTrimmedString(connectionId)}`;
-
-const isSidebarRootTagToken = (token: string): boolean =>
-  token.startsWith(SIDEBAR_ROOT_TAG_TOKEN_PREFIX) &&
-  token.length > SIDEBAR_ROOT_TAG_TOKEN_PREFIX.length;
-
-const isSidebarRootConnectionToken = (token: string): boolean =>
-  token.startsWith(SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX) &&
-  token.length > SIDEBAR_ROOT_CONNECTION_TOKEN_PREFIX.length;
-
-const sanitizeSidebarRootOrder = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  value.forEach((entry) => {
-    const token = toTrimmedString(entry);
-    if (!token) return;
-    if (!isSidebarRootTagToken(token) && !isSidebarRootConnectionToken(token)) {
-      return;
-    }
-    if (seen.has(token)) return;
-    seen.add(token);
-    result.push(token);
-  });
-  return result;
-};
-
-const buildDefaultSidebarRootOrderTokens = (
-  connectionTags: ConnectionTag[],
-  connections: SavedConnection[],
-): string[] => {
-  const groupedConnectionIds = new Set<string>();
-  connectionTags.forEach((tag) => {
-    tag.connectionIds.forEach((connectionId) => {
-      if (connectionId) groupedConnectionIds.add(connectionId);
-    });
-  });
-
-  return [
-    ...connectionTags.map((tag) => buildSidebarRootTagToken(tag.id)),
-    ...connections
-      .filter((connection) => !groupedConnectionIds.has(connection.id))
-      .map((connection) => buildSidebarRootConnectionToken(connection.id)),
-  ];
-};
-
-export const resolveSidebarRootOrderTokens = (
-  sidebarRootOrder: unknown,
-  connectionTags: ConnectionTag[],
-  connections: SavedConnection[],
-): string[] => {
-  const defaultOrder = buildDefaultSidebarRootOrderTokens(
-    connectionTags,
-    connections,
-  );
-  if (defaultOrder.length === 0) {
-    return [];
-  }
-
-  const validTokens = new Set(defaultOrder);
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  sanitizeSidebarRootOrder(sidebarRootOrder).forEach((token) => {
-    if (!validTokens.has(token) || seen.has(token)) return;
-    seen.add(token);
-    result.push(token);
-  });
-
-  defaultOrder.forEach((token) => {
-    if (seen.has(token)) return;
-    seen.add(token);
-    result.push(token);
-  });
-
-  return result;
-};
-
-const insertSidebarRootTokenBeforeUngrouped = (
-  sidebarRootOrder: string[],
-  token: string,
-): string[] => {
-  if (!token || sidebarRootOrder.includes(token)) {
-    return [...sidebarRootOrder];
-  }
-  const firstConnectionIndex = sidebarRootOrder.findIndex(
-    isSidebarRootConnectionToken,
-  );
-  if (firstConnectionIndex === -1) {
-    return [...sidebarRootOrder, token];
-  }
-  const nextOrder = [...sidebarRootOrder];
-  nextOrder.splice(firstConnectionIndex, 0, token);
-  return nextOrder;
-};
-
-const insertSidebarRootTokenAfter = (
-  sidebarRootOrder: string[],
-  token: string,
-  anchorToken: string,
-): string[] => {
-  if (!token) return [...sidebarRootOrder];
-  const nextOrder = sidebarRootOrder.filter((item) => item !== token);
-  const anchorIndex = nextOrder.indexOf(anchorToken);
-  if (anchorIndex === -1) {
-    nextOrder.push(token);
-    return nextOrder;
-  }
-  nextOrder.splice(anchorIndex + 1, 0, token);
-  return nextOrder;
-};
-
-const moveSidebarRootToken = (
-  sidebarRootOrder: string[],
-  sourceToken: string,
-  targetToken: string,
-  insertBefore: boolean,
-): string[] => {
-  if (!sourceToken || !targetToken || sourceToken === targetToken) {
-    return [...sidebarRootOrder];
-  }
-  const filtered = sidebarRootOrder.filter((token) => token !== sourceToken);
-  const targetIndex = filtered.indexOf(targetToken);
-  const insertIndex =
-    targetIndex === -1
-      ? filtered.length
-      : Math.max(
-          0,
-          Math.min(
-            filtered.length,
-            insertBefore ? targetIndex : targetIndex + 1,
-          ),
-        );
-  filtered.splice(insertIndex, 0, sourceToken);
-  return filtered;
-};
-
-const orderConnectionTagsBySidebarRootOrder = (
-  connectionTags: ConnectionTag[],
-  sidebarRootOrder: string[],
-): ConnectionTag[] => {
-  const tagMap = new Map(connectionTags.map((tag) => [tag.id, tag]));
-  const orderedTags: ConnectionTag[] = [];
-  sidebarRootOrder.forEach((token) => {
-    if (!isSidebarRootTagToken(token)) return;
-    const tagId = token.slice(SIDEBAR_ROOT_TAG_TOKEN_PREFIX.length);
-    const tag = tagMap.get(tagId);
-    if (!tag) return;
-    orderedTags.push(tag);
-    tagMap.delete(tagId);
-  });
-  orderedTags.push(...Array.from(tagMap.values()));
-  return orderedTags;
-};
-
 const isLegacyDefaultAppearance = (
   appearance: Partial<{ opacity: number; blur: number }> | undefined,
 ): boolean => {
@@ -1050,7 +887,6 @@ export interface QueryOptions {
 interface AppState {
   connections: SavedConnection[];
   connectionTags: ConnectionTag[];
-  sidebarRootOrder: string[];
   tabs: TabData[];
   activeTabId: string | null;
   activeContext: { connectionId: string; dbName: string } | null;
@@ -1119,18 +955,7 @@ interface AppState {
     connectionId: string,
     targetTagId: string | null,
   ) => void;
-  reorderConnections: (
-    connectionId: string,
-    targetConnectionId: string,
-    targetTagId: string | null,
-    insertBefore?: boolean,
-  ) => void;
   reorderTags: (tagIds: string[]) => void;
-  reorderSidebarRoot: (
-    sourceToken: string,
-    targetToken: string,
-    insertBefore: boolean,
-  ) => void;
 
   addTab: (tab: TabData) => void;
   updateQueryTabDraft: (
@@ -1847,7 +1672,6 @@ export const useStore = create<AppState>()(
     (set) => ({
       connections: [],
       connectionTags: [],
-      sidebarRootOrder: [],
       tabs: [],
       activeTabId: null,
       activeContext: null,
@@ -1915,87 +1739,31 @@ export const useStore = create<AppState>()(
           };
         }),
       removeConnection: (id) =>
-        set((state) => {
-          const nextConnections = state.connections.filter((c) => c.id !== id);
-          const nextTags = state.connectionTags.map((tag) => ({
+        set((state) => ({
+          connections: state.connections.filter((c) => c.id !== id),
+          connectionTags: state.connectionTags.map((tag) => ({
             ...tag,
             connectionIds: tag.connectionIds.filter((cid) => cid !== id),
-          }));
-          return {
-            connections: nextConnections,
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder.filter(
-                (token) => token !== buildSidebarRootConnectionToken(id),
-              ),
-              nextTags,
-              nextConnections,
-            ),
-          };
-        }),
+          })),
+        })),
       replaceConnections: (connections) =>
-        set((state) => {
-          const nextConnections = sanitizeConnections(connections);
-          return {
-            connections: nextConnections,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              nextConnections,
-            ),
-            shortcutOptions:
-              readPersistedShortcutOptions() ?? state.shortcutOptions,
-          };
-        }),
+        set((state) => ({
+          connections: sanitizeConnections(connections),
+          shortcutOptions: readPersistedShortcutOptions() ?? state.shortcutOptions,
+        })),
 
       addConnectionTag: (tag) =>
-        set((state) => {
-          const nextTags = [...state.connectionTags, tag];
-          const nextRootOrder = insertSidebarRootTokenBeforeUngrouped(
-            resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
-            buildSidebarRootTagToken(tag.id),
-          );
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              nextRootOrder,
-              nextTags,
-              state.connections,
-            ),
-          };
-        }),
+        set((state) => ({ connectionTags: [...state.connectionTags, tag] })),
       updateConnectionTag: (tag) =>
-        set((state) => {
-          const nextTags = state.connectionTags.map((t) =>
+        set((state) => ({
+          connectionTags: state.connectionTags.map((t) =>
             t.id === tag.id ? tag : t,
-          );
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              nextTags,
-              state.connections,
-            ),
-          };
-        }),
+          ),
+        })),
       removeConnectionTag: (id) =>
-        set((state) => {
-          const nextTags = state.connectionTags.filter((t) => t.id !== id);
-          return {
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder.filter(
-                (token) => token !== buildSidebarRootTagToken(id),
-              ),
-              nextTags,
-              state.connections,
-            ),
-          };
-        }),
+        set((state) => ({
+          connectionTags: state.connectionTags.filter((t) => t.id !== id),
+        })),
       moveConnectionToTag: (connectionId, targetTagId) =>
         set((state) => {
           const newTags = state.connectionTags.map((tag) => {
@@ -2008,186 +1776,22 @@ export const useStore = create<AppState>()(
             }
             return { ...tag, connectionIds: filteredIds };
           });
-          const nextRootOrder = resolveSidebarRootOrderTokens(
-            state.sidebarRootOrder,
-            newTags,
-            state.connections,
-          );
-          const connectionToken = buildSidebarRootConnectionToken(connectionId);
-          if (targetTagId) {
-            return {
-              connectionTags: newTags,
-              sidebarRootOrder: nextRootOrder.filter(
-                (token) => token !== connectionToken,
-              ),
-            };
-          }
-
-          const sourceToken = buildSidebarRootTagToken(
-            state.connectionTags.find((tag) =>
-              tag.connectionIds.includes(connectionId),
-            )?.id || "",
-          );
-          const insertedRootOrder = sourceToken
-            ? insertSidebarRootTokenAfter(nextRootOrder, connectionToken, sourceToken)
-            : insertSidebarRootTokenBeforeUngrouped(nextRootOrder, connectionToken);
-          return {
-            connectionTags: newTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              insertedRootOrder,
-              newTags,
-              state.connections,
-            ),
-          };
-        }),
-      reorderConnections: (
-        connectionId,
-        targetConnectionId,
-        targetTagId,
-        insertBefore = false,
-      ) =>
-        set((state) => {
-          if (
-            !connectionId ||
-            !targetConnectionId ||
-            connectionId === targetConnectionId
-          ) {
-            return {
-              connections: state.connections,
-              connectionTags: state.connectionTags,
-            };
-          }
-
-          const normalizeInsertIndex = (
-            length: number,
-            index: number,
-          ): number => Math.max(0, Math.min(length, index));
-
-          const nextTags = state.connectionTags.map((tag) => ({
-            ...tag,
-            connectionIds: tag.connectionIds.filter((id) => id !== connectionId),
-          }));
-
-          if (targetTagId) {
-            const updatedTags = nextTags.map((tag) => {
-              if (tag.id !== targetTagId) {
-                return tag;
-              }
-              const targetIndex = tag.connectionIds.indexOf(targetConnectionId);
-              if (targetIndex === -1) {
-                return {
-                  ...tag,
-                  connectionIds: [...tag.connectionIds, connectionId],
-                };
-              }
-              const insertIndex = normalizeInsertIndex(
-                tag.connectionIds.length,
-                insertBefore ? targetIndex : targetIndex + 1,
-              );
-              const nextIds = [...tag.connectionIds];
-              nextIds.splice(insertIndex, 0, connectionId);
-              return { ...tag, connectionIds: nextIds };
-            });
-            return {
-              connections: state.connections,
-              connectionTags: updatedTags,
-              sidebarRootOrder: resolveSidebarRootOrderTokens(
-                state.sidebarRootOrder,
-                updatedTags,
-                state.connections,
-              ),
-            };
-          }
-
-          const ungroupedIds = state.connections
-            .map((conn) => conn.id)
-            .filter((id) => id !== connectionId)
-            .filter((id) => !nextTags.some((tag) => tag.connectionIds.includes(id)));
-          const targetIndex = ungroupedIds.indexOf(targetConnectionId);
-          const insertIndex =
-            targetIndex === -1
-              ? ungroupedIds.length
-              : normalizeInsertIndex(
-                  ungroupedIds.length,
-                  insertBefore ? targetIndex : targetIndex + 1,
-                );
-          const nextUngroupedIds = [...ungroupedIds];
-          nextUngroupedIds.splice(insertIndex, 0, connectionId);
-          const ungroupedOrderMap = new Map(
-            nextUngroupedIds.map((id, index) => [id, index]),
-          );
-          const nextConnections = [...state.connections].sort((a, b) => {
-            const indexA = ungroupedOrderMap.get(a.id);
-            const indexB = ungroupedOrderMap.get(b.id);
-            if (typeof indexA === 'number' && typeof indexB === 'number') {
-              return indexA - indexB;
-            }
-            if (typeof indexA === 'number') {
-              return -1;
-            }
-            if (typeof indexB === 'number') {
-              return 1;
-            }
-            return 0;
-          });
-
-          return {
-            connections: nextConnections,
-            connectionTags: nextTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              nextTags,
-              nextConnections,
-            ),
-          };
+          return { connectionTags: newTags };
         }),
       reorderTags: (tagIds) =>
         set((state) => {
-          const nextRootOrder = resolveSidebarRootOrderTokens(
-            state.sidebarRootOrder,
-            state.connectionTags,
-            state.connections,
-          );
-          const orderedRootOrder = [
-            ...tagIds.map((id) => buildSidebarRootTagToken(id)),
-            ...nextRootOrder.filter((token) => !isSidebarRootTagToken(token)),
-          ];
-          const newTags = orderConnectionTagsBySidebarRootOrder(
-            state.connectionTags,
-            orderedRootOrder,
-          );
-          return {
-            connectionTags: newTags,
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              orderedRootOrder,
-              newTags,
-              state.connections,
-            ),
-          };
-        }),
-      reorderSidebarRoot: (sourceToken, targetToken, insertBefore) =>
-        set((state) => {
-          const nextRootOrder = moveSidebarRootToken(
-            resolveSidebarRootOrderTokens(
-              state.sidebarRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
-            sourceToken,
-            targetToken,
-            insertBefore,
-          );
-          return {
-            sidebarRootOrder: resolveSidebarRootOrderTokens(
-              nextRootOrder,
-              state.connectionTags,
-              state.connections,
-            ),
-            connectionTags: orderConnectionTagsBySidebarRootOrder(
-              state.connectionTags,
-              nextRootOrder,
-            ),
-          };
+          const tagMap = new Map(state.connectionTags.map((t) => [t.id, t]));
+          const newTags: ConnectionTag[] = [];
+          tagIds.forEach((id) => {
+            const tag = tagMap.get(id);
+            if (tag) {
+              newTags.push(tag);
+              tagMap.delete(id);
+            }
+          });
+          // 追加未指定的tag（如果有的话）
+          newTags.push(...Array.from(tagMap.values()));
+          return { connectionTags: newTags };
         }),
 
       addTab: (tab) =>
@@ -2900,11 +2504,6 @@ export const useStore = create<AppState>()(
             state.connectionTags,
           );
         }
-        nextState.sidebarRootOrder = resolveSidebarRootOrderTokens(
-          state.sidebarRootOrder,
-          nextState.connectionTags,
-          nextState.connections,
-        );
         nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
@@ -2976,11 +2575,6 @@ export const useStore = create<AppState>()(
           ...state,
           connections: sanitizeConnections(state.connections),
           connectionTags: sanitizeConnectionTags(state.connectionTags),
-          sidebarRootOrder: resolveSidebarRootOrderTokens(
-            state.sidebarRootOrder,
-            sanitizeConnectionTags(state.connectionTags),
-            sanitizeConnections(state.connections),
-          ),
           tabs: safeTabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: sanitizeSavedQueries(state.savedQueries),
@@ -3027,7 +2621,6 @@ export const useStore = create<AppState>()(
           tabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
-          sidebarRootOrder: state.sidebarRootOrder,
           savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
