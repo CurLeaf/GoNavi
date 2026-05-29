@@ -184,6 +184,7 @@ const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
 const DATA_GRID_DISPLAY_RENDER_VERSION = Symbol('DATA_GRID_DISPLAY_RENDER_VERSION');
 const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
+const DEFAULT_GRID_MONO_FONT_FAMILY = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const normalizedDateTimeCache = new Map<string, string>();
 const objectCellPreviewCache = new WeakMap<object, string>();
 const makeCellKey = (rowKey: string, colName: string) => `${rowKey}${CELL_KEY_SEP}${colName}`;
@@ -3990,7 +3991,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const computed = window.getComputedStyle(element);
           const weight = computed.fontWeight || '400';
           const size = computed.fontSize || '13px';
-          const family = computed.fontFamily || 'sans-serif';
+          const family = computed.fontFamily || DEFAULT_GRID_MONO_FONT_FAMILY;
           font = `${weight} ${size} ${family}`;
       }
       return (text: string) => measureTextWidth(text, font);
@@ -4001,7 +4002,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (displayColumnNames.length === 0 || displayData.length === 0) return;
       const sig = displayColumnNames.join(',');
       if (autoFitDoneRef.current === sig) return;
-      const font = `${densityParams.dataFontSize}px -apple-system, sans-serif`;
+      const font = `${densityParams.dataFontSize}px ${DEFAULT_GRID_MONO_FONT_FAMILY}`;
       const newWidths: Record<string, number> = {};
       displayColumnNames.forEach((key) => {
           const autoWidth = calculateAutoFitColumnWidth({
@@ -4039,8 +4040,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       const nextWidth = calculateAutoFitColumnWidth({
           headerTexts,
           valueTexts: displayDataRef.current.slice(0, 200).map((row) => row?.[normalizedKey]),
-          measureHeaderText: buildAutoFitMeasurer(headerEl ?? null, `600 ${densityParams.dataFontSize}px -apple-system, sans-serif`),
-          measureCellText: buildAutoFitMeasurer(sampleCell ?? null, `400 ${densityParams.dataFontSize}px -apple-system, sans-serif`),
+          measureHeaderText: buildAutoFitMeasurer(headerEl ?? null, `600 ${densityParams.dataFontSize}px ${DEFAULT_GRID_MONO_FONT_FAMILY}`),
+          measureCellText: buildAutoFitMeasurer(sampleCell ?? null, `400 ${densityParams.dataFontSize}px ${DEFAULT_GRID_MONO_FONT_FAMILY}`),
           defaultWidth,
           minWidth: 80,
           maxWidth: Math.max(720, Math.floor(containerWidth * 0.85)),

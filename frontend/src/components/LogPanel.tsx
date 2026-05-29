@@ -3,7 +3,6 @@ import { Table, Tag, Button, Tooltip, Empty } from 'antd';
 import { ClearOutlined, CloseOutlined, BugOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
-
 interface LogPanelProps {
     height: number;
     onClose: () => void;
@@ -76,7 +75,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
             title: 'SQL / Message',
             dataIndex: 'sql',
             render: (text: string, record: any) => (
-                <div style={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '12px', lineHeight: '1.45' }}>
+                <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', fontSize: '12px', lineHeight: '1.45' }}>
                     <div style={{ color: darkMode ? '#a6e22e' : '#005cc5' }}>{text}</div>
                     {record.message && <div style={{ color: '#ff4d4f', marginTop: 2 }}>{record.message}</div>}
                     {record.affectedRows !== undefined && <div style={{ color: panelMutedTextColor, marginTop: 1 }}>Affected: {record.affectedRows}</div>}

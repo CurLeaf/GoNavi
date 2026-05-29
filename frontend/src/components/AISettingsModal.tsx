@@ -21,7 +21,6 @@ import {
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -422,7 +421,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                             <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span>{matchedPreset.label}</span>
                                 <span style={{ opacity: 0.4 }}>·</span>
-                                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{p.model || '未选择模型'}</span>
+                                <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{p.model || '未选择模型'}</span>
                             </div>
                         </div>
                         <Space size={2}>
@@ -683,7 +682,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     <div style={{
                         background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.8)',
                         padding: '10px 12px', borderRadius: 8, fontSize: 13, color: overlayTheme.mutedText,
-                        whiteSpace: 'pre-wrap', fontFamily: 'monospace', lineHeight: 1.5,
+                        whiteSpace: 'pre-wrap', fontFamily: 'var(--gn-font-mono)', lineHeight: 1.5,
                         userSelect: 'text', border: darkMode ? '1px solid rgba(255,255,255,0.03)' : '1px solid rgba(0,0,0,0.02)'
                     }}>
                         {promptText}
@@ -718,7 +717,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                         <span style={{ fontSize: 20 }}>{tool.icon}</span>
                         <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'monospace' }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'var(--gn-font-mono)' }}>
                                 {tool.name}
                             </div>
                             <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 2 }}>{tool.desc}</div>
@@ -733,7 +732,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <ToolOutlined style={{ fontSize: 12 }} />
                         <span>参数：</span>
-                        <code style={{ fontFamily: 'monospace', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
+                        <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
                             {tool.params}
                         </code>
                     </div>
@@ -832,9 +831,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 };
 
 export default AISettingsModal;
-
-
-
 
 
 

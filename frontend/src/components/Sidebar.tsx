@@ -97,7 +97,6 @@ import {
 } from './V2TableContextMenu';
 
 const { Search } = Input;
-
 type SidebarContextMenuState = {
   x: number;
   y: number;
@@ -7139,11 +7138,18 @@ const Sidebar: React.FC<{
         return (
             <span
                 title={hoverTitle}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}
+                className="gn-v2-tree-external-root"
             >
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {statusBadge}
-                    {displayTitle}
+                <span
+                    className="gn-v2-tree-title"
+                    data-node-type={node.type}
+                    data-sidebar-node-key={String(node.key || '')}
+                    data-sidebar-node-type={String(node.type || '')}
+                >
+                    <span className="gn-v2-tree-label">
+                        {statusBadge}
+                        {displayTitle}
+                    </span>
                 </span>
                 <Button
                     size="small"
@@ -7156,7 +7162,7 @@ const Sidebar: React.FC<{
                         event.stopPropagation();
                         void handleAddExternalSQLDirectory(node);
                     }}
-                    style={{ paddingInline: 4, height: 20 }}
+                    className="gn-v2-tree-external-root-action"
                 />
             </span>
         );
@@ -7372,7 +7378,7 @@ const Sidebar: React.FC<{
       const rootToken = buildSidebarRootConnectionToken(conn.id);
 
       return (
-          <Tooltip key={conn.id} title={title}>
+          <Tooltip key={conn.id} title={title} placement="right">
               <button
                   type="button"
                   className={`gn-v2-rail-item${conn.id === activeConnectionId ? ' is-active' : ''}`}
@@ -7477,7 +7483,7 @@ const Sidebar: React.FC<{
               }}
           >
               {hasV2RailConnectionGroups && (
-                  <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`}>
+                  <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`} placement="right">
                       <button
                           type="button"
                           className={`gn-v2-rail-group-header${group.isUngrouped ? ' is-ungrouped' : ''}`}
@@ -7520,96 +7526,94 @@ const Sidebar: React.FC<{
 
   const renderV2ConnectionRail = () => (
       <div className="gn-v2-connection-rail" aria-label="系统操作">
-          <div className="gn-v2-rail-footer">
-              <div className="gn-v2-rail-action-group" aria-label="对象区快捷操作">
-                  <Tooltip title="新建组">
+          <div className="gn-v2-rail-primary-actions" aria-label="对象区快捷操作">
+              <Tooltip title="新建组" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
+                      aria-label="新建组"
+                      data-sidebar-create-group-action="true"
+                  >
+                      <FolderOpenOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="批量操作表" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => openBatchOperationModal()}
+                      aria-label="批量操作表"
+                      data-sidebar-batch-table-action="true"
+                  >
+                      <TableOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="批量操作库" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => openBatchDatabaseModal()}
+                      aria-label="批量操作库"
+                      data-sidebar-batch-database-action="true"
+                  >
+                      <DatabaseOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="运行外部SQL文件" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={handleOpenSQLFileFromToolbar}
+                      aria-label="运行外部 SQL 文件"
+                      data-sidebar-open-external-sql-file-action="true"
+                  >
+                      <FileAddOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'} placement="right">
+                  <span className="gn-v2-rail-action-wrap">
                       <button
                           type="button"
                           className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                          aria-label="新建组"
-                          data-sidebar-create-group-action="true"
+                          onClick={handleLocateActiveTabInSidebar}
+                          aria-label="定位当前打开表"
+                          data-sidebar-locate-current-tab-action="true"
+                          disabled={!canLocateActiveTab}
                       >
-                          <FolderOpenOutlined />
+                          <AimOutlined />
                       </button>
-                  </Tooltip>
-                  <Tooltip title="批量操作表">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => openBatchOperationModal()}
-                          aria-label="批量操作表"
-                          data-sidebar-batch-table-action="true"
-                      >
-                          <TableOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="批量操作库">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => openBatchDatabaseModal()}
-                          aria-label="批量操作库"
-                          data-sidebar-batch-database-action="true"
-                      >
-                          <DatabaseOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="运行外部SQL文件">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={handleOpenSQLFileFromToolbar}
-                          aria-label="运行外部 SQL 文件"
-                          data-sidebar-open-external-sql-file-action="true"
-                      >
-                          <FileAddOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
-                      <span className="gn-v2-rail-action-wrap">
-                          <button
-                              type="button"
-                              className="gn-v2-rail-tool gn-v2-rail-action"
-                              onClick={handleLocateActiveTabInSidebar}
-                              aria-label="定位当前打开表"
-                              data-sidebar-locate-current-tab-action="true"
-                              disabled={!canLocateActiveTab}
-                          >
-                              <AimOutlined />
-                          </button>
-                      </span>
-                  </Tooltip>
-              </div>
-              <div className="gn-v2-rail-system-actions" aria-label="系统操作">
-                  <Tooltip title="AI 助手">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool"
-                          onClick={onToggleAI}
-                          aria-label="AI 助手"
-                          data-gonavi-ai-entry-action="true"
-                      >
-                          <RobotOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="工具">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool"
-                          onClick={onOpenTools}
-                          aria-label="工具"
-                          data-gonavi-open-tools-action="true"
-                      >
-                          <ToolOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="设置">
-                      <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label="设置">
-                          <SettingOutlined />
-                      </button>
-                  </Tooltip>
-              </div>
+                  </span>
+              </Tooltip>
+          </div>
+          <div className="gn-v2-rail-secondary-actions" aria-label="系统操作">
+              <Tooltip title="AI 助手" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool"
+                      onClick={onToggleAI}
+                      aria-label="AI 助手"
+                      data-gonavi-ai-entry-action="true"
+                  >
+                      <RobotOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="工具" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool"
+                      onClick={onOpenTools}
+                      aria-label="工具"
+                      data-gonavi-open-tools-action="true"
+                  >
+                      <ToolOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="设置" placement="right">
+                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label="设置">
+                      <SettingOutlined />
+                  </button>
+              </Tooltip>
           </div>
       </div>
   );
@@ -8384,7 +8388,7 @@ const Sidebar: React.FC<{
                 <div>已执行：<strong style={{ color: '#52c41a' }}>{sqlFileExecState.executed}</strong> 条 | 失败：<strong style={{ color: sqlFileExecState.failed > 0 ? '#ff4d4f' : undefined }}>{sqlFileExecState.failed}</strong> 条</div>
             </div>
             {sqlFileExecState.currentSQL && sqlFileExecState.status === 'running' && (
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
                     {sqlFileExecState.currentSQL}
                 </div>
             )}

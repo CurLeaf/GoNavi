@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined } from '@ant-design/icons';
@@ -105,6 +105,7 @@ const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
+const EMPTY_INSTALLED_FONT_FAMILIES: InstalledFontFamily[] = [];
 type SidebarResizeBounds = { minWidth: number; maxWidth: number };
 type SidebarResizeDragState = SidebarResizeBounds & {
   startX: number;
@@ -229,9 +230,11 @@ class AIPanelErrorBoundary extends React.Component<
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
+  const connectionModalWarmupDoneRef = useRef(false);
   const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
@@ -2072,6 +2075,57 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  useEffect(() => {
+      if (!isThemeModalOpen || themeModalSection !== 'appearance') {
+          return;
+      }
+      if (hasLoadedInstalledFontsRef.current || isFontFamiliesLoading) {
+          return;
+      }
+
+      let cancelled = false;
+      hasLoadedInstalledFontsRef.current = true;
+      setIsFontFamiliesLoading(true);
+      setFontFamiliesLoadError(null);
+
+      ListInstalledFontFamilies()
+          .then((result) => {
+              if (cancelled) {
+                  return;
+              }
+              if (!result?.success) {
+                  throw new Error(String(result?.message || '加载系统字体失败'));
+              }
+              const nextFonts = Array.isArray(result?.data)
+                  ? result.data
+                      .map((item) => ({
+                          family: sanitizeFontFamilyInput((item as InstalledFontFamily | Record<string, unknown>)?.family) || '',
+                          path: typeof (item as InstalledFontFamily | Record<string, unknown>)?.path === 'string'
+                              ? String((item as InstalledFontFamily | Record<string, unknown>).path)
+                              : undefined,
+                      }))
+                      .filter((item) => item.family)
+                  : EMPTY_INSTALLED_FONT_FAMILIES;
+              setInstalledFontFamilies(nextFonts);
+          })
+          .catch((error) => {
+              if (cancelled) {
+                  return;
+              }
+              hasLoadedInstalledFontsRef.current = false;
+              setFontFamiliesLoadError(String(error instanceof Error ? error.message : error || '加载系统字体失败'));
+          })
+          .finally(() => {
+              if (!cancelled) {
+                  setIsFontFamiliesLoading(false);
+              }
+          });
+
+      return () => {
+          cancelled = true;
+      };
+  }, [isThemeModalOpen, themeModalSection]);
+
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
       for (const action of SHORTCUT_ACTION_ORDER) {
@@ -2294,14 +2348,34 @@ function App() {
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(null);
+      setIsConnectionModalMounted(true);
       setIsModalOpen(true);
   }, []);
 
   const handleEditConnection = (conn: SavedConnection) => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(conn);
+      setIsConnectionModalMounted(true);
       setIsModalOpen(true);
   };
+
+  useEffect(() => {
+      if (connectionModalWarmupDoneRef.current) {
+          return;
+      }
+      connectionModalWarmupDoneRef.current = true;
+      const warmup = () => setIsConnectionModalMounted(true);
+      if (typeof window === 'undefined') {
+          warmup();
+          return;
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+          const idleId = window.requestIdleCallback(() => warmup(), { timeout: 1200 });
+          return () => window.cancelIdleCallback?.(idleId);
+      }
+      const timerId = window.setTimeout(warmup, 300);
+      return () => window.clearTimeout(timerId);
+  }, []);
 
   const handleConnectionSaved = useCallback(async (savedConnection: SavedConnection) => {
       if (!shouldRetrySecurityUpdateAfterRepairSave(securityUpdateRepairSource)) {
@@ -2643,8 +2717,13 @@ function App() {
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     document.body.setAttribute('data-ui-version', appearance.uiVersion);
+    document.body.setAttribute('data-platform', runtimePlatform || '');
     document.body.style.fontSize = `${effectiveFontSize}px`;
+    document.body.style.setProperty('--gn-font-sans', resolvedUiFontFamily);
+    document.body.style.setProperty('--gn-font-mono', resolvedMonoFontFamily);
     document.documentElement.style.setProperty('--gonavi-font-size', `${effectiveFontSize}px`);
+    document.documentElement.style.setProperty('--gn-font-sans', resolvedUiFontFamily);
+    document.documentElement.style.setProperty('--gn-font-mono', resolvedMonoFontFamily);
     document.documentElement.style.setProperty('--gn-ui-scale', `${effectiveUiScale}`);
     document.documentElement.style.setProperty('--gn-font-size', `${effectiveFontSize}px`);
     document.documentElement.style.setProperty('--gn-font-size-sm', `${Math.max(10, Math.round(effectiveFontSize * 0.86))}px`);
@@ -3389,7 +3468,7 @@ function App() {
             )}
           </Content>
           </Layout>
-          {isModalOpen && (
+          {isConnectionModalMounted && (
           <ConnectionModal
             open={isModalOpen} 
             onClose={handleCloseModal} 

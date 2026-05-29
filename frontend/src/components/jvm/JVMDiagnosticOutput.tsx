@@ -7,7 +7,6 @@ import {
   formatJVMDiagnosticEventLabel,
   formatJVMDiagnosticPhaseLabel,
 } from "../../utils/jvmDiagnosticPresentation";
-
 const { Text } = Typography;
 
 type JVMDiagnosticOutputProps = {
@@ -44,7 +43,7 @@ const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
                 style={{
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  fontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  fontFamily: "var(--gn-font-mono)",
                 }}
               >
                 {chunkTexts[index]}

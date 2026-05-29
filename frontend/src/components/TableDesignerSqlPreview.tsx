@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import Editor, { type BeforeMount, type OnMount } from './MonacoEditor';
-
 interface TableDesignerSqlPreviewProps {
   sql: string;
   darkMode?: boolean;
@@ -25,7 +24,6 @@ export interface SqlChangeHighlight {
 
 const SQL_PREVIEW_LIGHT_THEME = 'gonavi-sql-preview-light';
 const SQL_PREVIEW_DARK_THEME = 'gonavi-sql-preview-dark';
-
 const CHANGE_LINE_RULES: Array<{
   kind: SqlChangeHighlightKind;
   label: string;
@@ -231,7 +229,7 @@ const TableDesignerSqlPreview: React.FC<TableDesignerSqlPreviewProps> = ({
         onMount={handleEditorMount}
         options={{
           automaticLayout: true,
-          fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+          fontFamily: 'var(--gn-font-mono)',
           fontSize: 13,
           lineNumbers: 'on',
           lineDecorationsWidth: 14,

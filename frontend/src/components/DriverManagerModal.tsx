@@ -1674,7 +1674,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             </Paragraph>
           ) : null}
           {activeDriverLogLines.length > 0 ? (
-            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: logBlockBackground, color: logBlockTextColor, borderRadius: 8, border: `1px solid ${logBlockBorderColor}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', padding: 12, background: logBlockBackground, color: logBlockTextColor, borderRadius: 8, border: `1px solid ${logBlockBorderColor}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--gn-font-mono)' }}>
               {activeDriverLogLines.join('\n')}
             </pre>
           ) : (

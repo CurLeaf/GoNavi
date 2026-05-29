@@ -5,6 +5,7 @@
     overflow: hidden;
     border-left: 1px solid rgba(128, 128, 128, 0.12);
     position: relative;
+    font-family: var(--gn-font-sans, "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif);
 }
 
 /* Resize Handle */
@@ -203,14 +204,14 @@
     margin: 10px 0;
     border-radius: 4px;
     padding: 10px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--gn-font-mono, "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
     font-size: 12px;
     overflow-x: auto;
     border: 1px solid rgba(128, 128, 128, 0.15);
     background: rgba(0, 0, 0, 0.2);
 }
 .ai-markdown-content code {
-    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--gn-font-mono, "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace);
     background: rgba(128, 128, 128, 0.15);
     padding: 2px 4px;
     border-radius: 3px;

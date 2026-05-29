@@ -16,7 +16,6 @@ import {
     resolveJVMDiagnosticPlanTargetTabId,
 } from '../../utils/jvmDiagnosticPlan';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
-
 // 🔧 性能优化：将 ReactMarkdown 包装为 Memo 组件并提取固定的 plugins
 const remarkPlugins = [remarkGfm];
 
@@ -92,11 +91,11 @@ const AIToolResultItem: React.FC<{ resultMsg: AIChatMessage, darkMode: boolean, 
             >
                 {toolExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                 <ApiOutlined style={{ color: '#1677ff' }} />
-                <span>探针执行结果 (<span style={{ fontFamily: 'monospace', color: overlayTheme.iconColor }}>{resultMsg.tool_name || 'unknown'}</span>)</span>
+                <span>探针执行结果 (<span style={{ fontFamily: 'var(--gn-font-mono)', color: overlayTheme.iconColor }}>{resultMsg.tool_name || 'unknown'}</span>)</span>
                 <span style={{ fontSize: 11, marginLeft: 8, opacity: 0.6 }}>{charCount > 0 ? `${charCount} 个字符` : '无数据'}</span>
             </div>
             {toolExpanded && (
-                <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflowY: 'auto', background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 6 }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, fontFamily: 'var(--gn-font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflowY: 'auto', background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 6 }}>
                     {resultMsg.content}
                 </div>
             )}
@@ -291,7 +290,7 @@ const AIBlockHashRender = ({ match, darkMode, overlayTheme, children, activeConn
                 padding: '6px 12px', background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
                 fontSize: 12, color: overlayTheme.mutedText
             }}>
-                <span style={{ fontFamily: 'monospace' }}>{match[1]}</span>
+                <span style={{ fontFamily: 'var(--gn-font-mono)' }}>{match[1]}</span>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     {isSql && <CodeRunBtn text={codeText} connectionId={activeConnectionId} dbName={activeDbName} />}
                     {isSelectQuery && activeConnectionConfig && (
@@ -332,7 +331,7 @@ const AIBlockHashRender = ({ match, darkMode, overlayTheme, children, activeConn
                     codeTagProps={{
                         style: {
                             fontSize: '14px',
-                            fontFamily: 'Menlo, Monaco, Consolas, "Courier New", monospace'
+                            fontFamily: 'var(--gn-font-mono)'
                         }
                     }}
                 >
@@ -383,7 +382,7 @@ const AIBlockHashRender = ({ match, darkMode, overlayTheme, children, activeConn
                         <span style={{ fontSize: 11, color: overlayTheme.mutedText, cursor: 'pointer' }} onClick={() => setPreviewExpanded(false)}>收起 ▴</span>
                     </div>
                     <div style={{ overflowX: 'auto', maxHeight: 200, overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'monospace' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--gn-font-mono)' }}>
                             <thead>
                                 <tr>
                                     {previewCols.map(col => (

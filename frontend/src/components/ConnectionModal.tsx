@@ -7333,6 +7333,7 @@ const ConnectionModal: React.FC<{
             wordBreak: "break-all",
             lineHeight: "20px",
             fontSize: 13,
+            fontFamily: "var(--gn-font-mono)",
           }}
         >
           {String(testResult?.message || "暂无失败日志")}

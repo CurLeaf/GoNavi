@@ -86,6 +86,7 @@ const DataGridPreviewPanel: React.FC<DataGridPreviewPanelProps> = ({
         {focusedCellInfo ? (
           <Editor
             height="100%"
+            gonaviTypography="data"
             language={dataPanelIsJson ? 'json' : 'plaintext'}
             theme={darkMode ? 'transparent-dark' : 'transparent-light'}
             value={dataPanelValue}
@@ -98,7 +99,6 @@ const DataGridPreviewPanel: React.FC<DataGridPreviewPanelProps> = ({
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               wordWrap: 'on',
-              fontSize: 13,
               tabSize: 2,
               automaticLayout: true,
               readOnly: !focusedCellWritable,
