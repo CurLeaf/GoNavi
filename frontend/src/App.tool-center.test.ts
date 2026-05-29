@@ -112,8 +112,9 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
-  it('mounts heavyweight modals only while they are open', () => {
-    expect(appSource).toContain('{isModalOpen && (');
+  it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
+    expect(appSource).toContain('const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);');
+    expect(appSource).toContain('{isConnectionModalMounted && (');
     expect(appSource).toContain('{isToolsModalOpen && (');
     expect(appSource).toContain('{isSettingsModalOpen && (');
     expect(appSource).toContain('{isThemeModalOpen && (');
