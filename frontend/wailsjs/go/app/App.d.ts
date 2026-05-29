@@ -158,6 +158,8 @@ export function JVMStartMonitoring(arg1:connection.ConnectionConfig):Promise<con
 
 export function JVMStopMonitoring(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function ListInstalledFontFamilies():Promise<connection.QueryResult>;
+
 export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function LogWindowDiagnostic(arg1:string,arg2:string):Promise<void>;

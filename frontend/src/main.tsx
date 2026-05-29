@@ -99,6 +99,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 CheckUpdate: async () => ({ success: false }),
                 DownloadUpdate: async () => ({ success: false }),
                 GetSavedConnections: async () => cloneBrowserMockValue(mockConnections),
+                ListInstalledFontFamilies: async () => ({ success: true, data: [] }),
                 SaveConnection: async (input: any) => saveMockConnection(input),
                 DeleteConnection: async (id: string) => {
                     const index = mockConnections.findIndex((item) => item.id === id);
@@ -184,5 +185,4 @@ ReactDOM.createRoot(rootNode).render(
     {rootComponent}
   </React.StrictMode>,
 )
-
 

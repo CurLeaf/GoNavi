@@ -46,6 +46,7 @@ import {
   resolveOceanBaseProtocolFromConfig,
   resolveOceanBaseProtocolFromQueryText,
 } from "./utils/oceanBaseProtocol";
+import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -53,6 +54,8 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  customUIFontFamily: string | null;
+  customMonoFontFamily: string | null;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -61,6 +64,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  customUIFontFamily: null,
+  customMonoFontFamily: null,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -79,7 +84,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 9;
+const PERSIST_VERSION = 10;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
@@ -1593,6 +1598,8 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
+    customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -2493,7 +2500,10 @@ export const useStore = create<AppState>()(
       setTheme: (theme) => set({ theme }),
       setAppearance: (appearance) =>
         set((state) => ({
-          appearance: { ...state.appearance, ...appearance },
+          appearance: sanitizeAppearance(
+            { ...state.appearance, ...appearance },
+            PERSIST_VERSION,
+          ),
         })),
       setUiScale: (scale) => set({ uiScale: sanitizeUiScale(scale) }),
       setFontSize: (size) => set({ fontSize: sanitizeFontSize(size) }),
@@ -2971,16 +2981,28 @@ export const useStore = create<AppState>()(
           persistedState,
         ) as Partial<AppState>;
         const safeTabs = sanitizeQueryTabs(state.tabs);
+        const persistedConnections =
+          state.connections === undefined
+            ? currentState.connections
+            : sanitizeConnections(state.connections);
+        const persistedConnectionTags =
+          state.connectionTags === undefined
+            ? currentState.connectionTags
+            : sanitizeConnectionTags(state.connectionTags);
+        const persistedSidebarRootOrder =
+          state.sidebarRootOrder === undefined
+            ? currentState.sidebarRootOrder
+            : resolveSidebarRootOrderTokens(
+                state.sidebarRootOrder,
+                persistedConnectionTags,
+                persistedConnections,
+              );
         return {
           ...currentState,
           ...state,
-          connections: sanitizeConnections(state.connections),
-          connectionTags: sanitizeConnectionTags(state.connectionTags),
-          sidebarRootOrder: resolveSidebarRootOrderTokens(
-            state.sidebarRootOrder,
-            sanitizeConnectionTags(state.connectionTags),
-            sanitizeConnections(state.connections),
-          ),
+          connections: persistedConnections,
+          connectionTags: persistedConnectionTags,
+          sidebarRootOrder: persistedSidebarRootOrder,
           tabs: safeTabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
           savedQueries: sanitizeSavedQueries(state.savedQueries),

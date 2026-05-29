@@ -19,6 +19,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
   sanitizeDataTableDensity,
@@ -91,7 +92,7 @@ import {
 } from './utils/aiEntryLayout';
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
-import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 import './v2-theme.css';
 
@@ -270,6 +271,8 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const resolvedUiFontFamily = resolveUIFontFamily(appearance.customUIFontFamily);
+  const resolvedMonoFontFamily = resolveMonoFontFamily(appearance.customMonoFontFamily);
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
   const titleBarHeight = Math.max(28, Math.round(32 * effectiveUiScale));
   const titleBarButtonWidth = Math.max(40, Math.round(46 * effectiveUiScale));
@@ -281,6 +284,18 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
+  const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);
+  const [isFontFamiliesLoading, setIsFontFamiliesLoading] = useState(false);
+  const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
+  const hasLoadedInstalledFontsRef = useRef(false);
+  const uiFontOptions = useMemo(
+      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies),
+      [installedFontFamilies, runtimePlatform],
+  );
+  const monoFontOptions = useMemo(
+      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
+      [installedFontFamilies, runtimePlatform],
+  );
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
@@ -2644,6 +2659,9 @@ function App() {
     darkMode,
     effectiveDataTableFontSize,
     effectiveFontSize,
+    resolvedMonoFontFamily,
+    resolvedUiFontFamily,
+    runtimePlatform,
     effectiveSidebarTreeFontSize,
     effectiveUiScale,
     tokenControlHeight,
@@ -2923,6 +2941,8 @@ function App() {
           fontSize: tokenFontSize,
           fontSizeSM: tokenFontSizeSM,
           fontSizeLG: tokenFontSizeLG,
+          fontFamily: resolvedUiFontFamily,
+          fontFamilyCode: resolvedMonoFontFamily,
           controlHeight: tokenControlHeight,
           controlHeightSM: tokenControlHeightSM,
           controlHeightLG: tokenControlHeightLG,
@@ -2973,13 +2993,30 @@ function App() {
   }), [
       darkMode,
       effectiveOpacity,
+      isV2Ui,
       tokenControlHeight,
       tokenControlHeightLG,
       tokenControlHeightSM,
       tokenFontSize,
       tokenFontSizeLG,
       tokenFontSizeSM,
+      resolvedMonoFontFamily,
+      resolvedUiFontFamily,
   ]);
+  const filterFontOption = useCallback((input: string, option?: { value?: string; label?: React.ReactNode }) => (
+      matchFontFamilyOption(input, {
+          value: String(option?.value || ''),
+          label: String(option?.label || ''),
+      })
+  ), []);
+  const renderFontOptionLabel = useCallback((option: FontFamilyOption) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.35 }}>
+          <span>{option.label}</span>
+          <span style={{ fontSize: 11, color: darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(16,24,40,0.45)' }}>
+              {option.value}
+          </span>
+      </div>
+  ), [darkMode]);
 
   return (
     <ConfigProvider
@@ -3999,6 +4036,75 @@ function App() {
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>字体族</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>界面字体 (UI Font Family)</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_UI_FONT_FAMILY}
+                                              value={appearance.customUIFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customUIFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customUIFontFamily: null })}
+                                              options={uiFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? `系统字体加载失败，当前回退常见字体预置：${fontFamiliesLoadError}`
+                                                  : (installedFontFamilies.length > 0
+                                                      ? `已读取当前系统 ${installedFontFamilies.length} 个字体族，支持输入搜索匹配。清空后回退默认 UI 字体。`
+                                                      : '按当前系统实时加载已安装字体，支持输入搜索匹配。清空后回退默认 UI 字体。')}
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>代码字体 (Mono Font Family)</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_MONO_FONT_FAMILY}
+                                              value={appearance.customMonoFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customMonoFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customMonoFontFamily: null })}
+                                              options={monoFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? '当前已回退常见代码字体预置。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'
+                                                  : '优先展示当前系统已安装字体，名称接近 Mono/Code/Console 的字体会靠前。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 500 }}>透明与模糊效果</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                                       <div>
@@ -4277,7 +4383,7 @@ function App() {
                                   <Input
                                       readOnly
                                       value={isCapturing ? '请按下快捷键...' : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
-                                      style={{ width: 180, fontFamily: 'Consolas, Menlo, Monaco, monospace' }}
+                                      style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
                                   />
                                   <Button
                                       size="small"

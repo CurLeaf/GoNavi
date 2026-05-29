@@ -1,3 +1,8 @@
+:root {
+  --gn-font-sans: "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+  --gn-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -8,6 +13,21 @@ html, body, #root {
 
 body, #root {
   border-radius: var(--gonavi-border-radius); /* Slightly rounded app window corners */
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--gn-font-sans);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--gn-font-mono);
 }
 
 /* 侧边栏 Tree 样式优化 */

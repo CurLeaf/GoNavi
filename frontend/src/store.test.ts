@@ -75,6 +75,8 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
     expect(appearance.sidebarTreeFontSize).toBeNull();
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
+    expect(appearance.customUIFontFamily).toBeNull();
+    expect(appearance.customMonoFontFamily).toBeNull();
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -95,6 +97,26 @@ describe('store appearance persistence', () => {
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableDensity).toBe('compact');
+  });
+
+  it('persists custom font families and sanitizes blank values', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      customUIFontFamily: '  IBM Plex Sans, PingFang SC  ',
+      customMonoFontFamily: '   ',
+    });
+
+    let appearance = useStore.getState().appearance;
+    expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
+    expect(appearance.customMonoFontFamily).toBeNull();
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
+    expect(appearance.customMonoFontFamily).toBeNull();
   });
 
   it('does not clear persisted legacy connections during hydration migration', async () => {

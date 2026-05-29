@@ -179,8 +179,16 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("setProperty('--gn-sidebar-tree-font-size'");
     expect(appSource).toContain("setProperty('--gn-control-height'");
     expect(appSource).toContain("setProperty('--gn-control-height-sm'");
+    expect(appSource).toContain('fontFamily: resolvedUiFontFamily');
+    expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
     expect(appSource).toContain('数据表字体大小');
     expect(appSource).toContain('左侧库表字体大小');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
+    expect(appSource).toContain('ListInstalledFontFamilies()');
+    expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
+    expect(appSource).toContain('matchFontFamilyOption');
+    expect(appSource).toContain('showSearch');
     expect(appSource).toContain('const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('const sidebarTreeFontSizeFollowsGlobal = appearance.sidebarTreeFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('disabled={dataTableFontSizeFollowsGlobal}');
