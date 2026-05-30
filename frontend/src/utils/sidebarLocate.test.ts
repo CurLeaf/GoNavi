@@ -96,6 +96,32 @@ describe('sidebarLocate', () => {
     })).toBeNull();
   });
 
+  it('builds locate requests from trigger and routine tabs', () => {
+    expect(normalizeSidebarLocateObjectRequestFromTab({
+      id: 'trigger-conn-1-main-audit.users_bi',
+      type: 'trigger',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      triggerName: 'audit.users_bi',
+    })).toMatchObject({
+      tableName: 'audit.users_bi',
+      schemaName: 'audit',
+      objectGroup: 'triggers',
+    });
+
+    expect(normalizeSidebarLocateObjectRequestFromTab({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      type: 'routine-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      routineName: 'reporting.refresh_stats',
+    })).toMatchObject({
+      tableName: 'reporting.refresh_stats',
+      schemaName: 'reporting',
+      objectGroup: 'routines',
+    });
+  });
+
   it('keeps StarRocks materialized view tabs on the materialized views branch', () => {
     const request = normalizeSidebarLocateObjectRequestFromTab({
       id: 'view-def-conn-1-main-sales.mv_daily',
@@ -180,6 +206,83 @@ describe('sidebarLocate', () => {
       'conn-1-main-schema-public',
       'conn-1-main-schema-public-tables',
       'conn-1-main-public.users',
+    ]);
+  });
+
+  it('finds trigger and routine paths from loaded tree data', () => {
+    const triggerTarget = resolveSidebarLocateTarget({
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'audit.users_bi',
+      schemaName: 'audit',
+      objectGroup: 'triggers',
+    }, { groupBySchema: true });
+
+    const routineTarget = resolveSidebarLocateTarget({
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'reporting.refresh_stats',
+      schemaName: 'reporting',
+      objectGroup: 'routines',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-main',
+            dataRef: { id: 'conn-1', dbName: 'main' },
+            children: [
+              {
+                key: 'conn-1-main-schema-audit',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-audit-triggers',
+                    children: [
+                      {
+                        key: 'conn-1-main-trigger-audit.users_bi-audit.users',
+                        type: 'db-trigger',
+                        dataRef: { id: 'conn-1', dbName: 'main', triggerName: 'audit.users_bi', schemaName: 'audit' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-main-schema-reporting',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-reporting-routines',
+                    children: [
+                      {
+                        key: 'conn-1-main-routine-reporting.refresh_stats',
+                        type: 'routine',
+                        dataRef: { id: 'conn-1', dbName: 'main', routineName: 'reporting.refresh_stats', schemaName: 'reporting' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, triggerTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-audit',
+      'conn-1-main-schema-audit-triggers',
+      'conn-1-main-trigger-audit.users_bi-audit.users',
+    ]);
+    expect(findSidebarNodePathForLocate(tree, routineTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-reporting',
+      'conn-1-main-schema-reporting-routines',
+      'conn-1-main-routine-reporting.refresh_stats',
     ]);
   });
 });

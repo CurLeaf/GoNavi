@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
-import QueryEditor from './QueryEditor';
+import QueryEditor, { resolveQueryEditorNavigationTarget } from './QueryEditor';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -23,6 +23,7 @@ const storeState = vi.hoisted(() => ({
   ],
   addSqlLog: vi.fn(),
   addTab: vi.fn(),
+  setActiveContext: vi.fn(),
   updateQueryTabDraft: vi.fn(),
   savedQueries: [] as SavedQuery[],
   saveQuery: vi.fn(),
@@ -72,6 +73,10 @@ const dataGridState = vi.hoisted(() => ({
   latestProps: null as any,
 }));
 
+const autoFetchState = vi.hoisted(() => ({
+  visible: false,
+}));
+
 const editorState = vi.hoisted(() => {
   const state = {
     value: '',
@@ -80,7 +85,11 @@ const editorState = vi.hoisted(() => {
     selection: null as any,
     providers: [] as any[],
     cursorPositionListeners: [] as Array<(event: any) => void>,
+    mouseMoveListeners: [] as Array<(event: any) => void>,
+    mouseDownListeners: [] as Array<(event: any) => void>,
+    mouseLeaveListeners: [] as Array<() => void>,
     hasTextFocus: true,
+    decorationIds: [] as string[],
   };
   const offsetAt = (position: { lineNumber: number; column: number }) => {
     const text = state.value;
@@ -147,6 +156,24 @@ const editorState = vi.hoisted(() => {
       state.cursorPositionListeners.push(listener);
       return { dispose: vi.fn() };
     }),
+    onMouseMove: vi.fn((listener: (event: any) => void) => {
+      state.mouseMoveListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
+    onMouseDown: vi.fn((listener: (event: any) => void) => {
+      state.mouseDownListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
+    onMouseLeave: vi.fn((listener: () => void) => {
+      state.mouseLeaveListeners.push(listener);
+      return { dispose: vi.fn() };
+    }),
+    deltaDecorations: vi.fn((oldDecorations: string[], newDecorations: any[]) => {
+      state.decorationIds = newDecorations.map((_: any, index: number) => `decoration-${index + 1}`);
+      return state.decorationIds;
+    }),
+    updateOptions: vi.fn(),
+    onDidDispose: vi.fn(),
     hasTextFocus: vi.fn(() => state.hasTextFocus),
     revealLineInCenterIfOutsideViewport: vi.fn(),
     revealRangeInCenterIfOutsideViewport: vi.fn(),
@@ -167,7 +194,7 @@ vi.mock('../store', () => {
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
 
 vi.mock('../utils/autoFetchVisibility', () => ({
-  useAutoFetchVisibility: () => false,
+  useAutoFetchVisibility: () => autoFetchState.visible,
 }));
 
 vi.mock('@monaco-editor/react', () => ({
@@ -194,6 +221,12 @@ vi.mock('@monaco-editor/react', () => ({
             this.startColumn = startColumn;
             this.endLineNumber = endLineNumber;
             this.endColumn = endColumn;
+          }
+        },
+        MarkdownString: class {
+          value: string;
+          constructor(value: string) {
+            this.value = value;
           }
         },
         Position: class {
@@ -291,6 +324,7 @@ describe('QueryEditor external SQL save', () => {
       dispatchEvent: vi.fn(),
     });
     storeState.addTab.mockReset();
+    storeState.setActiveContext.mockReset();
     storeState.saveQuery.mockReset();
     storeState.savedQueries = [];
     storeState.activeTabId = 'tab-1';
@@ -302,20 +336,30 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBQueryMulti.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetDatabases.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
     storeState.appearance.uiVersion = 'legacy';
+    autoFetchState.visible = false;
     dataGridState.latestProps = null;
     editorState.value = '';
     editorState.position = { lineNumber: 1, column: 1 };
     editorState.selection = null;
     editorState.providers = [];
     editorState.cursorPositionListeners = [];
+    editorState.mouseMoveListeners = [];
+    editorState.mouseDownListeners = [];
+    editorState.mouseLeaveListeners = [];
     editorState.hasTextFocus = true;
+    editorState.decorationIds = [];
     editorState.editor.getValue.mockClear();
     editorState.editor.setValue.mockClear();
     editorState.editor.executeEdits.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+    editorState.editor.updateOptions.mockClear();
     storeState.updateQueryTabDraft.mockReset();
   });
 
@@ -330,6 +374,321 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('resolves database and table targets for ctrl/cmd navigation', () => {
+    const tables = [
+      { dbName: 'main', tableName: 'users' },
+      { dbName: 'main', tableName: 'dbo.orders' },
+      { dbName: 'analytics', tableName: 'events' },
+    ];
+    const views = [
+      { dbName: 'main', viewName: 'reporting.active_users', schemaName: 'reporting' },
+    ];
+    const materializedViews = [
+      { dbName: 'analytics', viewName: 'mv_daily_stats', schemaName: undefined },
+    ];
+    const triggers = [
+      { dbName: 'main', triggerName: 'audit.users_bi', tableName: 'audit.users', schemaName: 'audit' },
+    ];
+    const routines = [
+      { dbName: 'main', routineName: 'reporting.refresh_stats', routineType: 'PROCEDURE', schemaName: 'reporting' },
+    ];
+
+    expect(resolveQueryEditorNavigationTarget('select * from analytics.events', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'table',
+      dbName: 'analytics',
+      tableName: 'events',
+      schemaName: undefined,
+    });
+    expect(resolveQueryEditorNavigationTarget('select * from dbo.orders', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'table',
+      dbName: 'main',
+      tableName: 'dbo.orders',
+      schemaName: 'dbo',
+    });
+    expect(resolveQueryEditorNavigationTarget('use analytics', 6, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'database',
+      dbName: 'analytics',
+    });
+    expect(resolveQueryEditorNavigationTarget('select * from users', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'table',
+      dbName: 'main',
+      tableName: 'users',
+      schemaName: undefined,
+    });
+    expect(resolveQueryEditorNavigationTarget('select * from reporting.active_users', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'view',
+      dbName: 'main',
+      viewName: 'reporting.active_users',
+      schemaName: 'reporting',
+    });
+    expect(resolveQueryEditorNavigationTarget('select * from analytics.mv_daily_stats', 37, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'materialized-view',
+      dbName: 'analytics',
+      viewName: 'mv_daily_stats',
+      schemaName: undefined,
+    });
+    expect(resolveQueryEditorNavigationTarget('call audit.users_bi()', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'trigger',
+      dbName: 'main',
+      triggerName: 'audit.users_bi',
+      tableName: 'audit.users',
+      schemaName: 'audit',
+    });
+    expect(resolveQueryEditorNavigationTarget('call reporting.refresh_stats()', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+      type: 'routine',
+      dbName: 'main',
+      routineName: 'reporting.refresh_stats',
+      routineType: 'PROCEDURE',
+      schemaName: 'reporting',
+    });
+  });
+
+  it('opens a table tab on ctrl left click inside the editor', async () => {
+    editorState.value = 'select * from analytics.events where id = 1';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_analytics: 'events' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 27 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'analytics' });
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'conn-1-analytics-table-events',
+      title: 'events',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'analytics',
+      tableName: 'events',
+    });
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('shows link-style hover feedback when ctrl/cmd is pressed over a navigable identifier', async () => {
+    editorState.value = 'select * from analytics.events where id = 1';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_analytics: 'events' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      editorState.mouseMoveListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 27 } },
+        event: {
+          ctrlKey: true,
+          metaKey: false,
+        },
+      });
+    });
+
+    expect(editorState.editor.deltaDecorations).toHaveBeenCalled();
+    expect(editorState.editor.updateOptions).toHaveBeenCalledWith({ mouseStyle: 'pointer' });
+    const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
+    expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
+
+    await act(async () => {
+      editorState.mouseLeaveListeners[0]?.();
+    });
+    expect(editorState.editor.updateOptions).toHaveBeenLastCalledWith({ mouseStyle: 'text' });
+  });
+
+  it('opens a view tab on ctrl left click inside the editor', async () => {
+    editorState.value = 'select * from reporting.active_users';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (sql.includes('information_schema.views') || sql.includes('pg_catalog.pg_views') || sql.includes('USER_VIEWS') || sql.includes('ALL_VIEWS')) {
+        return { success: true, data: [{ view_name: 'active_users', schema_name: 'reporting' }] };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 31 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'view-def-conn-1-main-active_users',
+      title: '视图: active_users',
+      type: 'view-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      viewName: 'active_users',
+      viewKind: 'view',
+    });
+  });
+
+  it('opens trigger and routine tabs on ctrl left click inside the editor', async () => {
+    editorState.value = 'call audit.users_bi(); call reporting.refresh_stats();';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (sql.includes('information_schema.triggers') || sql.includes('SHOW TRIGGERS') || sql.includes('USER_TRIGGERS') || sql.includes('ALL_TRIGGERS')) {
+        return { success: true, data: [{ trigger_name: 'users_bi', table_name: 'users', schema_name: 'audit' }] };
+      }
+      if (sql.includes('information_schema.routines') || sql.includes('SHOW FUNCTION STATUS') || sql.includes('SHOW PROCEDURE STATUS') || sql.includes('USER_OBJECTS') || sql.includes('ALL_OBJECTS')) {
+        return { success: true, data: [{ routine_name: 'refresh_stats', routine_type: 'PROCEDURE', schema_name: 'reporting' }] };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 12 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 39 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'trigger-conn-1-main-audit.users_bi',
+      title: '触发器: audit.users_bi',
+      type: 'trigger',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      triggerName: 'audit.users_bi',
+    });
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'routine-def-conn-1-main-reporting.refresh_stats',
+      title: '存储过程: reporting.refresh_stats',
+      type: 'routine-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      routineName: 'reporting.refresh_stats',
+      routineType: 'PROCEDURE',
+    });
+  });
+
+  it('switches current database on cmd left click for database identifiers', async () => {
+    editorState.value = 'use analytics';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_analytics: 'events' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 6 } },
+        event: {
+          leftButton: true,
+          ctrlKey: false,
+          metaKey: true,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'analytics' });
+    expect(storeState.addTab).not.toHaveBeenCalled();
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', expect.objectContaining({
+      dbName: 'analytics',
+    }));
   });
 
   it('keeps the editor empty when a tab draft is externally synced to an empty query', async () => {

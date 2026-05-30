@@ -19,6 +19,8 @@ import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/q
 import { quoteIdentPart } from '../utils/sql';
 import { resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
+import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
+import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 
@@ -195,6 +197,9 @@ let sharedCurrentConnectionId = '';
 let sharedConnections: any[] = [];
 type CompletionTableMeta = {dbName: string, tableName: string, comment?: string};
 type CompletionColumnMeta = {dbName: string, tableName: string, name: string, type: string, comment?: string};
+type CompletionViewMeta = {dbName: string, viewName: string, schemaName?: string};
+type CompletionTriggerMeta = {dbName: string, triggerName: string, tableName: string, schemaName?: string};
+type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
 let sharedTablesData: CompletionTableMeta[] = [];
 let sharedAllColumnsData: CompletionColumnMeta[] = [];
 let sharedVisibleDbs: string[] = [];
@@ -475,6 +480,16 @@ const escapeMetadataSqlLiteral = (raw: string): string => String(raw || '').repl
 
 const quoteSqlServerDbIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
 
+type MetadataQuerySpec = {
+    sql: string;
+    inferredType?: 'FUNCTION' | 'PROCEDURE';
+};
+
+type MetadataQueryResult = {
+    rows: Record<string, any>[];
+    inferredType?: 'FUNCTION' | 'PROCEDURE';
+};
+
 const normalizeMetadataDialect = (conn: any): string => {
     const type = String(conn?.config?.type || '').trim().toLowerCase();
     const driver = String(conn?.config?.driver || '').trim();
@@ -639,6 +654,581 @@ const getNormalizedOffsetAtPosition = (
         offset += (lines[index]?.length || 0) + 1;
     }
     return Math.max(0, Math.min(text.length, offset + Math.max(0, position.column - 1)));
+};
+
+const getFirstRowValue = (row: Record<string, any>): string => {
+    for (const value of Object.values(row || {})) {
+        if (value !== undefined && value !== null) {
+            const normalized = String(value).trim();
+            if (normalized !== '') return normalized;
+        }
+    }
+    return '';
+};
+
+const normalizeMetadataQuerySpecs = (specs: MetadataQuerySpec[]): MetadataQuerySpec[] => {
+    const seen = new Set<string>();
+    const normalized: MetadataQuerySpec[] = [];
+    specs.forEach((spec) => {
+        const sql = String(spec.sql || '').trim();
+        if (!sql) return;
+        const key = `${spec.inferredType || ''}@@${sql}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        normalized.push({ sql, inferredType: spec.inferredType });
+    });
+    return normalized;
+};
+
+const buildQualifiedCompletionName = (schemaName: string, objectName: string): string => {
+    const schema = String(schemaName || '').trim();
+    const object = String(objectName || '').trim();
+    if (!object) return '';
+    if (!schema || object.includes('.')) return object;
+    return `${schema}.${object}`;
+};
+
+const buildCompletionViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    switch (dialect) {
+        case 'mysql':
+        case 'starrocks': {
+            const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: safeDbName
+                        ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
+                        : '',
+                },
+                { sql: dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '' },
+                { sql: 'SHOW FULL TABLES' },
+            ]);
+        }
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+            return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, viewname` }];
+        case 'sqlserver': {
+            const safeDb = quoteSqlServerDbIdentifier(dbName || 'master');
+            return [{ sql: `SELECT s.name AS schema_name, v.name AS view_name FROM ${safeDb}.sys.views v JOIN ${safeDb}.sys.schemas s ON v.schema_id = s.schema_id ORDER BY s.name, v.name` }];
+        }
+        case 'oracle': {
+            return normalizeMetadataQuerySpecs([
+                { sql: 'SELECT VIEW_NAME AS view_name FROM USER_VIEWS ORDER BY VIEW_NAME' },
+                { sql: 'SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = USER ORDER BY VIEW_NAME' },
+                {
+                    sql: safeDbName
+                        ? `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME`
+                        : '',
+                },
+            ]);
+        }
+        case 'sqlite':
+            return [{ sql: 'SELECT name AS view_name FROM sqlite_master WHERE type = \'view\' ORDER BY name' }];
+        case 'duckdb':
+            return [{ sql: `SELECT table_schema AS schema_name, table_name AS view_name FROM information_schema.views WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name` }];
+        default:
+            return [];
+    }
+};
+
+const buildCompletionMaterializedViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    if (dialect !== 'starrocks') {
+        return [];
+    }
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+    return normalizeMetadataQuerySpecs([
+        {
+            sql: safeDbName
+                ? `SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name FROM information_schema.tables WHERE TABLE_SCHEMA = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%MATERIALIZED%' ORDER BY TABLE_NAME`
+                : '',
+        },
+        { sql: dbIdent ? `SHOW MATERIALIZED VIEWS FROM \`${dbIdent}\`` : '' },
+        { sql: 'SHOW MATERIALIZED VIEWS' },
+    ]);
+};
+
+const buildCompletionTriggersMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    switch (dialect) {
+        case 'mysql':
+        case 'starrocks': {
+            const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: safeDbName
+                        ? `SELECT TRIGGER_NAME AS trigger_name, EVENT_OBJECT_TABLE AS table_name, TRIGGER_SCHEMA AS schema_name FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME`
+                        : '',
+                },
+                { sql: dbIdent ? `SHOW TRIGGERS FROM \`${dbIdent}\`` : '' },
+                { sql: 'SHOW TRIGGERS' },
+            ]);
+        }
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+            return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY event_object_schema, event_object_table, trigger_name` }];
+        case 'sqlserver': {
+            const safeDb = quoteSqlServerDbIdentifier(dbName || 'master');
+            return [{ sql: `SELECT s.name AS schema_name, t.name AS table_name, tr.name AS trigger_name FROM ${safeDb}.sys.triggers tr JOIN ${safeDb}.sys.tables t ON tr.parent_id = t.object_id JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id WHERE tr.parent_class = 1 ORDER BY s.name, t.name, tr.name` }];
+        }
+        case 'oracle':
+            if (!safeDbName) {
+                return [{ sql: 'SELECT TRIGGER_NAME AS trigger_name, TABLE_NAME AS table_name FROM USER_TRIGGERS ORDER BY TABLE_NAME, TRIGGER_NAME' }];
+            }
+            return [{ sql: `SELECT OWNER AS schema_name, TABLE_NAME AS table_name, TRIGGER_NAME AS trigger_name FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY TABLE_NAME, TRIGGER_NAME` }];
+        case 'sqlite':
+            return [{ sql: 'SELECT name AS trigger_name, tbl_name AS table_name FROM sqlite_master WHERE type = \'trigger\' ORDER BY tbl_name, name' }];
+        default:
+            return [];
+    }
+};
+
+const buildCompletionFunctionsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    switch (dialect) {
+        case 'mysql':
+        case 'starrocks':
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: safeDbName
+                        ? `SELECT ROUTINE_NAME AS routine_name, ROUTINE_TYPE AS routine_type, ROUTINE_SCHEMA AS schema_name FROM information_schema.routines WHERE routine_schema = '${safeDbName}' ORDER BY ROUTINE_TYPE, ROUTINE_NAME`
+                        : '',
+                },
+                {
+                    sql: safeDbName ? `SHOW FUNCTION STATUS WHERE Db = '${safeDbName}'` : 'SHOW FUNCTION STATUS',
+                    inferredType: 'FUNCTION',
+                },
+                {
+                    sql: safeDbName ? `SHOW PROCEDURE STATUS WHERE Db = '${safeDbName}'` : 'SHOW PROCEDURE STATUS',
+                    inferredType: 'PROCEDURE',
+                },
+            ]);
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, routine_type, p.proname`,
+                },
+                {
+                    sql: `SELECT r.routine_schema AS schema_name, r.routine_name AS routine_name, COALESCE(NULLIF(UPPER(r.routine_type), ''), 'FUNCTION') AS routine_type FROM information_schema.routines r WHERE r.routine_schema NOT IN ('pg_catalog', 'information_schema') AND r.routine_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY r.routine_schema, routine_type, r.routine_name`,
+                },
+                {
+                    sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, 'FUNCTION' AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, p.proname`,
+                },
+            ]);
+        case 'sqlserver': {
+            const safeDb = quoteSqlServerDbIdentifier(dbName || 'master');
+            return [{ sql: `SELECT s.name AS schema_name, o.name AS routine_name, CASE o.type WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'FUNCTION' WHEN 'IF' THEN 'FUNCTION' WHEN 'TF' THEN 'FUNCTION' END AS routine_type FROM ${safeDb}.sys.objects o JOIN ${safeDb}.sys.schemas s ON o.schema_id = s.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY o.type, s.name, o.name` }];
+        }
+        case 'oracle':
+            return normalizeMetadataQuerySpecs([
+                { sql: `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` },
+                { sql: `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = USER AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` },
+                {
+                    sql: safeDbName
+                        ? `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`
+                        : '',
+                },
+            ]);
+        case 'duckdb':
+            return [{
+                sql: `SELECT schema_name, function_name AS routine_name, 'FUNCTION' AS routine_type FROM duckdb_functions() WHERE internal = false AND lower(function_type) = 'macro' AND COALESCE(macro_definition, '') <> '' ORDER BY schema_name, function_name`,
+                inferredType: 'FUNCTION',
+            }];
+        default:
+            return [];
+    }
+};
+
+const queryCompletionMetadataRowsBySpecs = async (
+    config: Record<string, any>,
+    dbName: string,
+    specs: MetadataQuerySpec[],
+): Promise<MetadataQueryResult[]> => {
+    const normalizedSpecs = normalizeMetadataQuerySpecs(specs);
+    if (normalizedSpecs.length === 0) {
+        return [];
+    }
+    const results: MetadataQueryResult[] = [];
+    for (const spec of normalizedSpecs) {
+        try {
+            const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, spec.sql);
+            if (!result.success || !Array.isArray(result.data)) {
+                continue;
+            }
+            results.push({
+                rows: result.data as Record<string, any>[],
+                inferredType: spec.inferredType,
+            });
+        } catch {
+            // 忽略单条元数据查询失败，继续走兼容查询。
+        }
+    }
+    return results;
+};
+
+type QueryEditorNavigationTarget =
+    | { type: 'database'; dbName: string }
+    | { type: 'table'; dbName: string; tableName: string; schemaName?: string }
+    | { type: 'view'; dbName: string; viewName: string; schemaName?: string }
+    | { type: 'materialized-view'; dbName: string; viewName: string; schemaName?: string }
+    | { type: 'trigger'; dbName: string; triggerName: string; tableName: string; schemaName?: string }
+    | { type: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string };
+
+const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
+
+const findIdentifierWindowAtOffset = (
+    lineContent: string,
+    rawOffset: number,
+): { start: number; end: number } | null => {
+    const text = String(lineContent || '');
+    if (!text) return null;
+    const maxIndex = text.length - 1;
+    if (maxIndex < 0) return null;
+    let offset = Math.max(0, Math.min(maxIndex, Number.isFinite(rawOffset) ? rawOffset : 0));
+
+    if (!QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset] || '')) {
+        if (offset > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset - 1] || '')) {
+            offset -= 1;
+        } else if (offset < maxIndex && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset + 1] || '')) {
+            offset += 1;
+        } else {
+            return null;
+        }
+    }
+
+    let start = offset;
+    while (start > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[start - 1] || '')) {
+        start -= 1;
+    }
+
+    let end = offset + 1;
+    while (end < text.length && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[end] || '')) {
+        end += 1;
+    }
+
+    return start < end ? { start, end } : null;
+};
+
+const normalizeNavigationIdentifierParts = (text: string): string[] => (
+    String(text || '')
+        .split('.')
+        .map((part) => stripCompletionIdentifierQuotes(part))
+        .map((part) => part.trim())
+        .filter(Boolean)
+);
+
+export const resolveQueryEditorNavigationTarget = (
+    lineContent: string,
+    column: number,
+    currentDb: string,
+    visibleDbs: string[],
+    tables: CompletionTableMeta[],
+    views: CompletionViewMeta[] = [],
+    materializedViews: CompletionViewMeta[] = [],
+    triggers: CompletionTriggerMeta[] = [],
+    routines: CompletionRoutineMeta[] = [],
+): QueryEditorNavigationTarget | null => {
+    const text = String(lineContent || '');
+    if (!text) return null;
+
+    const offset = Math.max(0, Number(column || 1) - 2);
+    const windowRange = findIdentifierWindowAtOffset(text, offset);
+    if (!windowRange) return null;
+
+    const rawIdentifier = text.slice(windowRange.start, windowRange.end).trim();
+    if (!rawIdentifier) return null;
+
+    const parts = normalizeNavigationIdentifierParts(rawIdentifier);
+    if (parts.length === 0 || parts.length > 3) return null;
+
+    const currentDbName = String(currentDb || '').trim();
+    const visibleDbSet = new Set(visibleDbs.map((db) => String(db || '').trim().toLowerCase()).filter(Boolean));
+    const tableMetas = tables.map((table) => {
+        const dbName = String(table.dbName || '').trim();
+        const rawTableName = String(table.tableName || '').trim();
+        const parsed = splitSidebarQualifiedName(rawTableName);
+        return {
+            dbName,
+            rawTableName,
+            normalizedDbName: dbName.toLowerCase(),
+            normalizedRawTableName: rawTableName.toLowerCase(),
+            normalizedObjectName: String(parsed.objectName || rawTableName).trim().toLowerCase(),
+            schemaName: String(parsed.schemaName || '').trim(),
+            normalizedSchemaName: String(parsed.schemaName || '').trim().toLowerCase(),
+        };
+    });
+
+    const buildObjectNameMeta = (
+        dbName: string,
+        rawObjectName: string,
+        explicitSchemaName = '',
+    ) => {
+        const parsed = splitSidebarQualifiedName(rawObjectName);
+        const schemaName = String(explicitSchemaName || parsed.schemaName || '').trim();
+        const objectName = String(parsed.objectName || rawObjectName).trim();
+        return {
+            dbName: String(dbName || '').trim(),
+            rawObjectName: String(rawObjectName || '').trim(),
+            objectName,
+            schemaName,
+            normalizedDbName: String(dbName || '').trim().toLowerCase(),
+            normalizedRawObjectName: String(rawObjectName || '').trim().toLowerCase(),
+            normalizedObjectName: objectName.toLowerCase(),
+            normalizedSchemaName: schemaName.toLowerCase(),
+        };
+    };
+
+    const viewMetas = views.map((view) => buildObjectNameMeta(view.dbName, view.viewName, view.schemaName));
+    const materializedViewMetas = materializedViews.map((view) => buildObjectNameMeta(view.dbName, view.viewName, view.schemaName));
+    const triggerMetas = triggers.map((trigger) => ({
+        ...buildObjectNameMeta(trigger.dbName, trigger.triggerName, trigger.schemaName),
+        tableName: String(trigger.tableName || '').trim(),
+    }));
+    const routineMetas = routines.map((routine) => ({
+        ...buildObjectNameMeta(routine.dbName, routine.routineName, routine.schemaName),
+        routineType: String(routine.routineType || 'FUNCTION').trim().toUpperCase() || 'FUNCTION',
+    }));
+
+    const findTable = (candidateDbName: string, candidateTableName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const normalizedDbName = String(candidateDbName || '').trim().toLowerCase();
+        const normalizedTableName = String(candidateTableName || '').trim().toLowerCase();
+        const normalizedSchemaName = String(schemaName || '').trim().toLowerCase();
+        if (!normalizedDbName || !normalizedTableName) return null;
+
+        const exactQualifiedName = normalizedSchemaName ? `${normalizedSchemaName}.${normalizedTableName}` : normalizedTableName;
+        const exact = tableMetas.find((meta) =>
+            meta.normalizedDbName === normalizedDbName
+            && meta.normalizedRawTableName === exactQualifiedName
+        );
+        if (exact) {
+            return {
+                type: 'table',
+                dbName: exact.dbName,
+                tableName: exact.rawTableName,
+                schemaName: exact.schemaName || undefined,
+            };
+        }
+
+        const matched = tableMetas.find((meta) =>
+            meta.normalizedDbName === normalizedDbName
+            && meta.normalizedObjectName === normalizedTableName
+            && (!normalizedSchemaName || meta.normalizedSchemaName === normalizedSchemaName)
+        );
+        if (!matched) return null;
+        return {
+            type: 'table',
+            dbName: matched.dbName,
+            tableName: matched.rawTableName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findNamedObject = <TMeta extends {
+        dbName: string;
+        rawObjectName: string;
+        objectName: string;
+        normalizedDbName: string;
+        normalizedRawObjectName: string;
+        normalizedObjectName: string;
+        normalizedSchemaName: string;
+        schemaName: string;
+    }>(
+        metas: TMeta[],
+        candidateDbName: string,
+        candidateObjectName: string,
+        schemaName = '',
+    ): TMeta | null => {
+        const normalizedDbName = String(candidateDbName || '').trim().toLowerCase();
+        const normalizedObjectName = String(candidateObjectName || '').trim().toLowerCase();
+        const normalizedSchemaName = String(schemaName || '').trim().toLowerCase();
+        if (!normalizedDbName || !normalizedObjectName) return null;
+
+        const exactQualifiedName = normalizedSchemaName ? `${normalizedSchemaName}.${normalizedObjectName}` : normalizedObjectName;
+        const exact = metas.find((meta) =>
+            meta.normalizedDbName === normalizedDbName
+            && meta.normalizedRawObjectName === exactQualifiedName
+        );
+        if (exact) {
+            return exact;
+        }
+
+        return metas.find((meta) =>
+            meta.normalizedDbName === normalizedDbName
+            && meta.normalizedObjectName === normalizedObjectName
+            && (!normalizedSchemaName || meta.normalizedSchemaName === normalizedSchemaName)
+        ) || null;
+    };
+
+    const findView = (candidateDbName: string, candidateViewName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(viewMetas, candidateDbName, candidateViewName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'view',
+            dbName: matched.dbName,
+            viewName: matched.rawObjectName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findMaterializedView = (candidateDbName: string, candidateViewName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(materializedViewMetas, candidateDbName, candidateViewName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'materialized-view',
+            dbName: matched.dbName,
+            viewName: matched.rawObjectName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findTrigger = (candidateDbName: string, candidateTriggerName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(triggerMetas, candidateDbName, candidateTriggerName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'trigger',
+            dbName: matched.dbName,
+            triggerName: matched.rawObjectName,
+            tableName: matched.tableName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findRoutine = (candidateDbName: string, candidateRoutineName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(routineMetas, candidateDbName, candidateRoutineName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'routine',
+            dbName: matched.dbName,
+            routineName: matched.rawObjectName,
+            routineType: matched.routineType,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findObjectInPriorityOrder = (candidateDbName: string, candidateObjectName: string, schemaName = ''): QueryEditorNavigationTarget | null => (
+        findTable(candidateDbName, candidateObjectName, schemaName)
+        || findView(candidateDbName, candidateObjectName, schemaName)
+        || findMaterializedView(candidateDbName, candidateObjectName, schemaName)
+        || findTrigger(candidateDbName, candidateObjectName, schemaName)
+        || findRoutine(candidateDbName, candidateObjectName, schemaName)
+    );
+
+    if (parts.length === 1) {
+        const [singlePart] = parts;
+        const normalizedSingle = singlePart.toLowerCase();
+        if (visibleDbSet.has(normalizedSingle)) {
+            return { type: 'database', dbName: singlePart };
+        }
+        return findObjectInPriorityOrder(currentDbName, singlePart);
+    }
+
+    if (parts.length === 2) {
+        const [firstPart, secondPart] = parts;
+        if (visibleDbSet.has(firstPart.toLowerCase())) {
+            return findObjectInPriorityOrder(firstPart, secondPart);
+        }
+        return findObjectInPriorityOrder(currentDbName, secondPart, firstPart);
+    }
+
+    const [dbName, schemaName, tableName] = parts;
+    if (!visibleDbSet.has(dbName.toLowerCase())) {
+        return null;
+    }
+    return findObjectInPriorityOrder(dbName, tableName, schemaName);
+};
+
+export const resolveQueryEditorNavigationDecorations = (
+    lineContent: string,
+    column: number,
+    currentDb: string,
+    visibleDbs: string[],
+    tables: CompletionTableMeta[],
+    views: CompletionViewMeta[] = [],
+    materializedViews: CompletionViewMeta[] = [],
+    triggers: CompletionTriggerMeta[] = [],
+    routines: CompletionRoutineMeta[] = [],
+): Array<{ startColumn: number; endColumn: number; hoverMessage: string }> => {
+    const text = String(lineContent || '');
+    if (!text) return [];
+    const offset = Math.max(0, Number(column || 1) - 2);
+    const windowRange = findIdentifierWindowAtOffset(text, offset);
+    if (!windowRange) return [];
+
+    const navigationTarget = resolveQueryEditorNavigationTarget(
+        lineContent,
+        column,
+        currentDb,
+        visibleDbs,
+        tables,
+        views,
+        materializedViews,
+        triggers,
+        routines,
+    );
+    if (!navigationTarget) return [];
+
+    const hoverMessage = (() => {
+        if (navigationTarget.type === 'database') {
+            return 'Ctrl/Cmd + 点击切换到该数据库';
+        }
+        if (navigationTarget.type === 'table') {
+            return 'Ctrl/Cmd + 点击打开该表';
+        }
+        if (navigationTarget.type === 'view') {
+            return 'Ctrl/Cmd + 点击打开该视图';
+        }
+        if (navigationTarget.type === 'materialized-view') {
+            return 'Ctrl/Cmd + 点击打开该物化视图';
+        }
+        if (navigationTarget.type === 'trigger') {
+            return 'Ctrl/Cmd + 点击打开该触发器';
+        }
+        return navigationTarget.routineType === 'PROCEDURE'
+            ? 'Ctrl/Cmd + 点击打开该存储过程'
+            : 'Ctrl/Cmd + 点击打开该函数';
+    })();
+
+    return [{
+        startColumn: windowRange.start + 1,
+        endColumn: windowRange.end + 1,
+        hoverMessage,
+    }];
+};
+
+const dispatchQueryEditorSidebarLocate = (detail: Record<string, unknown>) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    const connectionId = String(detail.connectionId || '').trim();
+    const dbName = String(detail.dbName || '').trim();
+    const objectName = String(detail.tableName || detail.viewName || detail.triggerName || detail.routineName || detail.objectName || '').trim();
+    if (!connectionId || !dbName || !objectName) {
+        return;
+    }
+    window.dispatchEvent(new CustomEvent('gonavi:locate-sidebar-object', {
+        detail,
+    }));
+};
+
+const clearQueryEditorLinkDecorations = (
+    editor: any,
+    decorationIdsRef: React.MutableRefObject<string[]>,
+) => {
+    if (!editor?.deltaDecorations) {
+        decorationIdsRef.current = [];
+        return;
+    }
+    decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, []);
 };
 
 const resolveQueryLocatorPlan = async ({
@@ -823,11 +1413,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastEditorCursorPositionRef = useRef<any>(null);
   const lastExecutedEditorQueryRef = useRef<string>('');
+  const linkDecorationIdsRef = useRef<string[]>([]);
+  const ctrlMetaPressedRef = useRef(false);
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
   const editorPaneRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<CompletionTableMeta[]>([]); // Store tables for autocomplete (cross-db)
   const allColumnsRef = useRef<CompletionColumnMeta[]>([]); // Store all columns (cross-db)
+  const viewsRef = useRef<CompletionViewMeta[]>([]);
+  const materializedViewsRef = useRef<CompletionViewMeta[]>([]);
+  const triggersRef = useRef<CompletionTriggerMeta[]>([]);
+  const routinesRef = useRef<CompletionRoutineMeta[]>([]);
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
 
   const connections = useStore(state => state.connections);
@@ -837,6 +1433,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
   const addSqlLog = useStore(state => state.addSqlLog);
   const addTab = useStore(state => state.addTab);
+  const setActiveContext = useStore(state => state.setActiveContext);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
   const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
@@ -1055,6 +1652,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           // 加载所有可见数据库的表
           const allTables: CompletionTableMeta[] = [];
           const allColumns: CompletionColumnMeta[] = [];
+          const allViews: CompletionViewMeta[] = [];
+          const allMaterializedViews: CompletionViewMeta[] = [];
+          const allTriggers: CompletionTriggerMeta[] = [];
+          const allRoutines: CompletionRoutineMeta[] = [];
           const metadataDialect = normalizeMetadataDialect(conn);
 
           for (const dbName of visibleDbs) {
@@ -1104,10 +1705,122 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               }
+
+              const viewResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionViewsMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              const seenViews = new Set<string>();
+              viewResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const tableType = String(getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']) || '').trim().toUpperCase();
+                      if (tableType && tableType !== 'VIEW') return;
+                      const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']) || '').trim();
+                      const rawViewName = String(getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name']) || '').trim() || getFirstRowValue(row);
+                      const normalizedViewName = normalizeSidebarViewName(metadataDialect, dbName, schemaName, rawViewName);
+                      if (!normalizedViewName) return;
+                      const uniqueKey = `${dbName.toLowerCase()}@@${normalizedViewName.toLowerCase()}`;
+                      if (seenViews.has(uniqueKey)) return;
+                      seenViews.add(uniqueKey);
+                      const parsed = splitSidebarQualifiedName(normalizedViewName);
+                      allViews.push({
+                          dbName,
+                          viewName: normalizedViewName,
+                          schemaName: schemaName || parsed.schemaName || undefined,
+                      });
+                  });
+              });
+
+              const materializedViewResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionMaterializedViewsMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              const seenMaterializedViews = new Set<string>();
+              materializedViewResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'table_schema', 'db', 'database']) || '').trim();
+                      const rawViewName = String(getCaseInsensitiveValue(row, ['object_name', 'view_name', 'table_name', 'name', 'materialized_view_name', 'mv_name']) || '').trim() || getFirstRowValue(row);
+                      const normalizedViewName = normalizeSidebarViewName(metadataDialect, dbName, schemaName, rawViewName);
+                      if (!normalizedViewName) return;
+                      const uniqueKey = `${dbName.toLowerCase()}@@${normalizedViewName.toLowerCase()}`;
+                      if (seenMaterializedViews.has(uniqueKey)) return;
+                      seenMaterializedViews.add(uniqueKey);
+                      const parsed = splitSidebarQualifiedName(normalizedViewName);
+                      allMaterializedViews.push({
+                          dbName,
+                          viewName: normalizedViewName,
+                          schemaName: schemaName || parsed.schemaName || undefined,
+                      });
+                  });
+              });
+
+              const triggerResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionTriggersMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              const seenTriggers = new Set<string>();
+              triggerResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const rawTriggerName = String(getCaseInsensitiveValue(row, ['trigger_name', 'triggername', 'trigger', 'name']) || '').trim() || getFirstRowValue(row);
+                      if (!rawTriggerName) return;
+                      const rawSchemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'event_object_schema', 'trigger_schema', 'db']) || '').trim();
+                      const rawTableName = String(getCaseInsensitiveValue(row, ['table_name', 'event_object_table', 'tbl_name', 'table']) || '').trim();
+                      const triggerParts = splitSidebarQualifiedName(rawTriggerName);
+                      const tableParts = splitSidebarQualifiedName(rawTableName);
+                      const resolvedSchemaName = String(rawSchemaName || tableParts.schemaName || triggerParts.schemaName || '').trim();
+                      const resolvedTriggerName = String(triggerParts.objectName || rawTriggerName).trim();
+                      const resolvedTableName = buildQualifiedCompletionName(resolvedSchemaName, tableParts.objectName || rawTableName);
+                      const uniqueKey = (metadataDialect === 'mysql' || metadataDialect === 'starrocks')
+                          ? `${dbName.toLowerCase()}@@${resolvedSchemaName.toLowerCase()}@@${resolvedTriggerName.toLowerCase()}`
+                          : `${dbName.toLowerCase()}@@${resolvedSchemaName.toLowerCase()}@@${resolvedTriggerName.toLowerCase()}@@${resolvedTableName.toLowerCase()}`;
+                      if (seenTriggers.has(uniqueKey)) return;
+                      seenTriggers.add(uniqueKey);
+                      allTriggers.push({
+                          dbName,
+                          triggerName: buildQualifiedCompletionName(resolvedSchemaName, resolvedTriggerName) || resolvedTriggerName,
+                          tableName: resolvedTableName || rawTableName,
+                          schemaName: resolvedSchemaName || undefined,
+                      });
+                  });
+              });
+
+              const routineResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionFunctionsMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              const seenRoutines = new Set<string>();
+              routineResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const rawRoutineName = String(getCaseInsensitiveValue(row, ['routine_name', 'object_name', 'proname', 'name']) || '').trim();
+                      if (!rawRoutineName) return;
+                      const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'owner', 'db', 'database']) || '').trim();
+                      const rawType = String(getCaseInsensitiveValue(row, ['routine_type', 'object_type', 'type']) || queryResult.inferredType || 'FUNCTION').trim();
+                      const normalizedType = rawType.toUpperCase().includes('PROC') ? 'PROCEDURE' : 'FUNCTION';
+                      const qualifiedRoutineName = buildQualifiedCompletionName(schemaName, rawRoutineName);
+                      if (!qualifiedRoutineName) return;
+                      const uniqueKey = `${dbName.toLowerCase()}@@${qualifiedRoutineName.toLowerCase()}@@${normalizedType}`;
+                      if (seenRoutines.has(uniqueKey)) return;
+                      seenRoutines.add(uniqueKey);
+                      allRoutines.push({
+                          dbName,
+                          routineName: qualifiedRoutineName,
+                          routineType: normalizedType,
+                          schemaName: schemaName || splitSidebarQualifiedName(qualifiedRoutineName).schemaName || undefined,
+                      });
+                  });
+              });
           }
 
           tablesRef.current = allTables;
           allColumnsRef.current = allColumns;
+          viewsRef.current = allViews;
+          materializedViewsRef.current = allMaterializedViews;
+          triggersRef.current = allTriggers;
+          routinesRef.current = allRoutines;
           // 如果当前 Tab 是活跃 Tab，同步更新共享变量
           if (isActive) {
               sharedTablesData = allTables;
@@ -1155,6 +1868,68 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       monacoRef.current = monaco;
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
+      const applyNavigationHoverState = (event: any) => {
+          if (!ctrlMetaPressedRef.current) {
+              clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+              editor.updateOptions?.({ mouseStyle: 'text' });
+              return;
+          }
+          const targetPosition = normalizeEditorPosition(event?.target?.position);
+          if (!targetPosition) {
+              clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+              editor.updateOptions?.({ mouseStyle: 'text' });
+              return;
+          }
+          const model = editor.getModel?.();
+          const lineContent = String(model?.getLineContent?.(targetPosition.lineNumber) || '');
+          const decorations = resolveQueryEditorNavigationDecorations(
+              lineContent,
+              targetPosition.column,
+              currentDbRef.current,
+              visibleDbsRef.current,
+              tablesRef.current,
+              viewsRef.current,
+              materializedViewsRef.current,
+              triggersRef.current,
+              routinesRef.current,
+          );
+          if (decorations.length === 0) {
+              clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+              editor.updateOptions?.({ mouseStyle: 'text' });
+              return;
+          }
+
+          linkDecorationIdsRef.current = editor.deltaDecorations(
+              linkDecorationIdsRef.current,
+              decorations.map((item) => ({
+                  range: new monaco.Range(
+                      targetPosition.lineNumber,
+                      item.startColumn,
+                      targetPosition.lineNumber,
+                      item.endColumn,
+                  ),
+                  options: {
+                      inlineClassName: 'gonavi-query-editor-link-hint',
+                      hoverMessage: { value: item.hoverMessage },
+                  },
+              })),
+          );
+          editor.updateOptions?.({ mouseStyle: 'pointer' });
+      };
+
+      const syncModifierState = (keyboardEvent?: KeyboardEvent | MouseEvent | null) => {
+          ctrlMetaPressedRef.current = !!(keyboardEvent?.ctrlKey || keyboardEvent?.metaKey);
+          if (!ctrlMetaPressedRef.current) {
+              clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+              editor.updateOptions?.({ mouseStyle: 'text' });
+          }
+      };
+      const handleWindowBlur = () => {
+          ctrlMetaPressedRef.current = false;
+          clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+          editor.updateOptions?.({ mouseStyle: 'text' });
+      };
+
       // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
 
@@ -1163,6 +1938,171 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (position) {
               lastEditorCursorPositionRef.current = position;
           }
+      });
+
+      editor.onMouseMove?.((event: any) => {
+          syncModifierState(event?.event || null);
+          applyNavigationHoverState(event);
+      });
+      editor.onMouseLeave?.(() => {
+          clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+          editor.updateOptions?.({ mouseStyle: 'text' });
+      });
+
+      window.addEventListener('keydown', syncModifierState);
+      window.addEventListener('keyup', syncModifierState);
+      window.addEventListener('blur', handleWindowBlur);
+
+      editor.onMouseDown?.((event: any) => {
+          const browserEvent = event?.event;
+          syncModifierState(browserEvent || null);
+          const targetPosition = normalizeEditorPosition(event?.target?.position);
+          if (!browserEvent || !targetPosition) {
+              return;
+          }
+          if (browserEvent.leftButton !== true) {
+              return;
+          }
+          if (!browserEvent.ctrlKey && !browserEvent.metaKey) {
+              return;
+          }
+
+          const model = editor.getModel?.();
+          const lineContent = String(model?.getLineContent?.(targetPosition.lineNumber) || '');
+          const navigationTarget = resolveQueryEditorNavigationTarget(
+              lineContent,
+              targetPosition.column,
+              currentDbRef.current,
+              visibleDbsRef.current,
+              tablesRef.current,
+              viewsRef.current,
+              materializedViewsRef.current,
+              triggersRef.current,
+              routinesRef.current,
+          );
+          if (!navigationTarget) {
+              return;
+          }
+
+          browserEvent.preventDefault?.();
+          browserEvent.stopPropagation?.();
+
+          const connectionId = String(currentConnectionIdRef.current || '').trim();
+          if (!connectionId) {
+              return;
+          }
+
+          if (navigationTarget.type === 'database') {
+              const nextDbName = String(navigationTarget.dbName || '').trim();
+              if (!nextDbName) {
+                  return;
+              }
+              setCurrentDb(nextDbName);
+              currentDbRef.current = nextDbName;
+              setActiveContext({ connectionId, dbName: nextDbName });
+              return;
+          }
+
+          const targetDbName = String(navigationTarget.dbName || '').trim();
+          if (!targetDbName) {
+              return;
+          }
+
+          setCurrentDb(targetDbName);
+          currentDbRef.current = targetDbName;
+          setActiveContext({ connectionId, dbName: targetDbName });
+          if (navigationTarget.type === 'table') {
+              const targetTableName = String(navigationTarget.tableName || '').trim();
+              if (!targetTableName) return;
+              addTab({
+                  id: `${connectionId}-${targetDbName}-table-${targetTableName}`,
+                  title: targetTableName,
+                  type: 'table',
+                  connectionId,
+                  dbName: targetDbName,
+                  tableName: targetTableName,
+              });
+              dispatchQueryEditorSidebarLocate({
+                  connectionId,
+                  dbName: targetDbName,
+                  tableName: targetTableName,
+                  schemaName: navigationTarget.schemaName,
+                  objectGroup: 'tables',
+              });
+              return;
+          }
+
+          if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {
+              const targetViewName = String(navigationTarget.viewName || '').trim();
+              if (!targetViewName) return;
+              addTab({
+                  id: `view-def-${connectionId}-${targetDbName}-${targetViewName}`,
+                  title: `${navigationTarget.type === 'materialized-view' ? '物化视图' : '视图'}: ${targetViewName}`,
+                  type: 'view-def',
+                  connectionId,
+                  dbName: targetDbName,
+                  viewName: targetViewName,
+                  viewKind: navigationTarget.type === 'materialized-view' ? 'materialized' : 'view',
+              });
+              dispatchQueryEditorSidebarLocate({
+                  connectionId,
+                  dbName: targetDbName,
+                  viewName: targetViewName,
+                  tableName: targetViewName,
+                  schemaName: navigationTarget.schemaName,
+                  objectGroup: navigationTarget.type === 'materialized-view' ? 'materializedViews' : 'views',
+              });
+              return;
+          }
+
+          if (navigationTarget.type === 'trigger') {
+              const targetTriggerName = String(navigationTarget.triggerName || '').trim();
+              if (!targetTriggerName) return;
+              addTab({
+                  id: `trigger-${connectionId}-${targetDbName}-${targetTriggerName}`,
+                  title: `触发器: ${targetTriggerName}`,
+                  type: 'trigger',
+                  connectionId,
+                  dbName: targetDbName,
+                  triggerName: targetTriggerName,
+              });
+              dispatchQueryEditorSidebarLocate({
+                  connectionId,
+                  dbName: targetDbName,
+                  triggerName: targetTriggerName,
+                  tableName: targetTriggerName,
+                  schemaName: navigationTarget.schemaName,
+                  objectGroup: 'triggers',
+              });
+              return;
+          }
+
+          const targetRoutineName = String(navigationTarget.routineName || '').trim();
+          if (!targetRoutineName) return;
+          addTab({
+              id: `routine-def-${connectionId}-${targetDbName}-${targetRoutineName}`,
+              title: `${navigationTarget.routineType === 'PROCEDURE' ? '存储过程' : '函数'}: ${targetRoutineName}`,
+              type: 'routine-def',
+              connectionId,
+              dbName: targetDbName,
+              routineName: targetRoutineName,
+              routineType: navigationTarget.routineType,
+          });
+          dispatchQueryEditorSidebarLocate({
+              connectionId,
+              dbName: targetDbName,
+              routineName: targetRoutineName,
+              tableName: targetRoutineName,
+              schemaName: navigationTarget.schemaName,
+              objectGroup: 'routines',
+          });
+      });
+
+      editor.onDidDispose?.(() => {
+          clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+          window.removeEventListener('keydown', syncModifierState);
+          window.removeEventListener('keyup', syncModifierState);
+          window.removeEventListener('blur', handleWindowBlur);
       });
 
       // 注册 AI 右键菜单操作

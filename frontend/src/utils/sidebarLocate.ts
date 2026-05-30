@@ -1,4 +1,4 @@
-export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews';
+export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines';
 
 export interface SidebarLocateObjectRequest {
   tabId?: string;
@@ -38,6 +38,8 @@ export interface SidebarLocateTabLike {
   tableName?: string;
   viewName?: string;
   viewKind?: string;
+  triggerName?: string;
+  routineName?: string;
 }
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
@@ -57,15 +59,21 @@ const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string,
   const explicitGroup = toTrimmedString(detail.objectGroup);
   if (explicitGroup === 'views' || explicitGroup === 'view') return 'views';
   if (explicitGroup === 'materializedViews' || explicitGroup === 'materialized-view') return 'materializedViews';
+  if (explicitGroup === 'triggers' || explicitGroup === 'trigger') return 'triggers';
+  if (explicitGroup === 'routines' || explicitGroup === 'routine') return 'routines';
 
   const explicitType = toTrimmedString(detail.objectType);
   if (explicitType === 'view' || explicitType === 'views') return 'views';
   if (explicitType === 'materialized' || explicitType === 'materialized-view') return 'materializedViews';
+  if (explicitType === 'trigger' || explicitType === 'triggers') return 'triggers';
+  if (explicitType === 'routine' || explicitType === 'routines') return 'routines';
 
   const tabId = toTrimmedString(detail.tabId);
   const dbNodeKey = `${connectionId}-${dbName}`;
   if (tabId.startsWith(`${dbNodeKey}-materialized-view-`)) return 'materializedViews';
   if (tabId.startsWith(`${dbNodeKey}-view-`)) return 'views';
+  if (tabId.startsWith(`${dbNodeKey}-trigger-`)) return 'triggers';
+  if (tabId.startsWith(`${dbNodeKey}-routine-`) || tabId.startsWith(`routine-def-${connectionId}-${dbName}-`)) return 'routines';
 
   return 'tables';
 };
@@ -74,7 +82,7 @@ export const normalizeSidebarLocateObjectRequest = (detail: unknown): SidebarLoc
   const raw = (detail || {}) as Record<string, unknown>;
   const connectionId = toTrimmedString(raw.connectionId);
   const dbName = toTrimmedString(raw.dbName);
-  const tableName = toTrimmedString(raw.tableName || raw.objectName || raw.viewName);
+  const tableName = toTrimmedString(raw.tableName || raw.objectName || raw.viewName || raw.triggerName || raw.routineName);
 
   if (!connectionId || !dbName || !tableName) {
     return null;
@@ -97,8 +105,12 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
   if (!tab) return null;
   const objectName = tab.type === 'view-def'
     ? toTrimmedString(tab.viewName || tab.tableName)
-    : toTrimmedString(tab.tableName || tab.viewName);
-  if (tab.type !== 'table' && tab.type !== 'view-def') {
+    : tab.type === 'trigger'
+      ? toTrimmedString(tab.triggerName || tab.tableName)
+      : tab.type === 'routine-def'
+        ? toTrimmedString(tab.routineName || tab.tableName)
+        : toTrimmedString(tab.tableName || tab.viewName);
+  if (tab.type !== 'table' && tab.type !== 'view-def' && tab.type !== 'trigger' && tab.type !== 'routine-def') {
     return null;
   }
 
@@ -109,7 +121,7 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
     tableName: objectName,
     objectGroup: tab.type === 'view-def'
       ? (tab.viewKind === 'materialized' ? 'materializedViews' : 'views')
-      : undefined,
+      : (tab.type === 'trigger' ? 'triggers' : (tab.type === 'routine-def' ? 'routines' : undefined)),
   });
 };
 
@@ -121,7 +133,13 @@ export const resolveSidebarLocateTarget = (
   const databaseKey = `${request.connectionId}-${request.dbName}`;
   const fallbackTargetKey = request.objectGroup === 'materializedViews'
     ? `${databaseKey}-materialized-view-${request.tableName}`
-    : (request.objectGroup === 'views' ? `${databaseKey}-view-${request.tableName}` : `${databaseKey}-${request.tableName}`);
+    : request.objectGroup === 'views'
+      ? `${databaseKey}-view-${request.tableName}`
+      : request.objectGroup === 'triggers'
+        ? `${databaseKey}-trigger-${request.tableName}`
+        : request.objectGroup === 'routines'
+          ? `${databaseKey}-routine-${request.tableName}`
+          : `${databaseKey}-${request.tableName}`;
   const targetKey = request.tabId || fallbackTargetKey;
   const schemaSegment = request.schemaName || 'default';
   const schemaKey = options.groupBySchema ? `${databaseKey}-schema-${schemaSegment}` : undefined;
@@ -202,6 +220,16 @@ const matchesLocateObjectNode = (node: SidebarLocateTreeNodeLike, target: Sideba
   if (target.objectGroup === 'materializedViews') {
     if (node.type !== 'materialized-view') return false;
     return matchesLocateObjectName(target, toTrimmedString(dataRef.viewName || dataRef.tableName), toTrimmedString(dataRef.schemaName));
+  }
+
+  if (target.objectGroup === 'triggers') {
+    if (node.type !== 'db-trigger') return false;
+    return matchesLocateObjectName(target, toTrimmedString(dataRef.triggerName || dataRef.tableName), toTrimmedString(dataRef.schemaName));
+  }
+
+  if (target.objectGroup === 'routines') {
+    if (node.type !== 'routine') return false;
+    return matchesLocateObjectName(target, toTrimmedString(dataRef.routineName || dataRef.tableName), toTrimmedString(dataRef.schemaName));
   }
 
   if (node.type !== 'table') return false;
