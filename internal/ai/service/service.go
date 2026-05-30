@@ -144,6 +144,25 @@ func (s *Service) AIGetProviders() []ai.ProviderConfig {
 	return result
 }
 
+// AIGetEditableProvider 获取用于编辑的 Provider 配置，包含已解析的 secret
+func (s *Service) AIGetEditableProvider(id string) (ai.ProviderConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, providerConfig := range s.providers {
+		if providerConfig.ID != id {
+			continue
+		}
+		resolved, err := s.resolveProviderConfigSecrets(providerConfig)
+		if err != nil {
+			return ai.ProviderConfig{}, fmt.Errorf("读取 Provider secret 失败: %w", err)
+		}
+		return resolved, nil
+	}
+
+	return ai.ProviderConfig{}, fmt.Errorf("provider not found: %s", id)
+}
+
 // AISaveProvider 保存/更新 Provider 配置
 func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 	s.mu.Lock()

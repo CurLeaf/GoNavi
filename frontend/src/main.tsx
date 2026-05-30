@@ -25,6 +25,10 @@ const resolveDevHarnessMode = (): string => {
 
 if (typeof window !== 'undefined' && !(window as any).go) {
     const mockConnections: any[] = [];
+    const mockConnectionSecrets = new Map<string, any>();
+    const mockProviders: any[] = [];
+    const mockProviderSecrets = new Map<string, string>();
+    let mockActiveProviderId = '';
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
@@ -45,11 +49,31 @@ if (typeof window !== 'undefined' && !(window as any).go) {
 
     const saveMockConnection = (input: any) => {
         const existing = mockConnections.find((item) => item.id === input?.id);
+        const existingSecrets = mockConnectionSecrets.get(existing?.id || input?.id || '') || {};
         const config = (input?.config && typeof input.config === 'object') ? input.config : {};
         const ssh = (config.ssh && typeof config.ssh === 'object') ? config.ssh : {};
         const proxy = (config.proxy && typeof config.proxy === 'object') ? config.proxy : {};
         const httpTunnel = (config.httpTunnel && typeof config.httpTunnel === 'object') ? config.httpTunnel : {};
         const nextId = String(input?.id || existing?.id || `mock-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const nextSecrets = {
+            password: String(config.password ?? existingSecrets.password ?? ''),
+            sshPassword: String(ssh.password ?? existingSecrets.sshPassword ?? ''),
+            proxyPassword: String(proxy.password ?? existingSecrets.proxyPassword ?? ''),
+            httpTunnelPassword: String(httpTunnel.password ?? existingSecrets.httpTunnelPassword ?? ''),
+            mysqlReplicaPassword: String(config.mysqlReplicaPassword ?? existingSecrets.mysqlReplicaPassword ?? ''),
+            mongoReplicaPassword: String(config.mongoReplicaPassword ?? existingSecrets.mongoReplicaPassword ?? ''),
+            uri: String(config.uri ?? existingSecrets.uri ?? ''),
+            dsn: String(config.dsn ?? existingSecrets.dsn ?? ''),
+        };
+        if (input?.clearPrimaryPassword) nextSecrets.password = '';
+        if (input?.clearSSHPassword) nextSecrets.sshPassword = '';
+        if (input?.clearProxyPassword) nextSecrets.proxyPassword = '';
+        if (input?.clearHttpTunnelPassword) nextSecrets.httpTunnelPassword = '';
+        if (input?.clearMySQLReplicaPassword) nextSecrets.mysqlReplicaPassword = '';
+        if (input?.clearMongoReplicaPassword) nextSecrets.mongoReplicaPassword = '';
+        if (input?.clearOpaqueURI) nextSecrets.uri = '';
+        if (input?.clearOpaqueDSN) nextSecrets.dsn = '';
+        mockConnectionSecrets.set(nextId, nextSecrets);
         const view = {
             id: nextId,
             name: String(input?.name || existing?.name || '未命名连接'),
@@ -93,12 +117,63 @@ if (typeof window !== 'undefined' && !(window as any).go) {
         return cloneBrowserMockValue(mockGlobalProxy);
     };
 
+    const saveMockProvider = (input: any) => {
+        const existing = mockProviders.find((item) => item.id === input?.id);
+        const nextId = String(input?.id || existing?.id || `provider-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const apiKey = String(input?.apiKey ?? '');
+        if (apiKey !== '') {
+            mockProviderSecrets.set(nextId, apiKey);
+        } else if (input?.hasSecret === false) {
+            mockProviderSecrets.delete(nextId);
+        }
+        const hasSecret = mockProviderSecrets.has(nextId);
+        const view = {
+            ...existing,
+            ...input,
+            id: nextId,
+            apiKey: '',
+            hasSecret,
+            secretRef: '',
+        };
+        const index = mockProviders.findIndex((item) => item.id === nextId);
+        if (index >= 0) {
+            mockProviders[index] = view;
+        } else {
+            mockProviders.push(view);
+        }
+        if (!mockActiveProviderId) {
+            mockActiveProviderId = nextId;
+        }
+        return cloneBrowserMockValue(view);
+    };
+
     (window as any).go = {
         app: {
             App: {
                 CheckUpdate: async () => ({ success: false }),
                 DownloadUpdate: async () => ({ success: false }),
                 GetSavedConnections: async () => cloneBrowserMockValue(mockConnections),
+                GetEditableSavedConnection: async (id: string) => {
+                    const existing = mockConnections.find((item) => item.id === id);
+                    if (!existing) {
+                        throw new Error(`saved connection not found: ${id}`);
+                    }
+                    const secrets = mockConnectionSecrets.get(id) || {};
+                    return cloneBrowserMockValue({
+                        ...existing,
+                        config: {
+                            ...existing.config,
+                            password: secrets.password || '',
+                            ssh: { ...(existing.config?.ssh || {}), password: secrets.sshPassword || '' },
+                            proxy: { ...(existing.config?.proxy || {}), password: secrets.proxyPassword || '' },
+                            httpTunnel: { ...(existing.config?.httpTunnel || {}), password: secrets.httpTunnelPassword || '' },
+                            mysqlReplicaPassword: secrets.mysqlReplicaPassword || '',
+                            mongoReplicaPassword: secrets.mongoReplicaPassword || '',
+                            uri: secrets.uri || '',
+                            dsn: secrets.dsn || '',
+                        },
+                    });
+                },
                 ListInstalledFontFamilies: async () => ({ success: true, data: [] }),
                 SaveConnection: async (input: any) => saveMockConnection(input),
                 DeleteConnection: async (id: string) => {
@@ -171,6 +246,47 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                     return { success: true, message: '数据目录已更新', data: cloneBrowserMockValue(mockDataRootInfo) };
                 },
             }
+        },
+        aiservice: {
+            Service: {
+                AIGetProviders: async () => cloneBrowserMockValue(mockProviders),
+                AIGetEditableProvider: async (id: string) => {
+                    const existing = mockProviders.find((item) => item.id === id);
+                    if (!existing) {
+                        throw new Error(`provider not found: ${id}`);
+                    }
+                    return cloneBrowserMockValue({
+                        ...existing,
+                        apiKey: mockProviderSecrets.get(id) || '',
+                    });
+                },
+                AISaveProvider: async (input: any) => saveMockProvider(input),
+                AIDeleteProvider: async (id: string) => {
+                    const index = mockProviders.findIndex((item) => item.id === id);
+                    if (index >= 0) {
+                        mockProviders.splice(index, 1);
+                    }
+                    mockProviderSecrets.delete(id);
+                    if (mockActiveProviderId === id) {
+                        mockActiveProviderId = mockProviders[0]?.id || '';
+                    }
+                    return null;
+                },
+                AIGetActiveProvider: async () => mockActiveProviderId,
+                AISetActiveProvider: async (id: string) => {
+                    mockActiveProviderId = id;
+                    return null;
+                },
+                AIGetSafetyLevel: async () => 'readonly',
+                AIGetContextLevel: async () => 'schema_only',
+                AIGetBuiltinPrompts: async () => ({}),
+                AITestProvider: async (input: any) => ({
+                    success: String(input?.apiKey || '').trim() !== '',
+                    message: String(input?.apiKey || '').trim() !== '' ? '端点连通性测试成功！' : '连接测试失败: missing api key',
+                }),
+                AISetSafetyLevel: async () => null,
+                AISetContextLevel: async () => null,
+            },
         }
     };
 }

@@ -108,6 +108,8 @@ export function GetDriverVersionList(arg1:string,arg2:string):Promise<connection
 
 export function GetDriverVersionPackageSize(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
+export function GetEditableSavedConnection(arg1:string):Promise<connection.SavedConnectionView>;
+
 export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
 export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;

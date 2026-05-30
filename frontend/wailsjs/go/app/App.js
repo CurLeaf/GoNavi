@@ -206,6 +206,10 @@ export function GetDriverVersionPackageSize(arg1, arg2) {
   return window['go']['app']['App']['GetDriverVersionPackageSize'](arg1, arg2);
 }
 
+export function GetEditableSavedConnection(arg1) {
+  return window['go']['app']['App']['GetEditableSavedConnection'](arg1);
+}
+
 export function GetGlobalProxyConfig() {
   return window['go']['app']['App']['GetGlobalProxyConfig']();
 }

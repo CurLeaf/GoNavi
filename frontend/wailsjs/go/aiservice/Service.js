@@ -38,6 +38,10 @@ export function AIGetContextLevel() {
   return window['go']['aiservice']['Service']['AIGetContextLevel']();
 }
 
+export function AIGetEditableProvider(arg1) {
+  return window['go']['aiservice']['Service']['AIGetEditableProvider'](arg1);
+}
+
 export function AIGetProviders() {
   return window['go']['aiservice']['Service']['AIGetProviders']();
 }

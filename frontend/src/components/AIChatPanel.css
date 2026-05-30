@@ -493,6 +493,19 @@
     left: 50% !important;
     transform: translateX(-50%) !important;
     right: auto !important;
-    width: max-content;
+    width: min(100%, 720px);
+    max-width: calc(100% - 32px);
     z-index: 100;
+}
+
+.ai-settings-body .ant-message .ant-message-notice {
+    width: 100%;
+}
+
+.ai-settings-body .ant-message .ant-message-notice-content {
+    width: 100%;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    text-align: left;
 }

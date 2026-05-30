@@ -54,6 +54,61 @@ func TestSaveConnectionMethodReturnsSecretlessView(t *testing.T) {
 	}
 }
 
+func TestGetEditableSavedConnectionReturnsResolvedSecretsForEdit(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+
+	if _, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "conn-edit",
+		Name: "Editable",
+		Config: connection.ConnectionConfig{
+			ID:       "conn-edit",
+			Type:     "mysql",
+			Host:     "db.local",
+			Port:     3306,
+			User:     "root",
+			Password: "mysql-secret",
+			UseSSH:   true,
+			SSH: connection.SSHConfig{
+				Host:     "jump.local",
+				Port:     22,
+				User:     "ops",
+				Password: "ssh-secret",
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := app.GetEditableSavedConnection("conn-edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Config.Password != "mysql-secret" {
+		t.Fatalf("expected editable primary password, got %q", view.Config.Password)
+	}
+	if view.Config.SSH.Password != "ssh-secret" {
+		t.Fatalf("expected editable SSH password, got %q", view.Config.SSH.Password)
+	}
+	if !view.HasPrimaryPassword || !view.HasSSHPassword {
+		t.Fatalf("expected secret flags to stay true, got %#v", view)
+	}
+
+	saved, err := app.GetSavedConnections()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 {
+		t.Fatalf("expected one saved connection, got %d", len(saved))
+	}
+	if saved[0].Config.Password != "" {
+		t.Fatalf("expected saved connection list to remain secretless, got %q", saved[0].Config.Password)
+	}
+	if saved[0].Config.SSH.Password != "" {
+		t.Fatalf("expected saved connection list SSH password to remain secretless, got %q", saved[0].Config.SSH.Password)
+	}
+}
+
 func TestSaveConnectionOnDarwinPersistsSecretsInlineButReturnsSecretlessView(t *testing.T) {
 	app := NewAppWithSecretStore(failOnUseSecretStore{})
 	app.configDir = t.TempDir()

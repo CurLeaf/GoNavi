@@ -8,12 +8,10 @@ export interface ProviderEditorSession {
   editingProvider: ProviderEditorConfig | null;
   formValues: Record<string, unknown> | null;
   isEditing: boolean;
-  clearProviderSecret: boolean;
   testStatus: ProviderEditorStatus;
 }
 
 interface BuildAddProviderEditorSessionInput {
-  previousClearProviderSecret?: boolean;
   presetKey?: string;
   presetBackendType: AIProviderType;
   presetBaseUrl: string;
@@ -23,13 +21,8 @@ interface BuildAddProviderEditorSessionInput {
 }
 
 interface BuildEditProviderEditorSessionInput {
-  previousClearProviderSecret?: boolean;
   provider: ProviderEditorConfig;
   formValues?: Record<string, unknown>;
-}
-
-interface BuildClosedProviderEditorSessionInput {
-  previousClearProviderSecret?: boolean;
 }
 
 export const buildAddProviderEditorSession = ({
@@ -61,7 +54,6 @@ export const buildAddProviderEditorSession = ({
       apiFormat,
     },
     isEditing: true,
-    clearProviderSecret: false,
     testStatus: 'idle',
   };
 };
@@ -78,15 +70,13 @@ export const buildEditProviderEditorSession = ({
     apiFormat: provider.apiFormat || 'openai',
   },
   isEditing: true,
-  clearProviderSecret: false,
   testStatus: 'idle',
 });
 
-export const buildClosedProviderEditorSession = (_input?: BuildClosedProviderEditorSessionInput): ProviderEditorSession => ({
+export const buildClosedProviderEditorSession = (): ProviderEditorSession => ({
   editingProvider: null,
   formValues: null,
   isEditing: false,
-  clearProviderSecret: false,
   testStatus: 'idle',
 });
 

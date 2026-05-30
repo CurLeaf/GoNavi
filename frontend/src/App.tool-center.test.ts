@@ -124,6 +124,24 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('{isSyncModalOpen && (');
   });
 
+  it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {
+    expect(appSource).toContain("typeof backendApp?.GetEditableSavedConnection === 'function'");
+    expect(appSource).toContain('const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);');
+    expect(appSource).toContain('setEditingConnection(nextConnection);');
+    expect(appSource).toContain('setIsModalOpen(true);');
+  });
+
+  it('loads editable AI provider details before opening the edit modal so stored api keys can be shown', () => {
+    expect(appSource).toContain('<AISettingsModal');
+    const modalSource = readFileSync(new URL('./components/AISettingsModal.tsx', import.meta.url), 'utf8');
+    expect(modalSource).toContain("typeof Service?.AIGetEditableProvider === 'function'");
+    expect(modalSource).toContain('await Service.AIGetEditableProvider(p.id)');
+  });
+
+  it('keeps edit-mode passwords masked by default instead of forcing the eye toggle open', () => {
+    expect(appSource).not.toContain('setPrimaryPasswordVisible(String(config.password || "").trim() !== "")');
+  });
+
   it('keeps shortcut manager scrolling inside the modal body', () => {
     expect(appSource).toContain('centered');
     expect(appSource).toContain("height: 'min(760px, calc(100vh - 80px))'");
