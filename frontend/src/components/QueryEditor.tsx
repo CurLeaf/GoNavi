@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
@@ -1473,16 +1473,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
       return savedQueries.find((item) => item.id === tabId) || null;
   }, [savedQueries, tab.id, tab.savedQueryId]);
-  const activeConnectionName = useMemo(
-      () => connections.find(c => c.id === currentConnectionId)?.name || '未选择连接',
-      [connections, currentConnectionId],
-  );
-  const queryResultSummary = useMemo(() => {
-      if (loading) return '执行中';
-      if (resultSets.length === 0) return executionError ? '执行失败' : '未执行';
-      const totalRows = resultSets.reduce((sum, rs) => sum + (Array.isArray(rs.rows) ? rs.rows.length : 0), 0);
-      return `${resultSets.length} 组结果 / ${totalRows.toLocaleString()} 行`;
-  }, [executionError, loading, resultSets]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -3843,18 +3833,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         }
       `}</style>
       <div ref={editorPaneRef} className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}>
-      {isV2Ui && (
-        <div className="gn-v2-query-header">
-          <div className="gn-v2-query-title">
-            <span>SQL WORKSPACE</span>
-            <strong>{currentDb || '未选择数据库'}</strong>
-          </div>
-          <div className="gn-v2-query-context">
-            <span><DatabaseOutlined /> {activeConnectionName}</span>
-            <span>{queryResultSummary}</span>
-          </div>
-        </div>
-      )}
       <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
