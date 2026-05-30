@@ -12,6 +12,7 @@ import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AISettingsModal from './components/AISettingsModal';
+import AIChatPanel from './components/AIChatPanel';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -189,8 +190,6 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
-const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
-
 interface AIPanelErrorBoundaryProps {
   children: React.ReactNode;
   fallback: (error: Error | null) => React.ReactNode;
@@ -328,7 +327,6 @@ function App() {
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
-  const LazyAIChatPanel = useMemo(() => createLazyAIChatPanel(), [aiPanelRenderNonce]);
   const securityUpdateStatusMeta = useMemo(
       () => getSecurityUpdateStatusMeta(securityUpdateStatus),
       [securityUpdateStatus],
@@ -2352,12 +2350,26 @@ function App() {
       setIsModalOpen(true);
   }, []);
 
-  const handleEditConnection = (conn: SavedConnection) => {
+  const handleEditConnection = useCallback((conn: SavedConnection) => {
       setSecurityUpdateRepairSource(null);
-      setEditingConnection(conn);
       setIsConnectionModalMounted(true);
-      setIsModalOpen(true);
-  };
+      void (async () => {
+          const backendApp = (window as any).go?.app?.App;
+          let nextConnection = conn;
+          if (typeof backendApp?.GetEditableSavedConnection === 'function') {
+              try {
+                  const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);
+                  if (editableConnection) {
+                      nextConnection = editableConnection;
+                  }
+              } catch (error: any) {
+                  message.warning(error?.message || '读取已保存连接详情失败，当前将打开脱敏配置');
+              }
+          }
+          setEditingConnection(nextConnection);
+          setIsModalOpen(true);
+      })();
+  }, []);
 
   useEffect(() => {
       if (connectionModalWarmupDoneRef.current) {
@@ -2489,6 +2501,15 @@ function App() {
   }, []);
 
   const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
+      try {
+          (window as any).__gonaviLastAIPanelRenderError = {
+              message: error?.message || '',
+              stack: error?.stack || '',
+              componentStack: errorInfo?.componentStack || '',
+          };
+      } catch {
+          // ignore debug capture failures
+      }
       console.error('AIChatPanel render error:', error, errorInfo);
   }, []);
 
@@ -3394,6 +3415,7 @@ function App() {
                       </>
                       )}
                       <AIPanelErrorBoundary
+                        key={aiPanelRenderNonce}
                         onError={handleAIPanelRenderError}
                         fallback={(error) => (
                           <div
@@ -3449,11 +3471,9 @@ function App() {
                           </div>
                         )}
                       >
-                        <React.Suspense fallback={<div style={{ width: aiPanelRenderWidth, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
-                            <LazyAIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                              handleOpenAISettings();
-                            }} overlayTheme={overlayTheme} />
-                        </React.Suspense>
+                        <AIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                          handleOpenAISettings();
+                        }} overlayTheme={overlayTheme} />
                       </AIPanelErrorBoundary>
                       </div>
                   </div>
