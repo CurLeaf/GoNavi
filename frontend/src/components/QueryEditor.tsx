@@ -1412,6 +1412,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const selectCurrentStatementActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastEditorCursorPositionRef = useRef<any>(null);
+  const lastHoverTargetPositionRef = useRef<{ lineNumber: number; column: number } | null>(null);
   const lastExecutedEditorQueryRef = useRef<string>('');
   const linkDecorationIdsRef = useRef<string[]>([]);
   const ctrlMetaPressedRef = useRef(false);
@@ -1868,16 +1869,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       monacoRef.current = monaco;
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
-      const applyNavigationHoverState = (event: any) => {
+      const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
               editor.updateOptions?.({ mouseStyle: 'text' });
+              setQueryEditorMouseCursor(editor, '');
               return;
           }
-          const targetPosition = normalizeEditorPosition(event?.target?.position);
           if (!targetPosition) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
               editor.updateOptions?.({ mouseStyle: 'text' });
+              setQueryEditorMouseCursor(editor, '');
               return;
           }
           const model = editor.getModel?.();
@@ -1896,6 +1898,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (decorations.length === 0) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
               editor.updateOptions?.({ mouseStyle: 'text' });
+              setQueryEditorMouseCursor(editor, '');
               return;
           }
 
@@ -1914,20 +1917,36 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   },
               })),
           );
-          editor.updateOptions?.({ mouseStyle: 'pointer' });
+          setQueryEditorMouseCursor(editor, 'pointer');
+      };
+
+      const applyNavigationHoverState = (event: any) => {
+          const targetPosition = normalizeEditorPosition(event?.target?.position);
+          lastHoverTargetPositionRef.current = targetPosition;
+          applyNavigationHoverStateAtPosition(targetPosition);
       };
 
       const syncModifierState = (keyboardEvent?: KeyboardEvent | MouseEvent | null) => {
+          const wasPressed = ctrlMetaPressedRef.current;
           ctrlMetaPressedRef.current = !!(keyboardEvent?.ctrlKey || keyboardEvent?.metaKey);
           if (!ctrlMetaPressedRef.current) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
               editor.updateOptions?.({ mouseStyle: 'text' });
+              setQueryEditorMouseCursor(editor, '');
+              return;
+          }
+          const isKeyboardLikeEvent = keyboardEvent
+              && typeof keyboardEvent === 'object'
+              && ('key' in keyboardEvent || 'code' in keyboardEvent || 'repeat' in keyboardEvent);
+          if (!wasPressed || isKeyboardLikeEvent) {
+              applyNavigationHoverStateAtPosition(lastHoverTargetPositionRef.current);
           }
       };
       const handleWindowBlur = () => {
           ctrlMetaPressedRef.current = false;
           clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
           editor.updateOptions?.({ mouseStyle: 'text' });
+          setQueryEditorMouseCursor(editor, '');
       };
 
       // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
@@ -1945,8 +1964,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           applyNavigationHoverState(event);
       });
       editor.onMouseLeave?.(() => {
+          lastHoverTargetPositionRef.current = null;
           clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
           editor.updateOptions?.({ mouseStyle: 'text' });
+          setQueryEditorMouseCursor(editor, '');
       });
 
       window.addEventListener('keydown', syncModifierState);
@@ -2100,6 +2121,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.onDidDispose?.(() => {
           clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+          setQueryEditorMouseCursor(editor, '');
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
           window.removeEventListener('blur', handleWindowBlur);
@@ -4066,7 +4088,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           </Form>
       </Modal>
     </div>
-  );
+    );
+};
+
+const setQueryEditorMouseCursor = (
+    editor: any,
+    cursor: '' | 'pointer',
+) => {
+    const domNode = editor?.getDomNode?.();
+    if (domNode?.style) {
+        domNode.style.cursor = cursor;
+    }
 };
 
 export default React.memo(QueryEditor);

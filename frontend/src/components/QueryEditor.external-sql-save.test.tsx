@@ -81,6 +81,7 @@ const editorState = vi.hoisted(() => {
   const state = {
     value: '',
     editor: null as any,
+    domNode: { style: { cursor: '' } },
     position: { lineNumber: 1, column: 1 },
     selection: null as any,
     providers: [] as any[],
@@ -140,6 +141,7 @@ const editorState = vi.hoisted(() => {
       state.position = position;
     }),
     getSelection: vi.fn(() => state.selection),
+    getDomNode: vi.fn(() => state.domNode),
     setSelection: vi.fn((selection: any) => {
       state.selection = selection;
     }),
@@ -348,6 +350,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.value = '';
     editorState.position = { lineNumber: 1, column: 1 };
     editorState.selection = null;
+    editorState.domNode.style.cursor = '';
     editorState.providers = [];
     editorState.cursorPositionListeners = [];
     editorState.mouseMoveListeners = [];
@@ -525,14 +528,81 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.editor.deltaDecorations).toHaveBeenCalled();
-    expect(editorState.editor.updateOptions).toHaveBeenCalledWith({ mouseStyle: 'pointer' });
+    expect(editorState.domNode.style.cursor).toBe('pointer');
     const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
 
     await act(async () => {
       editorState.mouseLeaveListeners[0]?.();
     });
+    expect(editorState.domNode.style.cursor).toBe('');
     expect(editorState.editor.updateOptions).toHaveBeenLastCalledWith({ mouseStyle: 'text' });
+  });
+
+  it('keeps hover underline active when ctrl/cmd is pressed repeatedly without moving the mouse', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'select * from analytics.events where id = 1';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_analytics: 'events' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      editorState.mouseMoveListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 27 } },
+        event: {
+          ctrlKey: true,
+          metaKey: false,
+        },
+      });
+    });
+
+    const firstDecorationCallCount = editorState.editor.deltaDecorations.mock.calls.length;
+    expect(firstDecorationCallCount).toBeGreaterThan(0);
+    expect(editorState.domNode.style.cursor).toBe('pointer');
+
+    await act(async () => {
+      const repeatedCtrlEvent = {
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: 'Control',
+        code: 'ControlLeft',
+        repeat: true,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      };
+      windowListeners.keydown?.forEach((listener) => listener(repeatedCtrlEvent));
+      windowListeners.keydown?.forEach((listener) => listener(repeatedCtrlEvent));
+    });
+
+    expect(editorState.editor.deltaDecorations.mock.calls.length).toBeGreaterThan(firstDecorationCallCount);
+    expect(editorState.domNode.style.cursor).toBe('pointer');
+    const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
+    expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
   });
 
   it('opens a view tab on ctrl left click inside the editor', async () => {
