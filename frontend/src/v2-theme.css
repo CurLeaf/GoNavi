@@ -3983,9 +3983,19 @@ body[data-ui-version="v2"] .gn-v2-table-context-menu-popup {
   max-width: calc(100vw - 24px);
 }
 
+body[data-ui-version="v2"] .gn-v2-sidebar-context-menu-portal {
+  width: 264px;
+  max-width: calc(100vw - 24px);
+}
+
+body[data-ui-version="v2"] .gn-v2-table-overview-context-menu-portal {
+  width: 264px;
+  max-width: calc(100vw - 24px);
+}
+
 body[data-ui-version="v2"] .gn-v2-table-context-menu {
   width: 264px;
-  max-height: min(582px, calc(100vh - 28px));
+  max-height: min(582px, var(--gn-v2-context-menu-max-height, calc(100vh - 28px)));
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -4006,10 +4016,10 @@ body[data-ui-version="v2"] .gn-v2-context-menu-body {
   max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 4px 12px;
+  padding: 4px 4px 20px;
   box-sizing: border-box;
   overscroll-behavior: contain;
-  scroll-padding-bottom: 12px;
+  scroll-padding-bottom: 20px;
 }
 
 body[data-ui-version="v2"] .gn-v2-context-menu-body::-webkit-scrollbar {
@@ -4349,6 +4359,15 @@ body[data-ui-version="v2"] .gn-v2-query-results {
 
 body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav {
   background: var(--gn-bg-panel-2);
+}
+
+body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav .ant-tabs-tab {
+  min-height: 34px;
+  padding: 4px 10px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  align-items: stretch;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-empty,

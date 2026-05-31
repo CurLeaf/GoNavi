@@ -115,11 +115,13 @@ vi.mock('../store', () => ({
     connections: mocks.state.connections,
     savedQueries: [],
     externalSQLDirectories: [],
+    saveQuery: mocks.noop,
     deleteQuery: mocks.noop,
     saveExternalSQLDirectory: mocks.noop,
     deleteExternalSQLDirectory: mocks.noop,
     addConnection: mocks.noop,
     addTab: mocks.noop,
+    updateQueryTabDraft: mocks.noop,
     tabs: mocks.state.tabs,
     activeTabId: mocks.state.activeTabId,
     setActiveContext: mocks.noop,
@@ -145,8 +147,10 @@ vi.mock('../store', () => ({
     setTableSortPreference: mocks.noop,
     setSidebarTablePinned: mocks.noop,
     addSqlLog: mocks.noop,
+    sqlLogs: [],
     shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
     setAIPanelVisible: mocks.noop,
+    addAIContext: mocks.noop,
   }),
 }));
 
@@ -384,7 +388,7 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('gn-v2-explorer-command-trigger');
     expect(markup).toContain('搜索表、连接、动作... 或问 AI');
     expect(markup).toContain('gn-v2-search-shortcut');
-    expect(markup).toContain('<kbd>⌘</kbd>');
+    expect(markup).toContain('<kbd>Ctrl</kbd>');
     expect(markup).toContain('<kbd>K</kbd>');
     expect(markup).toContain('gn-v2-explorer-filter-tabs');
     expect(markup).toContain('全部');
@@ -414,7 +418,18 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("kind: 'v2-connection-group'");
     expect(source).toContain('onContextMenu={(event) => openV2ConnectionContextMenu(event, conn)}');
     expect(source).toContain("kind: 'v2-connection'");
-    expect(source).toContain("if (contextMenu.kind === 'v2-connection') return () => renderV2ConnectionContextMenu(contextMenu.node);");
+    expect(source).toContain('resolveSidebarContextMenuPosition(event.clientX, event.clientY)');
+    expect(source).toContain('contextMenuPortalRef');
+    expect(source).toContain('createPortal(');
+    expect(source).toContain('gn-v2-sidebar-context-menu-portal');
+    expect(source).toContain('getBoundingClientRect()');
+    expect(source).toContain("querySelector('.gn-v2-table-context-menu')");
+    expect(source).toContain('content?.scrollHeight');
+    expect(source).toContain("if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);");
+    expect(source).toContain('sourceX: event.clientX');
+    expect(source).toContain("['--gn-v2-context-menu-max-height' as any]");
+    expect(source).toContain('{contextMenu && !contextMenu.kind && (');
+    expect(source).not.toContain("document.addEventListener('contextmenu', onPointerDown)");
     const contextMenuFunction = source.slice(
       source.indexOf('const openV2ConnectionContextMenu = ('),
       source.indexOf('const getV2TreeMetaText = (node: any): string => {'),
@@ -816,6 +831,16 @@ describe('Sidebar locate toolbar', () => {
     expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node) => node.key)).toEqual(['conn-main-events']);
   });
 
+  it('adds rename to the saved query context menu', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const openRenameSavedQueryModal = (query: SavedQuery) =>');
+    expect(source).toContain("key: 'rename-query'");
+    expect(source).toContain("label: '重命名查询'");
+    expect(source).toContain('onClick: () => openRenameSavedQueryModal(q)');
+    expect(source).toContain('const handleRenameSavedQuery = async () =>');
+  });
+
   it('renders the v2 table context menu with the redesigned table layout', () => {
     const markup = renderToStaticMarkup(
       <V2TableContextMenuView
@@ -839,7 +864,7 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('置顶表');
     expect(markup).toContain('字段 / 索引 / 外键');
     expect(markup).toContain('在新标签打开');
-    expect(markup).toContain('⌘↵');
+    expect(markup).toContain('Ctrl+Enter');
     expect(markup).toContain('元信息');
     expect(markup).toContain('查看 DDL · CREATE TABLE');
     expect(markup).toContain('在 ER 图中查看');

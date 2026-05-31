@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'antd';
 import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
@@ -20,6 +21,8 @@ import {
     type TableOverviewSortOrder,
 } from '../utils/tableOverviewFilter';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
+import { isMacLikePlatform } from '../utils/appearance';
+import { getShortcutPlatform } from '../utils/shortcuts';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 
 interface TableOverviewProps {
@@ -40,11 +43,50 @@ interface TableStatRow {
 type SortField = TableOverviewSortField;
 type SortOrder = TableOverviewSortOrder;
 type ViewMode = 'card' | 'list';
+type OverviewContextMenuState = {
+    tableName: string;
+    x: number;
+    y: number;
+    sourceX: number;
+    sourceY: number;
+    maxHeight: number;
+};
 type OverviewTableSection = {
     key: string;
     title: string;
     kind: 'pinned' | 'all';
     rows: TableStatRow[];
+};
+
+const OVERVIEW_CONTEXT_MENU_SAFE_GAP = 8;
+const OVERVIEW_CONTEXT_MENU_WIDTH = 264;
+const OVERVIEW_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
+
+const resolveOverviewContextMenuPosition = (
+    x: number,
+    y: number,
+    options?: {
+        width?: number;
+        height?: number;
+        viewportWidth?: number;
+        viewportHeight?: number;
+        safeGap?: number;
+    },
+): { x: number; y: number; maxHeight: number } => {
+    const safeGap = options?.safeGap ?? OVERVIEW_CONTEXT_MENU_SAFE_GAP;
+    const viewportWidth = options?.viewportWidth ?? (typeof window === 'undefined' ? 1024 : window.innerWidth);
+    const viewportHeight = options?.viewportHeight ?? (typeof window === 'undefined' ? 768 : window.innerHeight);
+    const width = Math.max(0, options?.width ?? OVERVIEW_CONTEXT_MENU_WIDTH);
+    const height = Math.max(0, options?.height ?? OVERVIEW_CONTEXT_MENU_FALLBACK_HEIGHT);
+    const maxX = Math.max(safeGap, viewportWidth - width - safeGap);
+    const maxY = Math.max(safeGap, viewportHeight - height - safeGap);
+    const nextX = Math.max(safeGap, Math.min(x, maxX));
+    const nextY = Math.max(safeGap, Math.min(y, maxY));
+    return {
+        x: nextX,
+        y: nextY,
+        maxHeight: Math.max(120, viewportHeight - nextY - safeGap),
+    };
 };
 
 const formatSize = (bytes: number): string => {
@@ -199,6 +241,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
     const darkMode = theme === 'dark';
     const isV2Ui = appearance.uiVersion === 'v2';
+    const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
 
     const [tables, setTables] = useState<TableStatRow[]>([]);
     const [loading, setLoading] = useState(true);
@@ -206,7 +249,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [sortField, setSortField] = useState<SortField>('name');
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
     const [viewMode, setViewMode] = useState<ViewMode>(isV2Ui ? 'card' : 'list');
-    const [openContextMenuTable, setOpenContextMenuTable] = useState<string | null>(null);
+    const [v2ContextMenu, setV2ContextMenu] = useState<OverviewContextMenuState | null>(null);
+    const v2ContextMenuPortalRef = useRef<HTMLDivElement | null>(null);
     const [visibleTableLimit, setVisibleTableLimit] = useState(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
     const deferredSearchText = useDeferredValue(searchText);
     const isSearchPending = searchText !== deferredSearchText;
@@ -291,6 +335,66 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             ...(regularRows.length > 0 ? [{ key: 'all', title: '全部', kind: 'all' as const, rows: regularRows }] : []),
         ];
     }, [connection?.id, pinnedOverview.pinnedRows, pinnedSidebarTables, schemaName, tab.dbName, visibleTables]);
+
+    const v2ContextMenuTable = useMemo(
+        () => (v2ContextMenu ? tables.find(table => table.name === v2ContextMenu.tableName) || null : null),
+        [tables, v2ContextMenu],
+    );
+
+    const openV2OverviewContextMenu = useCallback((event: React.MouseEvent, table: TableStatRow) => {
+        if (!isV2Ui) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const position = resolveOverviewContextMenuPosition(event.clientX, event.clientY);
+        setV2ContextMenu({
+            tableName: table.name,
+            x: position.x,
+            y: position.y,
+            sourceX: event.clientX,
+            sourceY: event.clientY,
+            maxHeight: position.maxHeight,
+        });
+    }, [isV2Ui]);
+
+    useEffect(() => {
+        if (!v2ContextMenu) return;
+        const onPointerDown = (event: MouseEvent) => {
+            const target = event.target instanceof Node ? event.target : null;
+            if (target && v2ContextMenuPortalRef.current?.contains(target)) return;
+            setV2ContextMenu(null);
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            setV2ContextMenu(null);
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('mousedown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [v2ContextMenu]);
+
+    useEffect(() => {
+        if (!v2ContextMenu) return;
+        const frame = requestAnimationFrame(() => {
+            const portal = v2ContextMenuPortalRef.current;
+            if (!portal) return;
+            const rect = portal.getBoundingClientRect();
+            const content = portal.querySelector('.gn-v2-table-context-menu') as HTMLElement | null;
+            const measuredHeight = Math.max(rect.height, content?.scrollHeight || 0);
+            const position = resolveOverviewContextMenuPosition(v2ContextMenu.sourceX, v2ContextMenu.sourceY, {
+                width: rect.width || OVERVIEW_CONTEXT_MENU_WIDTH,
+                height: measuredHeight || OVERVIEW_CONTEXT_MENU_FALLBACK_HEIGHT,
+            });
+            setV2ContextMenu(prev => {
+                if (!prev) return prev;
+                if (prev.x === position.x && prev.y === position.y && prev.maxHeight === position.maxHeight) return prev;
+                return { ...prev, x: position.x, y: position.y, maxHeight: position.maxHeight };
+            });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [v2ContextMenu]);
 
     const openTable = useCallback((tableName: string) => {
         if (!connection) return;
@@ -700,6 +804,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const renderV2OverviewTableContextMenu = useCallback((table: TableStatRow) => (
         <V2TableContextMenuView
             tableName={table.name}
+            shortcutPlatform={activeShortcutPlatform}
             stats={{
                 rowCount: table.rows,
                 dataLength: table.dataSize,
@@ -710,11 +815,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             supportsTruncate={allowTruncate}
             supportsStarRocksRollup={metadataDialect === 'starrocks'}
             onAction={(action) => {
-                setOpenContextMenuTable(null);
+                setV2ContextMenu(null);
                 handleV2TableContextMenuAction(table, action);
             }}
         />
-    ), [allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, tab.dbName]);
+    ), [activeShortcutPlatform, allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, tab.dbName]);
 
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
         { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
@@ -768,60 +873,65 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         </div>
     );
 
-    const renderCardTable = (t: TableStatRow) => (
-        <Dropdown
-            key={t.name}
-            trigger={['contextMenu']}
-            menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
-            open={isV2Ui ? openContextMenuTable === t.name : undefined}
-            onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
-            popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
-            rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
-            overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
+    const renderCardTableContent = (t: TableStatRow) => (
+        <div
+            className={isV2Ui ? 'gn-v2-table-card' : undefined}
+            onDoubleClick={() => openTable(t.name)}
+            onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, t) : undefined}
+            style={{
+                background: cardBg,
+                border: `1px solid ${cardBorder}`,
+                borderRadius: 10,
+                padding: '14px 16px',
+                cursor: 'pointer',
+                transition: isV2Ui ? undefined : 'all 0.15s ease',
+                userSelect: 'none',
+            }}
+            onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
+            onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
         >
-            <div
-                className={isV2Ui ? 'gn-v2-table-card' : undefined}
-                onDoubleClick={() => openTable(t.name)}
-                style={{
-                    background: cardBg,
-                    border: `1px solid ${cardBorder}`,
-                    borderRadius: 10,
-                    padding: '14px 16px',
-                    cursor: 'pointer',
-                    transition: isV2Ui ? undefined : 'all 0.15s ease',
-                    userSelect: 'none',
-                }}
-                onMouseEnter={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardHoverBg; (e.currentTarget as HTMLDivElement).style.borderColor = accentColor; }}
-                onMouseLeave={isV2Ui ? undefined : e => { (e.currentTarget as HTMLDivElement).style.background = cardBg; (e.currentTarget as HTMLDivElement).style.borderColor = cardBorder; }}
-            >
-                <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <TableOutlined style={{ fontSize: 14, color: accentColor }} />
-                    <Tooltip title={t.name} mouseEnterDelay={0.4}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
-                            {t.name}
-                        </span>
-                    </Tooltip>
-                </div>
-                {t.comment && (
-                    <Tooltip title={t.comment} mouseEnterDelay={0.4}>
-                        <div style={{ fontSize: 12, color: textSecondary, marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {t.comment}
-                        </div>
-                    </Tooltip>
-                )}
-                <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
-                    <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
-                    <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
-                    {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
-                </div>
-                {isV2Ui && (
-                    <div className="gn-v2-table-size-bar">
-                        <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
-                    </div>
-                )}
+            <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <TableOutlined style={{ fontSize: 14, color: accentColor }} />
+                <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
+                        {t.name}
+                    </span>
+                </Tooltip>
             </div>
-        </Dropdown>
+            {t.comment && (
+                <Tooltip title={t.comment} mouseEnterDelay={0.4}>
+                    <div style={{ fontSize: 12, color: textSecondary, marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.comment}
+                    </div>
+                </Tooltip>
+            )}
+            <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
+                <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
+                <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
+                {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
+            </div>
+            {isV2Ui && (
+                <div className="gn-v2-table-size-bar">
+                    <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
+                </div>
+            )}
+        </div>
     );
+
+    const renderCardTable = (t: TableStatRow) => {
+        if (isV2Ui) {
+            return <React.Fragment key={t.name}>{renderCardTableContent(t)}</React.Fragment>;
+        }
+        return (
+            <Dropdown
+                key={t.name}
+                trigger={['contextMenu']}
+                menu={{ items: buildLegacyTableContextMenuItems(t) }}
+            >
+                {renderCardTableContent(t)}
+            </Dropdown>
+        );
+    };
 
     const renderListTable = (t: TableStatRow) => {
         const combinedSize = t.dataSize + t.indexSize;
@@ -830,20 +940,11 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
         const rowSecondary = t.comment || (t.engine ? `${t.engine} 表` : '双击打开数据，右键查看更多操作');
 
-        return (
-            <Dropdown
-                key={t.name}
-                trigger={['contextMenu']}
-                menu={{ items: isV2Ui ? [] : buildLegacyTableContextMenuItems(t) }}
-                open={isV2Ui ? openContextMenuTable === t.name : undefined}
-                onOpenChange={isV2Ui ? (open) => setOpenContextMenuTable(open ? t.name : null) : undefined}
-                popupRender={isV2Ui ? () => renderV2OverviewTableContextMenu(t) : undefined}
-                rootClassName={isV2Ui ? 'gn-v2-table-context-menu-popup' : undefined}
-                overlayStyle={isV2Ui ? { width: 264, maxWidth: 'calc(100vw - 24px)' } : undefined}
-            >
+        const content = (
                 <div
                     className={isV2Ui ? 'gn-v2-table-row' : undefined}
                     onDoubleClick={() => openTable(t.name)}
+                    onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, t) : undefined}
                     style={{
                         position: 'relative',
                         overflow: 'hidden',
@@ -931,6 +1032,19 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         </div>
                     </div>
                 </div>
+        );
+
+        if (isV2Ui) {
+            return <React.Fragment key={t.name}>{content}</React.Fragment>;
+        }
+
+        return (
+            <Dropdown
+                key={t.name}
+                trigger={['contextMenu']}
+                menu={{ items: buildLegacyTableContextMenuItems(t) }}
+            >
+                {content}
             </Dropdown>
         );
     };
@@ -1061,6 +1175,27 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                     </div>
                 )}
             </div>
+            {isV2Ui && v2ContextMenu && v2ContextMenuTable && typeof document !== 'undefined' && createPortal(
+                <div
+                    ref={v2ContextMenuPortalRef}
+                    className="gn-v2-table-overview-context-menu-portal gn-v2-table-context-menu-popup"
+                    style={{
+                        position: 'fixed',
+                        left: v2ContextMenu.x,
+                        top: v2ContextMenu.y,
+                        zIndex: 10000,
+                        width: OVERVIEW_CONTEXT_MENU_WIDTH,
+                        maxWidth: 'calc(100vw - 24px)',
+                        ['--gn-v2-context-menu-max-height' as any]: `${v2ContextMenu.maxHeight}px`,
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => event.preventDefault()}
+                >
+                    {renderV2OverviewTableContextMenu(v2ContextMenuTable)}
+                </div>,
+                document.body,
+            )}
         </div>
     );
 };

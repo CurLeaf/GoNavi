@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
 	import {
 	  DatabaseOutlined,
@@ -52,7 +53,7 @@ import {
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, SavedQuery, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
@@ -79,7 +80,7 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
-import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
+import { getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
@@ -100,11 +101,45 @@ const { Search } = Input;
 type SidebarContextMenuState = {
   x: number;
   y: number;
+  sourceX?: number;
+  sourceY?: number;
   items: MenuProps['items'];
   kind?: 'v2-table' | 'v2-database' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
   node?: any;
   rootClassName?: string;
   overlayStyle?: React.CSSProperties;
+  maxHeight?: number;
+};
+
+const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
+const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
+const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
+
+export const resolveSidebarContextMenuPosition = (
+  x: number,
+  y: number,
+  options?: {
+    width?: number;
+    height?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    safeGap?: number;
+  },
+): { x: number; y: number; maxHeight: number } => {
+  const safeGap = options?.safeGap ?? SIDEBAR_CONTEXT_MENU_SAFE_GAP;
+  const viewportWidth = options?.viewportWidth ?? (typeof window === 'undefined' ? 1024 : window.innerWidth);
+  const viewportHeight = options?.viewportHeight ?? (typeof window === 'undefined' ? 768 : window.innerHeight);
+  const width = Math.max(0, options?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH);
+  const height = Math.max(0, options?.height ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT);
+  const maxX = Math.max(safeGap, viewportWidth - width - safeGap);
+  const maxY = Math.max(safeGap, viewportHeight - height - safeGap);
+  const nextX = Math.max(safeGap, Math.min(x, maxX));
+  const nextY = Math.max(safeGap, Math.min(y, maxY));
+  return {
+    x: nextX,
+    y: nextY,
+    maxHeight: Math.max(120, viewportHeight - nextY - safeGap),
+  };
 };
 interface TreeNode {
   title: string;
@@ -837,11 +872,13 @@ const Sidebar: React.FC<{
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
   const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
+  const saveQuery = useStore(state => state.saveQuery);
   const deleteQuery = useStore(state => state.deleteQuery);
   const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
   const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
+  const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -877,6 +914,7 @@ const Sidebar: React.FC<{
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+  const primaryShortcutModifierLabel = getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
@@ -963,6 +1001,7 @@ const Sidebar: React.FC<{
   const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
   const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
+  const contextMenuPortalRef = useRef<HTMLDivElement | null>(null);
   const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
   const v2RailConnectionGroups = useMemo(
@@ -1075,6 +1114,9 @@ const Sidebar: React.FC<{
   const [isRenameViewModalOpen, setIsRenameViewModalOpen] = useState(false);
   const [renameViewForm] = Form.useForm();
   const [renameViewTarget, setRenameViewTarget] = useState<any>(null);
+  const [isRenameSavedQueryModalOpen, setIsRenameSavedQueryModalOpen] = useState(false);
+  const [renameSavedQueryForm] = Form.useForm();
+  const [renameSavedQueryTarget, setRenameSavedQueryTarget] = useState<SavedQuery | null>(null);
 
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
@@ -4581,6 +4623,56 @@ const Sidebar: React.FC<{
       }
   };
 
+  const openRenameSavedQueryModal = (query: SavedQuery) => {
+      setRenameSavedQueryTarget(query);
+      renameSavedQueryForm.setFieldsValue({ name: query.name || '未命名查询' });
+      setIsRenameSavedQueryModalOpen(true);
+  };
+
+  const handleRenameSavedQuery = async () => {
+      if (!renameSavedQueryTarget) return;
+      try {
+          const values = await renameSavedQueryForm.validateFields();
+          const nextName = String(values.name || '').trim();
+          if (!nextName) {
+              message.error('查询名称不能为空');
+              return;
+          }
+          if (nextName === renameSavedQueryTarget.name) {
+              message.warning('新旧查询名称相同，无需修改');
+              return;
+          }
+
+          saveQuery({
+              ...renameSavedQueryTarget,
+              name: nextName,
+          });
+          const updateSavedQueryNode = (list: TreeNode[]): TreeNode[] =>
+              list.map(node => {
+                  if (node.key === renameSavedQueryTarget.id) {
+                      return {
+                          ...node,
+                          title: nextName,
+                          dataRef: { ...(node.dataRef || renameSavedQueryTarget), name: nextName },
+                      };
+                  }
+                  return node.children ? { ...node, children: updateSavedQueryNode(node.children) } : node;
+              });
+          const nextTreeData = updateSavedQueryNode(treeDataRef.current);
+          treeDataRef.current = nextTreeData;
+          setTreeData(nextTreeData);
+          tabs
+              .filter(tab => tab.type === 'query' && (tab.savedQueryId === renameSavedQueryTarget.id || tab.id === renameSavedQueryTarget.id))
+              .forEach(tab => updateQueryTabDraft(tab.id, { title: nextName }));
+          message.success('查询已重命名');
+          setIsRenameSavedQueryModalOpen(false);
+          setRenameSavedQueryTarget(null);
+          renameSavedQueryForm.resetFields();
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
   // --- 函数/存储过程操作 ---
   const openRoutineDefinition = (node: any) => {
       const { routineName, routineType, dbName, id } = node.dataRef;
@@ -5798,14 +5890,18 @@ const Sidebar: React.FC<{
           ? connOrNode as TreeNode
           : getConnectionNodeForAction(connOrNode as SavedConnection);
       if (!node?.key || !node?.dataRef) return;
+      const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
       setContextMenu({
-          x: event.clientX,
-          y: event.clientY,
+          x: position.x,
+          y: position.y,
+          sourceX: event.clientX,
+          sourceY: event.clientY,
           items: [],
           kind: 'v2-connection',
           node,
           rootClassName: 'gn-v2-table-context-menu-popup',
-          overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+          overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+          maxHeight: position.maxHeight,
       });
   };
 
@@ -5933,6 +6029,7 @@ const Sidebar: React.FC<{
       return (
           <V2TableContextMenuView
               tableName={tableName}
+              shortcutPlatform={activeShortcutPlatform}
               stats={stats}
               isPinned={isPinned}
               supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
@@ -5952,6 +6049,7 @@ const Sidebar: React.FC<{
       return (
           <V2TableGroupContextMenuView
               title="表 · tables"
+              shortcutPlatform={activeShortcutPlatform}
               dbName={String(groupData.dbName || '')}
               count={Array.isArray(node.children) ? node.children.length : 0}
               currentSort={currentSort}
@@ -5969,6 +6067,7 @@ const Sidebar: React.FC<{
       return (
           <V2DatabaseContextMenuView
               dbName={String(node.dataRef?.dbName || node.title || '')}
+              shortcutPlatform={activeShortcutPlatform}
               dialect={dialect}
               supportsSchemaActions={isPostgresSchemaDialect(dialect)}
               supportsStarRocksActions={dialect === 'starrocks'}
@@ -5989,6 +6088,7 @@ const Sidebar: React.FC<{
       return (
           <V2ConnectionContextMenuView
               connectionName={String(conn?.name || node.title || '未命名连接')}
+              shortcutPlatform={activeShortcutPlatform}
               hostSummary={resolveConnectionHostSummary(conn?.config)}
               driverLabel={resolveConnectionIconType(conn)}
               isRedis={conn?.config?.type === 'redis'}
@@ -6016,6 +6116,55 @@ const Sidebar: React.FC<{
           }}
       />
   );
+
+  const renderV2SidebarContextMenuContent = (menu: SidebarContextMenuState) => {
+      if (!menu.node) return null;
+      if (menu.kind === 'v2-table') return renderV2TableContextMenu(menu.node);
+      if (menu.kind === 'v2-database') return renderV2DatabaseContextMenu(menu.node);
+      if (menu.kind === 'v2-table-group') return renderV2TableGroupContextMenu(menu.node);
+      if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);
+      if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);
+      return null;
+  };
+
+  useEffect(() => {
+      if (!contextMenu?.kind) return;
+      const onPointerDown = (event: MouseEvent) => {
+          const target = event.target instanceof Node ? event.target : null;
+          if (target && contextMenuPortalRef.current?.contains(target)) return;
+          setContextMenu(null);
+      };
+      const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key === 'Escape') setContextMenu(null);
+      };
+      document.addEventListener('mousedown', onPointerDown);
+      document.addEventListener('keydown', onKeyDown);
+      return () => {
+          document.removeEventListener('mousedown', onPointerDown);
+          document.removeEventListener('keydown', onKeyDown);
+      };
+  }, [contextMenu?.kind]);
+
+  useEffect(() => {
+      if (!contextMenu?.kind) return;
+      const frame = requestAnimationFrame(() => {
+          const portal = contextMenuPortalRef.current;
+          if (!portal) return;
+          const rect = portal.getBoundingClientRect();
+          const content = portal.querySelector('.gn-v2-table-context-menu') as HTMLElement | null;
+          const measuredHeight = Math.max(rect.height, content?.scrollHeight || 0);
+          const position = resolveSidebarContextMenuPosition(contextMenu.sourceX ?? contextMenu.x, contextMenu.sourceY ?? contextMenu.y, {
+              width: rect.width || SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
+              height: measuredHeight || SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
+          });
+          setContextMenu(prev => {
+              if (!prev?.kind) return prev;
+              if (prev.x === position.x && prev.y === position.y && prev.maxHeight === position.maxHeight) return prev;
+              return { ...prev, x: position.x, y: position.y, maxHeight: position.maxHeight };
+          });
+      });
+      return () => cancelAnimationFrame(frame);
+  }, [contextMenu?.kind, contextMenu?.x, contextMenu?.y]);
 
   const fetchV2TableContextMenuStats = async (node: any) => {
       const statsKey = getV2TableContextMenuStatsKey(node);
@@ -7170,6 +7319,12 @@ const Sidebar: React.FC<{
             },
             { type: 'divider' },
             {
+                key: 'rename-query',
+                label: '重命名查询',
+                icon: <EditOutlined />,
+                onClick: () => openRenameSavedQueryModal(q),
+            },
+            {
                 key: 'delete-query',
                 label: '删除查询',
                 icon: <DeleteOutlined />,
@@ -7482,38 +7637,50 @@ const Sidebar: React.FC<{
           return;
       }
       if (isV2Ui && node?.type === 'database') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-database',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
       if (isV2Ui && node?.type === 'object-group' && node?.dataRef?.groupKey === 'tables') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-table-group',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
       if (isV2Ui && node?.type === 'table') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-table',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
@@ -7650,14 +7817,18 @@ const Sidebar: React.FC<{
                               if (group.isUngrouped) return;
                               event.preventDefault();
                               event.stopPropagation();
+                              const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
                               setContextMenu({
-                                  x: event.clientX,
-                                  y: event.clientY,
+                                  x: position.x,
+                                  y: position.y,
+                                  sourceX: event.clientX,
+                                  sourceY: event.clientY,
                                   items: [],
                                   kind: 'v2-connection-group',
                                   node: group,
                                   rootClassName: 'gn-v2-table-context-menu-popup',
                                   overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+                                  maxHeight: position.maxHeight,
                               });
                           }}
                           aria-label={`${collapsed ? '展开' : '折叠'}连接分组 ${groupTitle}`}
@@ -7833,7 +8004,7 @@ const Sidebar: React.FC<{
                     <SearchOutlined />
                     <span>搜索表、连接、动作... 或问 AI</span>
                     <span className="gn-v2-search-shortcut" aria-hidden="true">
-                        <kbd>⌘</kbd>
+                        <kbd>{primaryShortcutModifierLabel}</kbd>
                         <kbd>K</kbd>
                     </span>
                 </button>
@@ -8049,21 +8220,34 @@ const Sidebar: React.FC<{
         </div>
         {renderV2CommandSearchOverlay()}
 
-        {contextMenu && (
+        {contextMenu?.kind && typeof document !== 'undefined' && createPortal(
+            <div
+                ref={contextMenuPortalRef}
+                className={`gn-v2-sidebar-context-menu-portal ${contextMenu.rootClassName || ''}`}
+                style={{
+                    position: 'fixed',
+                    left: contextMenu.x,
+                    top: contextMenu.y,
+                    zIndex: 10000,
+                    width: contextMenu.overlayStyle?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
+                    maxWidth: contextMenu.overlayStyle?.maxWidth ?? 'calc(100vw - 24px)',
+                    ['--gn-v2-context-menu-max-height' as any]: `${contextMenu.maxHeight ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT}px`,
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.preventDefault()}
+            >
+                {renderV2SidebarContextMenuContent(contextMenu)}
+            </div>,
+            document.body,
+        )}
+
+        {contextMenu && !contextMenu.kind && (
             <Dropdown
                 menu={{ items: contextMenu.items }}
                 open={true}
                 onOpenChange={(open) => { if (!open) setContextMenu(null); }}
                 trigger={['contextMenu']}
-                popupRender={(() => {
-                    if (!contextMenu.node) return undefined;
-                    if (contextMenu.kind === 'v2-table') return () => renderV2TableContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-database') return () => renderV2DatabaseContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-table-group') return () => renderV2TableGroupContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-connection') return () => renderV2ConnectionContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-connection-group') return () => renderV2ConnectionGroupContextMenu(contextMenu.node);
-                    return undefined;
-                })()}
                 rootClassName={contextMenu.rootClassName}
                 overlayStyle={contextMenu.overlayStyle}
             >
@@ -8212,6 +8396,25 @@ const Sidebar: React.FC<{
         >
             <Form form={renameViewForm} layout="vertical">
                 <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
+                    <Input {...noAutoCapInputProps} />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`重命名查询${renameSavedQueryTarget?.name ? ` (${renameSavedQueryTarget.name})` : ''}`}
+            open={isRenameSavedQueryModalOpen}
+            onOk={handleRenameSavedQuery}
+            onCancel={() => {
+                setIsRenameSavedQueryModalOpen(false);
+                setRenameSavedQueryTarget(null);
+                renameSavedQueryForm.resetFields();
+            }}
+            okText="重命名"
+            cancelText="取消"
+        >
+            <Form form={renameSavedQueryForm} layout="vertical">
+                <Form.Item name="name" label="查询名称" rules={[{ required: true, message: '请输入查询名称' }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
