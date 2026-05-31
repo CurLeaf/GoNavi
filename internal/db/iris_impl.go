@@ -273,7 +273,7 @@ func (i *IrisDB) GetDatabases() ([]string, error) {
 	var namespaces []string
 	seen := map[string]struct{}{}
 	for _, row := range data {
-		name := strings.TrimSpace(rowString(row, "TABLE_CATALOG", "table_catalog"))
+		name := strings.TrimSpace(rowString(row, "TABLE_CATALOG", "table_catalog", "TABLECATALOG", "tablecatalog"))
 		if name == "" {
 			continue
 		}
@@ -295,12 +295,12 @@ func (i *IrisDB) GetTables(dbName string) ([]string, error) {
 	var tables []string
 	seen := map[string]struct{}{}
 	for _, row := range data {
-		tableType := strings.ToUpper(strings.TrimSpace(rowString(row, "TABLE_TYPE", "table_type")))
+		tableType := strings.ToUpper(strings.TrimSpace(rowString(row, "TABLE_TYPE", "table_type", "TABLETYPE", "tabletype")))
 		if tableType != "" && tableType != "TABLE" && tableType != "BASE TABLE" {
 			continue
 		}
-		schema := strings.TrimSpace(rowString(row, "TABLE_SCHEMA", "table_schema", "SCHEMA_NAME", "schema_name"))
-		table := strings.TrimSpace(rowString(row, "TABLE_NAME", "table_name"))
+		schema := strings.TrimSpace(rowString(row, "TABLE_SCHEMA", "table_schema", "SCHEMA_NAME", "schema_name", "TABLESCHEMA", "tableschema", "SCHEMANAME", "schemaname"))
+		table := strings.TrimSpace(rowString(row, "TABLE_NAME", "table_name", "TABLENAME", "tablename"))
 		if table == "" || isIRISSystemSchema(schema) {
 			continue
 		}
@@ -351,27 +351,27 @@ func (i *IrisDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefini
 
 	columns := make([]connection.ColumnDefinition, 0, len(data))
 	for _, row := range data {
-		name := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name"))
+		name := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name", "COLUMNNAME", "columnname"))
 		if name == "" {
 			continue
 		}
 		key := keyByColumn[name]
-		if primary, ok := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key"); ok && primary {
+		if primary, ok := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key", "PRIMARYKEY", "primarykey"); ok && primary {
 			key = "PRI"
 		} else if key == "" {
-			if unique, ok := irisBoolFromRow(row, "UNIQUE_COLUMN", "unique_column", "IS_UNIQUE", "is_unique", "UNIQUE", "unique"); ok && unique {
+			if unique, ok := irisBoolFromRow(row, "UNIQUE_COLUMN", "unique_column", "UNIQUECOLUMN", "uniquecolumn", "IS_UNIQUE", "is_unique", "ISUNIQUE", "isunique", "UNIQUE", "unique"); ok && unique {
 				key = "UNI"
 			}
 		}
 		col := connection.ColumnDefinition{
 			Name:     name,
 			Type:     buildIRISColumnType(row),
-			Nullable: normalizeIRISNullable(rowString(row, "IS_NULLABLE", "is_nullable")),
+			Nullable: normalizeIRISNullable(rowString(row, "IS_NULLABLE", "is_nullable", "ISNULLABLE", "isnullable")),
 			Key:      key,
 			Extra:    "",
 			Comment:  rowString(row, "DESCRIPTION", "description", "COMMENT", "comment"),
 		}
-		if rawDefault, ok := rowValue(row, "COLUMN_DEFAULT", "column_default"); ok && rawDefault != nil {
+		if rawDefault, ok := rowValue(row, "COLUMN_DEFAULT", "column_default", "COLUMNDEFAULT", "columndefault"); ok && rawDefault != nil {
 			def := strings.TrimSpace(fmt.Sprintf("%v", rawDefault))
 			if def != "" {
 				col.Default = &def
@@ -392,9 +392,9 @@ func (i *IrisDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWith
 	}
 	cols := make([]connection.ColumnDefinitionWithTable, 0, len(data))
 	for _, row := range data {
-		schema := strings.TrimSpace(rowString(row, "TABLE_SCHEMA", "table_schema"))
-		table := strings.TrimSpace(rowString(row, "TABLE_NAME", "table_name"))
-		name := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name"))
+		schema := strings.TrimSpace(rowString(row, "TABLE_SCHEMA", "table_schema", "TABLESCHEMA", "tableschema"))
+		table := strings.TrimSpace(rowString(row, "TABLE_NAME", "table_name", "TABLENAME", "tablename"))
+		name := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name", "COLUMNNAME", "columnname"))
 		if table == "" || name == "" || isIRISSystemSchema(schema) {
 			continue
 		}
@@ -429,16 +429,16 @@ func (i *IrisDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinit
 	}
 	indexes := make([]connection.IndexDefinition, 0, len(data))
 	for _, row := range data {
-		name := strings.TrimSpace(rowString(row, "INDEX_NAME", "index_name", "KEY_NAME", "key_name", "CONSTRAINT_NAME", "constraint_name"))
-		column := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name"))
-		primary, hasPrimaryFlag := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key")
+		name := strings.TrimSpace(rowString(row, "INDEX_NAME", "index_name", "INDEXNAME", "indexname", "KEY_NAME", "key_name", "KEYNAME", "keyname", "CONSTRAINT_NAME", "constraint_name", "CONSTRAINTNAME", "constraintname"))
+		column := strings.TrimSpace(rowString(row, "COLUMN_NAME", "column_name", "COLUMNNAME", "columnname"))
+		primary, hasPrimaryFlag := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key", "PRIMARYKEY", "primarykey")
 		if name == "" && hasPrimaryFlag && primary {
 			name = "PRIMARY"
 		}
 		if name == "" || column == "" {
 			continue
 		}
-		indexType := normalizeIRISIndexType(rowString(row, "INDEX_TYPE", "index_type", "TYPE", "type"))
+		indexType := normalizeIRISIndexType(rowString(row, "INDEX_TYPE", "index_type", "INDEXTYPE", "indextype", "TYPE", "type"))
 		if hasPrimaryFlag && primary {
 			indexType = "PRIMARY"
 		}
@@ -447,7 +447,7 @@ func (i *IrisDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinit
 			Name:       name,
 			ColumnName: column,
 			NonUnique:  nonUnique,
-			SeqInIndex: parseIRISInt(rowValueAny(row, "ORDINAL_POSITION", "ordinal_position", "SEQ_IN_INDEX", "seq_in_index", "KEY_SEQ", "key_seq")),
+			SeqInIndex: parseIRISInt(rowValueAny(row, "ORDINAL_POSITION", "ordinal_position", "ORDINALPOSITION", "ordinalposition", "SEQ_IN_INDEX", "seq_in_index", "SEQININDEX", "seqinindex", "KEY_SEQ", "key_seq", "KEYSEQ", "keyseq")),
 			IndexType:  indexType,
 		})
 	}
@@ -686,10 +686,10 @@ func irisBoolFromRow(row map[string]interface{}, keys ...string) (bool, bool) {
 }
 
 func parseIRISNonUnique(row map[string]interface{}) int {
-	if primary, ok := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key"); ok && primary {
+	if primary, ok := irisBoolFromRow(row, "PRIMARY_KEY", "primary_key", "PRIMARYKEY", "primarykey"); ok && primary {
 		return 0
 	}
-	if value, ok := rowValue(row, "NON_UNIQUE", "non_unique"); ok {
+	if value, ok := rowValue(row, "NON_UNIQUE", "non_unique", "NONUNIQUE", "nonunique"); ok {
 		if enabled, ok := parseIRISBool(value); ok {
 			if enabled {
 				return 1
@@ -707,7 +707,7 @@ func parseIRISNonUnique(row map[string]interface{}) int {
 			return 0
 		}
 	}
-	if unique, ok := irisBoolFromRow(row, "UNIQUE_COLUMN", "unique_column"); ok && unique {
+	if unique, ok := irisBoolFromRow(row, "UNIQUE_COLUMN", "unique_column", "UNIQUECOLUMN", "uniquecolumn"); ok && unique {
 		return 0
 	}
 	return 1
@@ -731,14 +731,14 @@ func normalizeIRISNullable(raw string) string {
 }
 
 func buildIRISColumnType(row map[string]interface{}) string {
-	dataType := strings.TrimSpace(rowString(row, "DATA_TYPE", "data_type", "TYPE_NAME", "type_name"))
+	dataType := strings.TrimSpace(rowString(row, "DATA_TYPE", "data_type", "DATATYPE", "datatype", "TYPE_NAME", "type_name", "TYPENAME", "typename"))
 	if dataType == "" {
 		dataType = "VARCHAR"
 	}
 	upper := strings.ToUpper(dataType)
-	charLength := parseIRISInt(rowValueAny(row, "CHARACTER_MAXIMUM_LENGTH", "character_maximum_length", "CHARACTER_MAX_LENGTH", "character_max_length"))
-	precision := parseIRISInt(rowValueAny(row, "NUMERIC_PRECISION", "numeric_precision"))
-	scale := parseIRISInt(rowValueAny(row, "NUMERIC_SCALE", "numeric_scale"))
+	charLength := parseIRISInt(rowValueAny(row, "CHARACTER_MAXIMUM_LENGTH", "character_maximum_length", "CHARACTERMAXIMUMLENGTH", "charactermaximumlength", "CHARACTER_MAX_LENGTH", "character_max_length", "CHARACTERMAXLENGTH", "charactermaxlength"))
+	precision := parseIRISInt(rowValueAny(row, "NUMERIC_PRECISION", "numeric_precision", "NUMERICPRECISION", "numericprecision"))
+	scale := parseIRISInt(rowValueAny(row, "NUMERIC_SCALE", "numeric_scale", "NUMERICSCALE", "numericscale"))
 	if charLength > 0 && (strings.Contains(upper, "CHAR") || strings.Contains(upper, "VARCHAR")) && !strings.Contains(dataType, "(") {
 		return fmt.Sprintf("%s(%d)", dataType, charLength)
 	}
@@ -753,8 +753,8 @@ func buildIRISColumnType(row map[string]interface{}) string {
 
 func rowOrdinal(rows []map[string]interface{}, columnName string) int {
 	for idx, row := range rows {
-		if strings.EqualFold(rowString(row, "COLUMN_NAME", "column_name"), columnName) {
-			ordinal := parseIRISInt(rowValueAny(row, "ORDINAL_POSITION", "ordinal_position"))
+		if strings.EqualFold(rowString(row, "COLUMN_NAME", "column_name", "COLUMNNAME", "columnname"), columnName) {
+			ordinal := parseIRISInt(rowValueAny(row, "ORDINAL_POSITION", "ordinal_position", "ORDINALPOSITION", "ordinalposition"))
 			if ordinal > 0 {
 				return ordinal
 			}
