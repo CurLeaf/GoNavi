@@ -648,3 +648,10 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
         transform: translateY(0);
     }
 }
+.gonavi-query-editor-link-hint {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
