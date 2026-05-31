@@ -140,6 +140,7 @@ vi.mock('@ant-design/icons', () => {
     SearchOutlined: Icon,
     LinkOutlined: Icon,
     TableOutlined: Icon,
+    AimOutlined: Icon,
     SortAscendingOutlined: Icon,
     SortDescendingOutlined: Icon,
     DatabaseOutlined: Icon,
@@ -576,6 +577,7 @@ describe('DataGrid DDL interactions', () => {
           tableName="users"
           dbName="main"
           connectionId="conn-1"
+          pkColumns={['id']}
         />,
       );
     });
@@ -675,6 +677,7 @@ describe('DataGrid DDL interactions', () => {
           tableName="users"
           dbName="main"
           connectionId="conn-1"
+          pkColumns={['id']}
         />,
       );
     });
@@ -869,6 +872,78 @@ describe('DataGrid DDL interactions', () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith('alpha\nbeta');
+    renderer!.unmount();
+  });
+
+  it('copies the current row for paste and pastes it as a new row from the v2 cell context menu', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const contextTarget = {
+      closest: (selector: string) => selector === '[data-row-key][data-col-name]'
+        ? {
+            getAttribute: (name: string) => {
+              if (name === 'data-row-key') return 'row-1';
+              if (name === 'data-col-name') return 'name';
+              return null;
+            },
+          }
+        : null,
+    } as unknown as HTMLElement;
+
+    const openMenu = async () => {
+      const cellProps = nameColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' });
+      await act(async () => {
+        cellProps.onContextMenu({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          clientX: 160,
+          clientY: 120,
+          currentTarget: contextTarget,
+          target: contextTarget,
+        });
+      });
+    };
+
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '复制本行为新增行').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(messageApi.success).toHaveBeenCalledWith('已复制 1 行，可粘贴为新增行');
+
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '粘贴为新增行 (1)').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(messageApi.success).toHaveBeenCalledWith('已粘贴 1 行为新增行，请检查后提交事务');
+    expect(testRenderState.latestTableProps.dataSource).toHaveLength(2);
+    expect(testRenderState.latestTableProps.dataSource[1][GONAVI_ROW_KEY]).toContain('paste-');
     renderer!.unmount();
   });
 

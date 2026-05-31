@@ -160,6 +160,11 @@ describe('DataGrid layout', () => {
     expect(pageFindSource).toContain("textAlign: 'left'");
     expect(dataGridSource).toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(pageFindText), [pageFindText]);");
     expect(dataGridSource).not.toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);");
+    expect(dataGridSource).toContain("if (event.key === 'Escape')");
+    expect(dataGridSource).toContain('if (activeSelection.size === 0) {');
+    expect(dataGridSource).toContain('closeCellEditMode();');
+    expect(dataGridSource).toContain('resetCellSelection();');
+    expect(dataGridSource).toContain("tagName === 'input' || tagName === 'textarea' || activeElement?.isContentEditable");
     expect(paginationSource).toContain("padding: 0");
     expect(paginationSource).toContain("justifyContent: 'flex-start'");
   });
@@ -357,7 +362,7 @@ describe('DataGrid layout', () => {
     expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
   });
 
-  it('renders row copy and paste actions in editable table toolbar', () => {
+  it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {
     const markup = renderToStaticMarkup(
       <DataGrid
         data={[
@@ -374,10 +379,8 @@ describe('DataGrid layout', () => {
       />,
     );
 
-    expect(markup).toContain('data-grid-copy-row-action="true"');
-    expect(markup).toContain('data-grid-paste-row-action="true"');
-    expect(markup).toContain('复制行');
-    expect(markup).toContain('粘贴行');
+    expect(markup).not.toContain('data-grid-copy-row-action="true"');
+    expect(markup).not.toContain('data-grid-paste-row-action="true"');
   });
 
   it('renders a clickable copy action for aggregate query results', () => {
@@ -398,6 +401,33 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-query-copy-action="true"');
     expect(markup).not.toMatch(/data-grid-query-copy-action="true"[^>]*disabled/);
     expect(markup).toContain('复制');
+    expect(markup.match(/data-grid-query-copy-action="true"/g)?.length).toBe(1);
+  });
+
+  it('keeps query-result export scopes explicit and repositions v2 context menus after measuring', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("type QueryResultExportScope = 'selected' | 'page' | 'all';");
+    expect(source).toContain("title: '导出查询结果'");
+    expect(source).toContain('data-query-result-export-scope="true"');
+    expect(source).toContain('选中导出');
+    expect(source).toContain('当前页导出');
+    expect(source).toContain('全部导出');
+    expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
+    expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
+    expect(source).toContain('const rect = element.getBoundingClientRect();');
+    expect(source).toContain('ref={cellContextMenuPortalRef}');
+  });
+
+  it('keeps inline cell editors stretched to the full cell width', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const INLINE_EDIT_FORM_ITEM_STYLE: React.CSSProperties = { margin: 0, width: \'100%\', minWidth: 0 };');
+    expect(source).toContain('className="data-grid-inline-editor-form-item"');
+    expect(source).toContain('className="data-grid-inline-editor-input"');
+    expect(source).toContain('style={{ width: \'100%\', ...inputCellPadding }}');
+    expect(source).toContain('.${gridId} .data-grid-inline-editor-form-item .ant-form-item-control-input-content');
+    expect(source).toContain('.${gridId} .data-grid-inline-editor-input');
   });
 
   it('renders a quick WHERE condition editor when table filters are visible', () => {
