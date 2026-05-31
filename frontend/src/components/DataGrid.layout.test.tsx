@@ -500,6 +500,12 @@ describe('DataGrid layout', () => {
     expect(source).toContain('return originalRenderContent;');
     expect(source).toContain('if (scrollSnapshotRafRef.current !== null) return;');
     expect(source).toContain('scrollSnapshotRafRef.current = requestAnimationFrame');
+    expect(source).toContain('didRestoreScrollRef.current = false;');
+    expect(source).toContain('useEffect(() => {');
+    expect(source).toContain('}, [connectionId, dbName, tableName, data]);');
+    expect(source).toContain('const applied = applyVirtualHorizontalOffset(tableContainer, nextLeft);');
+    expect(source).toContain('resolvedLeft = readVirtualHorizontalOffset(tableContainer);');
+    expect(source).toContain('lastReportedScrollRef.current = { top: nextTop, left: resolvedLeft };');
     expect(source).toContain("const dataGridBackdropFilter = isV2Ui || isMacLike ? 'none' : (opacity < 0.999 ? 'blur(14px)' : 'none');");
     expect(source).toContain('rowHoverable={!enableVirtual}');
     expect(columnTitleSource).toContain("data-grid-column-highlighted={highlighted ? 'true' : undefined}");

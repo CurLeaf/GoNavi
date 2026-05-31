@@ -1920,6 +1920,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const lastReportedScrollRef = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
   const didRestoreScrollRef = useRef(false);
 
+  useEffect(() => {
+      // 结果集刷新后需要允许重新恢复滚动位置；否则筛选/排序重载时可能只保留外部滚动条位置，
+      // 但虚拟表格内部横向偏移已被重建为初始值，进而造成表头与单元格错位。
+      didRestoreScrollRef.current = false;
+  }, [connectionId, dbName, tableName, data]);
+
   // 批量编辑模式状态
   const [cellEditMode, setCellEditMode] = useState(false);
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
@@ -6781,32 +6787,49 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       let rafId = requestAnimationFrame(() => {
           const verticalTarget = pickVerticalScrollTarget(tableContainer);
-          const horizontalTargets = pickHorizontalScrollTargets(tableContainer);
           const nextTop = Math.max(0, scrollSnapshot.top);
           const nextLeft = Math.max(0, scrollSnapshot.left);
           if (verticalTarget && Math.abs(verticalTarget.scrollTop - scrollSnapshot.top) > 1) {
               verticalTarget.scrollTop = nextTop;
           }
+          let resolvedLeft = nextLeft;
           if (Math.abs(nextLeft) > 0.5) {
-              horizontalTargets.forEach(target => {
-                  if (Math.abs(target.scrollLeft - nextLeft) > 1) {
-                      target.scrollLeft = nextLeft;
+              if (enableVirtual) {
+                  const applied = applyVirtualHorizontalOffset(tableContainer, nextLeft);
+                  if (applied) {
+                      resolvedLeft = readVirtualHorizontalOffset(tableContainer);
+                  } else {
+                      const fallbackTargets = pickHorizontalScrollTargets(tableContainer);
+                      fallbackTargets.forEach(target => {
+                          if (Math.abs(target.scrollLeft - nextLeft) > 1) {
+                              target.scrollLeft = nextLeft;
+                          }
+                      });
+                      resolvedLeft = fallbackTargets[0]?.scrollLeft ?? nextLeft;
                   }
-              });
-              const externalScroll = externalHorizontalScrollRef.current;
-              if (externalScroll && Math.abs(externalScroll.scrollLeft - nextLeft) > 1) {
-                  externalScroll.scrollLeft = nextLeft;
+              } else {
+                  const horizontalTargets = pickHorizontalScrollTargets(tableContainer);
+                  horizontalTargets.forEach(target => {
+                      if (Math.abs(target.scrollLeft - nextLeft) > 1) {
+                          target.scrollLeft = nextLeft;
+                      }
+                  });
+                  resolvedLeft = horizontalTargets[0]?.scrollLeft ?? nextLeft;
               }
-              lastTableScrollLeftRef.current = nextLeft;
-              lastExternalScrollLeftRef.current = nextLeft;
+              const externalScroll = externalHorizontalScrollRef.current;
+              if (externalScroll && Math.abs(externalScroll.scrollLeft - resolvedLeft) > 1) {
+                  externalScroll.scrollLeft = resolvedLeft;
+              }
+              lastTableScrollLeftRef.current = resolvedLeft;
+              lastExternalScrollLeftRef.current = resolvedLeft;
           }
-          lastReportedScrollRef.current = { top: nextTop, left: nextLeft };
+          lastReportedScrollRef.current = { top: nextTop, left: resolvedLeft };
           didRestoreScrollRef.current = true;
-          onScrollSnapshotChange?.({ top: nextTop, left: nextLeft });
+          onScrollSnapshotChange?.({ top: nextTop, left: resolvedLeft });
       });
 
       return () => cancelAnimationFrame(rafId);
-  }, [isTableSurfaceActive, mergedDisplayData.length, scrollSnapshot, pickHorizontalScrollTargets, pickVerticalScrollTarget, onScrollSnapshotChange]);
+  }, [applyVirtualHorizontalOffset, data, enableVirtual, isTableSurfaceActive, mergedDisplayData.length, onScrollSnapshotChange, pickHorizontalScrollTargets, pickVerticalScrollTarget, readVirtualHorizontalOffset, scrollSnapshot]);
 
   useEffect(() => {
       if (!isTableSurfaceActive) return;
