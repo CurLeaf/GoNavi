@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
 import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
@@ -884,7 +884,17 @@ type QueryEditorNavigationTarget =
     | { type: 'trigger'; dbName: string; triggerName: string; tableName: string; schemaName?: string }
     | { type: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string };
 
+type QueryEditorHoverTarget =
+    | { kind: 'database'; dbName: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'table'; dbName: string; tableName: string; schemaName?: string; comment?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'view'; dbName: string; viewName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'materialized-view'; dbName: string; viewName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'trigger'; dbName: string; triggerName: string; tableName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'column'; dbName: string; tableName: string; columnName: string; type?: string; comment?: string; schemaName?: string; range: { startColumn: number; endColumn: number } };
+
 const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
+const QUERY_EDITOR_HOVER_DELAY_MS = 1000;
 
 const findIdentifierWindowAtOffset = (
     lineContent: string,
@@ -926,6 +936,68 @@ const normalizeNavigationIdentifierParts = (text: string): string[] => (
         .map((part) => part.trim())
         .filter(Boolean)
 );
+
+const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {
+    const appendComment = (comment?: string): string => {
+        const normalized = normalizeCommentText(comment);
+        return normalized ? `\n\n${normalized}` : '';
+    };
+    switch (target.kind) {
+        case 'database':
+            return `**数据库**\n\n\`${target.dbName}\``;
+        case 'table':
+            return `**表** \`${target.tableName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}${appendComment(target.comment)}`;
+        case 'view':
+            return `**视图** \`${target.viewName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+        case 'materialized-view':
+            return `**物化视图** \`${target.viewName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+        case 'trigger':
+            return `**触发器** \`${target.triggerName}\`\n\n库：\`${target.dbName}\`\n\n表：\`${target.tableName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+        case 'routine':
+            return `**${target.routineType === 'PROCEDURE' ? '存储过程' : '函数'}** \`${target.routineName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+        case 'column':
+            return `**字段** \`${target.columnName}\`${target.type ? `\n\n类型：\`${target.type}\`` : ''}\n\n表：\`${target.tableName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}${appendComment(target.comment)}`;
+        default:
+            return '';
+    }
+};
+
+const buildQueryEditorAliasMap = (
+    fullText: string,
+    currentDb: string,
+): Record<string, { dbName: string; tableName: string }> => {
+    const aliasMap: Record<string, { dbName: string; tableName: string }> = {};
+    const reserved = new Set([
+        'where', 'on', 'group', 'order', 'limit', 'having',
+        'left', 'right', 'inner', 'outer', 'full', 'cross', 'join',
+        'union', 'except', 'intersect', 'as', 'set', 'values', 'returning',
+    ]);
+    const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?\w+[`"]?))?/gi;
+    let match: RegExpExecArray | null;
+    while ((match = aliasRegex.exec(fullText)) !== null) {
+        const tableIdent = normalizeCompletionQualifiedName(match[1] || '');
+        if (!tableIdent) continue;
+        const parts = tableIdent.split('.');
+        let dbName = currentDb || '';
+        let tableName = tableIdent;
+        if (parts.length === 2) {
+            dbName = parts[0];
+            tableName = parts[1];
+        } else if (parts.length >= 3) {
+            dbName = parts[0];
+            tableName = parts.slice(1).join('.');
+        }
+        const shortTable = getCompletionQualifiedNameLastPart(tableIdent);
+        if (shortTable) aliasMap[shortTable.toLowerCase()] = { dbName, tableName };
+
+        const alias = stripCompletionIdentifierQuotes(match[2] || '').trim();
+        if (!alias) continue;
+        const loweredAlias = alias.toLowerCase();
+        if (reserved.has(loweredAlias)) continue;
+        aliasMap[loweredAlias] = { dbName, tableName };
+    }
+    return aliasMap;
+};
 
 export const resolveQueryEditorNavigationTarget = (
     lineContent: string,
@@ -1147,6 +1219,160 @@ export const resolveQueryEditorNavigationTarget = (
     return findObjectInPriorityOrder(dbName, tableName, schemaName);
 };
 
+const resolveQueryEditorHoverTarget = (
+    fullText: string,
+    lineContent: string,
+    column: number,
+    currentDb: string,
+    visibleDbs: string[],
+    tables: CompletionTableMeta[],
+    allColumns: CompletionColumnMeta[],
+    views: CompletionViewMeta[] = [],
+    materializedViews: CompletionViewMeta[] = [],
+    triggers: CompletionTriggerMeta[] = [],
+    routines: CompletionRoutineMeta[] = [],
+): QueryEditorHoverTarget | null => {
+    const text = String(lineContent || '');
+    if (!text) return null;
+
+    const offset = Math.max(0, Number(column || 1) - 2);
+    const windowRange = findIdentifierWindowAtOffset(text, offset);
+    if (!windowRange) return null;
+
+    const rawIdentifier = text.slice(windowRange.start, windowRange.end).trim();
+    if (!rawIdentifier) return null;
+
+    const range = { startColumn: windowRange.start + 1, endColumn: windowRange.end + 1 };
+    const parts = normalizeNavigationIdentifierParts(rawIdentifier);
+    if (parts.length === 0 || parts.length > 3) return null;
+
+    const findMatchingTable = (dbName: string, rawTableName: string, schemaName = ''): CompletionTableMeta | null => {
+        const normalizedDbName = String(dbName || '').trim().toLowerCase();
+        const normalizedRawTableName = String(rawTableName || '').trim().toLowerCase();
+        const normalizedSchemaName = String(schemaName || '').trim().toLowerCase();
+        return tables.find((item) => {
+            if (String(item.dbName || '').trim().toLowerCase() !== normalizedDbName) return false;
+            const itemRawName = String(item.tableName || '').trim();
+            const parsed = splitSidebarQualifiedName(itemRawName);
+            const itemObjectName = String(parsed.objectName || itemRawName).trim().toLowerCase();
+            const itemSchemaName = String(parsed.schemaName || '').trim().toLowerCase();
+            if (normalizedSchemaName) {
+                return itemSchemaName === normalizedSchemaName && (itemObjectName === normalizedRawTableName || String(itemRawName).trim().toLowerCase() === `${normalizedSchemaName}.${normalizedRawTableName}`);
+            }
+            return itemObjectName === normalizedRawTableName || String(itemRawName).trim().toLowerCase() === normalizedRawTableName;
+        }) || null;
+    };
+
+    const navigationTarget = resolveQueryEditorNavigationTarget(
+        lineContent,
+        column,
+        currentDb,
+        visibleDbs,
+        tables,
+        views,
+        materializedViews,
+        triggers,
+        routines,
+    );
+    if (navigationTarget) {
+        if (navigationTarget.type === 'database') {
+            return { kind: 'database', dbName: navigationTarget.dbName, range };
+        }
+        if (navigationTarget.type === 'table') {
+            const meta = findMatchingTable(navigationTarget.dbName, navigationTarget.tableName, navigationTarget.schemaName || '');
+            return {
+                kind: 'table',
+                dbName: navigationTarget.dbName,
+                tableName: navigationTarget.tableName,
+                schemaName: navigationTarget.schemaName,
+                comment: meta?.comment,
+                range,
+            };
+        }
+        if (navigationTarget.type === 'view') {
+            return { kind: 'view', dbName: navigationTarget.dbName, viewName: navigationTarget.viewName, schemaName: navigationTarget.schemaName, range };
+        }
+        if (navigationTarget.type === 'materialized-view') {
+            return { kind: 'materialized-view', dbName: navigationTarget.dbName, viewName: navigationTarget.viewName, schemaName: navigationTarget.schemaName, range };
+        }
+        if (navigationTarget.type === 'trigger') {
+            return { kind: 'trigger', dbName: navigationTarget.dbName, triggerName: navigationTarget.triggerName, tableName: navigationTarget.tableName, schemaName: navigationTarget.schemaName, range };
+        }
+        return { kind: 'routine', dbName: navigationTarget.dbName, routineName: navigationTarget.routineName, routineType: navigationTarget.routineType, schemaName: navigationTarget.schemaName, range };
+    }
+
+    const findColumnTarget = (dbName: string, tableName: string, columnName: string): QueryEditorHoverTarget | null => {
+        const normalizedDbName = String(dbName || '').trim().toLowerCase();
+        const normalizedTableName = String(tableName || '').trim().toLowerCase();
+        const normalizedColumnName = String(columnName || '').trim().toLowerCase();
+        const column = allColumns.find((item) => {
+            if (String(item.dbName || '').trim().toLowerCase() !== normalizedDbName) return false;
+            if (String(item.name || '').trim().toLowerCase() !== normalizedColumnName) return false;
+            const rawTable = String(item.tableName || '').trim().toLowerCase();
+            const parsed = splitCompletionSchemaAndTable(item.tableName || '');
+            return rawTable === normalizedTableName || String(parsed.table || '').trim().toLowerCase() === normalizedTableName;
+        });
+        if (!column) return null;
+        const parsedTable = splitCompletionSchemaAndTable(column.tableName || '');
+        return {
+            kind: 'column',
+            dbName: column.dbName,
+            tableName: column.tableName,
+            columnName: column.name,
+            type: column.type,
+            comment: column.comment,
+            schemaName: parsedTable.schema || undefined,
+            range,
+        };
+    };
+
+    if (parts.length === 2) {
+        const [firstPart, secondPart] = parts;
+        const aliasMap = buildQueryEditorAliasMap(fullText, currentDb);
+        const aliasInfo = aliasMap[firstPart.toLowerCase()];
+        if (aliasInfo) {
+            const aliasedColumn = findColumnTarget(aliasInfo.dbName, aliasInfo.tableName, secondPart);
+            if (aliasedColumn) return aliasedColumn;
+        }
+        const qualifiedTable = findMatchingTable(currentDb, secondPart, firstPart);
+        if (qualifiedTable) {
+            return {
+                kind: 'table',
+                dbName: qualifiedTable.dbName,
+                tableName: qualifiedTable.tableName,
+                schemaName: firstPart,
+                comment: qualifiedTable.comment,
+                range,
+            };
+        }
+    }
+
+    if (parts.length === 1) {
+        const [columnName] = parts;
+        const normalizedCurrentDb = String(currentDb || '').trim().toLowerCase();
+        const directColumns = allColumns.filter((item) =>
+            String(item.dbName || '').trim().toLowerCase() === normalizedCurrentDb
+            && String(item.name || '').trim().toLowerCase() === columnName.toLowerCase()
+        );
+        if (directColumns.length === 1) {
+            const column = directColumns[0];
+            const parsedTable = splitCompletionSchemaAndTable(column.tableName || '');
+            return {
+                kind: 'column',
+                dbName: column.dbName,
+                tableName: column.tableName,
+                columnName: column.name,
+                type: column.type,
+                comment: column.comment,
+                schemaName: parsedTable.schema || undefined,
+                range,
+            };
+        }
+    }
+
+    return null;
+};
+
 export const resolveQueryEditorNavigationDecorations = (
     lineContent: string,
     column: number,
@@ -1205,6 +1431,16 @@ export const resolveQueryEditorNavigationDecorations = (
     }];
 };
 
+const buildQueryEditorNavigationHoverMarkdown = (
+    hoverTarget: QueryEditorHoverTarget | null,
+    actionHint: string,
+): string => {
+    const hoverContent = hoverTarget ? buildQueryEditorHoverMarkdown(hoverTarget) : '';
+    return hoverContent
+        ? `${hoverContent}\n\n---\n\n${actionHint}`
+        : actionHint;
+};
+
 const dispatchQueryEditorSidebarLocate = (detail: Record<string, unknown>) => {
     if (typeof window === 'undefined') {
         return;
@@ -1221,6 +1457,17 @@ const dispatchQueryEditorSidebarLocate = (detail: Record<string, unknown>) => {
 };
 
 const clearQueryEditorLinkDecorations = (
+    editor: any,
+    decorationIdsRef: React.MutableRefObject<string[]>,
+) => {
+    if (!editor?.deltaDecorations) {
+        decorationIdsRef.current = [];
+        return;
+    }
+    decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, []);
+};
+
+const clearQueryEditorObjectDecorations = (
     editor: any,
     decorationIdsRef: React.MutableRefObject<string[]>,
 ) => {
@@ -1416,6 +1663,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const lastExecutedEditorQueryRef = useRef<string>('');
   const linkDecorationIdsRef = useRef<string[]>([]);
   const ctrlMetaPressedRef = useRef(false);
+  const objectDecorationIdsRef = useRef<string[]>([]);
+  const objectHoverActionRef = useRef<any>(null);
+  const hoverProviderDisposableRef = useRef<any>(null);
   const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
   const editorPaneRef = useRef<HTMLDivElement | null>(null);
@@ -1516,6 +1766,119 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   useEffect(() => {
       connectionsRef.current = connections;
   }, [connections]);
+
+  const refreshObjectDecorations = useCallback(() => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel?.();
+      if (!editor || !monaco || !model) {
+          return;
+      }
+
+      const text = String(model.getValue?.() || '');
+      const decorations: any[] = [];
+      const seen = new Set<string>();
+      const identifierRegex = /[`"\[]?[A-Za-z_][A-Za-z0-9_$]*(?:[`"\]]?\s*\.\s*[`"\[]?[A-Za-z_][A-Za-z0-9_$]*){0,2}[`"\]]?/g;
+      const lines = text.replace(/\r\n/g, '\n').split('\n');
+
+      lines.forEach((lineContent, lineIndex) => {
+          let match: RegExpExecArray | null;
+          identifierRegex.lastIndex = 0;
+          while ((match = identifierRegex.exec(lineContent)) !== null) {
+              const positionColumn = match.index + 2;
+              const hoverTarget = resolveQueryEditorHoverTarget(
+                  text,
+                  lineContent,
+                  positionColumn,
+                  currentDbRef.current,
+                  visibleDbsRef.current,
+                  tablesRef.current,
+                  allColumnsRef.current,
+                  viewsRef.current,
+                  materializedViewsRef.current,
+                  triggersRef.current,
+                  routinesRef.current,
+              );
+              if (!hoverTarget) continue;
+
+              const inlineClassName = hoverTarget.kind === 'column'
+                  ? 'gonavi-query-editor-column-token'
+                  : hoverTarget.kind === 'database'
+                      ? 'gonavi-query-editor-db-token'
+                      : 'gonavi-query-editor-object-token';
+              const key = `${lineIndex + 1}:${hoverTarget.range.startColumn}:${hoverTarget.range.endColumn}:${inlineClassName}`;
+              if (seen.has(key)) continue;
+              seen.add(key);
+              decorations.push({
+                  range: new monaco.Range(
+                      lineIndex + 1,
+                      hoverTarget.range.startColumn,
+                      lineIndex + 1,
+                      hoverTarget.range.endColumn,
+                  ),
+                  options: { inlineClassName },
+              });
+          }
+      });
+
+      objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, decorations);
+  }, []);
+
+  const showObjectInfoAtPosition = useCallback((position?: { lineNumber: number; column: number } | null) => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel?.();
+      const normalizedPosition = normalizeEditorPosition(position || editor?.getPosition?.());
+      if (!editor || !model || !normalizedPosition) {
+          return false;
+      }
+      const lineContent = String(model.getLineContent?.(normalizedPosition.lineNumber) || '');
+      const hoverTarget = resolveQueryEditorHoverTarget(
+          String(model.getValue?.() || ''),
+          lineContent,
+          normalizedPosition.column,
+          currentDbRef.current,
+          visibleDbsRef.current,
+          tablesRef.current,
+          allColumnsRef.current,
+          viewsRef.current,
+          materializedViewsRef.current,
+          triggersRef.current,
+          routinesRef.current,
+      );
+      if (!hoverTarget) {
+          return false;
+      }
+      editor.focus?.();
+      const hoverRange = monaco
+          ? new monaco.Range(
+              normalizedPosition.lineNumber,
+              hoverTarget.range.startColumn,
+              normalizedPosition.lineNumber,
+              hoverTarget.range.endColumn,
+          )
+          : {
+              startLineNumber: normalizedPosition.lineNumber,
+              startColumn: hoverTarget.range.startColumn,
+              endLineNumber: normalizedPosition.lineNumber,
+              endColumn: hoverTarget.range.endColumn,
+          };
+      const contentHoverController = editor.getContribution?.('editor.contrib.contentHover');
+      if (contentHoverController?.showContentHover) {
+          contentHoverController.showContentHover(hoverRange, 1, 2, false);
+          return true;
+      }
+      editor.setPosition?.({
+          lineNumber: normalizedPosition.lineNumber,
+          column: hoverTarget.range.startColumn,
+      });
+      editor.trigger?.('gonavi-hover', 'editor.action.showHover', null);
+      return true;
+  }, []);
+
+  useEffect(() => {
+      refreshObjectDecorations();
+  }, [query, currentDb, refreshObjectDecorations]);
 
   const getCurrentQuery = () => {
       const val = editorRef.current?.getValue?.();
@@ -1817,9 +2180,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               sharedTablesData = allTables;
               sharedAllColumnsData = allColumns;
           }
+          refreshObjectDecorations();
       };
       void fetchMetadata();
-  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive]); // dbList 变化时触发重新加载
+  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive, refreshObjectDecorations]); // dbList 变化时触发重新加载
 
   // Query ID management helpers
   const setQueryId = (id: string) => {
@@ -1859,6 +2223,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       monacoRef.current = monaco;
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
+      editor.updateOptions?.({
+          hover: {
+              enabled: true,
+              delay: QUERY_EDITOR_HOVER_DELAY_MS,
+          },
+      });
+
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
@@ -1891,6 +2262,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               setQueryEditorMouseCursor(editor, '');
               return;
           }
+          const hoverTarget = resolveQueryEditorHoverTarget(
+              String(model?.getValue?.() || ''),
+              lineContent,
+              targetPosition.column,
+              currentDbRef.current,
+              visibleDbsRef.current,
+              tablesRef.current,
+              allColumnsRef.current,
+              viewsRef.current,
+              materializedViewsRef.current,
+              triggersRef.current,
+              routinesRef.current,
+          );
 
           linkDecorationIdsRef.current = editor.deltaDecorations(
               linkDecorationIdsRef.current,
@@ -1903,7 +2287,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ),
                   options: {
                       inlineClassName: 'gonavi-query-editor-link-hint',
-                      hoverMessage: { value: item.hoverMessage },
+                      hoverMessage: {
+                          value: buildQueryEditorNavigationHoverMarkdown(hoverTarget, item.hoverMessage),
+                      },
                   },
               })),
           );
@@ -1942,11 +2328,71 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
 
+      hoverProviderDisposableRef.current?.dispose?.();
+      hoverProviderDisposableRef.current = monaco.languages.registerHoverProvider('sql', {
+          provideHover: (model: any, position: any) => {
+              const normalizedPosition = normalizeEditorPosition(position);
+              if (!normalizedPosition) {
+                  return null;
+              }
+              const lineContent = String(model?.getLineContent?.(normalizedPosition.lineNumber) || '');
+              const hoverTarget = resolveQueryEditorHoverTarget(
+                  String(model?.getValue?.() || ''),
+                  lineContent,
+                  normalizedPosition.column,
+                  currentDbRef.current,
+                  visibleDbsRef.current,
+                  tablesRef.current,
+                  allColumnsRef.current,
+                  viewsRef.current,
+                  materializedViewsRef.current,
+                  triggersRef.current,
+                  routinesRef.current,
+              );
+              if (!hoverTarget) {
+                  return null;
+              }
+              return {
+                  range: new monaco.Range(
+                      normalizedPosition.lineNumber,
+                      hoverTarget.range.startColumn,
+                      normalizedPosition.lineNumber,
+                      hoverTarget.range.endColumn,
+                  ),
+                  contents: [{ value: buildQueryEditorHoverMarkdown(hoverTarget) }],
+              };
+          },
+      });
+
+      objectHoverActionRef.current?.dispose?.();
+      const showObjectInfoKeybinding = monaco.KeyMod?.CtrlCmd && monaco.KeyCode?.KeyQ
+          ? [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ]
+          : undefined;
+      objectHoverActionRef.current = editor.addAction({
+          id: 'gonavi.queryEditor.showObjectInfo',
+          label: 'GoNavi: 查看对象信息',
+          keybindings: showObjectInfoKeybinding,
+          run: () => {
+              const preferredPosition = lastHoverTargetPositionRef.current || editor.getPosition?.();
+              const shown = showObjectInfoAtPosition(preferredPosition);
+              if (!shown) {
+                  void message.info({
+                      key: 'gonavi-query-editor-object-info-miss',
+                      content: '当前光标未定位到可识别的表或字段。',
+                  });
+              }
+          },
+      });
+
       editor.onDidChangeCursorPosition?.((event: any) => {
           const position = normalizeEditorPosition(event?.position);
           if (position) {
               lastEditorCursorPositionRef.current = position;
           }
+      });
+
+      editor.onDidChangeModelContent?.(() => {
+          refreshObjectDecorations();
       });
 
       editor.onMouseMove?.((event: any) => {
@@ -2111,11 +2557,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.onDidDispose?.(() => {
           clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
+          clearQueryEditorObjectDecorations(editor, objectDecorationIdsRef);
           setQueryEditorMouseCursor(editor, '');
+          objectHoverActionRef.current?.dispose?.();
+          objectHoverActionRef.current = null;
+          hoverProviderDisposableRef.current?.dispose?.();
+          hoverProviderDisposableRef.current = null;
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
           window.removeEventListener('blur', handleWindowBlur);
       });
+
+      refreshObjectDecorations();
 
       // 注册 AI 右键菜单操作
       const aiActions = [
@@ -2698,6 +3151,28 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const handleFormat = () => {
       try {
           const formatted = format(getCurrentQuery(), { language: 'mysql', keywordCase: sqlFormatOptions.keywordCase });
+          const editor = editorRef.current;
+          const monaco = monacoRef.current;
+          const model = editor?.getModel?.();
+          if (editor && monaco && model) {
+              const currentValue = String(model.getValue?.() || '');
+              if (currentValue === formatted) {
+                  return;
+              }
+              const fullRange = model.getFullModelRange?.()
+                  || new monaco.Range(1, 1, model.getLineCount?.() || 1, model.getLineMaxColumn?.(model.getLineCount?.() || 1) || 1);
+              editor.pushUndoStop?.();
+              editor.executeEdits?.('gonavi-format-sql', [{
+                  range: fullRange,
+                  text: formatted,
+                  forceMoveMarkers: true,
+              }]);
+              editor.pushUndoStop?.();
+              const nextValue = editor.getValue?.();
+              setQuery(typeof nextValue === 'string' ? nextValue : formatted);
+              refreshObjectDecorations();
+              return;
+          }
           syncQueryToEditor(formatted);
       } catch (e) {
           void message.error("格式化失败: SQL 语法可能有误");
