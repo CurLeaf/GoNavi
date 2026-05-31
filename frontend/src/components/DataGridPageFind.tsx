@@ -14,6 +14,7 @@ export interface DataGridPageFindProps {
   occurrenceCount: number;
   matchedCellCount: number;
   onPageFindTextChange: (value: string) => void;
+  onCancel: () => void;
   onNavigatePrevious: () => void;
   onNavigateNext: () => void;
 }
@@ -30,6 +31,7 @@ const DataGridPageFind: React.FC<DataGridPageFindProps> = ({
   occurrenceCount,
   matchedCellCount,
   onPageFindTextChange,
+  onCancel,
   onNavigatePrevious,
   onNavigateNext,
 }) => (
@@ -37,44 +39,57 @@ const DataGridPageFind: React.FC<DataGridPageFindProps> = ({
     <div
       data-grid-page-find="true"
       className={isV2Ui ? 'gn-v2-data-grid-page-find' : undefined}
-      style={isV2Ui ? undefined : { display: 'flex', alignItems: 'center', gap: 6 }}
+      style={isV2Ui ? undefined : { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'nowrap', height: 32 }}
     >
-      <div className={isV2Ui ? 'gn-v2-data-grid-page-find-row' : undefined}>
-        <Input
-          className={isV2Ui ? 'gn-v2-data-grid-page-find-input' : undefined}
-          {...inputProps}
-          allowClear
-          size="small"
-          variant="borderless"
-          prefix={<SearchOutlined />}
-          placeholder="当前页查找..."
-          value={pageFindText}
-          onChange={(event) => onPageFindTextChange(event.target.value)}
-          style={isV2Ui ? undefined : { width: 220 }}
-        />
-        <Button
-          data-grid-page-find-prev="true"
-          className={isV2Ui ? 'gn-v2-data-grid-page-find-prev' : undefined}
-          size="small"
-          icon={<LeftOutlined />}
-          disabled={!hasMatches}
-          onClick={onNavigatePrevious}
-        >
-          {isV2Ui ? null : '上一个'}
-        </Button>
-        <Button
-          data-grid-page-find-next="true"
-          className={isV2Ui ? 'gn-v2-data-grid-page-find-next' : undefined}
-          size="small"
-          icon={<RightOutlined />}
-          disabled={!hasMatches}
-          onClick={onNavigateNext}
-        >
-          {isV2Ui ? null : '下一个'}
-        </Button>
-      </div>
+      <Input
+        className={isV2Ui ? 'gn-v2-data-grid-page-find-input' : undefined}
+        {...inputProps}
+        allowClear
+        size="small"
+        variant="borderless"
+        prefix={<SearchOutlined />}
+        placeholder="当前页查找..."
+        value={pageFindText}
+        onChange={(event) => onPageFindTextChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onCancel();
+          }
+        }}
+        style={isV2Ui ? undefined : { width: 168, height: 32 }}
+      />
+      <Button
+        data-grid-page-find-prev="true"
+        className={isV2Ui ? 'gn-v2-data-grid-page-find-prev' : undefined}
+        size="small"
+        icon={<LeftOutlined />}
+        disabled={!hasMatches}
+        onClick={onNavigatePrevious}
+        style={isV2Ui ? undefined : { height: 32, minWidth: 32, paddingInline: 8 }}
+      />
+      <Button
+        data-grid-page-find-next="true"
+        className={isV2Ui ? 'gn-v2-data-grid-page-find-next' : undefined}
+        size="small"
+        icon={<RightOutlined />}
+        disabled={!hasMatches}
+        onClick={onNavigateNext}
+        style={isV2Ui ? undefined : { height: 32, minWidth: 32, paddingInline: 8 }}
+      />
       {normalizedPageFindText && (
-        <span aria-live="polite" style={isV2Ui ? undefined : { fontSize: 12, color: darkMode ? '#999' : '#666', whiteSpace: 'nowrap' }}>
+        <span
+          aria-live="polite"
+          style={isV2Ui ? undefined : {
+            fontSize: 12,
+            color: darkMode ? '#999' : '#666',
+            lineHeight: 1.4,
+            whiteSpace: 'nowrap',
+            textAlign: 'left',
+            flex: '0 1 auto',
+          }}
+        >
           {hasMatches ? `${activePageFindPosition} / ${matchCount} · ` : ''}匹配 {occurrenceCount} 处 / {matchedCellCount} 个单元格
         </span>
       )}

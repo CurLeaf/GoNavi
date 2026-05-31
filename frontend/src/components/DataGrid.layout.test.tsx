@@ -10,6 +10,7 @@ import DataGrid, {
   resolveDefaultGridFilterOperator,
   resolveNextGridFilterOperatorForColumnChange,
 } from './DataGrid';
+import DataGridPaginationBar from './DataGridPaginationBar';
 import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
 
 vi.mock('../store', () => ({
@@ -106,6 +107,85 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('hides current-page find in JSON and text record views', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("const visiblePageFindContent = viewMode === 'table' ? pageFindContent : null;");
+    expect(source).toContain('pageFindContent={visiblePageFindContent}');
+  });
+
+  it('keeps legacy secondary actions aligned on a shared search-row baseline', () => {
+    const source = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+    const columnQuickFindSource = readFileSync(new URL('./DataGridColumnQuickFind.tsx', import.meta.url), 'utf8');
+    const pageFindSource = readFileSync(new URL('./DataGridPageFind.tsx', import.meta.url), 'utf8');
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const paginationSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('data-grid-legacy-secondary-actions="true"');
+    expect(source).toContain('data-grid-legacy-secondary-row="primary"');
+    expect(source).toContain('data-grid-legacy-secondary-row="search"');
+    expect(source).toContain('data-grid-legacy-result-view-switcher="true"');
+    expect(source).toContain('data-grid-legacy-column-quick-find="true"');
+    expect(source).toContain('data-grid-legacy-page-find="true"');
+    expect(source).toContain('data-grid-legacy-pagination="true"');
+    expect(source).toContain("justifyContent: 'flex-start'");
+    expect(source).toContain('minHeight: 32');
+    expect(source).toContain("style={{ display: 'flex', minWidth: 0, marginLeft: 'auto' }}");
+    expect(source).toContain("flex: '0 1 240px'");
+    expect(source).toContain("flex: '0 1 auto'");
+    expect(columnQuickFindSource).not.toContain('定位字段列');
+    expect(columnQuickFindSource).toContain("flexWrap: 'nowrap'");
+    expect(columnQuickFindSource).toContain("width: 168");
+    expect(columnQuickFindSource).toContain('height: 32');
+    expect(columnQuickFindSource).toContain('const legacyDropdownOpen =');
+    expect(columnQuickFindSource).toContain('open={isV2Ui ? undefined : legacyDropdownOpen}');
+    expect(columnQuickFindSource).toContain('onSubmit: (value?: string) => void;');
+    expect(columnQuickFindSource).toContain('onSubmit(nextValue);');
+    expect(columnQuickFindSource).toContain('onPressEnter={() => onSubmit(value)}');
+    expect(columnQuickFindSource).not.toContain('data-grid-column-quick-find-submit=');
+    expect(columnQuickFindSource).not.toContain(" '跳转'");
+    expect(pageFindSource).toContain("gap: 8");
+    expect(pageFindSource).toContain("flexWrap: 'nowrap'");
+    expect(pageFindSource).toContain('height: 32');
+    expect(pageFindSource).not.toContain("flexDirection: 'column'");
+    expect(pageFindSource).not.toContain(" '上一个'");
+    expect(pageFindSource).not.toContain(" '下一个'");
+    expect(pageFindSource).toContain("paddingInline: 8");
+    expect(pageFindSource).toContain("whiteSpace: 'nowrap'");
+    expect(pageFindSource).toContain("onCancel: () => void;");
+    expect(pageFindSource).toContain("if (event.key === 'Escape')");
+    expect(pageFindSource).toContain('onCancel();');
+    expect(pageFindSource).toContain("textAlign: 'left'");
+    expect(dataGridSource).toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(pageFindText), [pageFindText]);");
+    expect(dataGridSource).not.toContain("const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);");
+    expect(paginationSource).toContain("padding: 0");
+    expect(paginationSource).toContain("justifyContent: 'flex-start'");
+  });
+
+  it('avoids duplicating legacy pagination page text beside the pager', () => {
+    const markup = renderToStaticMarkup(
+      <DataGridPaginationBar
+        isV2Ui={false}
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 24,
+        }}
+        paginationV2SummaryText="24 行"
+        paginationSummaryText="当前 24 条 / 共 24 条"
+        paginationControlTotal={24}
+        paginationTotalPages={1}
+        paginationPageSizeOptions={['100', '200']}
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+        onV2PageStep={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('class="ant-pagination');
+    expect(markup).not.toContain('第 1 / 1 页');
   });
 
   it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
@@ -375,7 +455,11 @@ describe('DataGrid layout', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain('virtualHorizontalElementsRef');
-    expect(source).toContain('const handleSubmitColumnQuickFind = useCallback(() => {');
+    expect(source).toContain('const handleSubmitColumnQuickFind = useCallback((submittedValue?: string) => {');
+    expect(source).toContain('const effectiveQuery = String(submittedValue ?? columnQuickFindText);');
+    expect(source).toContain('resolveDataGridColumnQuickFindTarget(displayColumnNames, query)');
+    expect(source).toContain("onCancel={() => setPageFindText('')}");
+    expect(source).toContain('enumerable: true');
     expect(source).toContain('resolveDataGridColumnQuickFindScrollLeft({');
     expect(source).toContain('const applied = applyVirtualHorizontalOffset(tableContainer, nextScrollLeft);');
     expect(source).toContain('syncExternalScrollFromTargets();');

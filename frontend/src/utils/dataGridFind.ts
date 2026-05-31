@@ -55,7 +55,7 @@ export const attachDataGridFindRenderVersion = <T>(rows: T[], query: string): T[
     const nextRow = { ...(row as object) } as T;
     Object.defineProperty(nextRow, DATA_GRID_FIND_RENDER_VERSION, {
       value: normalizedQuery,
-      enumerable: false,
+      enumerable: true,
     });
     return nextRow;
   });

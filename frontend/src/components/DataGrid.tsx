@@ -36,7 +36,7 @@ import {
     resolveDataTableColumnWidth,
     resolveDataTableVerticalBorderColor,
 } from '../utils/dataGridDisplay';
-import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
+import { resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import {
     calculateExternalHorizontalScrollInnerWidth,
@@ -393,7 +393,7 @@ export const attachDataGridVirtualEditRenderVersion = <T extends Item>(
         const nextRow = { ...(row as object) } as T;
         Object.defineProperty(nextRow, DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION, {
             value: `${editingCell.rowKey}${CELL_KEY_SEP}${editingCell.dataIndex}`,
-            enumerable: false,
+            enumerable: true,
         });
         return nextRow;
     });
@@ -410,7 +410,7 @@ export const attachDataGridDisplayRenderVersion = <T extends Item>(
         const nextRow = { ...(row as object) } as T;
         Object.defineProperty(nextRow, DATA_GRID_DISPLAY_RENDER_VERSION, {
             value: renderVersion,
-            enumerable: false,
+            enumerable: true,
         });
         return nextRow;
     });
@@ -1568,9 +1568,9 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [pageFindText, setPageFindText] = useState('');
   const [activePageFindMatchIndex, setActivePageFindMatchIndex] = useState(-1);
   const columnQuickFindHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const deferredPageFindText = useDeferredValue(pageFindText);
   const deferredColumnQuickFindText = useDeferredValue(columnQuickFindText);
-  const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(deferredPageFindText), [deferredPageFindText]);
+  // 当前页查找需要即时反馈；否则清空输入框后高亮会继续停留一拍。
+  const normalizedPageFindText = useMemo(() => normalizeDataGridFindQuery(pageFindText), [pageFindText]);
   const normalizedColumnQuickFindText = useMemo(
       () => normalizeDataGridFindQuery(deferredColumnQuickFindText),
       [deferredColumnQuickFindText],
@@ -6531,8 +6531,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       const effectiveQuery = String(submittedValue ?? columnQuickFindText);
       const targetColumnName = resolveColumnQuickFindTarget(effectiveQuery);
       if (!targetColumnName) {
-          if (columnQuickFindText.trim()) {
-              void message.warning(`未找到字段列：${columnQuickFindText.trim()}`);
+          if (effectiveQuery.trim()) {
+              void message.warning(`未找到字段列：${effectiveQuery.trim()}`);
           }
           return;
       }
@@ -6870,14 +6870,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [pagination, prefersManualTotalCount, supportsApproximateTableCount]);
 
-  const paginationPageText = useMemo(() => {
-      if (!pagination) return '';
-      return resolvePaginationPageText({
-          pagination,
-          supportsApproximateTotalPages,
-      });
-  }, [pagination, supportsApproximateTotalPages]);
-
   const paginationControlTotal = useMemo(() => {
       if (!pagination) return 0;
       return resolvePaginationTotalForControl({
@@ -7024,10 +7016,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           occurrenceCount={pageFindSummary.occurrenceCount}
           matchedCellCount={pageFindSummary.matchedCellCount}
           onPageFindTextChange={setPageFindText}
+          onCancel={() => setPageFindText('')}
           onNavigatePrevious={() => handleNavigatePageFind('previous')}
           onNavigateNext={() => handleNavigatePageFind('next')}
       />
   );
+  const visiblePageFindContent = viewMode === 'table' ? pageFindContent : null;
   const columnQuickFindContent = isTableSurfaceActive ? (
       <DataGridColumnQuickFind
           isV2Ui={isV2Ui}
@@ -7054,7 +7048,6 @@ const DataGrid: React.FC<DataGridProps> = ({
           pagination={pagination}
           paginationV2SummaryText={paginationV2SummaryText}
           paginationSummaryText={paginationSummaryText}
-          paginationPageText={paginationPageText}
           paginationControlTotal={paginationControlTotal}
           paginationTotalPages={paginationTotalPages}
           paginationPageSizeOptions={paginationPageSizeOptions}
@@ -7513,7 +7506,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 resultViewSwitcher={resultViewSwitcher}
                 columnInfoSettingContent={columnInfoSettingContent}
                 columnQuickFindContent={columnQuickFindContent}
-                pageFindContent={pageFindContent}
+                pageFindContent={visiblePageFindContent}
                 paginationContent={paginationContent}
                 onViewModeChange={handleViewModeChange}
                 dataPanelOpen={dataPanelOpen}

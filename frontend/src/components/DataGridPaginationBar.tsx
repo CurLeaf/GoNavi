@@ -18,7 +18,6 @@ export interface DataGridPaginationBarProps {
   pagination?: DataGridPaginationState;
   paginationV2SummaryText: string;
   paginationSummaryText: string;
-  paginationPageText: string;
   paginationControlTotal: number;
   paginationTotalPages: number;
   paginationPageSizeOptions: string[];
@@ -32,7 +31,6 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   pagination,
   paginationV2SummaryText,
   paginationSummaryText,
-  paginationPageText,
   paginationControlTotal,
   paginationTotalPages,
   paginationPageSizeOptions,
@@ -47,7 +45,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   return (
     <div
       className={`${isV2Ui ? 'gn-v2-data-grid-pagination-wrap ' : ''}data-grid-pagination-wrap`}
-      style={isV2Ui ? undefined : { padding: '12px 0 0', borderTop: 'none', display: 'flex', justifyContent: 'flex-end' }}
+      style={isV2Ui ? undefined : { padding: 0, borderTop: 'none', display: 'flex', justifyContent: 'flex-start' }}
     >
       {isV2Ui ? (
         <div className="data-grid-pagination-shell" data-grid-v2-pagination="true">
@@ -89,7 +87,6 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             <span className="data-grid-pagination-kicker">结果集</span>
             <span className="data-grid-pagination-summary-value">{paginationSummaryText}</span>
           </div>
-          <div className="data-grid-pagination-page-chip">{paginationPageText}</div>
           <Pagination
             current={pagination.current}
             pageSize={pagination.pageSize}

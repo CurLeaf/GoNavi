@@ -114,4 +114,13 @@ describe('dataGridFind', () => {
     expect(hasDataGridFindRenderVersionChanged(betaRows[0], alphaRows[0])).toBe(true);
     expect(hasDataGridFindRenderVersionChanged(rows[0], alphaRows[0])).toBe(true);
   });
+
+  it('keeps find render metadata on symbol keys while allowing wrapped rows to preserve it', () => {
+    const rows = [{ id: 1, name: 'Alpha' }];
+    const alphaRows = attachDataGridFindRenderVersion(rows, 'alpha');
+
+    expect(Object.keys(alphaRows[0])).toEqual(['id', 'name']);
+    expect(Object.getOwnPropertySymbols(alphaRows[0]).length).toBeGreaterThan(0);
+    expect(hasDataGridFindRenderVersionChanged(alphaRows[0], rows[0])).toBe(true);
+  });
 });
