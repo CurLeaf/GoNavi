@@ -91,6 +91,7 @@ import {
     findDataGridTextRanges,
     hasDataGridFindRenderVersionChanged,
     normalizeDataGridFindQuery,
+    resolveDataGridColumnQuickFindTarget,
     resolveDataGridFindNavigationIndex,
     summarizeDataGridFindMatches,
     type DataGridFindMatch,
@@ -6284,13 +6285,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       [visibleColumnQuickFindMatches],
   );
 
-  const resolveColumnQuickFindTarget = useCallback((): string => {
-      const exactMatch = displayColumnNames.find((columnName) => (
-          normalizeDataGridFindQuery(columnName) === normalizedColumnQuickFindText
-      ));
-      if (exactMatch) return exactMatch;
-      return visibleColumnQuickFindMatches[0] || '';
-  }, [displayColumnNames, normalizedColumnQuickFindText, visibleColumnQuickFindMatches]);
+  const resolveColumnQuickFindTarget = useCallback((query: string): string => (
+      resolveDataGridColumnQuickFindTarget(displayColumnNames, query)
+  ), [displayColumnNames]);
 
   const highlightColumnQuickFindTarget = useCallback((columnName: string) => {
       setHighlightedColumnName(columnName);
@@ -6530,8 +6527,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       syncExternalScrollFromTargets,
   ]);
 
-  const handleSubmitColumnQuickFind = useCallback(() => {
-      const targetColumnName = resolveColumnQuickFindTarget();
+  const handleSubmitColumnQuickFind = useCallback((submittedValue?: string) => {
+      const effectiveQuery = String(submittedValue ?? columnQuickFindText);
+      const targetColumnName = resolveColumnQuickFindTarget(effectiveQuery);
       if (!targetColumnName) {
           if (columnQuickFindText.trim()) {
               void message.warning(`未找到字段列：${columnQuickFindText.trim()}`);
@@ -7037,7 +7035,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           inputProps={noAutoCapInputProps as Record<string, unknown>}
           value={columnQuickFindText}
           options={columnQuickFindOptions}
-          hasTarget={!!resolveColumnQuickFindTarget()}
+          hasTarget={!!resolveColumnQuickFindTarget(columnQuickFindText)}
           onChange={setColumnQuickFindText}
           onSubmit={handleSubmitColumnQuickFind}
       />

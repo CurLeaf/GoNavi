@@ -143,3 +143,20 @@ export const resolveDataGridFindNavigationIndex = (
   }
   return currentIndex < 0 || currentIndex >= matchCount - 1 ? 0 : currentIndex + 1;
 };
+
+export const resolveDataGridColumnQuickFindTarget = (
+  columnNames: string[],
+  query: string,
+): string => {
+  const normalizedQuery = normalizeDataGridFindQuery(query);
+  if (!normalizedQuery) return '';
+
+  const exactMatch = columnNames.find((columnName) => (
+    normalizeDataGridFindQuery(columnName) === normalizedQuery
+  ));
+  if (exactMatch) return exactMatch;
+
+  return columnNames.find((columnName) => (
+    normalizeDataGridFindQuery(columnName).includes(normalizedQuery)
+  )) || '';
+};

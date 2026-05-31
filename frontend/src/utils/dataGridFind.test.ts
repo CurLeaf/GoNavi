@@ -6,6 +6,7 @@ import {
   findDataGridTextRanges,
   hasDataGridFindRenderVersionChanged,
   normalizeDataGridFindQuery,
+  resolveDataGridColumnQuickFindTarget,
   resolveDataGridFindNavigationIndex,
   summarizeDataGridFindMatches,
 } from './dataGridFind';
@@ -87,6 +88,15 @@ describe('dataGridFind', () => {
     expect(resolveDataGridFindNavigationIndex(0, 4, 'previous')).toBe(3);
     expect(resolveDataGridFindNavigationIndex(2, 4, 'previous')).toBe(1);
     expect(resolveDataGridFindNavigationIndex(0, 0, 'next')).toBe(-1);
+  });
+
+  it('prefers an exact quick-find column match over earlier fuzzy matches', () => {
+    const columnNames = ['user_id', 'username', 'created_at'];
+
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'username')).toBe('username');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'user')).toBe('user_id');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, '  ')).toBe('');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'missing')).toBe('');
   });
 
   it('tracks render version changes without exposing metadata as row data', () => {
