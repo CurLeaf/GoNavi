@@ -42,6 +42,10 @@ const storeState = vi.hoisted(() => ({
       mac: { enabled: false, combo: '' },
       windows: { enabled: false, combo: '' },
     },
+    saveQuery: {
+      mac: { enabled: true, combo: 'Meta+S' },
+      windows: { enabled: true, combo: 'Ctrl+S' },
+    },
   },
   activeTabId: 'tab-1',
   aiPanelVisible: false,
@@ -60,6 +64,7 @@ const backendApp = vi.hoisted(() => ({
   CancelQuery: vi.fn(),
   GenerateQueryID: vi.fn(),
   WriteSQLFile: vi.fn(),
+  ExportSQLFile: vi.fn(),
 }));
 
 const messageApi = vi.hoisted(() => ({
@@ -218,8 +223,8 @@ vi.mock('@monaco-editor/react', () => ({
       editorState.value = String(defaultValue || '');
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
-        KeyMod: { CtrlCmd: 2048 },
-        KeyCode: { KeyQ: 81 },
+        KeyMod: { CtrlCmd: 2048, WinCtrl: 256 },
+        KeyCode: { KeyQ: 81, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -301,10 +306,24 @@ vi.mock('antd', () => {
   return {
     Button,
     message: messageApi,
-    Modal: ({ children, open }: any) => (open ? <section>{children}</section> : null),
+    Modal: ({ children, open, onOk, okText = '确认' }: any) => (open ? (
+      <section>
+        {children}
+        <button type="button" onClick={onOk}>{okText}</button>
+      </section>
+    ) : null),
     Input: ({ value, onChange, placeholder }: any) => <input value={value} onChange={onChange} placeholder={placeholder} />,
     Form,
-    Dropdown: ({ children }: any) => <>{children}</>,
+    Dropdown: ({ children, menu }: any) => (
+      <>
+        {children}
+        {menu?.items?.map((item: any) => (
+          item?.type === 'divider'
+            ? null
+            : <button key={item.key} type="button" disabled={item.disabled} onClick={item.onClick}>{item.label}</button>
+        ))}
+      </>
+    ),
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
     Tabs: ({ activeKey, items }: any) => {
@@ -326,6 +345,9 @@ const textContent = (node: any): string =>
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+
+const findExactButton = (renderer: ReactTestRenderer, text: string) =>
+  renderer.root.findAll((node) => node.type === 'button' && textContent(node) === text)[0];
 
 const createTab = (overrides: Partial<TabData> = {}): TabData => ({
   id: 'tab-1',
@@ -354,6 +376,7 @@ describe('QueryEditor external SQL save', () => {
     messageApi.warning.mockReset();
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.WriteSQLFile.mockResolvedValue({ success: true });
+    backendApp.ExportSQLFile.mockResolvedValue({ success: true });
     backendApp.DBQueryMulti.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
@@ -553,7 +576,7 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.domNode.style.cursor).toBe('pointer');
     const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
-    expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage?.value).toContain('Ctrl/Cmd + 点击打开该表');
+    expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage?.value).toContain('Ctrl + 点击打开该表');
     expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage?.value).toContain('**表** `events`');
 
     await act(async () => {
@@ -985,6 +1008,69 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.success).toHaveBeenCalledWith('SQL 文件已保存！');
   });
 
+  it('registers Ctrl/Cmd+S to quick-save the active query', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    const saveAction = editorState.editor.addAction.mock.calls
+      .map((call: any[]) => call[0])
+      .find((action: any) => action?.id === 'gonavi.saveQuery');
+    expect(saveAction).toMatchObject({
+      label: 'GoNavi: 保存查询',
+      keybindings: [2048 | 83],
+    });
+
+    editorState.value = 'select 5;';
+    const event = {
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      key: 's',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'saved-1',
+      name: '常用查询',
+      sql: 'select 5;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      createdAt: 100,
+    }));
+    expect(messageApi.success).toHaveBeenCalledWith('查询已保存！');
+  });
+
   it('does not create saved queries when external SQL file writes fail', async () => {
     let renderer!: ReactTestRenderer;
     const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
@@ -1038,6 +1124,76 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       createdAt: 100,
     }));
+  });
+
+  it('renames saved queries without creating a new saved query id', async () => {
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    editorState.value = 'select 9;';
+    await act(async () => {
+      findButton(renderer!, '重命名查询').props.onClick();
+    });
+    await act(async () => {
+      await findExactButton(renderer!, '重命名').props.onClick();
+    });
+
+    expect(storeState.saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'saved-1',
+      name: '查询',
+      sql: 'select 9;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      createdAt: 100,
+    }));
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      title: '查询',
+      savedQueryId: 'saved-1',
+    }));
+    expect(messageApi.success).toHaveBeenCalledWith('查询已重命名！');
+  });
+
+  it('exports the current editor SQL without changing saved query state', async () => {
+    storeState.savedQueries = [
+      {
+        id: 'saved-1',
+        name: '常用查询',
+        sql: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        createdAt: 100,
+      },
+    ];
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ savedQueryId: 'saved-1' })} />);
+    });
+
+    editorState.value = 'select 10;';
+    await act(async () => {
+      await findButton(renderer!, '导出 SQL 文件').props.onClick();
+    });
+
+    expect(backendApp.ExportSQLFile).toHaveBeenCalledWith('常用查询', 'select 10;');
+    expect(storeState.saveQuery).not.toHaveBeenCalled();
+    expect(storeState.addTab).not.toHaveBeenCalledWith(expect.objectContaining({
+      query: 'select 10;',
+    }));
+    expect(messageApi.success).toHaveBeenCalledWith('SQL 文件已导出！');
   });
 
   it('automatically appends hidden primary key locator columns for editable query results', async () => {
@@ -1572,8 +1728,9 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('select 1 as a');
     expect(String(backendApp.DBQueryMulti.mock.calls[1][2])).toContain('select 2 as b');
     expect(String(backendApp.DBQueryMulti.mock.calls[1][2])).not.toContain('select 1 as a');
-    expect(textContent(renderer!.toJSON())).toContain('结果 1 (1)');
-    expect(textContent(renderer!.toJSON())).toContain('结果 2 (1)');
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).toContain('(1)');
+    expect(textContent(renderer!.toJSON())).toContain('结果 2');
   });
 
   it('replaces the current result when rerunning the same cursor SQL', async () => {
@@ -1626,8 +1783,8 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const tabLabels = renderer!.root.findAll((node) => textContent(node).includes('结果 '));
-    expect(textContent(renderer!.toJSON())).toContain('结果 1 (1)');
-    expect(textContent(renderer!.toJSON())).not.toContain('结果 2 (1)');
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).not.toContain('结果 2');
     expect(tabLabels.length).toBeGreaterThan(0);
     expect(dataGridState.latestProps?.data).toEqual(expect.arrayContaining([expect.objectContaining({ a: 10 })]));
     expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(2);
@@ -1698,8 +1855,8 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[1][2])).toContain('select 2 as b');
     expect(String(backendApp.DBQueryMulti.mock.calls[1][2])).not.toContain('select 1 as a');
     expect(String(backendApp.DBQueryMulti.mock.calls[1][2])).not.toContain('select 3 as c');
-    expect(textContent(renderer!.toJSON())).toContain('结果 1 (1)');
-    expect(textContent(renderer!.toJSON())).toContain('结果 2 (1)');
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).toContain('结果 2');
   });
 
   it('runs selected SQL before cursor SQL', async () => {

@@ -216,6 +216,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 ListSQLDirectory: async () => ({ success: true, data: [] }),
                 ReadSQLFile: async () => ({ success: false, message: '已取消' }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
+                ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: '浏览器 mock 不支持 SQL 文件导出' }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
                 ImportConnectionsPayload: async (raw: string, _password?: string) => {

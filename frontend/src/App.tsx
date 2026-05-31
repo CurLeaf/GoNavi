@@ -2953,9 +2953,9 @@ function App() {
           }
       };
 
-      window.addEventListener('keydown', handleGlobalShortcut);
+      window.addEventListener('keydown', handleGlobalShortcut, true);
       return () => {
-          window.removeEventListener('keydown', handleGlobalShortcut);
+          window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
   }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
 

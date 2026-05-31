@@ -170,6 +170,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQuery'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ExportSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
+}
+
 export function ExportTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTable'](arg1, arg2, arg3, arg4);
 }

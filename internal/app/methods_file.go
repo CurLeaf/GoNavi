@@ -163,6 +163,67 @@ func writeSQLFileByPath(filePath string, content string) connection.QueryResult 
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
 }
 
+func normalizeSQLExportDefaultFilename(rawName string) string {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		name = "query"
+	}
+	if idx := strings.LastIndexAny(name, `/\`); idx >= 0 {
+		name = name[idx+1:]
+	}
+	if name == "." || name == string(filepath.Separator) {
+		name = "query"
+	}
+	name = strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	).Replace(strings.TrimSpace(name))
+	if name == "" {
+		name = "query"
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".sql") {
+		name += ".sql"
+	}
+	return name
+}
+
+func normalizeSQLExportTargetPath(filePath string) string {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return ""
+	}
+	if !strings.EqualFold(filepath.Ext(target), ".sql") {
+		target += ".sql"
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	return target
+}
+
+func writeExportedSQLFileByPath(filePath string, content string) connection.QueryResult {
+	target := normalizeSQLExportTargetPath(filePath)
+	if target == "" {
+		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+	}
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+	} else if err != nil && !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法写入 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
+}
+
 func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {
@@ -284,6 +345,31 @@ func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
 
 func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
 	return writeSQLFileByPath(filePath, content)
+}
+
+func (a *App) ExportSQLFile(defaultName string, content string) connection.QueryResult {
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "导出 SQL 文件",
+		DefaultFilename: normalizeSQLExportDefaultFilename(defaultName),
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "SQL Files (*.sql)",
+				Pattern:     "*.sql",
+			},
+			{
+				DisplayName: "All Files (*.*)",
+				Pattern:     "*.*",
+			},
+		},
+	})
+	if err != nil || strings.TrimSpace(filename) == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+	result := writeExportedSQLFileByPath(filename, content)
+	if result.Success {
+		result.Message = "SQL 文件已导出"
+	}
+	return result
 }
 
 func normalizeSQLFileExecutionOptions(options sqlFileExecutionOptions) sqlFileExecutionOptions {

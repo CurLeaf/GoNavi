@@ -75,6 +75,45 @@ func TestWriteSQLFileByPathRejectsEmptyPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeSQLExportDefaultFilename(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "blank", raw: "   ", want: "query.sql"},
+		{name: "appends extension", raw: "daily report", want: "daily report.sql"},
+		{name: "keeps sql extension", raw: "report.SQL", want: "report.SQL"},
+		{name: "uses base name", raw: filepath.Join("folder", "report.sql"), want: "report.sql"},
+		{name: "replaces invalid chars", raw: `a:b*c?d"e<f>g|h`, want: "a_b_c_d_e_f_g_h.sql"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeSQLExportDefaultFilename(tt.raw); got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestWriteExportedSQLFileByPathCreatesNewSQLFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "exported")
+
+	result := writeExportedSQLFileByPath(filePath, "select 42;\n")
+	if !result.Success {
+		t.Fatalf("expected sql export to succeed, got %#v", result)
+	}
+
+	data, err := os.ReadFile(filePath + ".sql")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(data) != "select 42;\n" {
+		t.Fatalf("expected exported sql content, got %q", string(data))
+	}
+}
+
 func TestReadSQLFileByPathReturnsLargeFileMetadata(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "big.sql")
 	file, err := os.Create(filePath)

@@ -14,7 +14,7 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 
   const afterCase = appSource.slice(start + caseToken.length);
   const nextCaseIndex = afterCase.search(/\n\s+case '[^']+':/);
-  const switchEndIndex = afterCase.indexOf("window.addEventListener('keydown', handleGlobalShortcut);");
+  const switchEndIndex = afterCase.indexOf("window.addEventListener('keydown', handleGlobalShortcut, true);");
   const endIndex = nextCaseIndex >= 0 ? nextCaseIndex : switchEndIndex;
 
   expect(endIndex).toBeGreaterThan(-1);
@@ -176,6 +176,11 @@ describe('tool center menu entries', () => {
     }
     expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
     expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
+  });
+
+  it('captures global shortcuts before Monaco/editor defaults consume them', () => {
+    expect(appSource).toContain("window.addEventListener('keydown', handleGlobalShortcut, true);");
+    expect(appSource).toContain("window.removeEventListener('keydown', handleGlobalShortcut, true);");
   });
 
   it('listens for command search query-tab events and routes them through handleNewQuery', () => {

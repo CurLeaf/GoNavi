@@ -8,7 +8,9 @@ import {
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
+  getPrimaryShortcutDisplayLabel,
   getShortcutDisplayLabel,
+  getShortcutPrimaryModifierDisplayLabel,
   resolveShortcutBinding,
   resolveShortcutDisplay,
   sanitizeShortcutOptions,
@@ -133,6 +135,18 @@ describe('shortcut defaults', () => {
     });
   });
 
+  it('registers save query as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.saveQuery).toEqual({
+      mac: { combo: 'Meta+S', enabled: true },
+      windows: { combo: 'Ctrl+S', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.saveQuery).toMatchObject({
+      label: '保存查询',
+      scope: 'queryEditor',
+      allowInEditable: true,
+    });
+  });
+
   // Windows 任务栏恢复后字体异常变大的兜底入口（方案 3）。
   // 自动 fix 路径（9848b8b2）刻意不再 toggle 以避免可见动画，由该快捷键给用户主动触发的修复入口。
   it('registers reset window zoom shortcut with default Ctrl+Shift+0', () => {
@@ -198,6 +212,7 @@ describe('shortcut defaults', () => {
 
     expect(options.newQueryTab.mac).toEqual({ combo: 'Meta+Y', enabled: false });
     expect(options.newQueryTab.windows).toEqual({ combo: 'Ctrl+Q', enabled: true });
+    expect(options.saveQuery.windows).toEqual({ combo: 'Ctrl+S', enabled: true });
     expect(options.sendAIChatMessage.windows).toEqual({ combo: 'Enter', enabled: true });
   });
 
@@ -216,6 +231,14 @@ describe('shortcut defaults', () => {
     expect(getShortcutDisplayLabel('Meta+N', 'mac')).toBe('⌘N');
     expect(getShortcutDisplayLabel('Meta+Shift+H', 'mac')).toBe('⌘⇧H');
     expect(getShortcutDisplayLabel('Ctrl+Meta+F', 'mac')).toBe('⌃⌘F');
+    expect(getShortcutDisplayLabel('Meta+S', 'mac')).toBe('⌘S');
+    expect(getShortcutDisplayLabel('Ctrl+S', 'windows')).toBe('Ctrl+S');
+    expect(getShortcutPrimaryModifierDisplayLabel('mac')).toBe('⌘');
+    expect(getShortcutPrimaryModifierDisplayLabel('windows')).toBe('Ctrl');
+    expect(getPrimaryShortcutDisplayLabel('C', 'mac')).toBe('⌘C');
+    expect(getPrimaryShortcutDisplayLabel('C', 'windows')).toBe('Ctrl+C');
+    expect(getPrimaryShortcutDisplayLabel('Enter', 'mac')).toBe('⌘↵');
+    expect(getPrimaryShortcutDisplayLabel('Enter', 'windows')).toBe('Ctrl+Enter');
     expect(resolveShortcutDisplay(options, 'newQueryTab', 'windows')).toBe('Ctrl+Q');
   });
 });

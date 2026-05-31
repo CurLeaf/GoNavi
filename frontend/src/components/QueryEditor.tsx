@@ -6,11 +6,11 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile } from '../../wailsjs/go/app/App';
+import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
-import { getShortcutDisplayLabel, getShortcutPlatform, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
+import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
@@ -1383,6 +1383,7 @@ export const resolveQueryEditorNavigationDecorations = (
     materializedViews: CompletionViewMeta[] = [],
     triggers: CompletionTriggerMeta[] = [],
     routines: CompletionRoutineMeta[] = [],
+    shortcutModifierLabel = 'Ctrl/Cmd',
 ): Array<{ startColumn: number; endColumn: number; hoverMessage: string }> => {
     const text = String(lineContent || '');
     if (!text) return [];
@@ -1405,23 +1406,23 @@ export const resolveQueryEditorNavigationDecorations = (
 
     const hoverMessage = (() => {
         if (navigationTarget.type === 'database') {
-            return 'Ctrl/Cmd + 点击切换到该数据库';
+            return `${shortcutModifierLabel} + 点击切换到该数据库`;
         }
         if (navigationTarget.type === 'table') {
-            return 'Ctrl/Cmd + 点击打开该表';
+            return `${shortcutModifierLabel} + 点击打开该表`;
         }
         if (navigationTarget.type === 'view') {
-            return 'Ctrl/Cmd + 点击打开该视图';
+            return `${shortcutModifierLabel} + 点击打开该视图`;
         }
         if (navigationTarget.type === 'materialized-view') {
-            return 'Ctrl/Cmd + 点击打开该物化视图';
+            return `${shortcutModifierLabel} + 点击打开该物化视图`;
         }
         if (navigationTarget.type === 'trigger') {
-            return 'Ctrl/Cmd + 点击打开该触发器';
+            return `${shortcutModifierLabel} + 点击打开该触发器`;
         }
         return navigationTarget.routineType === 'PROCEDURE'
-            ? 'Ctrl/Cmd + 点击打开该存储过程'
-            : 'Ctrl/Cmd + 点击打开该函数';
+            ? `${shortcutModifierLabel} + 点击打开该存储过程`
+            : `${shortcutModifierLabel} + 点击打开该函数`;
     })();
 
     return [{
@@ -1455,6 +1456,10 @@ const dispatchQueryEditorSidebarLocate = (detail: Record<string, unknown>) => {
         detail,
     }));
 };
+
+const resolveEventTargetNode = (target: EventTarget | null): Node | null => (
+    typeof Node !== 'undefined' && target instanceof Node ? target : null
+);
 
 const clearQueryEditorLinkDecorations = (
     editor: any,
@@ -1644,6 +1649,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runSeqRef = useRef(0);
   const currentQueryIdRef = useRef('');
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [saveModalMode, setSaveModalMode] = useState<'save' | 'rename'>('save');
   const [saveForm] = Form.useForm();
   
   // Database Selection
@@ -1657,6 +1663,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const monacoRef = useRef<any>(null);
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
+  const saveQueryActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastEditorCursorPositionRef = useRef<any>(null);
   const lastHoverTargetPositionRef = useRef<{ lineNumber: number; column: number } | null>(null);
@@ -1709,6 +1716,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const selectCurrentStatementShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'selectCurrentStatement', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
+  );
+  const saveQueryShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'saveQuery', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+  const primaryShortcutModifierLabel = useMemo(
+      () => getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform),
+      [activeShortcutPlatform],
   );
   const autoFetchVisible = useAutoFetchVisibility();
 
@@ -2255,6 +2270,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               materializedViewsRef.current,
               triggersRef.current,
               routinesRef.current,
+              primaryShortcutModifierLabel,
           );
           if (decorations.length === 0) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
@@ -2631,6 +2647,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   label: 'GoNavi: 选择当前语句',
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: handleSelectCurrentStatement,
+              });
+          }
+      }
+
+      const saveBinding = saveQueryShortcutBinding;
+      if (saveBinding?.enabled && saveBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              saveBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              saveQueryActionRef.current = editor.addAction({
+                  id: 'gonavi.saveQuery',
+                  label: 'GoNavi: 保存查询',
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: () => {
+                      window.dispatchEvent(new CustomEvent('gonavi:save-active-query'));
+                  },
               });
           }
       }
@@ -3942,7 +3975,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
 
-          const targetNode = event.target instanceof Node ? event.target : null;
+          const targetNode = resolveEventTargetNode(event.target);
           const editorHasFocus = !!editor.hasTextFocus?.();
           const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
@@ -4060,6 +4093,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       };
   }, [selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
+
+  useEffect(() => {
+      if (saveQueryActionRef.current) {
+          saveQueryActionRef.current.dispose();
+          saveQueryActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = saveQueryShortcutBinding;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          saveQueryActionRef.current = editor.addAction({
+              id: 'gonavi.saveQuery',
+              label: 'GoNavi: 保存查询',
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:save-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (saveQueryActionRef.current) {
+              saveQueryActionRef.current.dispose();
+              saveQueryActionRef.current = null;
+          }
+      };
+  }, [saveQueryShortcutBinding]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
@@ -4192,6 +4258,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return saved;
   };
 
+  const openSaveQueryModal = (mode: 'save' | 'rename') => {
+      setSaveModalMode(mode);
+      saveForm.setFieldsValue({ name: currentSavedQuery?.name || resolveDefaultQueryName() });
+      setIsSaveModalOpen(true);
+  };
+
   const handleQuickSave = async () => {
       const filePath = String(tab.filePath || '').trim();
       if (filePath) {
@@ -4221,14 +4293,100 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const fallbackSavedId = String(tab.savedQueryId || '').trim();
       const saveId = existed?.id || fallbackSavedId || '';
       if (!saveId) {
-          saveForm.setFieldsValue({ name: resolveDefaultQueryName() });
-          setIsSaveModalOpen(true);
+          openSaveQueryModal('save');
           return;
       }
       const saveName = existed?.name || resolveDefaultQueryName();
       persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
       message.success('查询已保存！');
   };
+
+  const handleRenameQuery = () => {
+      const existed = currentSavedQuery || null;
+      const fallbackSavedId = String(tab.savedQueryId || '').trim();
+      if (!existed && !fallbackSavedId) {
+          message.warning('请先保存查询后再重命名');
+          openSaveQueryModal('save');
+          return;
+      }
+      openSaveQueryModal('rename');
+  };
+
+  const handleExportSQLFile = async () => {
+      try {
+          const res = await ExportSQLFile(currentSavedQuery?.name || resolveDefaultQueryName(), getCurrentQuery());
+          if (!res.success) {
+              if ((res.message || '') !== '已取消') {
+                  message.error('导出 SQL 文件失败: ' + (res.message || '未知错误'));
+              }
+              return;
+          }
+          message.success('SQL 文件已导出！');
+      } catch (error) {
+          message.error('导出 SQL 文件失败: ' + (error instanceof Error ? error.message : String(error)));
+      }
+  };
+
+  const saveMoreMenuItems: MenuProps['items'] = [
+      {
+          key: 'rename-query',
+          label: '重命名查询',
+          disabled: !!tab.filePath,
+          onClick: handleRenameQuery,
+      },
+      {
+          key: 'export-sql-file',
+          label: '导出 SQL 文件',
+          onClick: () => void handleExportSQLFile(),
+      },
+  ];
+
+  useEffect(() => {
+      const binding = saveQueryShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleSaveShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          void handleQuickSave();
+      };
+
+      window.addEventListener('keydown', handleSaveShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleSaveShortcut, true);
+      };
+  }, [isActive, saveQueryShortcutBinding, handleQuickSave]);
+
+  useEffect(() => {
+      const handleSaveActiveQuery = () => {
+          if (!isActive) {
+              return;
+          }
+          void handleQuickSave();
+      };
+
+      window.addEventListener('gonavi:save-active-query', handleSaveActiveQuery as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:save-active-query', handleSaveActiveQuery as EventListener);
+      };
+  }, [isActive, handleQuickSave]);
 
   const handleSave = async () => {
       try {
@@ -4241,7 +4399,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               name: String(values.name || '').trim() || '未命名查询',
               createdAt: existed?.createdAt,
           });
-          message.success('查询已保存！');
+          message.success(saveModalMode === 'rename' ? '查询已重命名！' : '查询已保存！');
           setIsSaveModalOpen(false);
       } catch (e) {
       }
@@ -4276,6 +4434,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           flex: 0 0 auto;
           margin: 0;
         }
+        .query-result-tabs .ant-tabs-nav-list {
+          align-items: stretch;
+        }
+        .query-result-tabs .ant-tabs-tab {
+          min-height: 34px;
+          padding: 4px 10px !important;
+        }
+        .query-result-tabs .ant-tabs-tab-btn {
+          max-width: 100%;
+        }
         .query-result-tabs .ant-tabs-content-holder {
           flex: 1 1 auto;
           overflow: hidden;
@@ -4305,6 +4473,35 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         }
         .query-result-tabs .ant-tabs-ink-bar {
           transition: none !important;
+        }
+        .query-result-tab-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+          max-width: 100%;
+          line-height: 1.1;
+        }
+        .query-result-tab-text {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .query-result-tab-close {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          color: #999;
+          cursor: pointer;
+          flex: 0 0 auto;
+        }
+        .query-result-tab-close:hover {
+          background: rgba(0, 0, 0, 0.06);
+          color: #666;
         }
       `}</style>
       <div ref={editorPaneRef} className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}>
@@ -4360,9 +4557,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             </Button>
           )}
         </Button.Group>
-        <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
-          保存
-        </Button>
+        <Button.Group>
+            <Tooltip
+                title={
+                    saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
+                        ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
+                        : '保存'
+                }
+            >
+              <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
+                保存
+              </Button>
+            </Tooltip>
+            <Dropdown menu={{ items: saveMoreMenuItems }} placement="bottomRight">
+                <Button>更多</Button>
+            </Dropdown>
+        </Button.Group>
         
         <Button.Group>
             <Tooltip title="美化 SQL">
@@ -4426,9 +4636,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               items={resultSets.map((rs, idx) => ({
                   key: rs.key,
                   label: (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <div className="query-result-tab-label">
                           <Tooltip title={rs.sql}>
-                          <span>{(() => {
+                          <span className="query-result-tab-text">{(() => {
                               const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
                               if (isAffected) return `结果 ${idx + 1} ✓`;
                               return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length})` : ''}`;
@@ -4436,12 +4646,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           </Tooltip>
                           <Tooltip title="关闭结果">
                               <span
+                                  className="query-result-tab-close"
                                   onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
                                       handleCloseResult(rs.key);
                                   }}
-                                  style={{ display: 'inline-flex', alignItems: 'center', color: '#999', cursor: 'pointer' }}
                               >
                                   <CloseOutlined style={{ fontSize: 12 }} />
                               </span>
@@ -4527,11 +4737,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       </div>
 
       <Modal 
-        title="保存查询" 
+        title={saveModalMode === 'rename' ? '重命名查询' : '保存查询'}
         open={isSaveModalOpen} 
         onOk={handleSave} 
         onCancel={() => setIsSaveModalOpen(false)}
-        okText="确认"
+        okText={saveModalMode === 'rename' ? '重命名' : '保存'}
         cancelText="取消"
       >
           <Form form={saveForm} layout="vertical">
