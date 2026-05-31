@@ -773,6 +773,78 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
   });
 
+  it('updates activeContext when switching between tabs with different host or database', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-main',
+      title: 'users',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      tableName: 'users',
+    });
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+
+    useStore.getState().addTab({
+      id: 'query-bot',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+      query: 'select 1;',
+    });
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+    });
+
+    useStore.getState().setActiveTab('table-main');
+    expect(useStore.getState().activeTabId).toBe('table-main');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+  });
+
+  it('falls back activeContext to the new active tab after closing the current tab', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-sys',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 1;',
+    });
+    useStore.getState().addTab({
+      id: 'query-bot',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+      query: 'select 2;',
+    });
+
+    expect(useStore.getState().activeTabId).toBe('query-bot');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+    });
+
+    useStore.getState().closeTab('query-bot');
+
+    expect(useStore.getState().activeTabId).toBe('query-sys');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+  });
+
   it('only restores persisted query tabs with useful SQL state', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

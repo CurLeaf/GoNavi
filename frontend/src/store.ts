@@ -1385,6 +1385,34 @@ const sanitizeActiveTabId = (activeTabId: unknown, tabs: TabData[]): string | nu
   return tabs[0]?.id || null;
 };
 
+const resolveActiveContextFromTab = (
+  tab: TabData | null | undefined,
+): { connectionId: string; dbName: string } | null => {
+  if (!tab) return null;
+  const connectionId = toTrimmedString(tab.connectionId);
+  if (!connectionId) return null;
+  return {
+    connectionId,
+    dbName: toTrimmedString(tab.dbName),
+  };
+};
+
+const resolveActiveContextForTabId = (
+  tabs: TabData[],
+  activeTabId: string | null | undefined,
+  fallbackContext: { connectionId: string; dbName: string } | null,
+): { connectionId: string; dbName: string } | null => {
+  const normalizedActiveTabId = toTrimmedString(activeTabId);
+  if (normalizedActiveTabId) {
+    const activeTab = tabs.find((tab) => tab.id === normalizedActiveTabId);
+    const contextFromTab = resolveActiveContextFromTab(activeTab);
+    if (contextFromTab) {
+      return contextFromTab;
+    }
+  }
+  return fallbackContext;
+};
+
 const sanitizeSqlLogs = (value: unknown, limit = MAX_PERSISTED_SQL_LOGS): SqlLog[] => {
   if (!Array.isArray(value)) return [];
   const result: SqlLog[] = [];
@@ -2204,7 +2232,15 @@ export const useStore = create<AppState>()(
             // Update existing tab with new data (e.g. switch initialTab)
             const newTabs = [...state.tabs];
             newTabs[index] = { ...newTabs[index], ...tab };
-            return { tabs: newTabs, activeTabId: tab.id };
+            return {
+              tabs: newTabs,
+              activeTabId: tab.id,
+              activeContext: resolveActiveContextForTabId(
+                newTabs,
+                tab.id,
+                state.activeContext,
+              ),
+            };
           }
           // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
           if (
@@ -2228,7 +2264,15 @@ export const useStore = create<AppState>()(
                 ...tab,
                 id: existingTab.id,
               };
-              return { tabs: newTabs, activeTabId: existingTab.id };
+              return {
+                tabs: newTabs,
+                activeTabId: existingTab.id,
+                activeContext: resolveActiveContextForTabId(
+                  newTabs,
+                  existingTab.id,
+                  state.activeContext,
+                ),
+              };
             }
           }
           // 语义去重：对 query 类型按 savedQueryId 匹配已有 Tab（避免保存后重复打开）
@@ -2247,10 +2291,27 @@ export const useStore = create<AppState>()(
                 ...tab,
                 id: existingTab.id,
               };
-              return { tabs: newTabs, activeTabId: existingTab.id };
+              return {
+                tabs: newTabs,
+                activeTabId: existingTab.id,
+                activeContext: resolveActiveContextForTabId(
+                  newTabs,
+                  existingTab.id,
+                  state.activeContext,
+                ),
+              };
             }
           }
-          return { tabs: [...state.tabs, tab], activeTabId: tab.id };
+          const nextTabs = [...state.tabs, tab];
+          return {
+            tabs: nextTabs,
+            activeTabId: tab.id,
+            activeContext: resolveActiveContextForTabId(
+              nextTabs,
+              tab.id,
+              state.activeContext,
+            ),
+          };
         }),
 
       updateQueryTabDraft: (id, draft) =>
@@ -2306,14 +2367,26 @@ export const useStore = create<AppState>()(
             newActiveId =
               newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
           }
-          return { tabs: newTabs, activeTabId: newActiveId };
+          return {
+            tabs: newTabs,
+            activeTabId: newActiveId,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              newActiveId,
+              state.activeContext,
+            ),
+          };
         }),
 
       closeOtherTabs: (id) =>
         set((state) => {
           const keep = state.tabs.find((t) => t.id === id);
           if (!keep) return state;
-          return { tabs: [keep], activeTabId: id };
+          return {
+            tabs: [keep],
+            activeTabId: id,
+            activeContext: resolveActiveContextFromTab(keep),
+          };
         }),
 
       closeTabsToLeft: (id) =>
@@ -2327,6 +2400,11 @@ export const useStore = create<AppState>()(
           return {
             tabs: newTabs,
             activeTabId: activeStillExists ? state.activeTabId : id,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              activeStillExists ? state.activeTabId : id,
+              state.activeContext,
+            ),
           };
         }),
 
@@ -2341,6 +2419,11 @@ export const useStore = create<AppState>()(
           return {
             tabs: newTabs,
             activeTabId: activeStillExists ? state.activeTabId : id,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              activeStillExists ? state.activeTabId : id,
+              state.activeContext,
+            ),
           };
         }),
 
@@ -2359,14 +2442,18 @@ export const useStore = create<AppState>()(
             : newTabs.length > 0
               ? newTabs[newTabs.length - 1].id
               : null;
-          const nextActiveContext =
+          const nextFallbackContext =
             state.activeContext?.connectionId === targetConnectionId
               ? null
               : state.activeContext;
           return {
             tabs: newTabs,
             activeTabId: nextActiveTabId,
-            activeContext: nextActiveContext,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              nextActiveTabId,
+              nextFallbackContext,
+            ),
           };
         }),
 
@@ -2393,10 +2480,17 @@ export const useStore = create<AppState>()(
             state.activeContext &&
             state.activeContext.connectionId === targetConnectionId &&
             state.activeContext.dbName === targetDbName;
+          const nextFallbackContext = sameActiveContext
+            ? null
+            : state.activeContext;
           return {
             tabs: newTabs,
             activeTabId: nextActiveTabId,
-            activeContext: sameActiveContext ? null : state.activeContext,
+            activeContext: resolveActiveContextForTabId(
+              newTabs,
+              nextActiveTabId,
+              nextFallbackContext,
+            ),
           };
         }),
 
@@ -2418,9 +2512,17 @@ export const useStore = create<AppState>()(
           return { tabs: nextTabs };
         }),
 
-      closeAllTabs: () => set(() => ({ tabs: [], activeTabId: null })),
+      closeAllTabs: () => set(() => ({ tabs: [], activeTabId: null, activeContext: null })),
 
-      setActiveTab: (id) => set({ activeTabId: id }),
+      setActiveTab: (id) =>
+        set((state) => ({
+          activeTabId: id,
+          activeContext: resolveActiveContextForTabId(
+            state.tabs,
+            id,
+            state.activeContext,
+          ),
+        })),
       setActiveContext: (context) => set({ activeContext: context }),
 
       saveQuery: (query) =>

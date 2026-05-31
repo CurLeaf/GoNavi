@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Sidebar, {
+  buildSidebarTableChildrenForUi,
   buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
   filterV2ExplorerTreeByKind,
@@ -357,6 +358,20 @@ describe('Sidebar locate toolbar', () => {
     expect(locateActionIndex).toBeGreaterThan(externalSqlActionIndex);
   });
 
+  it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const markup = renderToStaticMarkup(<Sidebar />);
+
+    expect(markup).toContain('data-sidebar-legacy-toolbar="true"');
+    expect(markup).toContain('data-sidebar-legacy-toolbar-item="true"');
+    expect(source).toContain("const legacyToolbarStyle: React.CSSProperties = {");
+    expect(source).toContain("gridTemplateColumns: 'repeat(5, minmax(0, 1fr))'");
+    expect(source).toContain("justifyItems: 'center'");
+    expect(source).toContain("const legacyToolbarItemStyle: React.CSSProperties = {");
+    expect(source).toContain("const legacyToolbarDisabledWrapStyle: React.CSSProperties = {");
+    expect(source).not.toContain("justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>");
+  });
+
   it('renders the v2 sidebar rail, command search hint, filter tabs and log footer', () => {
     const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" sqlLogCount={2341} onCreateConnection={mocks.noop} />);
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
@@ -382,7 +397,8 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('gn-v2-sidebar-log-footer');
     expect(markup).toContain('SQL 执行日志');
     expect(markup).toContain('2,341');
-    expect(markup).toContain('gn-v2-rail-action-group');
+    expect(markup).not.toContain('gn-v2-rail-action-group');
+    expect(source).toContain('className="gn-v2-rail-primary-actions"');
     expect(markup).toContain('data-sidebar-create-group-action="true"');
     expect(markup).toContain('data-sidebar-batch-table-action="true"');
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
@@ -443,12 +459,12 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.ant-tree \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
     expect(css).toMatch(/\.gn-v2-tree-title \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
-    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*font-size: clamp\(9px, calc\(var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\) - 1px\), 17px\);/s);
-    expect(css).toMatch(/\.gn-v2-tree-count \{[^}]*font-size: clamp\(9px, calc\(var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\) - 2px\), 16px\);/s);
-    expect(css).toMatch(/\.gn-v2-connection-rail \{[^}]*width: calc\(54px \* var\(--gn-ui-scale, 1\)\);[^}]*flex: 0 0 calc\(54px \* var\(--gn-ui-scale, 1\)\);/s);
-    expect(css).toMatch(/\.gn-v2-rail-item,[^}]*\.gn-v2-rail-tool \{[^}]*width: calc\(64px \* var\(--gn-ui-scale, 1\)\);[^}]*height: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*font-size: var\(--gn-font-size-sm, 12px\);/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*font-size: inherit;[^}]*font-weight: 400 !important;/s);
+    expect(css).toMatch(/\.gn-v2-tree-count \{[^}]*font-size: clamp\(10px, calc\(var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\) - 1px\), 16px\);/s);
+    expect(css).toMatch(/\.gn-v2-connection-rail \{[^}]*width: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*flex: 0 0 calc\(38px \* var\(--gn-ui-scale, 1\)\);/s);
+    expect(css).toMatch(/\.gn-v2-rail-item,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-tool \{[^}]*width: calc\(36px \* var\(--gn-ui-scale, 1\)\);[^}]*height: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*font-size: var\(--gn-font-size-sm, 12px\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*height: calc\(32px \* var\(--gn-ui-scale, 1\)\);/s);
-    expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(34px \* var\(--gn-ui-scale, 1\)\);/s);
+    expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(24px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-active-connection-trigger \{[^}]*height: 34px;[^}]*border: 0;[^}]*background: transparent;/s);
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
   });
@@ -919,6 +935,24 @@ describe('Sidebar locate toolbar', () => {
       selectable: false,
       dataRef: { sectionKind: 'all' },
     });
+  });
+
+  it('keeps legacy sidebar table groups flat and ignores v2 pin sections', () => {
+    const tableNodes = [
+      { title: 'orders', key: 'orders', type: 'table' as const, dataRef: { pinnedSidebarTable: true } },
+      { title: 'users', key: 'users', type: 'table' as const, dataRef: { pinnedSidebarTable: false } },
+    ];
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(buildSidebarTableChildrenForUi('conn-main-tables', tableNodes, false)).toBe(tableNodes);
+    expect(buildSidebarTableChildrenForUi('conn-main-tables', tableNodes, true).map((node) => node.title)).toEqual([
+      '置顶',
+      'orders',
+      '全部',
+      'users',
+    ]);
+    expect(source).toContain('pinnedSidebarTables: isV2Ui ? currentPinnedSidebarTables : []');
+    expect(source).toContain('buildSidebarTableChildrenForUi(groupNodeKey, children, isV2Ui)');
   });
 
   it('keeps v2 table sections out of regular table lists when nothing is pinned', () => {

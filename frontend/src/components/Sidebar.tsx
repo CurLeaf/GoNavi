@@ -151,6 +151,7 @@ type SidebarTableEntryForSort = {
   tableName: string;
   schemaName?: string;
   displayName: string;
+  rowCount?: number;
 };
 
 export const isSidebarTablePinned = (
@@ -225,6 +226,22 @@ export const buildV2SidebarTableSectionedChildren = (
     buildSectionNode('all', '全部'),
     ...regularTables,
   ];
+};
+
+export const buildSidebarTableChildrenForUi = (
+  parentKey: string,
+  tableNodes: TreeNode[],
+  isV2Ui: boolean,
+): TreeNode[] => {
+  if (!isV2Ui) return tableNodes;
+  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
+};
+
+export const formatSidebarRowCount = (count: number): string => {
+  if (!Number.isFinite(count) || count < 0) return '';
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return String(Math.round(count));
 };
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -1543,6 +1560,80 @@ const Sidebar: React.FC<{
       return '';
   };
 
+  const parseMetadataRowCount = (row: Record<string, any>): number | undefined => {
+      const rawValue = getCaseInsensitiveRawValue(row, ['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']);
+      if (rawValue === undefined || rawValue === null || rawValue === '') {
+          return undefined;
+      }
+      const parsed = Number(String(rawValue).replace(/,/g, ''));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+          return undefined;
+      }
+      return Math.round(parsed);
+  };
+
+  const buildSidebarTableStatusSQL = (conn: SavedConnection, dbName: string): string => {
+      const dialect = getMetadataDialect(conn);
+      const safeDbName = escapeSQLLiteral(dbName);
+      switch (dialect) {
+          case 'mysql':
+          case 'starrocks':
+              return [
+                  'SELECT TABLE_NAME AS table_name, TABLE_ROWS AS table_rows',
+                  'FROM information_schema.tables',
+                  `WHERE table_schema = '${safeDbName}'`,
+                  "AND table_type = 'BASE TABLE'",
+                  'ORDER BY table_name',
+              ].join('\n');
+          case 'postgres':
+          case 'kingbase':
+          case 'vastbase':
+          case 'highgo':
+          case 'opengauss':
+              return [
+                  "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
+                  'FROM pg_class c',
+                  'JOIN pg_namespace n ON n.oid = c.relnamespace',
+                  "WHERE c.relkind = 'r'",
+                  "AND n.nspname NOT IN ('information_schema', 'pg_catalog')",
+                  "AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'",
+                  'ORDER BY n.nspname, c.relname',
+              ].join('\n');
+          case 'sqlserver': {
+              const safeDb = quoteSqlServerIdentifier(dbName);
+              return [
+                  'SELECT s.name + \'.\' + t.name AS table_name, SUM(p.rows) AS table_rows',
+                  `FROM ${safeDb}.sys.tables t`,
+                  `JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id`,
+                  `LEFT JOIN ${safeDb}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)`,
+                  'WHERE t.type = \'U\'',
+                  'GROUP BY s.name, t.name',
+                  'ORDER BY s.name, t.name',
+              ].join('\n');
+          }
+          case 'clickhouse':
+              return [
+                  'SELECT name AS table_name, total_rows AS table_rows',
+                  'FROM system.tables',
+                  `WHERE database = '${safeDbName}'`,
+                  "AND engine NOT IN ('View', 'MaterializedView')",
+                  'ORDER BY name',
+              ].join('\n');
+          case 'oracle':
+          case 'dm': {
+              const owner = escapeSQLLiteral(dbName).toUpperCase();
+              return [
+                  'SELECT table_name, num_rows AS table_rows',
+                  'FROM all_tables',
+                  `WHERE owner = '${owner}'`,
+                  'ORDER BY table_name',
+              ].join('\n');
+          }
+          default:
+              return '';
+      }
+  };
+
   const buildQualifiedName = (schemaName: string, objectName: string): string => {
       const schema = String(schemaName || '').trim();
       const name = String(objectName || '').trim();
@@ -2310,6 +2401,24 @@ const Sidebar: React.FC<{
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
 
                 const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
+                const tableStatusSql = buildSidebarTableStatusSQL(conn as SavedConnection, conn.dbName);
+                const tableStatsResult = tableStatusSql
+                    ? await DBQuery(buildRpcConnectionConfig(config) as any, conn.dbName, tableStatusSql).catch(() => ({ success: false, data: [] as any[] }))
+                    : { success: false, data: [] as any[] };
+                const tableRowCountMap = new Map<string, number>();
+                if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
+                    tableStatsResult.data.forEach((row: Record<string, any>) => {
+                        const rawTableName = String(
+                            getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'Name', 'name'])
+                            || getMySQLShowTablesName(row)
+                            || ''
+                        ).trim();
+                        if (!rawTableName) return;
+                        const rowCount = parseMetadataRowCount(row);
+                        if (rowCount === undefined) return;
+                        tableRowCountMap.set(rawTableName.toLowerCase(), rowCount);
+                    });
+                }
 	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
@@ -2317,6 +2426,7 @@ const Sidebar: React.FC<{
 	                    tableName,
 	                    schemaName: parsed.schemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
+                        rowCount: tableRowCountMap.get(String(tableName || '').trim().toLowerCase()),
 	                };
 	            });
 
@@ -2454,7 +2564,7 @@ const Sidebar: React.FC<{
 	                dbName: conn.dbName,
 	                sortBy,
 	                tableAccessCount: currentTableAccessCount,
-	                pinnedSidebarTables: currentPinnedSidebarTables,
+	                pinnedSidebarTables: isV2Ui ? currentPinnedSidebarTables : [],
 	            });
 
 	            // Sort views by name (case-insensitive)
@@ -2470,14 +2580,26 @@ const Sidebar: React.FC<{
 
 	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
-	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string }): TreeNode => {
-	                const isPinned = isSidebarTablePinned(currentPinnedSidebarTables, conn.id, conn.dbName, entry.tableName, entry.schemaName);
+	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number }): TreeNode => {
+	                const isPinned = isV2Ui && isSidebarTablePinned(
+	                    currentPinnedSidebarTables,
+	                    conn.id,
+	                    conn.dbName,
+	                    entry.tableName,
+	                    entry.schemaName,
+	                );
 	                return {
 	                    title: entry.displayName,
 	                    key: `${conn.id}-${conn.dbName}-${entry.tableName}`,
 	                    icon: <TableOutlined />,
 	                    type: 'table',
-	                    dataRef: { ...conn, tableName: entry.tableName, schemaName: entry.schemaName, pinnedSidebarTable: isPinned },
+	                    dataRef: {
+	                        ...conn,
+	                        tableName: entry.tableName,
+	                        schemaName: entry.schemaName,
+	                        rowCount: entry.rowCount,
+	                        ...(isPinned ? { pinnedSidebarTable: true } : {}),
+	                    },
 	                    isLeaf: false,
 	                };
 	            };
@@ -2537,7 +2659,7 @@ const Sidebar: React.FC<{
 	            ): TreeNode => {
 	                const groupNodeKey = `${parentKey}-${groupKey}`;
 	                const groupedChildren = groupKey === 'tables'
-	                    ? buildV2SidebarTableSectionedChildren(groupNodeKey, children)
+	                    ? buildSidebarTableChildrenForUi(groupNodeKey, children, isV2Ui)
 	                    : children;
 	                return {
 	                    title: groupTitle,
@@ -5483,7 +5605,7 @@ const Sidebar: React.FC<{
       return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
   }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
   const v2TreeMetrics = useMemo(() => {
-      const databaseObjectCounts = new Map<React.Key, number>();
+      const databaseTableCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
       let activeObjectCount = 0;
 
@@ -5491,7 +5613,21 @@ const Sidebar: React.FC<{
           const childCount = (node.children || []).reduce((total, child) => total + visitAndCount(child), 0);
           const totalCount = (isV2SidebarObjectNode(node) ? 1 : 0) + childCount;
           if (node.type === 'database') {
-              databaseObjectCounts.set(node.key, childCount);
+              const tableCount = (node.children || []).reduce((total, child) => {
+                  if (child.type === 'object-group' && child?.dataRef?.groupKey === 'tables') {
+                      return total + (Array.isArray(child.children) ? child.children.filter((item) => item.type === 'table').length : 0);
+                  }
+                  if (child?.dataRef?.groupKey === 'schema' && Array.isArray(child.children)) {
+                      return total + child.children.reduce((schemaTotal, schemaChild) => {
+                          if (schemaChild.type === 'object-group' && schemaChild?.dataRef?.groupKey === 'tables') {
+                              return schemaTotal + (Array.isArray(schemaChild.children) ? schemaChild.children.filter((item) => item.type === 'table').length : 0);
+                          }
+                          return schemaTotal;
+                      }, 0);
+                  }
+                  return total;
+              }, 0);
+              databaseTableCounts.set(node.key, tableCount);
           } else if (node.type === 'object-group') {
               objectGroupCounts.set(node.key, childCount);
           }
@@ -5502,11 +5638,34 @@ const Sidebar: React.FC<{
 
       return {
           activeObjectCount,
-          databaseObjectCounts,
+          databaseTableCounts,
           objectGroupCounts,
       };
   }, [v2VisibleTreeData]);
   const activeConnectionObjectCount = v2TreeMetrics.activeObjectCount;
+  const legacyToolbarButtonColor = darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
+  const legacyToolbarStyle: React.CSSProperties = {
+      padding: '6px 16px',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+      gap: 8,
+      alignItems: 'center',
+      justifyItems: 'center',
+      borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`,
+      borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`,
+      background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)',
+  };
+  const legacyToolbarItemStyle: React.CSSProperties = {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 0,
+  };
+  const legacyToolbarDisabledWrapStyle: React.CSSProperties = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+  };
 
   const connectionStatusMap = useMemo(() => {
       const statusMap = new Map<string, 'live' | 'error' | 'idle'>();
@@ -5656,7 +5815,7 @@ const Sidebar: React.FC<{
           return count > 0 ? count.toLocaleString() : '';
       }
       if (node.type === 'database') {
-          const count = v2TreeMetrics.databaseObjectCounts.get(node.key) || 0;
+          const count = v2TreeMetrics.databaseTableCounts.get(node.key) || 0;
           return count > 0 ? count.toLocaleString() : '';
       }
       if (node.type === 'object-group') {
@@ -5668,9 +5827,8 @@ const Sidebar: React.FC<{
           return match?.[1] || '';
       }
       if (node.type === 'table') {
-          const key = `${node?.dataRef?.id}-${node?.dataRef?.dbName}-${node?.dataRef?.tableName}`;
-          const count = tableAccessCount[key] || 0;
-          return count > 0 ? count.toLocaleString() : '';
+          const rowCount = Number(node?.dataRef?.rowCount);
+          return Number.isFinite(rowCount) && rowCount >= 0 ? formatSidebarRowCount(rowCount) : '';
       }
       return '';
   };
@@ -7766,65 +7924,75 @@ const Sidebar: React.FC<{
 
         {/* Toolbar */}
         {!isV2Ui && (
-        <div style={{ padding: '6px 16px', display: 'flex', gap: 8, justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>
-            <Tooltip title="新建组">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<FolderOpenOutlined />}
-                    aria-label="新建组"
-                    data-sidebar-create-group-action="true"
-                    onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="批量操作表">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<TableOutlined />}
-                    aria-label="批量操作表"
-                    data-sidebar-batch-table-action="true"
-                    onClick={() => openBatchOperationModal()}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="批量操作库">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<DatabaseOutlined />}
-                    aria-label="批量操作库"
-                    data-sidebar-batch-database-action="true"
-                    onClick={() => openBatchDatabaseModal()}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="运行外部SQL文件">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<FileAddOutlined />}
-                    aria-label="运行外部 SQL 文件"
-                    data-sidebar-open-external-sql-file-action="true"
-                    onClick={handleOpenSQLFileFromToolbar}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
-                <span>
+        <div data-sidebar-legacy-toolbar="true" style={legacyToolbarStyle}>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="新建组">
                     <Button
                         size="small"
                         type="text"
-                        icon={<AimOutlined />}
-                        aria-label="定位当前打开表"
-                        data-sidebar-locate-current-tab-action="true"
-                        disabled={!canLocateActiveTab}
-                        onClick={handleLocateActiveTabInSidebar}
-                        style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
+                        icon={<FolderOpenOutlined />}
+                        aria-label="新建组"
+                        data-sidebar-create-group-action="true"
+                        onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
+                        style={{ color: legacyToolbarButtonColor }}
                     />
-                </span>
-            </Tooltip>
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="批量操作表">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<TableOutlined />}
+                        aria-label="批量操作表"
+                        data-sidebar-batch-table-action="true"
+                        onClick={() => openBatchOperationModal()}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="批量操作库">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<DatabaseOutlined />}
+                        aria-label="批量操作库"
+                        data-sidebar-batch-database-action="true"
+                        onClick={() => openBatchDatabaseModal()}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="运行外部SQL文件">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<FileAddOutlined />}
+                        aria-label="运行外部 SQL 文件"
+                        data-sidebar-open-external-sql-file-action="true"
+                        onClick={handleOpenSQLFileFromToolbar}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
+                    <span style={legacyToolbarDisabledWrapStyle}>
+                        <Button
+                            size="small"
+                            type="text"
+                            icon={<AimOutlined />}
+                            aria-label="定位当前打开表"
+                            data-sidebar-locate-current-tab-action="true"
+                            disabled={!canLocateActiveTab}
+                            onClick={handleLocateActiveTabInSidebar}
+                            style={{ color: legacyToolbarButtonColor }}
+                        />
+                    </span>
+                </Tooltip>
+            </div>
         </div>
         )}
 
