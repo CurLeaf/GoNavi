@@ -14,7 +14,7 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 
   const afterCase = appSource.slice(start + caseToken.length);
   const nextCaseIndex = afterCase.search(/\n\s+case '[^']+':/);
-  const switchEndIndex = afterCase.indexOf("window.addEventListener('keydown', handleGlobalShortcut);");
+  const switchEndIndex = afterCase.indexOf("window.addEventListener('keydown', handleGlobalShortcut, true);");
   const endIndex = nextCaseIndex >= 0 ? nextCaseIndex : switchEndIndex;
 
   expect(endIndex).toBeGreaterThan(-1);
@@ -112,8 +112,9 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
-  it('mounts heavyweight modals only while they are open', () => {
-    expect(appSource).toContain('{isModalOpen && (');
+  it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
+    expect(appSource).toContain('const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);');
+    expect(appSource).toContain('{isConnectionModalMounted && (');
     expect(appSource).toContain('{isToolsModalOpen && (');
     expect(appSource).toContain('{isSettingsModalOpen && (');
     expect(appSource).toContain('{isThemeModalOpen && (');
@@ -121,6 +122,24 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('{isAISettingsOpen && (');
     expect(appSource).toContain('{isDriverModalOpen && (');
     expect(appSource).toContain('{isSyncModalOpen && (');
+  });
+
+  it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {
+    expect(appSource).toContain("typeof backendApp?.GetEditableSavedConnection === 'function'");
+    expect(appSource).toContain('const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);');
+    expect(appSource).toContain('setEditingConnection(nextConnection);');
+    expect(appSource).toContain('setIsModalOpen(true);');
+  });
+
+  it('loads editable AI provider details before opening the edit modal so stored api keys can be shown', () => {
+    expect(appSource).toContain('<AISettingsModal');
+    const modalSource = readFileSync(new URL('./components/AISettingsModal.tsx', import.meta.url), 'utf8');
+    expect(modalSource).toContain("typeof Service?.AIGetEditableProvider === 'function'");
+    expect(modalSource).toContain('await Service.AIGetEditableProvider(p.id)');
+  });
+
+  it('keeps edit-mode passwords masked by default instead of forcing the eye toggle open', () => {
+    expect(appSource).not.toContain('setPrimaryPasswordVisible(String(config.password || "").trim() !== "")');
   });
 
   it('keeps shortcut manager scrolling inside the modal body', () => {
@@ -159,6 +178,11 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
   });
 
+  it('captures global shortcuts before Monaco/editor defaults consume them', () => {
+    expect(appSource).toContain("window.addEventListener('keydown', handleGlobalShortcut, true);");
+    expect(appSource).toContain("window.removeEventListener('keydown', handleGlobalShortcut, true);");
+  });
+
   it('listens for command search query-tab events and routes them through handleNewQuery', () => {
     expect(appSource).toContain("window.addEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);");
     expect(appSource).toContain("window.removeEventListener('gonavi:create-query-tab', handleCreateQueryTabEvent as EventListener);");
@@ -179,8 +203,16 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("setProperty('--gn-sidebar-tree-font-size'");
     expect(appSource).toContain("setProperty('--gn-control-height'");
     expect(appSource).toContain("setProperty('--gn-control-height-sm'");
+    expect(appSource).toContain('fontFamily: resolvedUiFontFamily');
+    expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
     expect(appSource).toContain('数据表字体大小');
     expect(appSource).toContain('左侧库表字体大小');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
+    expect(appSource).toContain('ListInstalledFontFamilies()');
+    expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
+    expect(appSource).toContain('matchFontFamilyOption');
+    expect(appSource).toContain('showSearch');
     expect(appSource).toContain('const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('const sidebarTreeFontSizeFollowsGlobal = appearance.sidebarTreeFontSizeFollowGlobal !== false;');
     expect(appSource).toContain('disabled={dataTableFontSizeFollowsGlobal}');

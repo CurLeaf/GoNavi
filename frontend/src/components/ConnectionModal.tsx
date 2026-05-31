@@ -193,6 +193,37 @@ const createEmptyConnectionSecretClearState =
     opaqueDSN: false,
   });
 
+const resolveInitialSecretFieldValue = (
+  initialValues: SavedConnection | null | undefined,
+  fieldName: string,
+): string => {
+  if (!initialValues) {
+    return "";
+  }
+
+  const config = initialValues.config || ({} as ConnectionConfig);
+  switch (fieldName) {
+    case "password":
+      return String(config.password || "");
+    case "sshPassword":
+      return String(config.ssh?.password || "");
+    case "proxyPassword":
+      return String(config.proxy?.password || "");
+    case "httpTunnelPassword":
+      return String(config.httpTunnel?.password || "");
+    case "mysqlReplicaPassword":
+      return String(config.mysqlReplicaPassword || "");
+    case "mongoReplicaPassword":
+      return String(config.mongoReplicaPassword || "");
+    case "uri":
+      return String(config.uri || "");
+    case "dsn":
+      return String(config.dsn || "");
+    default:
+      return "";
+  }
+};
+
 const getDefaultPortByType = (type: string) => {
   switch (type) {
     case "jvm":
@@ -475,6 +506,7 @@ const ConnectionModal: React.FC<{
   const [clearSecrets, setClearSecrets] = useState<ConnectionSecretClearState>(
     createEmptyConnectionSecretClearState,
   );
+  const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
   const testInFlightRef = useRef(false);
   const testTimerRef = useRef<number | null>(null);
   const addConnection = useStore((state) => state.addConnection);
@@ -649,7 +681,16 @@ const ConnectionModal: React.FC<{
       >
         {({ getFieldValue }) => {
           const draftValue = getFieldValue(fieldName);
-          const hasDraftValue = String(draftValue ?? "") !== "";
+          const initialSecretValue = resolveInitialSecretFieldValue(
+            initialValues,
+            fieldName,
+          );
+          const normalizedDraftValue = String(draftValue ?? "");
+          const matchesInitialSecret =
+            initialSecretValue !== "" &&
+            normalizedDraftValue === initialSecretValue;
+          const hasDraftValue =
+            normalizedDraftValue !== "" && !matchesInitialSecret;
           const cardBorder = darkMode
             ? "1px solid rgba(255,255,255,0.12)"
             : "1px solid rgba(16,24,40,0.08)";
@@ -684,6 +725,9 @@ const ConnectionModal: React.FC<{
                 disabled={hasDraftValue}
                 onChange={(event) => {
                   const checked = event.target.checked;
+                  if (checked && matchesInitialSecret) {
+                    form.setFieldValue(fieldName, "");
+                  }
                   setClearSecrets((prev) => ({ ...prev, [clearKey]: checked }));
                 }}
               >
@@ -2436,6 +2480,7 @@ const ConnectionModal: React.FC<{
       setCustomIconType(undefined);
       setCustomIconColor(undefined);
       setClearSecrets(createEmptyConnectionSecretClearState());
+      setPrimaryPasswordVisible(false);
       setTypeSelectWarning(null);
       setDriverStatusLoaded(false);
       void refreshDriverStatus();
@@ -2658,6 +2703,7 @@ const ConnectionModal: React.FC<{
             ? config.jvm?.jmx?.password || ""
             : "",
         });
+        setPrimaryPasswordVisible(false);
         setUseSSL(!!config.useSSL);
         setCustomIconType(initialValues.iconType);
         setCustomIconColor(initialValues.iconColor);
@@ -2693,6 +2739,7 @@ const ConnectionModal: React.FC<{
         setActiveGroup(0);
         setActiveConfigSection("basic");
         setActiveNetworkConfig("ssl");
+        setPrimaryPasswordVisible(false);
       }
     }
   }, [open, initialValues]);
@@ -2712,7 +2759,10 @@ const ConnectionModal: React.FC<{
     const primaryDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasPrimaryPassword,
       valueInput: config.password,
-      clearSecret: clearSecrets.primaryPassword,
+      clearSecret:
+        clearSecrets.primaryPassword ||
+        (initialValues?.hasPrimaryPassword === true &&
+          String(config.password || "") === ""),
       forceClear: values.type === "mongodb" && values.savePassword === false,
     });
     const sshDraft = resolveConnectionSecretDraft({
@@ -5504,6 +5554,10 @@ const ConnectionModal: React.FC<{
                       <Form.Item name="password" label="密码 (可选)">
                         <Input.Password
                           {...noAutoCapInputProps}
+                          visibilityToggle={{
+                            visible: primaryPasswordVisible,
+                            onVisibleChange: setPrimaryPasswordVisible,
+                          }}
                           placeholder={getStoredSecretPlaceholder({
                             hasStoredSecret: initialValues?.hasPrimaryPassword,
                             emptyPlaceholder:
@@ -5512,14 +5566,6 @@ const ConnectionModal: React.FC<{
                           })}
                         />
                       </Form.Item>
-                      {renderStoredSecretControls({
-                        fieldName: "password",
-                        clearKey: "primaryPassword",
-                        hasStoredSecret: initialValues?.hasPrimaryPassword,
-                        clearLabel: "清除已保存密码",
-                        description:
-                          "当前已保存 Redis 密码。留空表示继续沿用，输入新值表示替换。",
-                      })}
                     </>
                   ),
                 })}
@@ -5586,6 +5632,10 @@ const ConnectionModal: React.FC<{
                         >
                           <Input.Password
                             {...noAutoCapInputProps}
+                            visibilityToggle={{
+                              visible: primaryPasswordVisible,
+                              onVisibleChange: setPrimaryPasswordVisible,
+                            }}
                             placeholder={getStoredSecretPlaceholder({
                               hasStoredSecret:
                                 initialValues?.hasPrimaryPassword,
@@ -5632,14 +5682,6 @@ const ConnectionModal: React.FC<{
                           </div>
                         )}
                       </div>
-                      {renderStoredSecretControls({
-                        fieldName: "password",
-                        clearKey: "primaryPassword",
-                        hasStoredSecret: initialValues?.hasPrimaryPassword,
-                        clearLabel: "清除已保存密码",
-                        description:
-                          "当前已保存主连接密码。留空表示继续沿用，输入新值表示替换。",
-                      })}
                       {dbType === "mongodb" && (
                         <Form.Item
                           name="savePassword"
@@ -7333,6 +7375,7 @@ const ConnectionModal: React.FC<{
             wordBreak: "break-all",
             lineHeight: "20px",
             fontSize: 13,
+            fontFamily: "var(--gn-font-mono)",
           }}
         >
           {String(testResult?.message || "暂无失败日志")}

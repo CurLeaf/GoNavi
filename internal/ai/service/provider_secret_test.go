@@ -319,6 +319,44 @@ func TestAISaveProviderPersistsSecretlessConfigAndReturnsSecretlessView(t *testi
 	}
 }
 
+func TestAIGetEditableProviderReturnsResolvedSecretsForEdit(t *testing.T) {
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
+	service.configDir = t.TempDir()
+
+	if err := service.AISaveProvider(ai.ProviderConfig{
+		ID:      "openai-main",
+		Type:    "openai",
+		Name:    "OpenAI",
+		APIKey:  "sk-test",
+		BaseURL: "https://api.openai.com/v1",
+		Headers: map[string]string{
+			"Authorization": "Bearer test",
+			"X-Team":        "db",
+		},
+	}); err != nil {
+		t.Fatalf("AISaveProvider returned error: %v", err)
+	}
+
+	providers := service.AIGetProviders()
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %d", len(providers))
+	}
+	if providers[0].APIKey != "" {
+		t.Fatalf("expected provider list to stay secretless, got %q", providers[0].APIKey)
+	}
+
+	editable, err := service.AIGetEditableProvider("openai-main")
+	if err != nil {
+		t.Fatalf("AIGetEditableProvider returned error: %v", err)
+	}
+	if editable.APIKey != "sk-test" {
+		t.Fatalf("expected editable provider to restore apiKey, got %q", editable.APIKey)
+	}
+	if editable.Headers["Authorization"] != "Bearer test" {
+		t.Fatalf("expected editable provider to restore sensitive header, got %#v", editable.Headers)
+	}
+}
+
 func TestAISaveProviderKeepsExistingSecretWhenInputOmitsAPIKey(t *testing.T) {
 	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()

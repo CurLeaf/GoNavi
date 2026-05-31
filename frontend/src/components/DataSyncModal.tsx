@@ -9,7 +9,6 @@ import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 import { buildDataSyncRequest, type SourceDatasetMode, validateDataSyncSelection } from './dataSyncRequest';
-
 const { Title, Text } = Typography;
 const { Step } = Steps;
 const { Option } = Select;
@@ -1239,7 +1238,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
                       padding: 12,
                       height: 300,
                       overflowY: 'auto',
-                      fontFamily: 'SFMono-Regular, ui-monospace, Menlo, Consolas, monospace'
+                      fontFamily: 'var(--gn-font-mono)'
                   }}
               >
                   {syncLogs.map((item, i: number) => <div key={i}>{renderSyncLogItem(item)}</div>)}

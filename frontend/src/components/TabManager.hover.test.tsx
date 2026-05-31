@@ -3,7 +3,13 @@ import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { TAB_WORKBENCH_CLASS_NAME, resolveTabHoverOpen, TabHoverInfo, stopTabHoverDragPropagation } from './TabManager';
+import {
+  TAB_WORKBENCH_CLASS_NAME,
+  resolveTabHoverOpen,
+  shouldShowV2ConnectionLabel,
+  TabHoverInfo,
+  stopTabHoverDragPropagation,
+} from './TabManager';
 import type { TabData } from '../types';
 
 describe('TabManager hover info', () => {
@@ -97,6 +103,21 @@ describe('TabManager hover info', () => {
     expect(resolveTabHoverOpen(false, true)).toBe(false);
   });
 
+  it('hides the v2 gray connection suffix when the title already carries the same prefix', () => {
+    expect(shouldShowV2ConnectionLabel('[本地] videos', '本地')).toBe(false);
+    expect(shouldShowV2ConnectionLabel('[缓存 | 10.0.0.8] db2', '缓存')).toBe(false);
+    expect(shouldShowV2ConnectionLabel('新建查询', '本地')).toBe(true);
+  });
+
+  it('does not render the v2 leading icon or connection accent dot in tab labels', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('gn-v2-tab-kind-icon');
+    expect(source).not.toContain('tab-connection-accent');
+    expect(source).not.toContain('has-connection-accent');
+    expect(source).not.toContain('resolveConnectionAccentColor');
+  });
+
   it('wires hover card tab-switch and drag-blocking handlers with selectable text styles', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
@@ -114,7 +135,11 @@ describe('TabManager hover info', () => {
     expect(source).toContain('open={resolveTabHoverOpen(isHoverInfoOpen, isTabMenuOpen)}');
     expect(source).toContain('onOpenChange={handleHoverInfoOpenChange}');
     expect(source).toContain('onOpenChange={handleTabMenuOpenChange}');
+    expect(source).toContain('mouseEnterDelay={1.2}');
     expect(source).toMatch(/\.gn-v2-tab-hover-card \{[^}]*cursor: text;[^}]*user-select: text;/s);
+    expect(source).toContain("--gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);");
+    expect(source).toMatch(/\.gn-v2-tab-hover-head \{[^}]*display: grid;[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
+    expect(source).toMatch(/\.gn-v2-tab-hover-row \{[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
     expect(source).toMatch(/\.gn-v2-tab-hover-card \* \{[^}]*user-select: text;/s);
   });
 });

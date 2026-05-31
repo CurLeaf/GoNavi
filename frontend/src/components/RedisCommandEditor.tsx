@@ -111,6 +111,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
     const appearance = useStore(state => state.appearance);
     const connection = connections.find(c => c.id === connectionId);
     const darkMode = theme === 'dark';
+    const isV2Ui = appearance.uiVersion === 'v2';
     const resolvedAppearance = resolveAppearanceValues(appearance);
     const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
     const blur = normalizeBlurForPlatform(resolvedAppearance.blur);
@@ -406,6 +407,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                 <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
                     <Editor
                         theme={darkMode ? 'transparent-dark' : 'transparent-light'}
+                        gonaviTypography="code"
                         defaultLanguage="redis"
                         language="redis"
                         value={command}
@@ -414,7 +416,6 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                         options={{
                             minimap: { enabled: false },
                             lineNumbers: 'on',
-                            fontSize: 14,
                             wordWrap: 'on',
                             scrollBeyondLastLine: false,
                             automaticLayout: true,
@@ -469,8 +470,9 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                         overflow: 'auto',
                         background: darkMode ? '#111418' : '#f8fafc',
                         color: darkMode ? '#d4d4d4' : '#0f172a',
-                        fontFamily: '"Consolas", "Courier New", monospace',
-                        fontSize: 13,
+                        fontFamily: 'var(--gn-font-mono)',
+                        fontSize: 'var(--gn-font-size-mono, 13px)',
+                        lineHeight: '1.62',
                         padding: 12,
                     }}
                 >

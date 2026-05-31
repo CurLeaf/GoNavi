@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
 	import {
 	  DatabaseOutlined,
@@ -44,9 +45,15 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   StarFilled,
   StarOutlined
 	} from '@ant-design/icons';
-import { buildSidebarTablePinKey, useStore } from '../store';
+import {
+    buildSidebarRootConnectionToken,
+    buildSidebarRootTagToken,
+    buildSidebarTablePinKey,
+    resolveSidebarRootOrderTokens,
+    useStore,
+} from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, SavedQuery, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
@@ -73,7 +80,7 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
-import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
+import { getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
@@ -91,15 +98,48 @@ import {
 } from './V2TableContextMenu';
 
 const { Search } = Input;
-
 type SidebarContextMenuState = {
   x: number;
   y: number;
+  sourceX?: number;
+  sourceY?: number;
   items: MenuProps['items'];
   kind?: 'v2-table' | 'v2-database' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
   node?: any;
   rootClassName?: string;
   overlayStyle?: React.CSSProperties;
+  maxHeight?: number;
+};
+
+const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
+const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
+const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
+
+export const resolveSidebarContextMenuPosition = (
+  x: number,
+  y: number,
+  options?: {
+    width?: number;
+    height?: number;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    safeGap?: number;
+  },
+): { x: number; y: number; maxHeight: number } => {
+  const safeGap = options?.safeGap ?? SIDEBAR_CONTEXT_MENU_SAFE_GAP;
+  const viewportWidth = options?.viewportWidth ?? (typeof window === 'undefined' ? 1024 : window.innerWidth);
+  const viewportHeight = options?.viewportHeight ?? (typeof window === 'undefined' ? 768 : window.innerHeight);
+  const width = Math.max(0, options?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH);
+  const height = Math.max(0, options?.height ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT);
+  const maxX = Math.max(safeGap, viewportWidth - width - safeGap);
+  const maxY = Math.max(safeGap, viewportHeight - height - safeGap);
+  const nextX = Math.max(safeGap, Math.min(x, maxX));
+  const nextY = Math.max(safeGap, Math.min(y, maxY));
+  return {
+    x: nextX,
+    y: nextY,
+    maxHeight: Math.max(120, viewportHeight - nextY - safeGap),
+  };
 };
 interface TreeNode {
   title: string;
@@ -146,6 +186,7 @@ type SidebarTableEntryForSort = {
   tableName: string;
   schemaName?: string;
   displayName: string;
+  rowCount?: number;
 };
 
 export const isSidebarTablePinned = (
@@ -222,6 +263,22 @@ export const buildV2SidebarTableSectionedChildren = (
   ];
 };
 
+export const buildSidebarTableChildrenForUi = (
+  parentKey: string,
+  tableNodes: TreeNode[],
+  isV2Ui: boolean,
+): TreeNode[] => {
+  if (!isV2Ui) return tableNodes;
+  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
+};
+
+export const formatSidebarRowCount = (count: number): string => {
+  if (!Number.isFinite(count) || count < 0) return '';
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return String(Math.round(count));
+};
+
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
@@ -236,15 +293,17 @@ export interface V2RailConnectionGroup {
   name: string;
   connections: SavedConnection[];
   isUngrouped?: boolean;
+  rootToken: string;
 }
 
 export const buildV2RailConnectionGroups = (
   connections: SavedConnection[],
   connectionTags: ConnectionTag[],
+  sidebarRootOrder: string[] = [],
 ): V2RailConnectionGroup[] => {
   const connectionById = new Map(connections.map((conn) => [conn.id, conn]));
   const groupedConnectionIds = new Set<string>();
-  const groups: V2RailConnectionGroup[] = [];
+  const tagGroups = new Map<string, V2RailConnectionGroup>();
 
   connectionTags.forEach((tag) => {
     const tagConnections: SavedConnection[] = [];
@@ -255,22 +314,62 @@ export const buildV2RailConnectionGroups = (
       tagConnections.push(conn);
     });
     if (tagConnections.length === 0) return;
-    groups.push({
+    tagGroups.set(tag.id, {
       id: tag.id,
       name: tag.name || '未命名分组',
       connections: tagConnections,
+      rootToken: buildSidebarRootTagToken(tag.id),
     });
   });
 
-  const ungroupedConnections = connections.filter((conn) => !groupedConnectionIds.has(conn.id));
-  if (ungroupedConnections.length > 0) {
+  const ungroupedConnectionMap = new Map(
+    connections
+      .filter((conn) => !groupedConnectionIds.has(conn.id))
+      .map((conn) => [conn.id, conn]),
+  );
+  const orderedRootTokens = resolveSidebarRootOrderTokens(
+    sidebarRootOrder,
+    connectionTags,
+    connections,
+  );
+  const groups: V2RailConnectionGroup[] = [];
+
+  orderedRootTokens.forEach((token) => {
+    if (token.startsWith('tag:')) {
+      const tagId = token.slice('tag:'.length);
+      const group = tagGroups.get(tagId);
+      if (!group) return;
+      groups.push(group);
+      tagGroups.delete(tagId);
+      return;
+    }
+    if (token.startsWith('connection:')) {
+      const connectionId = token.slice('connection:'.length);
+      const conn = ungroupedConnectionMap.get(connectionId);
+      if (!conn) return;
+      groups.push({
+        id: connectionId,
+        name: conn.name,
+        connections: [conn],
+        isUngrouped: true,
+        rootToken: buildSidebarRootConnectionToken(connectionId),
+      });
+      ungroupedConnectionMap.delete(connectionId);
+    }
+  });
+
+  tagGroups.forEach((group) => {
+    groups.push(group);
+  });
+  ungroupedConnectionMap.forEach((conn) => {
     groups.push({
-      id: V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
-      name: groups.length > 0 ? '未分组' : '',
-      connections: ungroupedConnections,
+      id: conn.id,
+      name: conn.name,
+      connections: [conn],
       isUngrouped: true,
+      rootToken: buildSidebarRootConnectionToken(conn.id),
     });
-  }
+  });
 
   return groups;
 };
@@ -278,9 +377,29 @@ export const buildV2RailConnectionGroups = (
 export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组'): string => {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) return fallback;
-  const ascii = trimmed.replace(/[^a-z0-9]/gi, '');
-  if (ascii.length >= 2) return ascii.slice(0, 2).toUpperCase();
-  return trimmed.slice(0, 1);
+  const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
+  if (cjkParts && cjkParts.length > 0) {
+    return cjkParts.slice(0, 1).join('');
+  }
+  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
+  if (latinTokens.length >= 2) {
+    const firstToken = latinTokens[0] || '';
+    const secondToken = latinTokens[1] || '';
+    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
+  }
+  if (latinTokens.length === 1) {
+    const token = latinTokens[0] || '';
+    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
+    if (alphaPrefix) {
+      return alphaPrefix.slice(0, 2).toUpperCase();
+    }
+    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
+    if (trailingDigits) {
+      return trailingDigits.slice(-2).toUpperCase();
+    }
+    return token.slice(0, 2).toUpperCase();
+  }
+  return trimmed.slice(0, 2);
 };
 
 const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
@@ -441,6 +560,168 @@ export const resolveSidebarNodeConnectionId = (
   return resolveSidebarConnectionIdFromKey(node?.key, connectionIds);
 };
 
+export const normalizeSidebarTreeRelativeDropPosition = (
+  absoluteDropPosition: number,
+  nodePos: unknown,
+): number => {
+  const segments = String(nodePos || '').split('-');
+  const tailIndex = Number(segments[segments.length - 1] || 0);
+  return absoluteDropPosition - tailIndex;
+};
+
+export const resolveSidebarDropInsertBefore = (
+  relativeDropPosition: number,
+  metrics?: {
+    clientY?: number;
+    top?: number;
+    height?: number;
+  } | null,
+): boolean => {
+  if (relativeDropPosition < 0) return true;
+  if (relativeDropPosition > 0) return false;
+  const clientY = metrics?.clientY;
+  const top = metrics?.top;
+  const height = metrics?.height;
+  if (
+    typeof clientY !== 'number'
+    || typeof top !== 'number'
+    || typeof height !== 'number'
+    || !Number.isFinite(clientY)
+    || !Number.isFinite(top)
+    || !Number.isFinite(height)
+    || height <= 0
+  ) {
+    return false;
+  }
+  return clientY < (top + height / 2);
+};
+
+const resolveSidebarDropBaseElementFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): Element | null => {
+  if (typeof document === 'undefined') return null;
+  const fallbackTarget = event?.target && typeof (event.target as any).closest === 'function'
+    ? (event.target as unknown as Element)
+    : null;
+  const pointTarget = (
+    typeof event?.clientX === 'number'
+    && typeof event?.clientY === 'number'
+  )
+    ? document.elementFromPoint(event.clientX, event.clientY)
+    : null;
+  const baseElement = pointTarget || fallbackTarget;
+  if (!baseElement || typeof baseElement.closest !== 'function') return null;
+  return baseElement;
+};
+
+export const resolveSidebarDropNodeFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): { key: string; type: string } | null => {
+  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
+  if (!baseElement) return null;
+  const marker = baseElement.closest('[data-sidebar-node-key]') as HTMLElement | null;
+  if (!marker) return null;
+  const key = String(marker.getAttribute('data-sidebar-node-key') || '').trim();
+  const type = String(marker.getAttribute('data-sidebar-node-type') || '').trim();
+  if (!key || !type) return null;
+  return { key, type };
+};
+
+export const resolveSidebarDropTargetMetricsFromDomEvent = (
+  event: {
+    clientX?: number;
+    clientY?: number;
+    target?: EventTarget | null;
+  } | null | undefined,
+): { top: number; height: number } | null => {
+  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
+  if (!baseElement) return null;
+  const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;
+  if (!treeNode || typeof treeNode.getBoundingClientRect !== 'function') return null;
+  const rect = treeNode.getBoundingClientRect();
+  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) {
+    return null;
+  }
+  return {
+    top: rect.top,
+    height: rect.height,
+  };
+};
+
+export const resolveSidebarTagDropInsertBefore = (options: {
+  currentTagOrder: string[];
+  dragTagId: string;
+  dropTagId: string;
+  relativeDropPosition: number;
+  fallbackInsertBefore: boolean;
+  metrics?: {
+    clientY?: number;
+    top?: number;
+    height?: number;
+  } | null;
+}): boolean => {
+  const {
+    currentTagOrder,
+    dragTagId,
+    dropTagId,
+    relativeDropPosition,
+    fallbackInsertBefore,
+    metrics,
+  } = options;
+
+  if (relativeDropPosition !== 0) {
+    return fallbackInsertBefore;
+  }
+
+  const clientY = metrics?.clientY;
+  const top = metrics?.top;
+  const height = metrics?.height;
+  if (
+    typeof clientY !== 'number'
+    || typeof top !== 'number'
+    || typeof height !== 'number'
+    || !Number.isFinite(clientY)
+    || !Number.isFinite(top)
+    || !Number.isFinite(height)
+    || height <= 0
+  ) {
+    return fallbackInsertBefore;
+  }
+
+  const ratio = (clientY - top) / height;
+  if (ratio < 0.35) return true;
+  if (ratio > 0.65) return false;
+
+  const dragIndex = currentTagOrder.indexOf(dragTagId);
+  const dropIndex = currentTagOrder.indexOf(dropTagId);
+  if (dragIndex === -1 || dropIndex === -1 || dragIndex === dropIndex) {
+    return fallbackInsertBefore;
+  }
+  return dragIndex > dropIndex;
+};
+
+export const shouldSkipSidebarSelectWhileDragging = (
+  isTreeDragging: boolean,
+  info: { selected?: boolean } | null | undefined,
+): boolean => isTreeDragging || !info?.selected;
+
+export const shouldSkipSidebarLoadOnExpandWhileDragging = (
+  isTreeDragging: boolean,
+  info: { expanded?: boolean; node?: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null } | null | undefined,
+): boolean => {
+  if (isTreeDragging) return true;
+  if (!info?.expanded) return true;
+  return !shouldLoadSidebarNodeOnExpand(info.node);
+};
+
 export const resolveV2ActiveConnectionId = ({
   activeContextConnectionId,
   activeTabConnectionId,
@@ -467,7 +748,6 @@ export const resolveV2ActiveConnectionId = ({
       || selectedConnectionId
       || normalizeDirectId(fallbackConnectionId)
       || normalizeDirectId(activeTabConnectionId)
-      || connectionIds[0]
       || '';
 };
 
@@ -592,21 +872,26 @@ const Sidebar: React.FC<{
   const connections = useStore(state => state.connections);
   const savedQueries = useStore(state => state.savedQueries);
   const externalSQLDirectories = useStore(state => state.externalSQLDirectories);
+  const saveQuery = useStore(state => state.saveQuery);
   const deleteQuery = useStore(state => state.deleteQuery);
   const saveExternalSQLDirectory = useStore(state => state.saveExternalSQLDirectory);
   const deleteExternalSQLDirectory = useStore(state => state.deleteExternalSQLDirectory);
   const addConnection = useStore(state => state.addConnection);
   const addTab = useStore(state => state.addTab);
+  const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveContext = useStore(state => state.setActiveContext);
   const removeConnection = useStore(state => state.removeConnection);
   const connectionTags = useStore(state => state.connectionTags);
+  const sidebarRootOrder = useStore(state => state.sidebarRootOrder);
   const addConnectionTag = useStore(state => state.addConnectionTag);
   const updateConnectionTag = useStore(state => state.updateConnectionTag);
   const removeConnectionTag = useStore(state => state.removeConnectionTag);
   const moveConnectionToTag = useStore(state => state.moveConnectionToTag);
+  const reorderConnections = useStore(state => state.reorderConnections);
   const reorderTags = useStore(state => state.reorderTags);
+  const reorderSidebarRoot = useStore(state => state.reorderSidebarRoot);
   const closeTabsByConnection = useStore(state => state.closeTabsByConnection);
   const closeTabsByDatabase = useStore(state => state.closeTabsByDatabase);
   const theme = useStore(state => state.theme);
@@ -629,6 +914,7 @@ const Sidebar: React.FC<{
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+  const primaryShortcutModifierLabel = getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
@@ -701,15 +987,26 @@ const Sidebar: React.FC<{
   const selectedNodesRef = useRef<any[]>([]);
   const loadingNodesRef = useRef<Set<string>>(new Set());
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const treeDragSelectSuppressUntilRef = useRef(0);
+  const treeDragSelectionSnapshotRef = useRef<{
+      selectedKeys: React.Key[];
+      selectedNodes: any[];
+      activeContext: { connectionId: string; dbName: string } | null;
+  }>({
+      selectedKeys: [],
+      selectedNodes: [],
+      activeContext: null,
+  });
   const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
   const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
   const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
+  const contextMenuPortalRef = useRef<HTMLDivElement | null>(null);
   const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
   const v2RailConnectionGroups = useMemo(
-      () => buildV2RailConnectionGroups(connections, connectionTags),
-      [connections, connectionTags],
+      () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder),
+      [connections, connectionTags, sidebarRootOrder],
   );
   const [collapsedV2RailGroupIds, setCollapsedV2RailGroupIds] = useState<string[]>([]);
   const collapsedV2RailGroupIdSet = useMemo(
@@ -717,6 +1014,23 @@ const Sidebar: React.FC<{
       [collapsedV2RailGroupIds],
   );
   const hasV2RailConnectionGroups = v2RailConnectionGroups.some((group) => !group.isUngrouped);
+  const [draggingV2RailRootToken, setDraggingV2RailRootToken] = useState('');
+
+  const snapshotTreeSelectionBeforeDrag = useCallback(() => {
+      treeDragSelectionSnapshotRef.current = {
+          selectedKeys: [...selectedKeys],
+          selectedNodes: [...selectedNodesRef.current],
+          activeContext: activeContext ? { ...activeContext } : null,
+      };
+  }, [activeContext, selectedKeys]);
+
+  const restoreTreeSelectionAfterDrag = useCallback(() => {
+      const snapshot = treeDragSelectionSnapshotRef.current;
+      treeDragSelectSuppressUntilRef.current = Date.now() + 1000;
+      setSelectedKeys(snapshot.selectedKeys);
+      selectedNodesRef.current = snapshot.selectedNodes;
+      setActiveContext(snapshot.activeContext);
+  }, [setActiveContext]);
 
   const openV2CommandSearch = useCallback(() => {
       setIsV2CommandSearchOpen(true);
@@ -782,6 +1096,7 @@ const Sidebar: React.FC<{
   
   // Connection Status State: key -> 'success' | 'error'
   const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
+  const [isTreeDragging, setIsTreeDragging] = useState(false);
 
   // Create Database Modal
   const [isCreateDbModalOpen, setIsCreateDbModalOpen] = useState(false);
@@ -799,6 +1114,9 @@ const Sidebar: React.FC<{
   const [isRenameViewModalOpen, setIsRenameViewModalOpen] = useState(false);
   const [renameViewForm] = Form.useForm();
   const [renameViewTarget, setRenameViewTarget] = useState<any>(null);
+  const [isRenameSavedQueryModalOpen, setIsRenameSavedQueryModalOpen] = useState(false);
+  const [renameSavedQueryForm] = Form.useForm();
+  const [renameSavedQueryTarget, setRenameSavedQueryTarget] = useState<SavedQuery | null>(null);
 
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
@@ -952,12 +1270,20 @@ const Sidebar: React.FC<{
       };
 
       const taggedConnIds = new Set<string>();
-      const tagNodes: TreeNode[] = connectionTags.map((tag) => {
+      const tagNodesById = new Map<string, TreeNode>();
+      connectionTags.forEach((tag) => {
         tag.connectionIds.forEach(id => taggedConnIds.add(id));
-        return {
+        tagNodesById.set(tag.id, {
           title: tag.name,
           key: `tag-${tag.id}`,
-          icon: <FolderOutlined style={{ color: '#faad14' }} />,
+          icon: (
+            <span
+              className="gn-v2-tree-folder-icon"
+              data-sidebar-tree-folder-icon="true"
+            >
+              <FolderOutlined />
+            </span>
+          ),
           type: 'tag',
           dataRef: tag,
           isLeaf: false,
@@ -965,16 +1291,43 @@ const Sidebar: React.FC<{
             .map(cid => connections.find(c => c.id === cid))
             .filter(Boolean)
             .map(conn => buildConnectionNode(conn!)),
-        } as TreeNode;
+        } as TreeNode);
       });
 
-      const ungroupedNodes: TreeNode[] = connections
+      const ungroupedNodesById = new Map<string, TreeNode>();
+      connections
         .filter(c => !taggedConnIds.has(c.id))
-        .map(conn => buildConnectionNode(conn));
+        .forEach((conn) => {
+          ungroupedNodesById.set(conn.id, buildConnectionNode(conn));
+        });
 
-      return [...tagNodes, ...ungroupedNodes];
+      const orderedRootTokens = resolveSidebarRootOrderTokens(
+        sidebarRootOrder,
+        connectionTags,
+        connections,
+      );
+      const orderedNodes: TreeNode[] = [];
+      orderedRootTokens.forEach((token) => {
+        if (token.startsWith('tag:')) {
+          const tagNode = tagNodesById.get(token.slice('tag:'.length));
+          if (!tagNode) return;
+          orderedNodes.push(tagNode);
+          tagNodesById.delete(token.slice('tag:'.length));
+          return;
+        }
+        if (token.startsWith('connection:')) {
+          const connectionNode = ungroupedNodesById.get(token.slice('connection:'.length));
+          if (!connectionNode) return;
+          orderedNodes.push(connectionNode);
+          ungroupedNodesById.delete(token.slice('connection:'.length));
+        }
+      });
+
+      orderedNodes.push(...Array.from(tagNodesById.values()));
+      orderedNodes.push(...Array.from(ungroupedNodesById.values()));
+      return orderedNodes;
     });
-  }, [connections, connectionTags]);
+  }, [connections, connectionTags, sidebarRootOrder]);
 
   const handleDuplicateConnection = async (conn: SavedConnection) => {
     if (!conn?.id) return;
@@ -1247,6 +1600,80 @@ const Sidebar: React.FC<{
           if (normalized !== '') return normalized;
       }
       return '';
+  };
+
+  const parseMetadataRowCount = (row: Record<string, any>): number | undefined => {
+      const rawValue = getCaseInsensitiveRawValue(row, ['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']);
+      if (rawValue === undefined || rawValue === null || rawValue === '') {
+          return undefined;
+      }
+      const parsed = Number(String(rawValue).replace(/,/g, ''));
+      if (!Number.isFinite(parsed) || parsed < 0) {
+          return undefined;
+      }
+      return Math.round(parsed);
+  };
+
+  const buildSidebarTableStatusSQL = (conn: SavedConnection, dbName: string): string => {
+      const dialect = getMetadataDialect(conn);
+      const safeDbName = escapeSQLLiteral(dbName);
+      switch (dialect) {
+          case 'mysql':
+          case 'starrocks':
+              return [
+                  'SELECT TABLE_NAME AS table_name, TABLE_ROWS AS table_rows',
+                  'FROM information_schema.tables',
+                  `WHERE table_schema = '${safeDbName}'`,
+                  "AND table_type = 'BASE TABLE'",
+                  'ORDER BY table_name',
+              ].join('\n');
+          case 'postgres':
+          case 'kingbase':
+          case 'vastbase':
+          case 'highgo':
+          case 'opengauss':
+              return [
+                  "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
+                  'FROM pg_class c',
+                  'JOIN pg_namespace n ON n.oid = c.relnamespace',
+                  "WHERE c.relkind = 'r'",
+                  "AND n.nspname NOT IN ('information_schema', 'pg_catalog')",
+                  "AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'",
+                  'ORDER BY n.nspname, c.relname',
+              ].join('\n');
+          case 'sqlserver': {
+              const safeDb = quoteSqlServerIdentifier(dbName);
+              return [
+                  'SELECT s.name + \'.\' + t.name AS table_name, SUM(p.rows) AS table_rows',
+                  `FROM ${safeDb}.sys.tables t`,
+                  `JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id`,
+                  `LEFT JOIN ${safeDb}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)`,
+                  'WHERE t.type = \'U\'',
+                  'GROUP BY s.name, t.name',
+                  'ORDER BY s.name, t.name',
+              ].join('\n');
+          }
+          case 'clickhouse':
+              return [
+                  'SELECT name AS table_name, total_rows AS table_rows',
+                  'FROM system.tables',
+                  `WHERE database = '${safeDbName}'`,
+                  "AND engine NOT IN ('View', 'MaterializedView')",
+                  'ORDER BY name',
+              ].join('\n');
+          case 'oracle':
+          case 'dm': {
+              const owner = escapeSQLLiteral(dbName).toUpperCase();
+              return [
+                  'SELECT table_name, num_rows AS table_rows',
+                  'FROM all_tables',
+                  `WHERE owner = '${owner}'`,
+                  'ORDER BY table_name',
+              ].join('\n');
+          }
+          default:
+              return '';
+      }
   };
 
   const buildQualifiedName = (schemaName: string, objectName: string): string => {
@@ -2016,6 +2443,24 @@ const Sidebar: React.FC<{
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
 
                 const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
+                const tableStatusSql = buildSidebarTableStatusSQL(conn as SavedConnection, conn.dbName);
+                const tableStatsResult = tableStatusSql
+                    ? await DBQuery(buildRpcConnectionConfig(config) as any, conn.dbName, tableStatusSql).catch(() => ({ success: false, data: [] as any[] }))
+                    : { success: false, data: [] as any[] };
+                const tableRowCountMap = new Map<string, number>();
+                if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
+                    tableStatsResult.data.forEach((row: Record<string, any>) => {
+                        const rawTableName = String(
+                            getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'Name', 'name'])
+                            || getMySQLShowTablesName(row)
+                            || ''
+                        ).trim();
+                        if (!rawTableName) return;
+                        const rowCount = parseMetadataRowCount(row);
+                        if (rowCount === undefined) return;
+                        tableRowCountMap.set(rawTableName.toLowerCase(), rowCount);
+                    });
+                }
 	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
@@ -2023,6 +2468,7 @@ const Sidebar: React.FC<{
 	                    tableName,
 	                    schemaName: parsed.schemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
+                        rowCount: tableRowCountMap.get(String(tableName || '').trim().toLowerCase()),
 	                };
 	            });
 
@@ -2160,7 +2606,7 @@ const Sidebar: React.FC<{
 	                dbName: conn.dbName,
 	                sortBy,
 	                tableAccessCount: currentTableAccessCount,
-	                pinnedSidebarTables: currentPinnedSidebarTables,
+	                pinnedSidebarTables: isV2Ui ? currentPinnedSidebarTables : [],
 	            });
 
 	            // Sort views by name (case-insensitive)
@@ -2176,14 +2622,26 @@ const Sidebar: React.FC<{
 
 	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
-	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string }): TreeNode => {
-	                const isPinned = isSidebarTablePinned(currentPinnedSidebarTables, conn.id, conn.dbName, entry.tableName, entry.schemaName);
+	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number }): TreeNode => {
+	                const isPinned = isV2Ui && isSidebarTablePinned(
+	                    currentPinnedSidebarTables,
+	                    conn.id,
+	                    conn.dbName,
+	                    entry.tableName,
+	                    entry.schemaName,
+	                );
 	                return {
 	                    title: entry.displayName,
 	                    key: `${conn.id}-${conn.dbName}-${entry.tableName}`,
 	                    icon: <TableOutlined />,
 	                    type: 'table',
-	                    dataRef: { ...conn, tableName: entry.tableName, schemaName: entry.schemaName, pinnedSidebarTable: isPinned },
+	                    dataRef: {
+	                        ...conn,
+	                        tableName: entry.tableName,
+	                        schemaName: entry.schemaName,
+	                        rowCount: entry.rowCount,
+	                        ...(isPinned ? { pinnedSidebarTable: true } : {}),
+	                    },
 	                    isLeaf: false,
 	                };
 	            };
@@ -2243,7 +2701,7 @@ const Sidebar: React.FC<{
 	            ): TreeNode => {
 	                const groupNodeKey = `${parentKey}-${groupKey}`;
 	                const groupedChildren = groupKey === 'tables'
-	                    ? buildV2SidebarTableSectionedChildren(groupNodeKey, children)
+	                    ? buildSidebarTableChildrenForUi(groupNodeKey, children, isV2Ui)
 	                    : children;
 	                return {
 	                    title: groupTitle,
@@ -2559,6 +3017,12 @@ const Sidebar: React.FC<{
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
           return;
       }
+      if (Date.now() < treeDragSelectSuppressUntilRef.current) {
+          return;
+      }
+      if (isTreeDragging) {
+          return;
+      }
       setSelectedKeys(keys);
       selectedNodesRef.current = info.selectedNodes || [];
 
@@ -2568,7 +3032,7 @@ const Sidebar: React.FC<{
           }
           return;
       }
-      if (!info.selected) return;
+      if (shouldSkipSidebarSelectWhileDragging(isTreeDragging, info)) return;
 
       const { type, dataRef, key, title } = info.node;
       const nodeConnectionId = resolveSidebarNodeConnectionId(info.node, connectionIds);
@@ -2617,7 +3081,7 @@ const Sidebar: React.FC<{
   const onExpand = (newExpandedKeys: React.Key[], info?: any) => {
     setExpandedKeys(newExpandedKeys);
     setAutoExpandParent(false);
-    if (info?.expanded && shouldLoadSidebarNodeOnExpand(info.node)) {
+    if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info)) {
         void onLoadData(info.node);
     }
   };
@@ -4159,6 +4623,56 @@ const Sidebar: React.FC<{
       }
   };
 
+  const openRenameSavedQueryModal = (query: SavedQuery) => {
+      setRenameSavedQueryTarget(query);
+      renameSavedQueryForm.setFieldsValue({ name: query.name || '未命名查询' });
+      setIsRenameSavedQueryModalOpen(true);
+  };
+
+  const handleRenameSavedQuery = async () => {
+      if (!renameSavedQueryTarget) return;
+      try {
+          const values = await renameSavedQueryForm.validateFields();
+          const nextName = String(values.name || '').trim();
+          if (!nextName) {
+              message.error('查询名称不能为空');
+              return;
+          }
+          if (nextName === renameSavedQueryTarget.name) {
+              message.warning('新旧查询名称相同，无需修改');
+              return;
+          }
+
+          saveQuery({
+              ...renameSavedQueryTarget,
+              name: nextName,
+          });
+          const updateSavedQueryNode = (list: TreeNode[]): TreeNode[] =>
+              list.map(node => {
+                  if (node.key === renameSavedQueryTarget.id) {
+                      return {
+                          ...node,
+                          title: nextName,
+                          dataRef: { ...(node.dataRef || renameSavedQueryTarget), name: nextName },
+                      };
+                  }
+                  return node.children ? { ...node, children: updateSavedQueryNode(node.children) } : node;
+              });
+          const nextTreeData = updateSavedQueryNode(treeDataRef.current);
+          treeDataRef.current = nextTreeData;
+          setTreeData(nextTreeData);
+          tabs
+              .filter(tab => tab.type === 'query' && (tab.savedQueryId === renameSavedQueryTarget.id || tab.id === renameSavedQueryTarget.id))
+              .forEach(tab => updateQueryTabDraft(tab.id, { title: nextName }));
+          message.success('查询已重命名');
+          setIsRenameSavedQueryModalOpen(false);
+          setRenameSavedQueryTarget(null);
+          renameSavedQueryForm.resetFields();
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
   // --- 函数/存储过程操作 ---
   const openRoutineDefinition = (node: any) => {
       const { routineName, routineType, dbName, id } = node.dataRef;
@@ -5146,8 +5660,14 @@ const Sidebar: React.FC<{
           .map((node) => resolveSidebarNodeConnectionId(node, connectionIds))
           .find(Boolean),
   });
-  const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || connections[0] || null;
-  const activeConnectionHostSummary = resolveConnectionHostSummary(activeConnection?.config) || '未配置地址';
+  const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || null;
+  const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || '未选择 Host';
+  const activeDatabaseDisplayName = useMemo(() => {
+      if (activeContext && typeof activeContext === 'object' && 'dbName' in activeContext) {
+          return String(activeContext.dbName || '').trim();
+      }
+      return String(activeTab?.dbName || '').trim();
+  }, [activeContext, activeTab?.dbName]);
   const activeConnectionTreeData = useMemo(() => {
       if (!activeConnection) return displayTreeData;
       const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
@@ -5170,12 +5690,14 @@ const Sidebar: React.FC<{
       const filtered = filterTree(displayTreeData);
       return filtered;
   }, [activeConnection, displayTreeData]);
-  const v2VisibleTreeData = useMemo(
-      () => filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter),
-      [activeConnectionTreeData, v2ExplorerFilter],
-  );
+  const v2VisibleTreeData = useMemo(() => {
+      if (v2ExplorerFilter === 'all') {
+          return displayTreeData;
+      }
+      return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
+  }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
   const v2TreeMetrics = useMemo(() => {
-      const databaseObjectCounts = new Map<React.Key, number>();
+      const databaseTableCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
       let activeObjectCount = 0;
 
@@ -5183,7 +5705,21 @@ const Sidebar: React.FC<{
           const childCount = (node.children || []).reduce((total, child) => total + visitAndCount(child), 0);
           const totalCount = (isV2SidebarObjectNode(node) ? 1 : 0) + childCount;
           if (node.type === 'database') {
-              databaseObjectCounts.set(node.key, childCount);
+              const tableCount = (node.children || []).reduce((total, child) => {
+                  if (child.type === 'object-group' && child?.dataRef?.groupKey === 'tables') {
+                      return total + (Array.isArray(child.children) ? child.children.filter((item) => item.type === 'table').length : 0);
+                  }
+                  if (child?.dataRef?.groupKey === 'schema' && Array.isArray(child.children)) {
+                      return total + child.children.reduce((schemaTotal, schemaChild) => {
+                          if (schemaChild.type === 'object-group' && schemaChild?.dataRef?.groupKey === 'tables') {
+                              return schemaTotal + (Array.isArray(schemaChild.children) ? schemaChild.children.filter((item) => item.type === 'table').length : 0);
+                          }
+                          return schemaTotal;
+                      }, 0);
+                  }
+                  return total;
+              }, 0);
+              databaseTableCounts.set(node.key, tableCount);
           } else if (node.type === 'object-group') {
               objectGroupCounts.set(node.key, childCount);
           }
@@ -5194,11 +5730,34 @@ const Sidebar: React.FC<{
 
       return {
           activeObjectCount,
-          databaseObjectCounts,
+          databaseTableCounts,
           objectGroupCounts,
       };
   }, [v2VisibleTreeData]);
   const activeConnectionObjectCount = v2TreeMetrics.activeObjectCount;
+  const legacyToolbarButtonColor = darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
+  const legacyToolbarStyle: React.CSSProperties = {
+      padding: '6px 16px',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+      gap: 8,
+      alignItems: 'center',
+      justifyItems: 'center',
+      borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`,
+      borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`,
+      background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)',
+  };
+  const legacyToolbarItemStyle: React.CSSProperties = {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 0,
+  };
+  const legacyToolbarDisabledWrapStyle: React.CSSProperties = {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+  };
 
   const connectionStatusMap = useMemo(() => {
       const statusMap = new Map<string, 'live' | 'error' | 'idle'>();
@@ -5235,7 +5794,18 @@ const Sidebar: React.FC<{
       ));
   }, []);
 
-  const getRailConnectionLabel = (conn: SavedConnection): string => {
+  const handleV2RailRootDrop = useCallback((
+      sourceToken: string,
+      targetToken: string,
+      insertBefore: boolean,
+  ) => {
+      if (!sourceToken || !targetToken || sourceToken === targetToken) {
+          return;
+      }
+      reorderSidebarRoot(sourceToken, targetToken, insertBefore);
+  }, [reorderSidebarRoot]);
+
+  const getRailConnectionTypeLabel = (conn: SavedConnection): string => {
       const iconType = resolveConnectionIconType(conn);
       if (iconType === 'mysql' || iconType === 'mariadb' || iconType === 'oceanbase') return 'MY';
       if (iconType === 'postgres') return 'PG';
@@ -5249,6 +5819,67 @@ const Sidebar: React.FC<{
       return iconType.slice(0, 2).toUpperCase() || 'DB';
   };
 
+  const getRailConnectionHostLabel = (conn: SavedConnection): string => {
+      const hostTokens = resolveConnectionHostTokens(conn.config);
+      const primaryHost = String(hostTokens[0] || '').trim().replace(/^\[|\]$/g, '');
+      if (primaryHost) {
+          if (/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(primaryHost)) {
+              return 'LO';
+          }
+          if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(primaryHost)) {
+              const lastSegment = primaryHost.split('.').pop() || '';
+              return lastSegment.slice(-3).toUpperCase() || 'IP';
+          }
+          if (primaryHost.includes(':') && /^[a-f0-9:]+$/i.test(primaryHost)) {
+              const lastSegment = primaryHost.split(':').filter(Boolean).pop() || '';
+              return lastSegment.slice(-3).toUpperCase() || 'IP';
+          }
+
+          const hostFragments = primaryHost
+              .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
+              .map((entry) => entry.trim())
+              .filter(Boolean);
+          if (hostFragments.length >= 2) {
+              return `${hostFragments[0][0] || ''}${hostFragments[1][0] || ''}`.toUpperCase();
+          }
+          const hostToken = hostFragments[0] || primaryHost.split('.')[0] || '';
+          if (hostToken) {
+              return hostToken.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '').slice(0, 3).toUpperCase() || 'DB';
+          }
+      }
+
+      return getRailConnectionTypeLabel(conn);
+  };
+
+  const getRailConnectionBadgeLabel = (conn: SavedConnection): string => {
+      const connectionName = String(conn.name || '').trim();
+      const cjkParts = connectionName.match(/[\u4e00-\u9fa5]/g);
+      if (cjkParts && cjkParts.length > 0) {
+          return cjkParts.slice(0, 2).join('');
+      }
+
+      const latinTokens = connectionName.match(/[a-z0-9]+/gi) || [];
+      if (latinTokens.length >= 2) {
+          const firstToken = latinTokens[0] || '';
+          const secondToken = latinTokens[1] || '';
+          return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
+      }
+      if (latinTokens.length === 1) {
+          const token = latinTokens[0];
+          const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
+          if (alphaPrefix) {
+              return alphaPrefix.slice(0, 3).toUpperCase();
+          }
+          const trailingDigits = token.match(/(\d{2,})$/)?.[1];
+          if (trailingDigits) {
+              return trailingDigits.slice(-3).toUpperCase();
+          }
+          return token.slice(0, 3).toUpperCase();
+      }
+
+      return getRailConnectionTypeLabel(conn);
+  };
+
   const openV2ConnectionContextMenu = (
       event: React.MouseEvent,
       connOrNode: SavedConnection | TreeNode,
@@ -5259,20 +5890,28 @@ const Sidebar: React.FC<{
           ? connOrNode as TreeNode
           : getConnectionNodeForAction(connOrNode as SavedConnection);
       if (!node?.key || !node?.dataRef) return;
+      const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
       setContextMenu({
-          x: event.clientX,
-          y: event.clientY,
+          x: position.x,
+          y: position.y,
+          sourceX: event.clientX,
+          sourceY: event.clientY,
           items: [],
           kind: 'v2-connection',
           node,
           rootClassName: 'gn-v2-table-context-menu-popup',
-          overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+          overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+          maxHeight: position.maxHeight,
       });
   };
 
   const getV2TreeMetaText = (node: any): string => {
+      if (node.type === 'tag') {
+          const count = flattenConnectionNodes(node.children || []).length;
+          return count > 0 ? count.toLocaleString() : '';
+      }
       if (node.type === 'database') {
-          const count = v2TreeMetrics.databaseObjectCounts.get(node.key) || 0;
+          const count = v2TreeMetrics.databaseTableCounts.get(node.key) || 0;
           return count > 0 ? count.toLocaleString() : '';
       }
       if (node.type === 'object-group') {
@@ -5284,9 +5923,8 @@ const Sidebar: React.FC<{
           return match?.[1] || '';
       }
       if (node.type === 'table') {
-          const key = `${node?.dataRef?.id}-${node?.dataRef?.dbName}-${node?.dataRef?.tableName}`;
-          const count = tableAccessCount[key] || 0;
-          return count > 0 ? count.toLocaleString() : '';
+          const rowCount = Number(node?.dataRef?.rowCount);
+          return Number.isFinite(rowCount) && rowCount >= 0 ? formatSidebarRowCount(rowCount) : '';
       }
       return '';
   };
@@ -5391,6 +6029,7 @@ const Sidebar: React.FC<{
       return (
           <V2TableContextMenuView
               tableName={tableName}
+              shortcutPlatform={activeShortcutPlatform}
               stats={stats}
               isPinned={isPinned}
               supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
@@ -5410,6 +6049,7 @@ const Sidebar: React.FC<{
       return (
           <V2TableGroupContextMenuView
               title="表 · tables"
+              shortcutPlatform={activeShortcutPlatform}
               dbName={String(groupData.dbName || '')}
               count={Array.isArray(node.children) ? node.children.length : 0}
               currentSort={currentSort}
@@ -5427,6 +6067,7 @@ const Sidebar: React.FC<{
       return (
           <V2DatabaseContextMenuView
               dbName={String(node.dataRef?.dbName || node.title || '')}
+              shortcutPlatform={activeShortcutPlatform}
               dialect={dialect}
               supportsSchemaActions={isPostgresSchemaDialect(dialect)}
               supportsStarRocksActions={dialect === 'starrocks'}
@@ -5447,6 +6088,7 @@ const Sidebar: React.FC<{
       return (
           <V2ConnectionContextMenuView
               connectionName={String(conn?.name || node.title || '未命名连接')}
+              shortcutPlatform={activeShortcutPlatform}
               hostSummary={resolveConnectionHostSummary(conn?.config)}
               driverLabel={resolveConnectionIconType(conn)}
               isRedis={conn?.config?.type === 'redis'}
@@ -5474,6 +6116,55 @@ const Sidebar: React.FC<{
           }}
       />
   );
+
+  const renderV2SidebarContextMenuContent = (menu: SidebarContextMenuState) => {
+      if (!menu.node) return null;
+      if (menu.kind === 'v2-table') return renderV2TableContextMenu(menu.node);
+      if (menu.kind === 'v2-database') return renderV2DatabaseContextMenu(menu.node);
+      if (menu.kind === 'v2-table-group') return renderV2TableGroupContextMenu(menu.node);
+      if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);
+      if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);
+      return null;
+  };
+
+  useEffect(() => {
+      if (!contextMenu?.kind) return;
+      const onPointerDown = (event: MouseEvent) => {
+          const target = event.target instanceof Node ? event.target : null;
+          if (target && contextMenuPortalRef.current?.contains(target)) return;
+          setContextMenu(null);
+      };
+      const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key === 'Escape') setContextMenu(null);
+      };
+      document.addEventListener('mousedown', onPointerDown);
+      document.addEventListener('keydown', onKeyDown);
+      return () => {
+          document.removeEventListener('mousedown', onPointerDown);
+          document.removeEventListener('keydown', onKeyDown);
+      };
+  }, [contextMenu?.kind]);
+
+  useEffect(() => {
+      if (!contextMenu?.kind) return;
+      const frame = requestAnimationFrame(() => {
+          const portal = contextMenuPortalRef.current;
+          if (!portal) return;
+          const rect = portal.getBoundingClientRect();
+          const content = portal.querySelector('.gn-v2-table-context-menu') as HTMLElement | null;
+          const measuredHeight = Math.max(rect.height, content?.scrollHeight || 0);
+          const position = resolveSidebarContextMenuPosition(contextMenu.sourceX ?? contextMenu.x, contextMenu.sourceY ?? contextMenu.y, {
+              width: rect.width || SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
+              height: measuredHeight || SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
+          });
+          setContextMenu(prev => {
+              if (!prev?.kind) return prev;
+              if (prev.x === position.x && prev.y === position.y && prev.maxHeight === position.maxHeight) return prev;
+              return { ...prev, x: position.x, y: position.y, maxHeight: position.maxHeight };
+          });
+      });
+      return () => cancelAnimationFrame(frame);
+  }, [contextMenu?.kind, contextMenu?.x, contextMenu?.y]);
 
   const fetchV2TableContextMenuStats = async (node: any) => {
       const statsKey = getV2TableContextMenuStatsKey(node);
@@ -5601,6 +6292,22 @@ const Sidebar: React.FC<{
               {node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />}
           </button>
       ) : null;
+      if (node.type === 'connection') {
+          return (
+            <span
+                className={`${titleClassName} is-connection`}
+                title={hoverTitle}
+                data-node-type={node.type}
+                data-sidebar-node-key={String(node.key || '')}
+                data-sidebar-node-type={String(node.type || '')}
+            >
+                {statusBadge}
+                <span className="gn-v2-tree-connection-copy">
+                    <span className="gn-v2-tree-label">{displayTitle}</span>
+                </span>
+            </span>
+          );
+      }
       return (
         <>
           <span
@@ -5608,6 +6315,8 @@ const Sidebar: React.FC<{
               title={hoverTitle}
               data-node-type={node.type}
               data-group-key={groupKey || undefined}
+              data-sidebar-node-key={String(node.key || '')}
+              data-sidebar-node-type={String(node.type || '')}
           >
               {statusBadge}
               <span className="gn-v2-tree-label">{displayTitle}</span>
@@ -6610,6 +7319,12 @@ const Sidebar: React.FC<{
             },
             { type: 'divider' },
             {
+                key: 'rename-query',
+                label: '重命名查询',
+                icon: <EditOutlined />,
+                onClick: () => openRenameSavedQueryModal(q),
+            },
+            {
                 key: 'delete-query',
                 label: '删除查询',
                 icon: <DeleteOutlined />,
@@ -6736,11 +7451,18 @@ const Sidebar: React.FC<{
         return (
             <span
                 title={hoverTitle}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}
+                className="gn-v2-tree-external-root"
             >
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {statusBadge}
-                    {displayTitle}
+                <span
+                    className="gn-v2-tree-title"
+                    data-node-type={node.type}
+                    data-sidebar-node-key={String(node.key || '')}
+                    data-sidebar-node-type={String(node.type || '')}
+                >
+                    <span className="gn-v2-tree-label">
+                        {statusBadge}
+                        {displayTitle}
+                    </span>
                 </span>
                 <Button
                     size="small"
@@ -6753,7 +7475,7 @@ const Sidebar: React.FC<{
                         event.stopPropagation();
                         void handleAddExternalSQLDirectory(node);
                     }}
-                    style={{ paddingInline: 4, height: 20 }}
+                    className="gn-v2-tree-external-root-action"
                 />
             </span>
         );
@@ -6767,37 +7489,98 @@ const Sidebar: React.FC<{
   };
 
   const handleDrop = (info: any) => {
-      const dropKey = info.node.key;
-      const dragKey = info.dragNode.key;
-      const dropPos = info.node.pos.split('-');
-      const dropPosition = info.dropPosition - Number(dropPos[dropPos.length - 1]);
+      setIsTreeDragging(false);
+      const dropPosition = normalizeSidebarTreeRelativeDropPosition(
+          Number(info.dropPosition || 0),
+          info?.node?.pos,
+      );
+      const domDropNode = resolveSidebarDropNodeFromDomEvent(info?.event);
+      const dropTargetMetrics = resolveSidebarDropTargetMetricsFromDomEvent(info?.event);
+      const insertBefore = resolveSidebarDropInsertBefore(dropPosition, dropTargetMetrics ? {
+          clientY: info?.event?.clientY,
+          top: dropTargetMetrics.top,
+          height: dropTargetMetrics.height,
+      } : null);
 
       const dragNode = info.dragNode;
-      const dropNode = info.node;
+      const dropNode = domDropNode && domDropNode.key === String(info?.node?.key || '')
+          ? info.node
+          : (domDropNode
+              ? findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key) || info.node
+              : info.node);
 
-      // Tag to Tag reordering
+      const getDropRootToken = (node: any): string => {
+          if (!node) return '';
+          if (node.type === 'tag') {
+              return buildSidebarRootTagToken(String(node?.dataRef?.id || ''));
+          }
+          if (node.type === 'connection') {
+              const groupedTagId = connectionTags.find((tag) =>
+                  tag.connectionIds.includes(String(node.key)),
+              )?.id || '';
+              return groupedTagId
+                  ? buildSidebarRootTagToken(groupedTagId)
+                  : buildSidebarRootConnectionToken(String(node.key));
+          }
+          return '';
+      };
+
+      // Root tag or ungrouped connection reordering
       if (dragNode.type === 'tag') {
-          // You can only drop tags onto the root level (before/after other tags or connections at root)
           if (dropNode.type === 'tag' || dropNode.type === 'connection') {
-              // Get current order
               const currentTagOrder = connectionTags.map(t => t.id);
               const dragTagId = dragNode.dataRef.id;
+              const dropTagId = dropNode.type === 'tag'
+                  ? dropNode.dataRef.id
+                  : (connectionTags.find(t => t.connectionIds.includes(String(dropNode.key)))?.id || '');
+              const dragRootToken = buildSidebarRootTagToken(String(dragTagId));
+              const dropRootToken = getDropRootToken(dropNode);
 
-              // Filter out the dragging tag
+              if (dropRootToken && dropRootToken !== dragRootToken) {
+                  if (dropTagId) {
+                      const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
+                          currentTagOrder,
+                          dragTagId,
+                          dropTagId,
+                          relativeDropPosition: dropPosition,
+                          fallbackInsertBefore: insertBefore,
+                          metrics: dropTargetMetrics ? {
+                              clientY: info?.event?.clientY,
+                              top: dropTargetMetrics.top,
+                              height: dropTargetMetrics.height,
+                          } : null,
+                      });
+                      reorderSidebarRoot(dragRootToken, dropRootToken, resolvedInsertBefore);
+                  } else {
+                      reorderSidebarRoot(dragRootToken, dropRootToken, insertBefore);
+                  }
+                  return;
+              }
+
               const newOrder = currentTagOrder.filter(id => id !== dragTagId);
-
               let insertIndex = newOrder.length;
-              if (dropNode.type === 'tag') {
-                  const dropTagId = dropNode.dataRef.id;
+              if (dropTagId) {
                   const dropIndex = newOrder.indexOf(dropTagId);
+                  const resolvedInsertBefore = resolveSidebarTagDropInsertBefore({
+                      currentTagOrder,
+                      dragTagId,
+                      dropTagId,
+                      relativeDropPosition: dropPosition,
+                      fallbackInsertBefore: insertBefore,
+                      metrics: dropTargetMetrics ? {
+                          clientY: info?.event?.clientY,
+                          top: dropTargetMetrics.top,
+                          height: dropTargetMetrics.height,
+                      } : null,
+                  });
 
-                  if (dropPosition === -1) {
+                  if (resolvedInsertBefore) {
                       insertIndex = dropIndex;
                   } else {
                       insertIndex = dropIndex + 1;
                   }
               } else {
-                  // Dropped onto a root connection, usually meaning moving to the end of tags
+                  // Dropped onto an ungrouped root connection, usually meaning moving to the end of tags
                   // Since tags are always displayed before ungrouped connections, just put it at the end
                   insertIndex = newOrder.length;
               }
@@ -6808,27 +7591,38 @@ const Sidebar: React.FC<{
           return;
       }
 
+      if (dragNode.type === 'connection') {
+          const dragTagId = connectionTags.find((tag) =>
+              tag.connectionIds.includes(String(dragNode.key)),
+          )?.id || '';
+          const dragIsUngroupedRoot = !dragTagId;
+          const dropRootToken = getDropRootToken(dropNode);
+          if (dragIsUngroupedRoot && dropNode.type === 'connection' && dropRootToken) {
+              reorderSidebarRoot(
+                  buildSidebarRootConnectionToken(String(dragNode.key)),
+                  dropRootToken,
+                  insertBefore,
+              );
+              return;
+          }
+      }
+
       // Connection moving to tag (any drop position on a tag node counts as "into")
       if (dragNode.type === 'connection' && dropNode.type === 'tag') {
           moveConnectionToTag(dragNode.key, dropNode.dataRef.id);
           return;
       }
 
-      // Connection moving to another connection inside a tag
+      // Connection reordering against another connection
       if (dragNode.type === 'connection' && dropNode.type === 'connection') {
-          // Find if drop target is under a tag
           const targetTag = connectionTags.find(t => t.connectionIds.includes(dropNode.key));
-          if (targetTag) {
-              moveConnectionToTag(dragNode.key, targetTag.id);
-              return;
-          }
-
-          // Drop target is NOT under a tag (ungrouped) -> move OUT of tag
-          const sourceTag = connectionTags.find(t => t.connectionIds.includes(dragNode.key));
-          if (sourceTag) {
-              moveConnectionToTag(dragNode.key, null);
-              return;
-          }
+          reorderConnections(
+              String(dragNode.key),
+              String(dropNode.key),
+              targetTag?.id || null,
+              insertBefore,
+          );
+          return;
       }
   };
 
@@ -6843,38 +7637,50 @@ const Sidebar: React.FC<{
           return;
       }
       if (isV2Ui && node?.type === 'database') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-database',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
       if (isV2Ui && node?.type === 'object-group' && node?.dataRef?.groupKey === 'tables') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-table-group',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
       if (isV2Ui && node?.type === 'table') {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
-              x: event.clientX,
-              y: event.clientY,
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
               items: [],
               kind: 'v2-table',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
-              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' }
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
           });
           return;
       }
@@ -6891,14 +7697,51 @@ const Sidebar: React.FC<{
   const renderV2RailConnectionButton = (conn: SavedConnection) => {
       const accent = resolveConnectionAccentColor(conn);
       const status = buildRailConnectionStatus(conn.id);
-      const label = getRailConnectionLabel(conn);
+      const badgeLabel = getRailConnectionBadgeLabel(conn);
+      const hostLabel = getRailConnectionHostLabel(conn);
       const title = `${conn.name} · ${resolveConnectionHostSummary(conn.config) || conn.config.type}`;
+      const rootToken = buildSidebarRootConnectionToken(conn.id);
 
       return (
-          <Tooltip key={conn.id} title={title}>
+          <Tooltip key={conn.id} title={title} placement="right">
               <button
                   type="button"
                   className={`gn-v2-rail-item${conn.id === activeConnectionId ? ' is-active' : ''}`}
+                  draggable
+                  onDragStart={(event) => {
+                      snapshotTreeSelectionBeforeDrag();
+                      treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                      setDraggingV2RailRootToken(rootToken);
+                      setIsTreeDragging(true);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', rootToken);
+                  }}
+                  onDragEnd={() => {
+                      restoreTreeSelectionAfterDrag();
+                      setDraggingV2RailRootToken('');
+                      setIsTreeDragging(false);
+                  }}
+                  onDragOver={(event) => {
+                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                          return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(event) => {
+                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                          return;
+                      }
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const insertBefore = event.clientY < rect.top + rect.height / 2;
+                      handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
+                      restoreTreeSelectionAfterDrag();
+                      setDraggingV2RailRootToken('');
+                      setIsTreeDragging(false);
+                  }}
                   onClick={() => selectConnectionFromRail(conn)}
                   onContextMenu={(event) => openV2ConnectionContextMenu(event, conn)}
                   aria-label={`切换到连接 ${conn.name}`}
@@ -6906,11 +7749,13 @@ const Sidebar: React.FC<{
                   data-v2-rail-host-context-menu-trigger="true"
               >
                   <span className="gn-v2-rail-active-bar" />
-                  <span className="gn-v2-rail-badge" style={{ background: accent }}>
-                      {label}
+                  <span className="gn-v2-rail-badge-wrap">
+                      <span className="gn-v2-rail-badge" style={{ background: accent }}>
+                          {badgeLabel}
+                      </span>
+                      <span className={`gn-v2-rail-status is-${status}`} />
                   </span>
-                  <span className={`gn-v2-rail-status is-${status}`} />
-                  <span className="gn-v2-rail-fallback">{label}</span>
+                  <span className="gn-v2-rail-fallback">{hostLabel}</span>
               </button>
           </Tooltip>
       );
@@ -6919,32 +7764,71 @@ const Sidebar: React.FC<{
   const renderV2RailConnectionGroup = (group: V2RailConnectionGroup) => {
       const collapsed = collapsedV2RailGroupIdSet.has(group.id);
       const groupTitle = group.name || '连接';
-      const groupLabel = getV2RailConnectionGroupBadgeText(group.name, group.isUngrouped ? '未' : '组');
+      const rootToken = group.rootToken;
 
       return (
           <div
               key={group.id}
               className={`gn-v2-rail-group${group.isUngrouped ? ' is-ungrouped' : ''}${collapsed ? ' is-collapsed' : ''}`}
               data-v2-rail-connection-group="true"
+              draggable
+              onDragStart={(event) => {
+                  snapshotTreeSelectionBeforeDrag();
+                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                  setDraggingV2RailRootToken(rootToken);
+                  setIsTreeDragging(true);
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', rootToken);
+              }}
+              onDragEnd={() => {
+                  restoreTreeSelectionAfterDrag();
+                  setDraggingV2RailRootToken('');
+                  setIsTreeDragging(false);
+              }}
+              onDragOver={(event) => {
+                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                      return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
+                      return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const insertBefore = event.clientY < rect.top + rect.height / 2;
+                  handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
+                  restoreTreeSelectionAfterDrag();
+                  setDraggingV2RailRootToken('');
+                  setIsTreeDragging(false);
+              }}
           >
               {hasV2RailConnectionGroups && (
-                  <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`}>
+                  <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`} placement="right">
                       <button
                           type="button"
-                          className="gn-v2-rail-group-header"
+                          className={`gn-v2-rail-group-header${group.isUngrouped ? ' is-ungrouped' : ''}`}
                           onClick={() => toggleV2RailConnectionGroup(group.id)}
                           onContextMenu={(event) => {
                               if (group.isUngrouped) return;
                               event.preventDefault();
                               event.stopPropagation();
+                              const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
                               setContextMenu({
-                                  x: event.clientX,
-                                  y: event.clientY,
+                                  x: position.x,
+                                  y: position.y,
+                                  sourceX: event.clientX,
+                                  sourceY: event.clientY,
                                   items: [],
                                   kind: 'v2-connection-group',
                                   node: group,
                                   rootClassName: 'gn-v2-table-context-menu-popup',
                                   overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+                                  maxHeight: position.maxHeight,
                               });
                           }}
                           aria-label={`${collapsed ? '展开' : '折叠'}连接分组 ${groupTitle}`}
@@ -6955,7 +7839,7 @@ const Sidebar: React.FC<{
                           <span className="gn-v2-rail-group-chevron">
                               <DownOutlined />
                           </span>
-                          <span className="gn-v2-rail-group-badge">{groupLabel}</span>
+                          <span className="gn-v2-rail-group-title">{groupTitle}</span>
                           <span className="gn-v2-rail-group-count">{group.connections.length}</span>
                       </button>
                   </Tooltip>
@@ -6970,111 +7854,95 @@ const Sidebar: React.FC<{
   };
 
   const renderV2ConnectionRail = () => (
-      <div className="gn-v2-connection-rail" aria-label="连接切换">
-          <div className="gn-v2-rail-items">
-              {v2RailConnectionGroups.map(renderV2RailConnectionGroup)}
-              <Tooltip title="新建连接">
+      <div className="gn-v2-connection-rail" aria-label="系统操作">
+          <div className="gn-v2-rail-primary-actions" aria-label="对象区快捷操作">
+              <Tooltip title="新建组" placement="right">
                   <button
                       type="button"
-                      className="gn-v2-rail-item gn-v2-rail-add"
-                      onClick={onCreateConnection}
-                      aria-label="新建连接"
-                      data-gonavi-create-connection-action="true"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
+                      aria-label="新建组"
+                      data-sidebar-create-group-action="true"
                   >
-                      <PlusOutlined />
+                      <FolderOpenOutlined />
                   </button>
               </Tooltip>
+              <Tooltip title="批量操作表" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => openBatchOperationModal()}
+                      aria-label="批量操作表"
+                      data-sidebar-batch-table-action="true"
+                  >
+                      <TableOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="批量操作库" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={() => openBatchDatabaseModal()}
+                      aria-label="批量操作库"
+                      data-sidebar-batch-database-action="true"
+                  >
+                      <DatabaseOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="运行外部SQL文件" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool gn-v2-rail-action"
+                      onClick={handleOpenSQLFileFromToolbar}
+                      aria-label="运行外部 SQL 文件"
+                      data-sidebar-open-external-sql-file-action="true"
+                  >
+                      <FileAddOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'} placement="right">
+                  <span className="gn-v2-rail-action-wrap">
+                      <button
+                          type="button"
+                          className="gn-v2-rail-tool gn-v2-rail-action"
+                          onClick={handleLocateActiveTabInSidebar}
+                          aria-label="定位当前打开表"
+                          data-sidebar-locate-current-tab-action="true"
+                          disabled={!canLocateActiveTab}
+                      >
+                          <AimOutlined />
+                      </button>
+                  </span>
+              </Tooltip>
           </div>
-          <div className="gn-v2-rail-footer">
-              <div className="gn-v2-rail-action-group" aria-label="左侧快捷操作">
-                  <Tooltip title="新建组">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                          aria-label="新建组"
-                          data-sidebar-create-group-action="true"
-                      >
-                          <FolderOpenOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="批量操作表">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => openBatchOperationModal()}
-                          aria-label="批量操作表"
-                          data-sidebar-batch-table-action="true"
-                      >
-                          <TableOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="批量操作库">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={() => openBatchDatabaseModal()}
-                          aria-label="批量操作库"
-                          data-sidebar-batch-database-action="true"
-                      >
-                          <DatabaseOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="运行外部SQL文件">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool gn-v2-rail-action"
-                          onClick={handleOpenSQLFileFromToolbar}
-                          aria-label="运行外部 SQL 文件"
-                          data-sidebar-open-external-sql-file-action="true"
-                      >
-                          <FileAddOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
-                      <span className="gn-v2-rail-action-wrap">
-                          <button
-                              type="button"
-                              className="gn-v2-rail-tool gn-v2-rail-action"
-                              onClick={handleLocateActiveTabInSidebar}
-                              aria-label="定位当前打开表"
-                              data-sidebar-locate-current-tab-action="true"
-                              disabled={!canLocateActiveTab}
-                          >
-                              <AimOutlined />
-                          </button>
-                      </span>
-                  </Tooltip>
-              </div>
-              <div className="gn-v2-rail-system-actions" aria-label="系统操作">
-                  <Tooltip title="AI 助手">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool"
-                          onClick={onToggleAI}
-                          aria-label="AI 助手"
-                          data-gonavi-ai-entry-action="true"
-                      >
-                          <RobotOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="工具">
-                      <button
-                          type="button"
-                          className="gn-v2-rail-tool"
-                          onClick={onOpenTools}
-                          aria-label="工具"
-                          data-gonavi-open-tools-action="true"
-                      >
-                          <ToolOutlined />
-                      </button>
-                  </Tooltip>
-                  <Tooltip title="设置">
-                      <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label="设置">
-                          <SettingOutlined />
-                      </button>
-                  </Tooltip>
-              </div>
+          <div className="gn-v2-rail-secondary-actions" aria-label="系统操作">
+              <Tooltip title="AI 助手" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool"
+                      onClick={onToggleAI}
+                      aria-label="AI 助手"
+                      data-gonavi-ai-entry-action="true"
+                  >
+                      <RobotOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="工具" placement="right">
+                  <button
+                      type="button"
+                      className="gn-v2-rail-tool"
+                      onClick={onOpenTools}
+                      aria-label="工具"
+                      data-gonavi-open-tools-action="true"
+                  >
+                      <ToolOutlined />
+                  </button>
+              </Tooltip>
+              <Tooltip title="设置" placement="right">
+                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label="设置">
+                      <SettingOutlined />
+                  </button>
+              </Tooltip>
           </div>
       </div>
   );
@@ -7085,25 +7953,41 @@ const Sidebar: React.FC<{
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
-                <span className={`gn-v2-live-dot is-${activeConnection ? buildRailConnectionStatus(activeConnection.id) : 'idle'}`} />
-                <div className="gn-v2-active-connection-copy">
-                    <strong>{activeConnection?.name || '未选择连接'}</strong>
-                    <span>{activeConnectionHostSummary}</span>
+                <div className="gn-v2-active-connection-trigger" aria-label="当前 Host 与数据库">
+                    <span className={`gn-v2-live-dot is-${activeConnection ? buildRailConnectionStatus(activeConnection.id) : 'idle'}`} />
+                    <div className="gn-v2-active-connection-copy">
+                        <strong>{activeConnectionDisplayName}</strong>
+                        <span>{activeDatabaseDisplayName || '未选择数据库'}</span>
+                    </div>
                 </div>
-                <Tooltip title="连接操作">
-                    <Button
-                        size="small"
-                        type="text"
-                        icon={<MoreOutlined />}
-                        aria-label="连接操作"
-                        disabled={!activeConnection}
-                        onClick={(event) => {
-                            if (activeConnection) {
-                                openV2ConnectionContextMenu(event, activeConnection);
-                            }
-                        }}
-                    />
-                </Tooltip>
+                <div className="gn-v2-active-connection-actions">
+                    {onCreateConnection && (
+                        <Tooltip title="新建连接">
+                            <Button
+                                size="small"
+                                type="text"
+                                icon={<PlusOutlined />}
+                                aria-label="新建连接"
+                                data-gonavi-create-connection-action="true"
+                                onClick={onCreateConnection}
+                            />
+                        </Tooltip>
+                    )}
+                    <Tooltip title="连接操作">
+                        <Button
+                            size="small"
+                            type="text"
+                            icon={<MoreOutlined />}
+                            aria-label="连接操作"
+                            disabled={!activeConnection}
+                            onClick={(event) => {
+                                if (activeConnection) {
+                                    openV2ConnectionContextMenu(event, activeConnection);
+                                }
+                            }}
+                        />
+                    </Tooltip>
+                </div>
             </div>
         )}
         <div className={isV2Ui ? 'gn-v2-explorer-search' : undefined} style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
@@ -7120,7 +8004,7 @@ const Sidebar: React.FC<{
                     <SearchOutlined />
                     <span>搜索表、连接、动作... 或问 AI</span>
                     <span className="gn-v2-search-shortcut" aria-hidden="true">
-                        <kbd>⌘</kbd>
+                        <kbd>{primaryShortcutModifierLabel}</kbd>
                         <kbd>K</kbd>
                     </span>
                 </button>
@@ -7211,65 +8095,75 @@ const Sidebar: React.FC<{
 
         {/* Toolbar */}
         {!isV2Ui && (
-        <div style={{ padding: '6px 16px', display: 'flex', gap: 8, justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>
-            <Tooltip title="新建组">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<FolderOpenOutlined />}
-                    aria-label="新建组"
-                    data-sidebar-create-group-action="true"
-                    onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="批量操作表">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<TableOutlined />}
-                    aria-label="批量操作表"
-                    data-sidebar-batch-table-action="true"
-                    onClick={() => openBatchOperationModal()}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="批量操作库">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<DatabaseOutlined />}
-                    aria-label="批量操作库"
-                    data-sidebar-batch-database-action="true"
-                    onClick={() => openBatchDatabaseModal()}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title="运行外部SQL文件">
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<FileAddOutlined />}
-                    aria-label="运行外部 SQL 文件"
-                    data-sidebar-open-external-sql-file-action="true"
-                    onClick={handleOpenSQLFileFromToolbar}
-                    style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
-                />
-            </Tooltip>
-            <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
-                <span>
+        <div data-sidebar-legacy-toolbar="true" style={legacyToolbarStyle}>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="新建组">
                     <Button
                         size="small"
                         type="text"
-                        icon={<AimOutlined />}
-                        aria-label="定位当前打开表"
-                        data-sidebar-locate-current-tab-action="true"
-                        disabled={!canLocateActiveTab}
-                        onClick={handleLocateActiveTabInSidebar}
-                        style={{ color: darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)' }}
+                        icon={<FolderOpenOutlined />}
+                        aria-label="新建组"
+                        data-sidebar-create-group-action="true"
+                        onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
+                        style={{ color: legacyToolbarButtonColor }}
                     />
-                </span>
-            </Tooltip>
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="批量操作表">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<TableOutlined />}
+                        aria-label="批量操作表"
+                        data-sidebar-batch-table-action="true"
+                        onClick={() => openBatchOperationModal()}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="批量操作库">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<DatabaseOutlined />}
+                        aria-label="批量操作库"
+                        data-sidebar-batch-database-action="true"
+                        onClick={() => openBatchDatabaseModal()}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title="运行外部SQL文件">
+                    <Button
+                        size="small"
+                        type="text"
+                        icon={<FileAddOutlined />}
+                        aria-label="运行外部 SQL 文件"
+                        data-sidebar-open-external-sql-file-action="true"
+                        onClick={handleOpenSQLFileFromToolbar}
+                        style={{ color: legacyToolbarButtonColor }}
+                    />
+                </Tooltip>
+            </div>
+            <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
+                <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
+                    <span style={legacyToolbarDisabledWrapStyle}>
+                        <Button
+                            size="small"
+                            type="text"
+                            icon={<AimOutlined />}
+                            aria-label="定位当前打开表"
+                            data-sidebar-locate-current-tab-action="true"
+                            disabled={!canLocateActiveTab}
+                            onClick={handleLocateActiveTabInSidebar}
+                            style={{ color: legacyToolbarButtonColor }}
+                        />
+                    </span>
+                </Tooltip>
+            </div>
         </div>
         )}
 
@@ -7281,6 +8175,19 @@ const Sidebar: React.FC<{
                     draggable={{
                         icon: false,
                         nodeDraggable: (node: any) => node.type === 'connection' || node.type === 'tag'
+                    }}
+                    onDragStart={() => {
+                        snapshotTreeSelectionBeforeDrag();
+                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                        setIsTreeDragging(true);
+                    }}
+                    onDragEnter={() => {
+                        treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                        setIsTreeDragging(true);
+                    }}
+                    onDragEnd={() => {
+                        restoreTreeSelectionAfterDrag();
+                        setIsTreeDragging(false);
                     }}
                     onDrop={handleDrop}
                     loadData={onLoadData}
@@ -7313,21 +8220,34 @@ const Sidebar: React.FC<{
         </div>
         {renderV2CommandSearchOverlay()}
 
-        {contextMenu && (
+        {contextMenu?.kind && typeof document !== 'undefined' && createPortal(
+            <div
+                ref={contextMenuPortalRef}
+                className={`gn-v2-sidebar-context-menu-portal ${contextMenu.rootClassName || ''}`}
+                style={{
+                    position: 'fixed',
+                    left: contextMenu.x,
+                    top: contextMenu.y,
+                    zIndex: 10000,
+                    width: contextMenu.overlayStyle?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
+                    maxWidth: contextMenu.overlayStyle?.maxWidth ?? 'calc(100vw - 24px)',
+                    ['--gn-v2-context-menu-max-height' as any]: `${contextMenu.maxHeight ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT}px`,
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.preventDefault()}
+            >
+                {renderV2SidebarContextMenuContent(contextMenu)}
+            </div>,
+            document.body,
+        )}
+
+        {contextMenu && !contextMenu.kind && (
             <Dropdown
                 menu={{ items: contextMenu.items }}
                 open={true}
                 onOpenChange={(open) => { if (!open) setContextMenu(null); }}
                 trigger={['contextMenu']}
-                popupRender={(() => {
-                    if (!contextMenu.node) return undefined;
-                    if (contextMenu.kind === 'v2-table') return () => renderV2TableContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-database') return () => renderV2DatabaseContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-table-group') return () => renderV2TableGroupContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-connection') return () => renderV2ConnectionContextMenu(contextMenu.node);
-                    if (contextMenu.kind === 'v2-connection-group') return () => renderV2ConnectionGroupContextMenu(contextMenu.node);
-                    return undefined;
-                })()}
                 rootClassName={contextMenu.rootClassName}
                 overlayStyle={contextMenu.overlayStyle}
             >
@@ -7476,6 +8396,25 @@ const Sidebar: React.FC<{
         >
             <Form form={renameViewForm} layout="vertical">
                 <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
+                    <Input {...noAutoCapInputProps} />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`重命名查询${renameSavedQueryTarget?.name ? ` (${renameSavedQueryTarget.name})` : ''}`}
+            open={isRenameSavedQueryModalOpen}
+            onOk={handleRenameSavedQuery}
+            onCancel={() => {
+                setIsRenameSavedQueryModalOpen(false);
+                setRenameSavedQueryTarget(null);
+                renameSavedQueryForm.resetFields();
+            }}
+            okText="重命名"
+            cancelText="取消"
+        >
+            <Form form={renameSavedQueryForm} layout="vertical">
+                <Form.Item name="name" label="查询名称" rules={[{ required: true, message: '请输入查询名称' }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
@@ -7820,7 +8759,7 @@ const Sidebar: React.FC<{
                 <div>已执行：<strong style={{ color: '#52c41a' }}>{sqlFileExecState.executed}</strong> 条 | 失败：<strong style={{ color: sqlFileExecState.failed > 0 ? '#ff4d4f' : undefined }}>{sqlFileExecState.failed}</strong> 条</div>
             </div>
             {sqlFileExecState.currentSQL && sqlFileExecState.status === 'running' && (
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'monospace', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
+                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
                     {sqlFileExecState.currentSQL}
                 </div>
             )}

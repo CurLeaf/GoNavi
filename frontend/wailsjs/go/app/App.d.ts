@@ -90,6 +90,8 @@ export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,a
 
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
 
+export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function ExportTablesDataSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
@@ -107,6 +109,8 @@ export function GetDriverStatusList(arg1:string,arg2:string):Promise<connection.
 export function GetDriverVersionList(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function GetDriverVersionPackageSize(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function GetEditableSavedConnection(arg1:string):Promise<connection.SavedConnectionView>;
 
 export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
@@ -157,6 +161,8 @@ export function JVMStartDiagnosticSession(arg1:connection.ConnectionConfig,arg2:
 export function JVMStartMonitoring(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function JVMStopMonitoring(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
+export function ListInstalledFontFamilies():Promise<connection.QueryResult>;
 
 export function ListSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 

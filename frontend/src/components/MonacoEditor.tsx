@@ -1,8 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Editor, { loader, type BeforeMount, type EditorProps } from '@monaco-editor/react';
+import { useStore } from '../store';
+import { sanitizeDataTableFontSize } from '../utils/dataGridDisplay';
+import { DEFAULT_MONO_FONT_FAMILY } from '../utils/fontFamilies';
 
 export type { BeforeMount, OnMount } from '@monaco-editor/react';
+export type GonaviMonacoTypography = 'code' | 'data';
 
+const DEFAULT_FONT_SIZE = 14;
+const MIN_FONT_SIZE = 12;
+const MAX_FONT_SIZE = 20;
 let monacoConfiguredPromise: Promise<void> | null = null;
 let transparentThemesRegistered = false;
 
@@ -60,8 +67,23 @@ const ensureMonacoConfigured = (): Promise<void> => {
   return monacoConfiguredPromise;
 };
 
-const MonacoEditor: React.FC<EditorProps> = ({ beforeMount, loading, ...props }) => {
+interface MonacoEditorProps extends EditorProps {
+  gonaviTypography?: GonaviMonacoTypography;
+}
+
+const MonacoEditor: React.FC<MonacoEditorProps> = ({
+  beforeMount,
+  gonaviTypography = 'code',
+  loading,
+  options,
+  ...props
+}) => {
   const [ready, setReady] = useState(isTestRuntime);
+  const uiVersion = useStore((state) => state.appearance.uiVersion);
+  const dataTableFontSize = useStore((state) => state.appearance.dataTableFontSize);
+  const dataTableFontSizeFollowGlobal = useStore((state) => state.appearance.dataTableFontSizeFollowGlobal);
+  const monoFontFamily = useStore((state) => state.appearance.customMonoFontFamily);
+  const globalFontSize = useStore((state) => state.fontSize);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +111,38 @@ const MonacoEditor: React.FC<EditorProps> = ({ beforeMount, loading, ...props })
     beforeMount?.(monaco);
   }, [beforeMount]);
 
+  const resolvedOptions = useMemo(() => {
+    if (uiVersion !== 'v2') {
+      return options;
+    }
+
+    const effectiveGlobalFontSize = Math.min(
+      MAX_FONT_SIZE,
+      Math.max(MIN_FONT_SIZE, Math.round(Number(globalFontSize) || DEFAULT_FONT_SIZE)),
+    );
+    const effectiveDataTableFontSize = dataTableFontSizeFollowGlobal !== false
+      ? effectiveGlobalFontSize
+      : (sanitizeDataTableFontSize(dataTableFontSize) ?? effectiveGlobalFontSize);
+    const resolvedFontSize = gonaviTypography === 'data'
+      ? effectiveDataTableFontSize
+      : Math.max(10, Math.round(effectiveDataTableFontSize * 0.92));
+
+    return {
+      ...options,
+      fontFamily: options?.fontFamily ?? monoFontFamily ?? DEFAULT_MONO_FONT_FAMILY,
+      fontSize: options?.fontSize ?? resolvedFontSize,
+      lineHeight: options?.lineHeight ?? Math.max(18, Math.round(resolvedFontSize * 1.62)),
+    };
+  }, [
+    dataTableFontSize,
+    dataTableFontSizeFollowGlobal,
+    globalFontSize,
+    gonaviTypography,
+    monoFontFamily,
+    options,
+    uiVersion,
+  ]);
+
   if (!ready) {
     return (
       <div
@@ -100,7 +154,14 @@ const MonacoEditor: React.FC<EditorProps> = ({ beforeMount, loading, ...props })
     );
   }
 
-  return <Editor {...props} loading={loading} beforeMount={handleBeforeMount} />;
+  return (
+    <Editor
+      {...props}
+      options={resolvedOptions}
+      loading={loading}
+      beforeMount={handleBeforeMount}
+    />
+  );
 };
 
 export default MonacoEditor;

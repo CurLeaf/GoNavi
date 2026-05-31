@@ -5,7 +5,6 @@ import { PreviewImportFile, ImportDataWithProgress } from '../../wailsjs/go/app/
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-
 interface ImportPreviewModalProps {
     visible: boolean;
     filePath: string;
@@ -234,7 +233,7 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                                 borderRadius: 4,
                                 padding: 12,
                                 fontSize: 12,
-                                fontFamily: 'monospace'
+                                fontFamily: 'var(--gn-font-mono)'
                             }}>
                                 {importResult.errorLogs.map((log: string, idx: number) => (
                                     <div key={idx} style={{ marginBottom: 4 }}>{log}</div>

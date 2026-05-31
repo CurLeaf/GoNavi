@@ -200,6 +200,83 @@ func TestIrisMetadataMapsColumnsAndIndexes(t *testing.T) {
 	}
 }
 
+func TestIrisGetTablesReadsCompactInfoSchemaColumnNames(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults[`SELECT * FROM INFORMATION_SCHEMA.TABLES`] = oracleRecordingQueryResult{
+		columns: []string{"TABLECATALOG", "TABLESCHEMA", "TABLENAME", "TABLETYPE"},
+		rows: [][]driver.Value{
+			{"USER", "Sample", "Person", "TABLE"},
+			{"USER", "UserApp", "AuditLog", "BASE TABLE"},
+			{"USER", "Sample", "PersonView", "VIEW"},
+			{"USER", "%Library", "ClassDefinition", "TABLE"},
+		},
+	}
+	state.mu.Unlock()
+
+	iris := &IrisDB{conn: dbConn, namespace: "USER"}
+	tables, err := iris.GetTables("USER")
+	if err != nil {
+		t.Fatalf("GetTables 返回错误: %v", err)
+	}
+
+	want := []string{"Sample.Person", "UserApp.AuditLog"}
+	if !reflect.DeepEqual(tables, want) {
+		t.Fatalf("期望读取 IRIS 紧凑列名并过滤系统对象，want=%v got=%v", want, tables)
+	}
+}
+
+func TestIrisMetadataMapsCompactColumnsAndIndexes(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	iris := &IrisDB{conn: dbConn}
+
+	columnsQuery := buildIRISInfoSchemaWhereQuery("INFORMATION_SCHEMA.COLUMNS", irisTableRef{Schema: "Sample", Table: "Person"})
+	indexesQuery := buildIRISInfoSchemaWhereQuery("INFORMATION_SCHEMA.INDEXES", irisTableRef{Schema: "Sample", Table: "Person"})
+
+	state.mu.Lock()
+	state.queryResults[columnsQuery] = oracleRecordingQueryResult{
+		columns: []string{"TABLESCHEMA", "TABLENAME", "COLUMNNAME", "DATATYPE", "CHARACTERMAXIMUMLENGTH", "ISNULLABLE", "COLUMNDEFAULT", "ORDINALPOSITION", "DESCRIPTION", "PRIMARYKEY", "UNIQUECOLUMN"},
+		rows: [][]driver.Value{
+			{"Sample", "Person", "id", "INTEGER", nil, "NO", nil, int64(1), "identifier", true, false},
+			{"Sample", "Person", "name", "VARCHAR", int64(80), "YES", "'anonymous'", int64(2), "display name", false, true},
+		},
+	}
+	state.queryResults[indexesQuery] = oracleRecordingQueryResult{
+		columns: []string{"INDEXNAME", "COLUMNNAME", "NONUNIQUE", "ORDINALPOSITION", "INDEXTYPE", "PRIMARYKEY"},
+		rows: [][]driver.Value{
+			{"app_person_pk", "id", int64(0), int64(1), "bitmap", true},
+			{"idx_person_name", "name", int64(0), int64(1), "", false},
+		},
+	}
+	state.mu.Unlock()
+
+	columns, err := iris.GetColumns("Sample", "Person")
+	if err != nil {
+		t.Fatalf("GetColumns 返回错误: %v", err)
+	}
+	if len(columns) != 2 {
+		t.Fatalf("columns len = %d", len(columns))
+	}
+	if columns[0].Name != "id" || columns[0].Key != "PRI" || columns[0].Nullable != "NO" {
+		t.Fatalf("unexpected compact id column: %#v", columns[0])
+	}
+	if columns[1].Type != "VARCHAR(80)" || columns[1].Key != "UNI" {
+		t.Fatalf("unexpected compact name column: %#v", columns[1])
+	}
+
+	indexes, err := iris.GetIndexes("Sample", "Person")
+	if err != nil {
+		t.Fatalf("GetIndexes 返回错误: %v", err)
+	}
+	if len(indexes) != 2 || indexes[0].Name != "app_person_pk" || indexes[0].IndexType != "PRIMARY" || indexes[0].NonUnique != 0 {
+		t.Fatalf("unexpected compact indexes: %#v", indexes)
+	}
+}
+
 func TestBuildIRISApplyChangesSQL(t *testing.T) {
 	deleteSQL, deleteArgs, ok := buildIRISDeleteSQL("Sample.Person", map[string]interface{}{"id": 1})
 	if !ok {

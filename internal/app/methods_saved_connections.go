@@ -18,6 +18,19 @@ func (a *App) GetSavedConnections() ([]connection.SavedConnectionView, error) {
 	return sanitizeSavedConnectionViews(items), nil
 }
 
+func (a *App) GetEditableSavedConnection(id string) (connection.SavedConnectionView, error) {
+	view, err := a.savedConnectionRepository().Find(id)
+	if err != nil {
+		return connection.SavedConnectionView{}, err
+	}
+	resolvedConfig, err := a.resolveConnectionSecrets(view.Config)
+	if err != nil {
+		return connection.SavedConnectionView{}, err
+	}
+	view.Config = resolvedConfig
+	return view, nil
+}
+
 func (a *App) SaveConnection(input connection.SavedConnectionInput) (connection.SavedConnectionView, error) {
 	view, err := a.savedConnectionRepository().Save(input)
 	if err != nil {

@@ -7,6 +7,25 @@ export interface DbIconProps {
     color?: string;
 }
 
+const IconFrame: React.FC<{
+    size: number;
+    children: React.ReactNode;
+}> = ({ size, children }) => (
+    <span
+        data-db-icon-frame="true"
+        style={{
+            width: size,
+            height: size,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+        }}
+    >
+        {children}
+    </span>
+);
+
 // ─── 默认色表 ───────────────────────────────────────────────
 
 const DB_DEFAULT_COLORS: Record<string, string> = {
@@ -49,20 +68,22 @@ const BRAND_SVG_TYPES = new Set([
 const BrandSvgIcon: React.FC<{ type: string; size: number; color?: string }> = ({ type, size, color }) => {
     const bgColor = color || getDbDefaultColor(type);
     return (
-        <span style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: size, height: size, borderRadius: size * 0.22,
-            background: '#fff', border: `1.5px solid ${bgColor}`,
-            flexShrink: 0, overflow: 'hidden',
-        }}>
-            <img
-                src={`/db-icons/${type}.svg`}
-                alt={type}
-                width={size * 0.7}
-                height={size * 0.7}
-                style={{ display: 'block' }}
-            />
-        </span>
+        <IconFrame size={size}>
+            <span style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: size, height: size, borderRadius: size * 0.22,
+                background: '#fff', border: `1.5px solid ${bgColor}`,
+                flexShrink: 0, overflow: 'hidden', boxSizing: 'border-box',
+            }}>
+                <img
+                    src={`/db-icons/${type}.svg`}
+                    alt={type}
+                    width={Math.round(size * 0.64)}
+                    height={Math.round(size * 0.64)}
+                    style={{ display: 'block', objectFit: 'contain' }}
+                />
+            </span>
+        </IconFrame>
     );
 };
 
@@ -72,16 +93,19 @@ const BrandSvgIcon: React.FC<{ type: string; size: number; color?: string }> = (
 const ColorBadge: React.FC<{ size: number; color: string; label: string }> = ({ size, color, label }) => {
     const textSize = label.length <= 2 ? size * 0.48 : size * 0.38;
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="1" width="22" height="22" rx="5" fill={color}/>
-            <text
-                x="12" y="12" dominantBaseline="central" textAnchor="middle"
-                fontSize={textSize} fontWeight="800" fontFamily="system-ui,-apple-system,sans-serif"
-                fill="#fff" letterSpacing={label.length > 2 ? -0.5 : 0}
-            >
-                {label}
-            </text>
-        </svg>
+        <IconFrame size={size}>
+            <svg width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0" y="0" width="24" height="24" rx="5" fill={color}/>
+                <text
+                    x="12" y="12" dominantBaseline="central" textAnchor="middle"
+                    fontSize={textSize} fontWeight="800"
+                    style={{ fontFamily: 'var(--gn-font-sans, "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif)' }}
+                    fill="#fff" letterSpacing={label.length > 2 ? -0.5 : 0}
+                >
+                    {label}
+                </text>
+            </svg>
+        </IconFrame>
     );
 };
 
@@ -161,11 +185,13 @@ const JVMIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const CustomIcon: React.FC<DbIconProps> = ({ size = 16, color }) => {
     const c = color || DB_DEFAULT_COLORS.custom;
     return (
-        <svg width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="1" width="22" height="22" rx="5" fill={c}/>
-            <circle cx="12" cy="12" r="3.5" stroke="#fff" strokeWidth="1.5" fill="none"/>
-            <path d="M12 4v2.5M12 17.5V20M4 12h2.5M17.5 12H20M6.34 6.34l1.77 1.77M15.89 15.89l1.77 1.77M6.34 17.66l1.77-1.77M15.89 8.11l1.77-1.77" stroke="#fff" strokeWidth="1.3" strokeLinecap="round"/>
-        </svg>
+        <IconFrame size={size}>
+            <svg width={size} height={size} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0" y="0" width="24" height="24" rx="5" fill={c}/>
+                <circle cx="12" cy="12" r="3.5" stroke="#fff" strokeWidth="1.5" fill="none"/>
+                <path d="M12 4v2.5M12 17.5V20M4 12h2.5M17.5 12H20M6.34 6.34l1.77 1.77M15.89 15.89l1.77 1.77M6.34 17.66l1.77-1.77M15.89 8.11l1.77-1.77" stroke="#fff" strokeWidth="1.3" strokeLinecap="round"/>
+            </svg>
+        </IconFrame>
     );
 };
 

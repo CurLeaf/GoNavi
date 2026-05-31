@@ -125,43 +125,87 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
     <>
       <div
         data-grid-secondary-actions="true"
+        data-grid-legacy-secondary-actions="true"
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 10,
-          flexWrap: 'wrap',
+          flexDirection: 'column',
+          gap: 4,
           padding: '4px 0 0',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Button
-            icon={<EditOutlined />}
-            type={dataPanelOpen ? 'primary' : 'default'}
-            disabled={!isTableSurfaceActive}
-            onClick={onToggleDataPanel}
-          >
-            数据预览
-          </Button>
-          <Popover trigger="click" placement="bottomRight" content={columnInfoSettingContent}>
-            <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>字段信息</Button>
-          </Popover>
-          {columnQuickFindContent}
-          {canViewDdl && (
+        <div
+          data-grid-legacy-secondary-row="primary"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-start',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: '0 1 auto', minWidth: 0 }}>
             <Button
-              data-grid-ddl-action="true"
-              icon={<FileTextOutlined />}
-              loading={ddlLoading}
-              onClick={onOpenTableDdl}
+              icon={<EditOutlined />}
+              type={dataPanelOpen ? 'primary' : 'default'}
+              disabled={!isTableSurfaceActive}
+              onClick={onToggleDataPanel}
             >
-              查看 DDL
+              数据预览
             </Button>
-          )}
-          {pageFindContent}
+            <Popover trigger="click" placement="bottomRight" content={columnInfoSettingContent}>
+              <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>字段信息</Button>
+            </Popover>
+            {canViewDdl && (
+              <Button
+                data-grid-ddl-action="true"
+                icon={<FileTextOutlined />}
+                loading={ddlLoading}
+                onClick={onOpenTableDdl}
+              >
+                查看 DDL
+              </Button>
+            )}
+          </div>
+          <div
+            data-grid-legacy-result-view-switcher="true"
+            style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}
+          >
+            {resultViewSwitcher}
+          </div>
         </div>
-        {resultViewSwitcher}
+        <div
+          data-grid-legacy-secondary-row="search"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-start',
+            minHeight: 32,
+          }}
+        >
+          {columnQuickFindContent ? (
+            <div
+              data-grid-legacy-column-quick-find="true"
+              style={{ display: 'flex', flex: '0 1 240px', minWidth: 0 }}
+            >
+              {columnQuickFindContent}
+            </div>
+          ) : null}
+          <div
+            data-grid-legacy-page-find="true"
+            style={{ display: 'flex', flex: '0 1 auto', minWidth: 0 }}
+          >
+            {pageFindContent}
+          </div>
+          <div
+            data-grid-legacy-pagination="true"
+            style={{ display: 'flex', minWidth: 0, marginLeft: 'auto' }}
+          >
+            {paginationContent}
+          </div>
+        </div>
       </div>
-      {paginationContent}
     </>
   );
 };

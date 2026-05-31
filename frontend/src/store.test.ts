@@ -75,6 +75,8 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableFontSizeFollowGlobal).toBe(true);
     expect(appearance.sidebarTreeFontSize).toBeNull();
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
+    expect(appearance.customUIFontFamily).toBeNull();
+    expect(appearance.customMonoFontFamily).toBeNull();
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -95,6 +97,26 @@ describe('store appearance persistence', () => {
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableDensity).toBe('compact');
+  });
+
+  it('persists custom font families and sanitizes blank values', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      customUIFontFamily: '  IBM Plex Sans, PingFang SC  ',
+      customMonoFontFamily: '   ',
+    });
+
+    let appearance = useStore.getState().appearance;
+    expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
+    expect(appearance.customMonoFontFamily).toBeNull();
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
+    expect(appearance.customMonoFontFamily).toBeNull();
   });
 
   it('does not clear persisted legacy connections during hydration migration', async () => {
@@ -497,6 +519,147 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('reorders connections inside tags and ungrouped roots independently', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-d',
+        name: 'D',
+        config: { id: 'conn-d', type: 'mysql', host: 'd.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b', 'conn-d'],
+    });
+
+    useStore.getState().reorderConnections('conn-d', 'conn-b', 'tag-dev', true);
+    expect(useStore.getState().connectionTags[0]?.connectionIds).toEqual(['conn-d', 'conn-b']);
+
+    useStore.getState().reorderConnections('conn-c', 'conn-a', null, true);
+    expect(useStore.getState().connections.map((conn) => conn.id)).toEqual([
+      'conn-c',
+      'conn-a',
+      'conn-b',
+      'conn-d',
+    ]);
+  });
+
+  it('reorders sidebar root items across tags and ungrouped hosts', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-c',
+        name: 'C',
+        config: { id: 'conn-c', type: 'mysql', host: 'c.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b'],
+    });
+
+    const initialOrder = resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    );
+    expect(initialOrder).toEqual([
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+    ]);
+
+    useStore.getState().reorderSidebarRoot(
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-c'),
+      false,
+    );
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootConnectionToken('conn-a'),
+      buildSidebarRootConnectionToken('conn-c'),
+      buildSidebarRootTagToken('tag-dev'),
+    ]);
+  });
+
+  it('restores ungrouped host root order after moving a host out of a tag', async () => {
+    const {
+      buildSidebarRootConnectionToken,
+      buildSidebarRootTagToken,
+      resolveSidebarRootOrderTokens,
+      useStore,
+    } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'conn-a',
+        name: 'A',
+        config: { id: 'conn-a', type: 'mysql', host: 'a.local', port: 3306, user: 'root' },
+      },
+      {
+        id: 'conn-b',
+        name: 'B',
+        config: { id: 'conn-b', type: 'mysql', host: 'b.local', port: 3306, user: 'root' },
+      },
+    ]);
+    useStore.getState().addConnectionTag({
+      id: 'tag-dev',
+      name: '开发',
+      connectionIds: ['conn-b'],
+    });
+
+    useStore.getState().moveConnectionToTag('conn-a', 'tag-dev');
+    useStore.getState().moveConnectionToTag('conn-a', null);
+
+    expect(resolveSidebarRootOrderTokens(
+      useStore.getState().sidebarRootOrder,
+      useStore.getState().connectionTags,
+      useStore.getState().connections,
+    )).toEqual([
+      buildSidebarRootTagToken('tag-dev'),
+      buildSidebarRootConnectionToken('conn-a'),
+    ]);
+  });
+
   it('keeps legacy global proxy password during hydration until explicit cleanup', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
@@ -608,6 +771,78 @@ describe('store appearance persistence', () => {
       }),
     ]);
     expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+  });
+
+  it('updates activeContext when switching between tabs with different host or database', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-main',
+      title: 'users',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      tableName: 'users',
+    });
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+
+    useStore.getState().addTab({
+      id: 'query-bot',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+      query: 'select 1;',
+    });
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+    });
+
+    useStore.getState().setActiveTab('table-main');
+    expect(useStore.getState().activeTabId).toBe('table-main');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+  });
+
+  it('falls back activeContext to the new active tab after closing the current tab', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-sys',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 1;',
+    });
+    useStore.getState().addTab({
+      id: 'query-bot',
+      title: '新建查询',
+      type: 'query',
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+      query: 'select 2;',
+    });
+
+    expect(useStore.getState().activeTabId).toBe('query-bot');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-2',
+      dbName: 'missav_bot',
+    });
+
+    useStore.getState().closeTab('query-bot');
+
+    expect(useStore.getState().activeTabId).toBe('query-sys');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
   });
 
   it('only restores persisted query tabs with useful SQL state', async () => {

@@ -12,7 +12,6 @@ import type { SqlSnippet } from '../types';
 import { useStore } from '../store';
 import { BUILTIN_SNIPPET_MAP } from '../utils/sqlSnippetDefaults';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-
 interface SnippetSettingsModalProps {
   open: boolean;
   onClose: () => void;
@@ -163,7 +162,7 @@ export default function SnippetSettingsModal({
       key: 'syntax',
       label: '片段语法说明',
       children: (
-        <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'monospace' }}>
+        <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
           <div>{'${1:占位符}   第一个 Tab 位，占位符为提示文字'}</div>
           <div>{'${2:默认值}   第二个 Tab 位，默认值可直接确认'}</div>
           <div>{'$0            最终光标位置'}</div>
@@ -361,7 +360,7 @@ export default function SnippetSettingsModal({
                   style={{
                     flex: 1,
                     minHeight: 120,
-                    fontFamily: 'monospace',
+                    fontFamily: 'var(--gn-font-mono)',
                     fontSize: 13,
                     resize: 'none',
                   }}

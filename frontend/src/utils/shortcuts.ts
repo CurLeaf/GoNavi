@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
+  | 'saveQuery'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
@@ -87,6 +88,7 @@ const KEY_ALIASES: Record<string, string> = {
 export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
+  'saveQuery',
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
@@ -108,6 +110,12 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     label: '选择当前语句',
     description: '在查询编辑器中选中光标所在 SQL 语句',
     scope: 'queryEditor',
+  },
+  saveQuery: {
+    label: '保存查询',
+    description: '保存当前查询页；未命名查询会打开保存弹窗',
+    scope: 'queryEditor',
+    allowInEditable: true,
   },
   sendAIChatMessage: {
     label: 'AI 聊天发送',
@@ -169,6 +177,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   selectCurrentStatement: {
     mac: { combo: 'Meta+E', enabled: true },
     windows: { combo: 'Ctrl+E', enabled: true },
+  },
+  saveQuery: {
+    mac: { combo: 'Meta+S', enabled: true },
+    windows: { combo: 'Ctrl+S', enabled: true },
   },
   sendAIChatMessage: {
     mac: { combo: 'Enter', enabled: true },
@@ -465,6 +477,15 @@ export const getShortcutDisplayLabel = (
     .map((part) => DISPLAY_SYMBOLS[part] || part)
     .join('');
 };
+
+export const getShortcutPrimaryModifierDisplayLabel = (
+  platform: ShortcutPlatform,
+): string => getShortcutDisplayLabel(platform === 'mac' ? 'Meta' : 'Ctrl', platform);
+
+export const getPrimaryShortcutDisplayLabel = (
+  key: string,
+  platform: ShortcutPlatform,
+): string => getShortcutDisplayLabel(`${platform === 'mac' ? 'Meta' : 'Ctrl'}+${key}`, platform);
 
 export const resolveShortcutDisplay = (
   options: Partial<ShortcutOptions> | null | undefined,

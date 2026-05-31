@@ -6,6 +6,7 @@ import {
   findDataGridTextRanges,
   hasDataGridFindRenderVersionChanged,
   normalizeDataGridFindQuery,
+  resolveDataGridColumnQuickFindTarget,
   resolveDataGridFindNavigationIndex,
   summarizeDataGridFindMatches,
 } from './dataGridFind';
@@ -89,6 +90,15 @@ describe('dataGridFind', () => {
     expect(resolveDataGridFindNavigationIndex(0, 0, 'next')).toBe(-1);
   });
 
+  it('prefers an exact quick-find column match over earlier fuzzy matches', () => {
+    const columnNames = ['user_id', 'username', 'created_at'];
+
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'username')).toBe('username');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'user')).toBe('user_id');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, '  ')).toBe('');
+    expect(resolveDataGridColumnQuickFindTarget(columnNames, 'missing')).toBe('');
+  });
+
   it('tracks render version changes without exposing metadata as row data', () => {
     const rows = [{ id: 1, name: 'Alpha' }];
 
@@ -103,5 +113,14 @@ describe('dataGridFind', () => {
     expect(hasDataGridFindRenderVersionChanged(alphaRows[0], rows[0])).toBe(true);
     expect(hasDataGridFindRenderVersionChanged(betaRows[0], alphaRows[0])).toBe(true);
     expect(hasDataGridFindRenderVersionChanged(rows[0], alphaRows[0])).toBe(true);
+  });
+
+  it('keeps find render metadata on symbol keys while allowing wrapped rows to preserve it', () => {
+    const rows = [{ id: 1, name: 'Alpha' }];
+    const alphaRows = attachDataGridFindRenderVersion(rows, 'alpha');
+
+    expect(Object.keys(alphaRows[0])).toEqual(['id', 'name']);
+    expect(Object.getOwnPropertySymbols(alphaRows[0]).length).toBeGreaterThan(0);
+    expect(hasDataGridFindRenderVersionChanged(alphaRows[0], rows[0])).toBe(true);
   });
 });

@@ -170,6 +170,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQuery'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function ExportSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
+}
+
 export function ExportTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTable'](arg1, arg2, arg3, arg4);
 }
@@ -204,6 +208,10 @@ export function GetDriverVersionList(arg1, arg2) {
 
 export function GetDriverVersionPackageSize(arg1, arg2) {
   return window['go']['app']['App']['GetDriverVersionPackageSize'](arg1, arg2);
+}
+
+export function GetEditableSavedConnection(arg1) {
+  return window['go']['app']['App']['GetEditableSavedConnection'](arg1);
 }
 
 export function GetGlobalProxyConfig() {
@@ -304,6 +312,10 @@ export function JVMStartMonitoring(arg1) {
 
 export function JVMStopMonitoring(arg1, arg2) {
   return window['go']['app']['App']['JVMStopMonitoring'](arg1, arg2);
+}
+
+export function ListInstalledFontFamilies() {
+  return window['go']['app']['App']['ListInstalledFontFamilies']();
 }
 
 export function ListSQLDirectory(arg1) {

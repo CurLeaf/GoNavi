@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined } from '@ant-design/icons';
@@ -12,6 +12,7 @@ import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
 import LogPanel from './components/LogPanel';
 import AISettingsModal from './components/AISettingsModal';
+import AIChatPanel from './components/AIChatPanel';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -19,6 +20,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
   sanitizeDataTableDensity,
@@ -91,7 +93,7 @@ import {
 } from './utils/aiEntryLayout';
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
-import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import './App.css';
 import './v2-theme.css';
 
@@ -104,6 +106,7 @@ const MIN_FONT_SIZE = 12;
 const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
+const EMPTY_INSTALLED_FONT_FAMILIES: InstalledFontFamily[] = [];
 type SidebarResizeBounds = { minWidth: number; maxWidth: number };
 type SidebarResizeDragState = SidebarResizeBounds & {
   startX: number;
@@ -187,8 +190,6 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
-const createLazyAIChatPanel = () => React.lazy(() => import('./components/AIChatPanel'));
-
 interface AIPanelErrorBoundaryProps {
   children: React.ReactNode;
   fallback: (error: Error | null) => React.ReactNode;
@@ -228,9 +229,11 @@ class AIPanelErrorBoundary extends React.Component<
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
+  const connectionModalWarmupDoneRef = useRef(false);
   const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
   const setTheme = useStore(state => state.setTheme);
@@ -270,6 +273,8 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const resolvedUiFontFamily = resolveUIFontFamily(appearance.customUIFontFamily);
+  const resolvedMonoFontFamily = resolveMonoFontFamily(appearance.customMonoFontFamily);
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
   const titleBarHeight = Math.max(28, Math.round(32 * effectiveUiScale));
   const titleBarButtonWidth = Math.max(40, Math.round(46 * effectiveUiScale));
@@ -281,6 +286,18 @@ function App() {
   const [runtimePlatform, setRuntimePlatform] = useState('');
   const [runtimeBuildType, setRuntimeBuildType] = useState('');
   const [isLinuxRuntime, setIsLinuxRuntime] = useState(false);
+  const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);
+  const [isFontFamiliesLoading, setIsFontFamiliesLoading] = useState(false);
+  const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
+  const hasLoadedInstalledFontsRef = useRef(false);
+  const uiFontOptions = useMemo(
+      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies),
+      [installedFontFamilies, runtimePlatform],
+  );
+  const monoFontOptions = useMemo(
+      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
+      [installedFontFamilies, runtimePlatform],
+  );
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
@@ -310,7 +327,6 @@ function App() {
   const windowDiagLastSignatureRef = React.useRef('');
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
-  const LazyAIChatPanel = useMemo(() => createLazyAIChatPanel(), [aiPanelRenderNonce]);
   const securityUpdateStatusMeta = useMemo(
       () => getSecurityUpdateStatusMeta(securityUpdateStatus),
       [securityUpdateStatus],
@@ -2057,6 +2073,57 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  useEffect(() => {
+      if (!isThemeModalOpen || themeModalSection !== 'appearance') {
+          return;
+      }
+      if (hasLoadedInstalledFontsRef.current || isFontFamiliesLoading) {
+          return;
+      }
+
+      let cancelled = false;
+      hasLoadedInstalledFontsRef.current = true;
+      setIsFontFamiliesLoading(true);
+      setFontFamiliesLoadError(null);
+
+      ListInstalledFontFamilies()
+          .then((result) => {
+              if (cancelled) {
+                  return;
+              }
+              if (!result?.success) {
+                  throw new Error(String(result?.message || '加载系统字体失败'));
+              }
+              const nextFonts = Array.isArray(result?.data)
+                  ? result.data
+                      .map((item) => ({
+                          family: sanitizeFontFamilyInput((item as InstalledFontFamily | Record<string, unknown>)?.family) || '',
+                          path: typeof (item as InstalledFontFamily | Record<string, unknown>)?.path === 'string'
+                              ? String((item as InstalledFontFamily | Record<string, unknown>).path)
+                              : undefined,
+                      }))
+                      .filter((item) => item.family)
+                  : EMPTY_INSTALLED_FONT_FAMILIES;
+              setInstalledFontFamilies(nextFonts);
+          })
+          .catch((error) => {
+              if (cancelled) {
+                  return;
+              }
+              hasLoadedInstalledFontsRef.current = false;
+              setFontFamiliesLoadError(String(error instanceof Error ? error.message : error || '加载系统字体失败'));
+          })
+          .finally(() => {
+              if (!cancelled) {
+                  setIsFontFamiliesLoading(false);
+              }
+          });
+
+      return () => {
+          cancelled = true;
+      };
+  }, [isThemeModalOpen, themeModalSection]);
+
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
       for (const action of SHORTCUT_ACTION_ORDER) {
@@ -2279,14 +2346,48 @@ function App() {
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
       setEditingConnection(null);
+      setIsConnectionModalMounted(true);
       setIsModalOpen(true);
   }, []);
 
-  const handleEditConnection = (conn: SavedConnection) => {
+  const handleEditConnection = useCallback((conn: SavedConnection) => {
       setSecurityUpdateRepairSource(null);
-      setEditingConnection(conn);
-      setIsModalOpen(true);
-  };
+      setIsConnectionModalMounted(true);
+      void (async () => {
+          const backendApp = (window as any).go?.app?.App;
+          let nextConnection = conn;
+          if (typeof backendApp?.GetEditableSavedConnection === 'function') {
+              try {
+                  const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);
+                  if (editableConnection) {
+                      nextConnection = editableConnection;
+                  }
+              } catch (error: any) {
+                  message.warning(error?.message || '读取已保存连接详情失败，当前将打开脱敏配置');
+              }
+          }
+          setEditingConnection(nextConnection);
+          setIsModalOpen(true);
+      })();
+  }, []);
+
+  useEffect(() => {
+      if (connectionModalWarmupDoneRef.current) {
+          return;
+      }
+      connectionModalWarmupDoneRef.current = true;
+      const warmup = () => setIsConnectionModalMounted(true);
+      if (typeof window === 'undefined') {
+          warmup();
+          return;
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+          const idleId = window.requestIdleCallback(() => warmup(), { timeout: 1200 });
+          return () => window.cancelIdleCallback?.(idleId);
+      }
+      const timerId = window.setTimeout(warmup, 300);
+      return () => window.clearTimeout(timerId);
+  }, []);
 
   const handleConnectionSaved = useCallback(async (savedConnection: SavedConnection) => {
       if (!shouldRetrySecurityUpdateAfterRepairSave(securityUpdateRepairSource)) {
@@ -2400,6 +2501,15 @@ function App() {
   }, []);
 
   const handleAIPanelRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo) => {
+      try {
+          (window as any).__gonaviLastAIPanelRenderError = {
+              message: error?.message || '',
+              stack: error?.stack || '',
+              componentStack: errorInfo?.componentStack || '',
+          };
+      } catch {
+          // ignore debug capture failures
+      }
       console.error('AIChatPanel render error:', error, errorInfo);
   }, []);
 
@@ -2628,8 +2738,13 @@ function App() {
     document.body.style.color = darkMode ? '#ffffff' : '#000000';
     document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     document.body.setAttribute('data-ui-version', appearance.uiVersion);
+    document.body.setAttribute('data-platform', runtimePlatform || '');
     document.body.style.fontSize = `${effectiveFontSize}px`;
+    document.body.style.setProperty('--gn-font-sans', resolvedUiFontFamily);
+    document.body.style.setProperty('--gn-font-mono', resolvedMonoFontFamily);
     document.documentElement.style.setProperty('--gonavi-font-size', `${effectiveFontSize}px`);
+    document.documentElement.style.setProperty('--gn-font-sans', resolvedUiFontFamily);
+    document.documentElement.style.setProperty('--gn-font-mono', resolvedMonoFontFamily);
     document.documentElement.style.setProperty('--gn-ui-scale', `${effectiveUiScale}`);
     document.documentElement.style.setProperty('--gn-font-size', `${effectiveFontSize}px`);
     document.documentElement.style.setProperty('--gn-font-size-sm', `${Math.max(10, Math.round(effectiveFontSize * 0.86))}px`);
@@ -2644,6 +2759,9 @@ function App() {
     darkMode,
     effectiveDataTableFontSize,
     effectiveFontSize,
+    resolvedMonoFontFamily,
+    resolvedUiFontFamily,
+    runtimePlatform,
     effectiveSidebarTreeFontSize,
     effectiveUiScale,
     tokenControlHeight,
@@ -2835,9 +2953,9 @@ function App() {
           }
       };
 
-      window.addEventListener('keydown', handleGlobalShortcut);
+      window.addEventListener('keydown', handleGlobalShortcut, true);
       return () => {
-          window.removeEventListener('keydown', handleGlobalShortcut);
+          window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
   }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
 
@@ -2923,6 +3041,8 @@ function App() {
           fontSize: tokenFontSize,
           fontSizeSM: tokenFontSizeSM,
           fontSizeLG: tokenFontSizeLG,
+          fontFamily: resolvedUiFontFamily,
+          fontFamilyCode: resolvedMonoFontFamily,
           controlHeight: tokenControlHeight,
           controlHeightSM: tokenControlHeightSM,
           controlHeightLG: tokenControlHeightLG,
@@ -2973,13 +3093,30 @@ function App() {
   }), [
       darkMode,
       effectiveOpacity,
+      isV2Ui,
       tokenControlHeight,
       tokenControlHeightLG,
       tokenControlHeightSM,
       tokenFontSize,
       tokenFontSizeLG,
       tokenFontSizeSM,
+      resolvedMonoFontFamily,
+      resolvedUiFontFamily,
   ]);
+  const filterFontOption = useCallback((input: string, option?: { value?: string; label?: React.ReactNode }) => (
+      matchFontFamilyOption(input, {
+          value: String(option?.value || ''),
+          label: String(option?.label || ''),
+      })
+  ), []);
+  const renderFontOptionLabel = useCallback((option: FontFamilyOption) => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, lineHeight: 1.35 }}>
+          <span>{option.label}</span>
+          <span style={{ fontSize: 11, color: darkMode ? 'rgba(255,255,255,0.45)' : 'rgba(16,24,40,0.45)' }}>
+              {option.value}
+          </span>
+      </div>
+  ), [darkMode]);
 
   return (
     <ConfigProvider
@@ -3278,6 +3415,7 @@ function App() {
                       </>
                       )}
                       <AIPanelErrorBoundary
+                        key={aiPanelRenderNonce}
                         onError={handleAIPanelRenderError}
                         fallback={(error) => (
                           <div
@@ -3333,11 +3471,9 @@ function App() {
                           </div>
                         )}
                       >
-                        <React.Suspense fallback={<div style={{ width: aiPanelRenderWidth, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin size="small" /></div>}>
-                            <LazyAIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
-                              handleOpenAISettings();
-                            }} overlayTheme={overlayTheme} />
-                        </React.Suspense>
+                        <AIChatPanel width={aiPanelRenderWidth} darkMode={darkMode} bgColor={bgContent} onClose={() => setAIPanelVisible(false)} onOpenSettings={() => {
+                          handleOpenAISettings();
+                        }} overlayTheme={overlayTheme} />
                       </AIPanelErrorBoundary>
                       </div>
                   </div>
@@ -3352,7 +3488,7 @@ function App() {
             )}
           </Content>
           </Layout>
-          {isModalOpen && (
+          {isConnectionModalMounted && (
           <ConnectionModal
             open={isModalOpen} 
             onClose={handleCloseModal} 
@@ -3999,6 +4135,75 @@ function App() {
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>字体族</div>
+                                  <div style={{ display: 'grid', gap: 14 }}>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>界面字体 (UI Font Family)</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_UI_FONT_FAMILY}
+                                              value={appearance.customUIFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customUIFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customUIFontFamily: null })}
+                                              options={uiFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? `系统字体加载失败，当前回退常见字体预置：${fontFamiliesLoadError}`
+                                                  : (installedFontFamilies.length > 0
+                                                      ? `已读取当前系统 ${installedFontFamilies.length} 个字体族，支持输入搜索匹配。清空后回退默认 UI 字体。`
+                                                      : '按当前系统实时加载已安装字体，支持输入搜索匹配。清空后回退默认 UI 字体。')}
+                                          </div>
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>代码字体 (Mono Font Family)</div>
+                                          <Select
+                                              allowClear
+                                              showSearch
+                                              optionFilterProp="label"
+                                              loading={isFontFamiliesLoading}
+                                              placeholder={DEFAULT_MONO_FONT_FAMILY}
+                                              value={appearance.customMonoFontFamily ?? undefined}
+                                              onChange={(value) => setAppearance({
+                                                  customMonoFontFamily: sanitizeFontFamilyInput(value),
+                                              })}
+                                              onClear={() => setAppearance({ customMonoFontFamily: null })}
+                                              options={monoFontOptions.map((option) => ({
+                                                  value: option.value,
+                                                  label: option.label,
+                                              }))}
+                                              filterOption={filterFontOption}
+                                              popupMatchSelectWidth
+                                              style={{ width: '100%' }}
+                                              optionRender={(option) => renderFontOptionLabel({
+                                                  value: String(option.data.value),
+                                                  label: String(option.data.label),
+                                              })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
+                                              {fontFamiliesLoadError
+                                                  ? '当前已回退常见代码字体预置。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'
+                                                  : '优先展示当前系统已安装字体，名称接近 Mono/Code/Console 的字体会靠前。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 500 }}>透明与模糊效果</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                                       <div>
@@ -4277,7 +4482,7 @@ function App() {
                                   <Input
                                       readOnly
                                       value={isCapturing ? '请按下快捷键...' : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
-                                      style={{ width: 180, fontFamily: 'Consolas, Menlo, Monaco, monospace' }}
+                                      style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
                                   />
                                   <Button
                                       size="small"

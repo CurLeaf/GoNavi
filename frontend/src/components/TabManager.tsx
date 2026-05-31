@@ -25,7 +25,6 @@ import JVMMonitoringDashboard from './JVMMonitoringDashboard';
 import type { TabData } from '../types';
 import { buildTabDisplayTitle } from '../utils/tabDisplay';
 import { resolveConnectionHostSummary } from '../utils/tabDisplay';
-import { resolveConnectionAccentColor } from '../utils/connectionVisual';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return 'SQL';
@@ -42,14 +41,6 @@ const getTabKindLabel = (tab: TabData): string => {
 };
 
 export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
-
-const getTabKindIcon = (tab: TabData): React.ReactNode => {
-  if (tab.type === 'query') return <ConsoleSqlOutlined />;
-  if (tab.type === 'table-overview') return <DatabaseOutlined />;
-  if (tab.type.startsWith('redis')) return <DatabaseOutlined />;
-  if (tab.type.startsWith('jvm')) return <AppstoreOutlined />;
-  return <DatabaseOutlined />;
-};
 
 const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'query') return 'SQL 查询';
@@ -89,6 +80,22 @@ export const stopTabHoverDragPropagation = (event: React.SyntheticEvent<HTMLElem
 
 export const resolveTabHoverOpen = (isHoverInfoOpen: boolean, isTabMenuOpen: boolean) =>
   isHoverInfoOpen && !isTabMenuOpen;
+
+export const shouldShowV2ConnectionLabel = (displayTitle: string, connectionLabel?: string): boolean => {
+  const normalizedConnectionLabel = String(connectionLabel || '').trim();
+  if (!normalizedConnectionLabel) {
+    return false;
+  }
+
+  const normalizedDisplayTitle = String(displayTitle || '').trim();
+  if (!normalizedDisplayTitle) {
+    return true;
+  }
+
+  const escapedConnectionLabel = normalizedConnectionLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const prefixedConnectionPattern = new RegExp(`^\\[${escapedConnectionLabel}(?:\\s*[|\\]])`, 'i');
+  return !prefixedConnectionPattern.test(normalizedDisplayTitle);
+};
 
 type TabHoverInfoProps = {
   tab: TabData;
@@ -150,7 +157,6 @@ type SortableTabLabelProps = {
   tab: TabData;
   displayTitle: string;
   menuItems: MenuProps['items'];
-  accentColor?: string;
   connectionLabel?: string;
   hostSummary?: string;
   isV2Ui?: boolean;
@@ -161,7 +167,6 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
   tab,
   displayTitle,
   menuItems,
-  accentColor,
   connectionLabel,
   hostSummary,
   isV2Ui,
@@ -169,9 +174,6 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
 }) => {
   const [isHoverInfoOpen, setIsHoverInfoOpen] = useState(false);
   const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
-  const labelStyle = accentColor
-    ? ({ '--connection-accent': accentColor } as React.CSSProperties)
-    : undefined;
 
   const handleTabLabelContextMenu = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
@@ -190,20 +192,15 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
 
   const labelNode = (
     <span
-      className={`tab-dnd-label${accentColor ? ' has-connection-accent' : ''}${isV2Ui ? ' gn-v2-tab-label' : ''}`}
+      className={`tab-dnd-label${isV2Ui ? ' gn-v2-tab-label' : ''}`}
       onContextMenu={handleTabLabelContextMenu}
       title={isV2Ui ? undefined : displayTitle}
-      style={labelStyle}
     >
-      {isV2Ui ? (
-        <span className="gn-v2-tab-kind-icon" aria-hidden="true">
-          {getTabKindIcon(tab)}
-        </span>
-      ) : null}
       {isV2Ui ? <span className="gn-v2-tab-kind">{getTabKindLabel(tab)}</span> : null}
-      {accentColor ? <span className="tab-connection-accent" aria-hidden="true" /> : null}
       <span className="tab-title-text">{displayTitle}</span>
-      {isV2Ui && connectionLabel ? <span className="gn-v2-tab-conn">{connectionLabel}</span> : null}
+      {isV2Ui && shouldShowV2ConnectionLabel(displayTitle, connectionLabel) ? (
+        <span className="gn-v2-tab-conn">{connectionLabel}</span>
+      ) : null}
       {isV2Ui && onClose ? (
         <button
           type="button"
@@ -232,7 +229,7 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
         />
       )}
       placement="bottomLeft"
-      mouseEnterDelay={0.25}
+      mouseEnterDelay={1.2}
       open={resolveTabHoverOpen(isHoverInfoOpen, isTabMenuOpen)}
       onOpenChange={handleHoverInfoOpenChange}
       destroyOnHidden
@@ -441,7 +438,6 @@ const TabManager: React.FC = React.memo(() => {
   const items = useMemo(() => tabs.map((tab, index) => {
     const connection = connections.find((conn) => conn.id === tab.connectionId);
     const displayTitle = buildTabDisplayTitle(tab, connection);
-    const accentColor = connection ? resolveConnectionAccentColor(connection) : undefined;
     const hostSummary = resolveConnectionHostSummary(connection?.config);
     const tabIsActive = tab.id === activeTabId;
 
@@ -479,7 +475,6 @@ const TabManager: React.FC = React.memo(() => {
           tab={tab}
           displayTitle={displayTitle}
           menuItems={menuItems}
-          accentColor={accentColor}
           connectionLabel={connection?.name}
           hostSummary={hostSummary}
           isV2Ui={isV2Ui}
@@ -622,17 +617,6 @@ const TabManager: React.FC = React.memo(() => {
               gap: 7px;
               max-width: 100%;
             }
-            .main-tabs .tab-dnd-label.has-connection-accent {
-              position: relative;
-            }
-            .main-tabs .tab-connection-accent {
-              width: 9px;
-              height: 9px;
-              border-radius: 999px;
-              background: var(--connection-accent);
-              box-shadow: 0 0 0 2px color-mix(in srgb, var(--connection-accent) 22%, transparent);
-              flex: 0 0 auto;
-            }
             .main-tabs .tab-title-text {
               min-width: 0;
               overflow: hidden;
@@ -675,6 +659,7 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
               pointer-events: auto;
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-card {
+              --gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);
               display: flex;
               flex-direction: column;
               gap: 8px;
@@ -689,13 +674,14 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
               -webkit-user-select: text;
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-head {
-              display: flex;
-              align-items: center;
+              display: grid;
+              grid-template-columns: var(--gn-v2-tab-hover-grid-columns);
+              align-items: start;
               gap: 8px;
               min-width: 0;
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-head > span {
-              flex: 0 0 auto;
+              justify-self: start;
               padding: 2px 6px;
               border-radius: 5px;
               background: var(--gn-bg-active);
@@ -721,7 +707,7 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-row {
               display: grid;
-              grid-template-columns: 52px minmax(0, 1fr);
+              grid-template-columns: var(--gn-v2-tab-hover-grid-columns);
               align-items: start;
               gap: 8px;
               font-size: var(--gn-font-size-sm, 12px);

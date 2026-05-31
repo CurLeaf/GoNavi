@@ -12,7 +12,6 @@ import {
   formatJVMDiagnosticPhaseLabel,
   formatJVMDiagnosticTransportLabel,
 } from "../../utils/jvmDiagnosticPresentation";
-
 const { Text } = Typography;
 
 type JVMDiagnosticHistoryProps = {
@@ -62,7 +61,7 @@ const JVMDiagnosticHistory: React.FC<JVMDiagnosticHistoryProps> = ({
                     style={{
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-word",
-                      fontFamily: "SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      fontFamily: "var(--gn-font-mono)",
                     }}
                   >
                     {record.command}

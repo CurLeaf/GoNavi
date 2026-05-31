@@ -16,11 +16,15 @@ interface DataGridLegacyCellContextMenuProps {
   bgContextMenu: string;
   cellContextMenu: CellContextMenuState;
   canModifyData: boolean;
+  copiedRowsForPasteLength: number;
   selectedRowKeysLength: number;
   copiedCellPatchAvailable: boolean;
   supportsCopyInsert: boolean;
   onClose: () => void;
   onCopyFieldName: () => void;
+  onCopyRowData: () => void;
+  onCopyRowForPaste: () => void;
+  onPasteCopiedRowsAsNew: () => void;
   onSetNull: () => void;
   onEditRow: () => void;
   onFillToSelected: () => void;
@@ -55,11 +59,15 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
   bgContextMenu,
   cellContextMenu,
   canModifyData,
+  copiedRowsForPasteLength,
   selectedRowKeysLength,
   copiedCellPatchAvailable,
   supportsCopyInsert,
   onClose,
   onCopyFieldName,
+  onCopyRowData,
+  onCopyRowForPaste,
+  onPasteCopiedRowsAsNew,
   onSetNull,
   onEditRow,
   onFillToSelected,
@@ -81,6 +89,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
 
   const hoverBg = darkMode ? '#303030' : '#f5f5f5';
   const canFillRows = selectedRowKeysLength > 0;
+  const canPasteRows = copiedRowsForPasteLength > 0;
 
   const makeHoverHandlers = (enabled = true) => ({
     onMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => {
@@ -129,6 +138,27 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             <EditOutlined style={{ marginRight: 8 }} />
             编辑本行
           </div>
+          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyRowForPaste)}>
+            <CopyOutlined style={{ marginRight: 8 }} />
+            复制本行为新增行
+          </div>
+          <div
+            style={{
+              ...baseItemStyle,
+              cursor: canPasteRows ? 'pointer' : 'not-allowed',
+              opacity: canPasteRows ? 1 : 0.5,
+            }}
+            {...makeHoverHandlers(canPasteRows)}
+            onClick={() => {
+              if (canPasteRows) {
+                onPasteCopiedRowsAsNew();
+                onClose();
+              }
+            }}
+          >
+            <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
+            {canPasteRows ? `粘贴为新增行 (${copiedRowsForPasteLength})` : '粘贴为新增行'}
+          </div>
           <div
             style={{
               ...baseItemStyle,
@@ -160,6 +190,10 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
           <div style={separatorStyle(darkMode)} />
         </>
       )}
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyRowData)}>
+        <CopyOutlined style={{ marginRight: 8 }} />
+        复制行数据
+      </div>
       {supportsCopyInsert && (
         <>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyInsert)}>复制为 INSERT</div>

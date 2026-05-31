@@ -20,6 +20,8 @@ export function AIGetBuiltinPrompts():Promise<Record<string, string>>;
 
 export function AIGetContextLevel():Promise<string>;
 
+export function AIGetEditableProvider(arg1:string):Promise<ai.ProviderConfig>;
+
 export function AIGetProviders():Promise<Array<ai.ProviderConfig>>;
 
 export function AIGetSafetyLevel():Promise<string>;

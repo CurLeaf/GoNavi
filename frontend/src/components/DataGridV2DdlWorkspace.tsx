@@ -60,6 +60,7 @@ export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
     <div className="gn-v2-data-grid-ddl-code">
       <Editor
         height="100%"
+        gonaviTypography="code"
         language="sql"
         theme={darkMode ? 'transparent-dark' : 'transparent-light'}
         value={ddlLoading ? '正在加载 DDL...' : ddlText}
@@ -68,7 +69,6 @@ export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           wordWrap: 'off',
-          fontSize: 12,
           tabSize: 2,
           automaticLayout: true,
         }}

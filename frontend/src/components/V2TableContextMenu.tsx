@@ -30,6 +30,7 @@ import {
   SortDescendingOutlined,
   VerticalAlignBottomOutlined,
 } from '@ant-design/icons';
+import { getPrimaryShortcutDisplayLabel, type ShortcutPlatform } from '../utils/shortcuts';
 
 export type V2TableContextMenuActionKey =
   | 'pin-table'
@@ -153,6 +154,7 @@ const renderV2ContextMenuItems = (
 
 export const V2TableContextMenuView: React.FC<{
   tableName: string;
+  shortcutPlatform?: ShortcutPlatform;
   stats?: V2TableContextMenuStats;
   isPinned?: boolean;
   supportsTruncate?: boolean;
@@ -160,6 +162,7 @@ export const V2TableContextMenuView: React.FC<{
   onAction?: (action: V2TableContextMenuActionKey) => void;
 }> = ({
   tableName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   stats,
   isPinned = false,
   supportsTruncate = true,
@@ -196,8 +199,8 @@ export const V2TableContextMenuView: React.FC<{
         {renderItems([
           { action: 'open-data', icon: <TableOutlined />, title: '查看数据', kbd: '↵', featured: true },
           { action: isPinned ? 'unpin-table' : 'pin-table', icon: <PushpinOutlined />, title: isPinned ? '取消置顶' : '置顶表', kbd: isPinned ? '已置顶' : undefined, selected: isPinned },
-          { action: 'design-table', icon: <EditOutlined />, title: '设计表 · 字段 / 索引 / 外键', kbd: '⌘D' },
-          { action: 'open-new-tab', icon: <FileAddOutlined />, title: '在新标签打开', kbd: '⌘↵' },
+          { action: 'design-table', icon: <EditOutlined />, title: '设计表 · 字段 / 索引 / 外键', kbd: primaryShortcut('D', shortcutPlatform) },
+          { action: 'open-new-tab', icon: <FileAddOutlined />, title: '在新标签打开', kbd: primaryShortcut('Enter', shortcutPlatform) },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
         ])}
 
@@ -209,7 +212,7 @@ export const V2TableContextMenuView: React.FC<{
 
         <div className="gn-v2-context-menu-section-title">复制</div>
         {renderItems([
-          { action: 'copy-table-name', icon: <CopyOutlined />, title: '复制表名', kbd: '⌘C' },
+          { action: 'copy-table-name', icon: <CopyOutlined />, title: '复制表名', kbd: primaryShortcut('C', shortcutPlatform) },
           { action: 'copy-structure', icon: <CopyOutlined />, title: '复制表结构 · DDL' },
           { action: 'copy-insert', icon: <CopyOutlined />, title: '复制全表为 INSERT' },
         ])}
@@ -244,12 +247,14 @@ export type V2TableGroupContextMenuActionKey =
 
 export const V2TableGroupContextMenuView: React.FC<{
   title?: string;
+  shortcutPlatform?: ShortcutPlatform;
   dbName?: string;
   count?: number;
   currentSort?: 'name' | 'frequency';
   onAction?: (action: V2TableGroupContextMenuActionKey) => void;
 }> = ({
   title = '表 · tables',
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   dbName,
   count,
   currentSort = 'name',
@@ -272,7 +277,7 @@ export const V2TableGroupContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: '⌘N', featured: true },
+          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: primaryShortcut('N', shortcutPlatform), featured: true },
         ])}
 
         <div className="gn-v2-context-menu-section-title">排序</div>
@@ -301,6 +306,7 @@ export type V2DatabaseContextMenuActionKey =
 
 export const V2DatabaseContextMenuView: React.FC<{
   dbName: string;
+  shortcutPlatform?: ShortcutPlatform;
   dialect?: string;
   supportsSchemaActions?: boolean;
   supportsStarRocksActions?: boolean;
@@ -309,6 +315,7 @@ export const V2DatabaseContextMenuView: React.FC<{
   onAction?: (action: V2DatabaseContextMenuActionKey) => void;
 }> = ({
   dbName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   dialect,
   supportsSchemaActions = false,
   supportsStarRocksActions = false,
@@ -332,7 +339,7 @@ export const V2DatabaseContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: '⌘N', featured: true },
+          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: primaryShortcut('N', shortcutPlatform), featured: true },
           ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: '新建模式' }] : []),
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
           { action: 'run-sql', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },
@@ -369,6 +376,13 @@ export const V2DatabaseContextMenuView: React.FC<{
     </div>
   );
 };
+
+const DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM: ShortcutPlatform = 'windows';
+
+const primaryShortcut = (
+  key: string,
+  shortcutPlatform: ShortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
+): string => getPrimaryShortcutDisplayLabel(key, shortcutPlatform);
 
 export type V2ConnectionContextMenuActionKey =
   | 'new-db'
@@ -432,6 +446,7 @@ export const V2ConnectionGroupContextMenuView: React.FC<{
 
 export const V2ConnectionContextMenuView: React.FC<{
   connectionName: string;
+  shortcutPlatform?: ShortcutPlatform;
   hostSummary?: string;
   driverLabel?: string;
   isRedis?: boolean;
@@ -440,6 +455,7 @@ export const V2ConnectionContextMenuView: React.FC<{
   onAction?: (action: V2ConnectionContextMenuActionKey) => void;
 }> = ({
   connectionName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   hostSummary,
   driverLabel,
   isRedis = false,
@@ -468,12 +484,12 @@ export const V2ConnectionContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {isRedis ? renderItems([
-          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: '⌘R', featured: true },
+          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: primaryShortcut('R', shortcutPlatform), featured: true },
           { action: 'new-command', icon: <ConsoleSqlOutlined />, title: '新建命令窗口', featured: true },
           { action: 'open-monitor', icon: <DashboardOutlined />, title: 'Redis 实例监控' },
         ]) : renderItems([
-          ...(supportsCreateDatabase ? [{ action: 'new-db' as const, icon: <DatabaseOutlined />, title: '新建数据库', kbd: '⌘N', featured: true }] : []),
-          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: '⌘R' },
+          ...(supportsCreateDatabase ? [{ action: 'new-db' as const, icon: <DatabaseOutlined />, title: '新建数据库', kbd: primaryShortcut('N', shortcutPlatform), featured: true }] : []),
+          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: primaryShortcut('R', shortcutPlatform) },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
           { action: 'open-sql-file', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },
         ])}
@@ -519,6 +535,8 @@ export const V2ConnectionContextMenuView: React.FC<{
 export type V2CellContextMenuActionKey =
   | 'copy-field-name'
   | 'copy-row-data'
+  | 'copy-row-for-paste'
+  | 'paste-row-as-new'
   | 'copy-column-data'
   | 'set-null'
   | 'edit-row'
@@ -550,6 +568,7 @@ export type V2ColumnHeaderContextMenuActionKey =
 
 export const V2ColumnHeaderContextMenuView: React.FC<{
   fieldName: string;
+  shortcutPlatform?: ShortcutPlatform;
   columnType?: string;
   columnComment?: string;
   sortOrder?: 'ascend' | 'descend' | null;
@@ -558,6 +577,7 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
   onAction?: (action: V2ColumnHeaderContextMenuActionKey) => void;
 }> = ({
   fieldName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   columnType,
   columnComment,
   sortOrder,
@@ -587,7 +607,7 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: '⌘C', featured: true },
+          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: primaryShortcut('C', shortcutPlatform), featured: true },
           { action: 'copy-column-data', icon: <CopyOutlined />, title: '复制列数据' },
         ])}
 
@@ -622,19 +642,23 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
 
 export const V2CellContextMenuView: React.FC<{
   fieldName: string;
+  shortcutPlatform?: ShortcutPlatform;
   tableName?: string;
   rowLabel?: string;
   selectedRowCount?: number;
   canModifyData?: boolean;
+  copiedRowCount?: number;
   canPasteCopiedColumns?: boolean;
   supportsCopyInsert?: boolean;
   onAction?: (action: V2CellContextMenuActionKey) => void;
 }> = ({
   fieldName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   tableName,
   rowLabel,
   selectedRowCount = 0,
   canModifyData = false,
+  copiedRowCount = 0,
   canPasteCopiedColumns = false,
   supportsCopyInsert = true,
   onAction,
@@ -658,7 +682,7 @@ export const V2CellContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: '⌘C', featured: true },
+          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: primaryShortcut('C', shortcutPlatform), featured: true },
         ])}
 
         {canModifyData && (
@@ -667,6 +691,13 @@ export const V2CellContextMenuView: React.FC<{
             {renderItems([
               { action: 'set-null', icon: <ClearOutlined />, title: '设置为 NULL' },
               { action: 'edit-row', icon: <EditOutlined />, title: '编辑本行', kbd: '↵' },
+              { action: 'copy-row-for-paste', icon: <CopyOutlined />, title: '复制本行为新增行' },
+              {
+                action: 'paste-row-as-new',
+                icon: <VerticalAlignBottomOutlined />,
+                title: copiedRowCount > 0 ? `粘贴为新增行 (${copiedRowCount})` : '粘贴为新增行',
+                disabled: copiedRowCount <= 0,
+              },
               {
                 action: 'fill-selected',
                 icon: <VerticalAlignBottomOutlined />,

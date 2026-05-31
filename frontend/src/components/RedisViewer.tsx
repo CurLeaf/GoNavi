@@ -1012,6 +1012,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     </div>
                     <Editor
                         height="calc(100% - 72px)"
+                        gonaviTypography="data"
                         language={isJson ? 'json' : 'plaintext'}
                         theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                         value={displayValue}
@@ -1024,7 +1025,6 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             automaticLayout: true,
                             folding: true,
                             formatOnPaste: true,
-                            fontFamily: isBinary ? 'monospace' : undefined
                         }}
                     />
                     <div style={{ padding: '8px 0', flexShrink: 0 }}>
@@ -1135,7 +1135,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         <Tooltip title={<pre style={{ maxHeight: 300, overflow: 'auto', margin: 0, fontSize: 12 }}>{tooltipContent}</pre>} styles={{ root: { maxWidth: 600 } }}>
                                             <span style={{
                                                 color: record.isBinary ? '#d46b08' : (record.isJson ? jsonAccentColor : undefined),
-                                                fontFamily: record.isBinary ? 'monospace' : undefined,
+                                                fontFamily: record.isBinary ? 'var(--gn-font-mono)' : undefined,
                                                 fontSize: record.isBinary ? 11 : undefined
                                             }}>
                                                 {text}
@@ -1285,7 +1285,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         <Tooltip title={<pre style={{ maxHeight: 300, overflow: 'auto', margin: 0, fontSize: 12 }}>{tooltipContent}</pre>} styles={{ root: { maxWidth: 600 } }}>
                                             <span style={{
                                                 color: record.isBinary ? '#d46b08' : (record.isJson ? jsonAccentColor : undefined),
-                                                fontFamily: record.isBinary ? 'monospace' : undefined,
+                                                fontFamily: record.isBinary ? 'var(--gn-font-mono)' : undefined,
                                                 fontSize: record.isBinary ? 11 : undefined
                                             }}>
                                                 {text}
@@ -1411,7 +1411,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         <Tooltip title={<pre style={{ maxHeight: 300, overflow: 'auto', margin: 0, fontSize: 12 }}>{tooltipContent}</pre>} styles={{ root: { maxWidth: 600 } }}>
                                             <span style={{
                                                 color: record.isBinary ? '#d46b08' : (record.isJson ? jsonAccentColor : undefined),
-                                                fontFamily: record.isBinary ? 'monospace' : undefined,
+                                                fontFamily: record.isBinary ? 'var(--gn-font-mono)' : undefined,
                                                 fontSize: record.isBinary ? 11 : undefined
                                             }}>
                                                 {text}
@@ -1536,7 +1536,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         <Tooltip title={<pre style={{ maxHeight: 300, overflow: 'auto', margin: 0, fontSize: 12 }}>{tooltipContent}</pre>} styles={{ root: { maxWidth: 600 } }}>
                                             <span style={{
                                                 color: record.isBinary ? '#d46b08' : (record.isJson ? jsonAccentColor : undefined),
-                                                fontFamily: record.isBinary ? 'monospace' : undefined,
+                                                fontFamily: record.isBinary ? 'var(--gn-font-mono)' : undefined,
                                                 fontSize: record.isBinary ? 11 : undefined
                                             }}>
                                                 {text}
@@ -1723,7 +1723,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         <Tooltip title={<pre style={{ maxHeight: 300, overflow: 'auto', margin: 0, fontSize: 12 }}>{tooltipContent}</pre>} styles={{ root: { maxWidth: 720 } }}>
                                             <span style={{
                                                 color: record.isBinary ? '#d46b08' : (record.isJson ? jsonAccentColor : undefined),
-                                                fontFamily: record.isBinary ? 'monospace' : undefined,
+                                                fontFamily: record.isBinary ? 'var(--gn-font-mono)' : undefined,
                                                 fontSize: record.isBinary ? 11 : undefined
                                             }}>
                                                 {text}
@@ -1960,6 +1960,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             >
                 <Editor
                     height="450px"
+                    gonaviTypography="data"
                     language={formatRedisStringValue(editValue).isJson ? 'json' : 'plaintext'}
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     value={editValue}
@@ -2050,6 +2051,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             >
                 <Editor
                     height="450px"
+                    gonaviTypography="data"
                     language={jsonEditConfig?.isJson ? 'json' : 'plaintext'}
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     defaultValue={jsonEditConfig?.value || ''}

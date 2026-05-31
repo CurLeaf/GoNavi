@@ -59,7 +59,6 @@ export interface DataGridToolbarFrameProps {
   onToggleFilter?: () => void;
   canModifyData: boolean;
   selectedRowKeysLength: number;
-  copiedRowsForPasteLength: number;
   allSelectedAreDeleted: boolean;
   cellEditMode: boolean;
   selectedCellsSize: number;
@@ -95,8 +94,6 @@ export interface DataGridToolbarFrameProps {
   onRefresh: () => void;
   onToggleFilterClick: () => void;
   onAddRow: () => void;
-  onCopySelectedRowsForPaste: () => void;
-  onPasteCopiedRowsAsNew: () => void;
   onUndoDeleteSelected: () => void;
   onDeleteSelected: () => void;
   onToggleCellEditMode: () => void;
@@ -155,7 +152,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   onToggleFilter,
   canModifyData,
   selectedRowKeysLength,
-  copiedRowsForPasteLength,
   allSelectedAreDeleted,
   cellEditMode,
   selectedCellsSize,
@@ -191,8 +187,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   onRefresh,
   onToggleFilterClick,
   onAddRow,
-  onCopySelectedRowsForPaste,
-  onPasteCopiedRowsAsNew,
   onUndoDeleteSelected,
   onDeleteSelected,
   onToggleCellEditMode,
@@ -301,22 +295,6 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
           <>
             {renderToolbarDivider()}
             <Button icon={<PlusOutlined />} onClick={onAddRow}>添加行</Button>
-            <Button
-              data-grid-copy-row-action="true"
-              icon={<CopyOutlined />}
-              disabled={selectedRowKeysLength === 0}
-              onClick={onCopySelectedRowsForPaste}
-            >
-              复制行
-            </Button>
-            <Button
-              data-grid-paste-row-action="true"
-              icon={<VerticalAlignBottomOutlined />}
-              disabled={copiedRowsForPasteLength === 0}
-              onClick={onPasteCopiedRowsAsNew}
-            >
-              {copiedRowsForPasteLength > 0 ? `粘贴行 (${copiedRowsForPasteLength})` : '粘贴行'}
-            </Button>
             {allSelectedAreDeleted ? (
               <Button icon={<UndoOutlined />} disabled={selectedRowKeysLength === 0} onClick={onUndoDeleteSelected}>撤销删除</Button>
             ) : (
@@ -394,16 +372,15 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
         {isQueryResultExport && (
           <>
             {renderToolbarDivider()}
-            <Button
-              data-grid-query-copy-action="true"
-              icon={<CopyOutlined />}
-              disabled={!canCopyQueryResult}
-              onClick={onCopyQueryResultCsv}
-            >
-              复制
-            </Button>
             <Dropdown menu={{ items: queryResultCopyMenu }} disabled={!canCopyQueryResult}>
-              <Button icon={<DownOutlined />} disabled={!canCopyQueryResult} />
+              <Button
+                data-grid-query-copy-action="true"
+                icon={<CopyOutlined />}
+                disabled={!canCopyQueryResult}
+                onClick={onCopyQueryResultCsv}
+              >
+                复制 <DownOutlined />
+              </Button>
             </Dropdown>
           </>
         )}
