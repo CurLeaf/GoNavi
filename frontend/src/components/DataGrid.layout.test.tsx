@@ -104,6 +104,9 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-v2-page-chip="true"');
     expect(markup).toContain('data-grid-v2-pagination-prev="true"');
     expect(markup).toContain('data-grid-v2-pagination-next="true"');
+    expect(markup).toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('跳页');
+    expect(markup).toContain('跳转页码');
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
@@ -545,9 +548,19 @@ describe('DataGrid layout', () => {
     expect(secondaryActionsSource.indexOf('{pageFindContent}')).toBeLessThan(secondaryActionsSource.indexOf('gn-v2-data-grid-status-center'));
     expect(css).toContain('width: 66px !important;');
     expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
+    expect(css).toContain('container-name: gn-v2-data-grid-statusbar;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-right::-webkit-scrollbar');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap::-webkit-scrollbar');
+    expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 960px)');
+    expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 760px)');
     expect(css).toContain('.data-grid-pagination-size-select.ant-select-focused .ant-select-selector');
     expect(css).toContain('overflow-x: auto;');
     expect(paginationBarSource).toContain("label: `${value}/页`");
+    expect(paginationBarSource).toContain('const maxJumpPage = Math.max(1, paginationTotalPages);');
+    expect(paginationBarSource).toContain('Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))');
+    expect(paginationBarSource).toContain('onPressEnter={submitJumpPage}');
+    expect(paginationBarSource).toContain('data-grid-pagination-jump="true"');
+    expect(css).toContain('.data-grid-pagination-jump-input.ant-input-number-focused');
     expect(css).toContain('background: transparent !important;');
   });
 

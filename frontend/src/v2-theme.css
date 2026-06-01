@@ -3291,6 +3291,8 @@ body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-virtual-inline-editing .a
 
 body[data-ui-version="v2"] .gn-v2-data-grid-statusbar {
   --gn-v2-statusbar-control-height: 26px;
+  container-type: inline-size;
+  container-name: gn-v2-data-grid-statusbar;
   height: calc(36px * var(--gn-ui-scale, 1));
   min-height: calc(36px * var(--gn-ui-scale, 1));
   display: flex;
@@ -3325,9 +3327,17 @@ body[data-ui-version="v2"] .gn-v2-data-grid-status-right {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  flex: 0 0 auto;
-  min-width: fit-content;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-status-right::-webkit-scrollbar {
+  display: none;
 }
 
 @media (max-width: 1180px) {
@@ -3749,17 +3759,27 @@ body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap {
   height: var(--gn-v2-statusbar-control-height);
   min-height: var(--gn-v2-statusbar-control-height);
   gap: 4px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   margin-left: 0;
   padding: 0 !important;
   border-top: none !important;
   background: transparent;
   justify-content: flex-end !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap::-webkit-scrollbar {
+  display: none;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid .data-grid-pagination-shell {
   gap: 4px;
-  flex: 0 0 auto;
+  flex: 0 0 max-content;
+  min-width: max-content;
   align-items: center !important;
   align-self: center;
   justify-content: flex-start !important;
@@ -3894,6 +3914,128 @@ body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-paginatio
 
 body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-page-chip strong {
   color: var(--gn-fg-1);
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  min-height: 26px;
+  color: var(--gn-fg-4);
+  font-family: var(--gn-font-mono);
+  font-size: 11px;
+  line-height: 26px;
+  white-space: nowrap;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-label {
+  color: var(--gn-fg-4);
+  font-size: 11px;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input,
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input.ant-input-number,
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-button.ant-btn {
+  height: 26px !important;
+  min-height: 26px !important;
+  border-width: 0.5px !important;
+  border-style: solid !important;
+  border-color: var(--gn-br-2) !important;
+  border-radius: 5px !important;
+  background: var(--gn-bg-input) !important;
+  box-shadow: none !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input,
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input.ant-input-number {
+  display: inline-flex !important;
+  align-items: stretch !important;
+  width: 44px !important;
+  min-width: 44px !important;
+  max-width: 44px !important;
+  line-height: 26px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input-wrap,
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input {
+  height: 26px !important;
+  line-height: 26px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input .ant-input-number-input {
+  padding: 0 4px !important;
+  color: var(--gn-fg-1) !important;
+  font-family: var(--gn-font-mono);
+  font-size: 11px !important;
+  font-weight: 700;
+  text-align: center;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input.ant-input-number-focused,
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input.ant-input-number:focus-within {
+  border-color: color-mix(in srgb, var(--gn-info) 38%, var(--gn-br-2)) !important;
+  box-shadow: none !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-button.ant-btn {
+  width: 26px !important;
+  min-width: 26px !important;
+  padding: 0 !important;
+  color: var(--gn-fg-2) !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
+@container gn-v2-data-grid-statusbar (max-width: 1120px) {
+  body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-summary {
+    display: none;
+  }
+}
+
+@container gn-v2-data-grid-statusbar (max-width: 960px) {
+  body[data-ui-version="v2"] .gn-v2-data-grid-page-find {
+    max-width: 154px;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-data-grid-page-find .ant-input-affix-wrapper {
+    width: 112px !important;
+    min-width: 112px;
+    max-width: 112px !important;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-label {
+    display: none;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input,
+  body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-jump-input.ant-input-number {
+    width: 38px !important;
+    min-width: 38px !important;
+    max-width: 38px !important;
+  }
+}
+
+@container gn-v2-data-grid-statusbar (max-width: 760px) {
+  body[data-ui-version="v2"] .gn-v2-data-grid-result-switcher > span {
+    display: none;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-data-grid-column-quick-find,
+  body[data-ui-version="v2"] .gn-v2-data-grid-column-quick-find .ant-select,
+  body[data-ui-version="v2"] .gn-v2-data-grid-column-quick-find .ant-input-affix-wrapper,
+  body[data-ui-version="v2"] .gn-v2-data-grid-column-quick-find .ant-select-selector {
+    width: 140px !important;
+    min-width: 140px !important;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-data-grid-column-quick-find {
+    grid-template-columns: 140px 28px !important;
+    max-width: 180px;
+  }
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap .data-grid-pagination-size-select,

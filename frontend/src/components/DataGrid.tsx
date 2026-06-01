@@ -2913,6 +2913,57 @@ const DataGrid: React.FC<DataGridProps> = ({
                     width: 100%;
                     height: 100%;
                 }
+                .${gridId} .data-grid-pagination-jump {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    height: 34px;
+                    color: ${paginationSecondaryTextColor};
+                    font-size: 12px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                }
+                .${gridId} .data-grid-pagination-jump-label {
+                    color: ${paginationSecondaryTextColor};
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-jump-input,
+                .${gridId} .data-grid-pagination-jump-input.ant-input-number {
+                    width: 64px;
+                    min-width: 64px;
+                    height: 34px;
+                    display: inline-flex;
+                    align-items: stretch;
+                }
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input-wrap,
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input {
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input {
+                    padding: 0 10px;
+                    text-align: center;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                    line-height: 34px;
+                }
+                .${gridId} .data-grid-pagination-jump-input.ant-input-number {
+                    border-radius: 12px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    box-shadow: none;
+                }
+                .${gridId} .data-grid-pagination-jump-button.ant-btn {
+                    height: 34px;
+                    min-width: 34px;
+                    padding: 0 10px;
+                    border-radius: 12px;
+                    border-color: ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 700;
+                    box-shadow: none;
+                }
                 .${gridId} .data-grid-pagination-size-select {
                     width: 72px;
                     min-width: 72px;
