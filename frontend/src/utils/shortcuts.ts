@@ -159,7 +159,7 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
   },
   toggleMacFullscreen: {
     label: '切换原生全屏',
-    description: 'macOS 原生窗口控制模式下的全屏切换（⌃⌘F）',
+    description: 'macOS 原生窗口控制模式下的全屏切换',
     platformOnly: 'mac',
   },
   resetWindowZoom: {
@@ -504,6 +504,7 @@ export interface ReservedShortcut {
   label: string;
   context: ConflictContext;
   monacoCommandId?: string;
+  platforms?: ShortcutPlatform[];
 }
 
 export interface ConflictInfo {
@@ -522,29 +523,29 @@ export const RESERVED_SHORTCUTS: ReservedShortcut[] = [
   { combo: 'Ctrl+Shift+N',     label: '浏览器新建隐身窗口', context: 'global' },
 
   // Monaco editor built-in shortcuts
-  { combo: 'Ctrl+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find' },
-  { combo: 'Meta+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find' },
-  { combo: 'Ctrl+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction' },
-  { combo: 'Meta+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction' },
-  { combo: 'Ctrl+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine' },
-  { combo: 'Meta+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine' },
-  { combo: 'Ctrl+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen' },
-  { combo: 'Meta+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen' },
-  { combo: 'Ctrl+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate' },
-  { combo: 'Meta+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate' },
-  { combo: 'Ctrl+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch' },
-  { combo: 'Meta+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch' },
-  { combo: 'Ctrl+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines' },
-  { combo: 'Meta+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines' },
-  { combo: 'Ctrl+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter' },
-  { combo: 'Meta+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter' },
-  { combo: 'Ctrl+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore' },
-  { combo: 'Meta+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore' },
+  { combo: 'Ctrl+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['windows'] },
+  { combo: 'Meta+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['mac'] },
+  { combo: 'Ctrl+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['windows'] },
+  { combo: 'Meta+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['mac'] },
+  { combo: 'Ctrl+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['windows'] },
+  { combo: 'Meta+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['mac'] },
+  { combo: 'Ctrl+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['windows'] },
+  { combo: 'Meta+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['windows'] },
+  { combo: 'Meta+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['mac'] },
+  { combo: 'Ctrl+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['windows'] },
+  { combo: 'Meta+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['windows'] },
+  { combo: 'Meta+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['mac'] },
+  { combo: 'Ctrl+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['windows'] },
+  { combo: 'Meta+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['windows'] },
+  { combo: 'Meta+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['mac'] },
   { combo: 'F2',               label: '编辑器重命名符号',         context: 'monaco', monacoCommandId: 'editor.action.rename' },
 
   // DataGrid shortcuts
-  { combo: 'Ctrl+C',           label: '数据表格复制',     context: 'datagrid' },
-  { combo: 'Meta+C',           label: '数据表格复制',     context: 'datagrid' },
+  { combo: 'Ctrl+C',           label: '数据表格复制',     context: 'datagrid', platforms: ['windows'] },
+  { combo: 'Meta+C',           label: '数据表格复制',     context: 'datagrid', platforms: ['mac'] },
 ];
 
 const CONTEXT_DESCRIPTION: Record<ConflictContext, string> = {
@@ -572,14 +573,14 @@ export const splitConflictsByContext = (conflicts: ConflictInfo[]) => {
 };
 
 export const findReservedConflict = (normalizedCombo: string): ConflictInfo | null => {
-  const conflict = RESERVED_SHORTCUTS.find((r) => r.combo === normalizedCombo);
+  const conflict = findReservedConflicts(normalizedCombo)[0];
   if (!conflict) return null;
-  return { label: conflict.label, context: conflict.context, monacoCommandId: conflict.monacoCommandId };
+  return conflict;
 };
 
-export const findReservedConflicts = (normalizedCombo: string): ConflictInfo[] => {
+export const findReservedConflicts = (normalizedCombo: string, platform?: ShortcutPlatform): ConflictInfo[] => {
   return RESERVED_SHORTCUTS
-    .filter((r) => r.combo === normalizedCombo)
+    .filter((r) => r.combo === normalizedCombo && (!platform || !r.platforms || r.platforms.includes(platform)))
     .map((r) => ({ label: r.label, context: r.context, monacoCommandId: r.monacoCommandId }));
 };
 

@@ -80,7 +80,7 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
-import { getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, resolveShortcutDisplay } from '../utils/shortcuts';
+import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
@@ -914,7 +914,10 @@ const Sidebar: React.FC<{
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
-  const primaryShortcutModifierLabel = getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform);
+  const focusSidebarSearchShortcut = resolveShortcutDisplay(shortcutOptions, 'focusSidebarSearch', activeShortcutPlatform);
+  const focusSidebarSearchShortcutTokens = focusSidebarSearchShortcut === '-'
+      ? []
+      : focusSidebarSearchShortcut.match(/Ctrl|Alt|Shift|Esc|Space|[⌘⌃⌥⇧↵↑↓←→]|[^+]/g) ?? [];
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
@@ -8003,10 +8006,13 @@ const Sidebar: React.FC<{
                 >
                     <SearchOutlined />
                     <span>搜索表、连接、动作... 或问 AI</span>
-                    <span className="gn-v2-search-shortcut" aria-hidden="true">
-                        <kbd>{primaryShortcutModifierLabel}</kbd>
-                        <kbd>K</kbd>
-                    </span>
+                    {focusSidebarSearchShortcutTokens.length > 0 ? (
+                        <span className="gn-v2-search-shortcut" aria-hidden="true">
+                            {focusSidebarSearchShortcutTokens.map((token, index) => (
+                                <kbd key={`${token}-${index}`}>{token}</kbd>
+                            ))}
+                        </span>
+                    ) : null}
                 </button>
             ) : (
                 <Input

@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => ({
       blur: 0,
       uiVersion: 'legacy',
     } as any,
+    shortcutOptions: null as any,
   },
 }));
 
@@ -148,7 +149,7 @@ vi.mock('../store', () => ({
     setSidebarTablePinned: mocks.noop,
     addSqlLog: mocks.noop,
     sqlLogs: [],
-    shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
+    shortcutOptions: mocks.state.shortcutOptions ?? cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
     setAIPanelVisible: mocks.noop,
     addAIContext: mocks.noop,
   }),
@@ -183,6 +184,14 @@ vi.mock('../../wailsjs/runtime/runtime', () => ({
   EventsOn: mocks.noop,
 }));
 
+vi.mock('../utils/appearance', async () => {
+  const actual = await vi.importActual<typeof import('../utils/appearance')>('../utils/appearance');
+  return {
+    ...actual,
+    isMacLikePlatform: () => true,
+  };
+});
+
 describe('Sidebar locate toolbar', () => {
   beforeEach(() => {
     mocks.state.connections = [];
@@ -203,6 +212,7 @@ describe('Sidebar locate toolbar', () => {
       blur: 0,
       uiVersion: 'legacy',
     };
+    mocks.state.shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
   });
 
   it('resolves the table name used by the sidebar copy action', () => {
@@ -388,8 +398,11 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('gn-v2-explorer-command-trigger');
     expect(markup).toContain('搜索表、连接、动作... 或问 AI');
     expect(markup).toContain('gn-v2-search-shortcut');
-    expect(markup).toContain('<kbd>Ctrl</kbd>');
+    expect(markup).toContain('<kbd>⌘</kbd>');
     expect(markup).toContain('<kbd>K</kbd>');
+    expect(source).toContain("const focusSidebarSearchShortcut = resolveShortcutDisplay(shortcutOptions, 'focusSidebarSearch', activeShortcutPlatform);");
+    expect(source).not.toContain('<kbd>⌘</kbd>');
+    expect(source).not.toContain('<kbd>K</kbd>');
     expect(markup).toContain('gn-v2-explorer-filter-tabs');
     expect(markup).toContain('全部');
     expect(markup).toContain('视图');
@@ -437,6 +450,18 @@ describe('Sidebar locate toolbar', () => {
     expect(contextMenuFunction).not.toContain('setSelectedKeys');
     expect(contextMenuFunction).not.toContain('selectedNodesRef.current');
     expect(contextMenuFunction).not.toContain('setActiveContext');
+  });
+
+  it('renders the v2 search shortcut from the user shortcut settings', () => {
+    mocks.state.shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
+    mocks.state.shortcutOptions.focusSidebarSearch.mac = { combo: 'Meta+F', enabled: true };
+
+    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+
+    expect(markup).toContain('gn-v2-search-shortcut');
+    expect(markup).toContain('<kbd>⌘</kbd>');
+    expect(markup).toContain('<kbd>F</kbd>');
+    expect(markup).not.toContain('<kbd>K</kbd>');
   });
 
   it('keeps the v2 command search footer hints tied to real prefix actions', () => {

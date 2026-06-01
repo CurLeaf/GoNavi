@@ -2129,7 +2129,7 @@ function App() {
       for (const action of SHORTCUT_ACTION_ORDER) {
           const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
           if (!binding?.enabled || !binding.combo) continue;
-          const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo));
+          const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo), activeShortcutPlatform);
           if (conflicts.length > 0) {
               map[action] = conflicts;
           }
@@ -3001,7 +3001,7 @@ function App() {
               return;
           }
 
-          const reservedConflicts = findReservedConflicts(normalizedCombo);
+          const reservedConflicts = findReservedConflicts(normalizedCombo, activeShortcutPlatform);
           if (reservedConflicts.length > 0) {
               const { hasMonaco, hasOther, monacoLabels, otherLabels, otherContexts } = splitConflictsByContext(reservedConflicts);
               if (hasMonaco) {

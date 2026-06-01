@@ -82,6 +82,18 @@ describe('findReservedConflicts', () => {
     const results = findReservedConflicts('Ctrl+F');
     expect(results[0].monacoCommandId).toBe('actions.find');
   });
+
+  it('uses Command instead of Control for macOS find shortcut conflicts', () => {
+    expect(findReservedConflicts('Ctrl+F', 'mac')).toEqual([]);
+    expect(findReservedConflicts('Meta+F', 'mac')[0]).toMatchObject({
+      label: '编辑器查找',
+      monacoCommandId: 'actions.find',
+    });
+    expect(findReservedConflicts('Ctrl+F', 'windows')[0]).toMatchObject({
+      label: '编辑器查找',
+      monacoCommandId: 'actions.find',
+    });
+  });
 });
 
 // ─── describeConflictContext ─────────────────────────────────────────
@@ -157,6 +169,12 @@ describe('shortcut defaults', () => {
     expect(SHORTCUT_ACTION_META.resetWindowZoom).toMatchObject({
       label: '重置窗口缩放',
       allowInEditable: true,
+    });
+  });
+
+  it('keeps configurable shortcut descriptions free of hardcoded shortcut labels', () => {
+    Object.values(SHORTCUT_ACTION_META).forEach((meta) => {
+      expect(meta.description).not.toMatch(/⌘|⌃|Ctrl|Meta|Cmd|Command|Alt\+/);
     });
   });
 
