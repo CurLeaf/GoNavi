@@ -191,12 +191,12 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
     windows: { combo: 'Ctrl+K', enabled: true },
   },
   newQueryTab: {
-    mac: { combo: 'Meta+Y', enabled: true },
-    windows: { combo: 'Ctrl+Q', enabled: true },
-  },
-  newConnection: {
     mac: { combo: 'Meta+N', enabled: true },
     windows: { combo: 'Ctrl+N', enabled: true },
+  },
+  newConnection: {
+    mac: { combo: 'Meta+Shift+N', enabled: true },
+    windows: { combo: 'Ctrl+Shift+N', enabled: true },
   },
   toggleAIPanel: {
     mac: { combo: 'Meta+J', enabled: true },
