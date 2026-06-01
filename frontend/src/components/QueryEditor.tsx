@@ -23,6 +23,10 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
+import {
+    getColumnDefinitionKey,
+    getColumnDefinitionName,
+} from '../utils/columnDefinition';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -1530,10 +1534,10 @@ const resolveQueryLocatorPlan = async ({
         }
 
         const tableColumns = resCols.data as ColumnDefinition[];
-        const tableColumnNames = tableColumns.map((column) => String(column?.name || '').trim()).filter(Boolean);
+        const tableColumnNames = tableColumns.map(getColumnDefinitionName).filter(Boolean);
         const primaryKeys = tableColumns
-            .filter((column: any) => column?.key === 'PRI')
-            .map((column: any) => String(column?.name || '').trim())
+            .filter((column: any) => getColumnDefinitionKey(column) === 'PRI')
+            .map(getColumnDefinitionName)
             .filter(Boolean);
         const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
             ? resIndexes.data as IndexDefinition[]

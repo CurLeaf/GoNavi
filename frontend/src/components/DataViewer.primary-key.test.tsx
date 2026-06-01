@@ -120,7 +120,7 @@ describe('DataViewer safe editing locator', () => {
   it('enables table preview editing after primary keys are loaded', async () => {
     backendApp.DBGetColumns.mockResolvedValue({
       success: true,
-      data: [{ name: 'ID', key: 'PRI' }, { name: 'NAME', key: '' }],
+      data: [{ Name: 'ID', Key: 'PRI' }, { Name: 'NAME', Key: '' }],
     });
 
     const renderer = await renderAndReload();

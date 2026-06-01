@@ -16,6 +16,10 @@ import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
+    getColumnDefinitionExtra,
+    normalizeColumnDefinition,
+} from '../utils/columnDefinition';
+import {
     isMysqlFamilyDialect as isMysqlFamilySqlDialect,
     isOracleLikeDialect as isOracleLikeSqlDialect,
     isPgLikeDialect as isPgLikeSqlDialect,
@@ -804,9 +808,9 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
     if (colsRes.success) {
         const colsWithKey = (colsRes.data as ColumnDefinition[]).map((c, index) => ({
-            ...c,
+            ...normalizeColumnDefinition(c),
             _key: `col-${index}-${Date.now()}`,
-            isAutoIncrement: c.extra && c.extra.toLowerCase().includes('auto_increment')
+            isAutoIncrement: getColumnDefinitionExtra(c).toLowerCase().includes('auto_increment')
         }));
         setColumns(JSON.parse(JSON.stringify(colsWithKey)));
         setOriginalColumns(JSON.parse(JSON.stringify(colsWithKey)));

@@ -105,6 +105,11 @@ import {
     type EditRowLocator,
 } from '../utils/rowLocator';
 import {
+    getColumnDefinitionComment,
+    getColumnDefinitionName,
+    getColumnDefinitionType,
+} from '../utils/columnDefinition';
+import {
     V2CellContextMenuView,
     V2ColumnHeaderContextMenuView,
     type V2CellContextMenuActionKey,
@@ -2142,10 +2147,10 @@ const DataGrid: React.FC<DataGridProps> = ({
               }
               const nextMap: Record<string, ColumnMeta> = {};
               (res.data as ColumnDefinition[]).forEach((column: any) => {
-                  const name = String(column?.name ?? column?.Name ?? '').trim();
+                  const name = getColumnDefinitionName(column);
                   if (!name) return;
-                  const type = String(column?.type ?? column?.Type ?? '').trim();
-                  const comment = String(column?.comment ?? column?.Comment ?? '').trim();
+                  const type = getColumnDefinitionType(column);
+                  const comment = getColumnDefinitionComment(column);
                   nextMap[name] = { type, comment };
               });
               columnMetaCacheRef.current[cacheKey] = nextMap;

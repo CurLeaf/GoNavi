@@ -139,6 +139,7 @@ vi.mock('@ant-design/icons', () => {
     RobotOutlined: Icon,
     SearchOutlined: Icon,
     LinkOutlined: Icon,
+    AimOutlined: Icon,
     TableOutlined: Icon,
     AimOutlined: Icon,
     SortAscendingOutlined: Icon,
@@ -664,7 +665,7 @@ describe('DataGrid DDL interactions', () => {
     storeState.queryOptions.showColumnType = true;
     backendApp.DBGetColumns.mockResolvedValueOnce({
       success: true,
-      data: [{ name: 'id', type: 'bigint', comment: '主键 ID' }],
+      data: [{ Name: 'id', Type: 'bigint', Comment: '主键 ID' }],
     });
 
     let renderer: ReactTestRenderer;
@@ -703,6 +704,8 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain('隐藏此字段');
     expect(textContent(renderer!.root)).toContain('隐藏字段类型');
     expect(textContent(renderer!.root)).toContain('隐藏字段备注');
+    expect(textContent(renderer!.root)).toContain('bigint');
+    expect(textContent(renderer!.root)).toContain('主键 ID');
     renderer!.unmount();
   });
 
