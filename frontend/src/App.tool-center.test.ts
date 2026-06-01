@@ -162,6 +162,8 @@ describe('tool center menu entries', () => {
       ['runQuery', 'gonavi:run-active-query'],
       ['focusSidebarSearch', 'gonavi:focus-sidebar-search'],
       ['newQueryTab', 'handleNewQuery();'],
+      ['switchToNextTab', 'switchActiveTabByOffset(1);'],
+      ['switchToPreviousTab', 'switchActiveTabByOffset(-1);'],
       ['newConnection', 'handleCreateConnection();'],
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
@@ -174,8 +176,11 @@ describe('tool center menu entries', () => {
     for (const [action, handler] of expectedHandlers) {
       expect(getGlobalShortcutCaseBlock(action)).toContain(handler);
     }
+    expect(appSource).toContain('const switchActiveTabByOffset = useCallback((offset: 1 | -1) => {');
+    expect(appSource).toContain('const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;');
+    expect(appSource).toContain('setActiveTab(tabs[nextIndex].id);');
     expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
-    expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
+    expect(appSource).toContain('switchActiveTabByOffset, themeMode');
   });
 
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {

@@ -200,6 +200,14 @@ describe('shortcut defaults', () => {
       mac: { combo: 'Meta+N', enabled: true },
       windows: { combo: 'Ctrl+N', enabled: true },
     });
+    expect(DEFAULT_SHORTCUT_OPTIONS.switchToNextTab).toEqual({
+      mac: { combo: 'Ctrl+Tab', enabled: true },
+      windows: { combo: 'Ctrl+Tab', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.switchToPreviousTab).toEqual({
+      mac: { combo: 'Ctrl+Shift+Tab', enabled: true },
+      windows: { combo: 'Ctrl+Shift+Tab', enabled: true },
+    });
     expect(DEFAULT_SHORTCUT_OPTIONS.toggleLogPanel).toEqual({
       mac: { combo: 'Meta+Shift+H', enabled: true },
       windows: { combo: 'Ctrl+H', enabled: true },

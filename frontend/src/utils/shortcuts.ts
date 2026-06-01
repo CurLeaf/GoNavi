@@ -7,6 +7,8 @@ export type ShortcutAction =
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
+  | 'switchToNextTab'
+  | 'switchToPreviousTab'
   | 'newConnection'
   | 'toggleAIPanel'
   | 'toggleLogPanel'
@@ -92,6 +94,8 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
+  'switchToNextTab',
+  'switchToPreviousTab',
   'newConnection',
   'toggleAIPanel',
   'toggleLogPanel',
@@ -134,6 +138,16 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
   newQueryTab: {
     label: '新建查询页',
     description: '创建一个新的 SQL 查询标签页',
+  },
+  switchToNextTab: {
+    label: '切换到下一个标签页',
+    description: '在打开的标签页中向右切换',
+    allowInEditable: true,
+  },
+  switchToPreviousTab: {
+    label: '切换到上一个标签页',
+    description: '在打开的标签页中向左切换',
+    allowInEditable: true,
   },
   newConnection: {
     label: '新建数据源',
@@ -193,6 +207,14 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   newQueryTab: {
     mac: { combo: 'Meta+N', enabled: true },
     windows: { combo: 'Ctrl+N', enabled: true },
+  },
+  switchToNextTab: {
+    mac: { combo: 'Ctrl+Tab', enabled: true },
+    windows: { combo: 'Ctrl+Tab', enabled: true },
+  },
+  switchToPreviousTab: {
+    mac: { combo: 'Ctrl+Shift+Tab', enabled: true },
+    windows: { combo: 'Ctrl+Shift+Tab', enabled: true },
   },
   newConnection: {
     mac: { combo: 'Meta+Shift+N', enabled: true },

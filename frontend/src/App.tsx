@@ -1141,6 +1141,7 @@ function App() {
   const connections = useStore(state => state.connections);
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
+  const setActiveTab = useStore(state => state.setActiveTab);
   const openSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
       setIsSecurityUpdateIntroOpen(false);
       setSecurityUpdateSettingsFocusTarget(focusTarget);
@@ -1892,6 +1893,14 @@ function App() {
           query: ''
       });
   }, [activeTabId, tabs, connections, activeContext, addTab]);
+
+  const switchActiveTabByOffset = useCallback((offset: 1 | -1) => {
+      if (tabs.length < 2) return;
+      const activeIndex = tabs.findIndex(tab => tab.id === activeTabId);
+      const baseIndex = activeIndex >= 0 ? activeIndex : 0;
+      const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;
+      setActiveTab(tabs[nextIndex].id);
+  }, [activeTabId, setActiveTab, tabs]);
 
   const closeConnectionPackageDialog = useCallback(() => {
       setConnectionPackageDialog(createClosedConnectionPackageDialogState());
@@ -2927,6 +2936,12 @@ function App() {
               case 'newQueryTab':
                   handleNewQuery();
                   break;
+              case 'switchToNextTab':
+                  switchActiveTabByOffset(1);
+                  break;
+              case 'switchToPreviousTab':
+                  switchActiveTabByOffset(-1);
+                  break;
               case 'newConnection':
                   handleCreateConnection();
                   break;
@@ -2957,7 +2972,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, switchActiveTabByOffset, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
