@@ -141,7 +141,6 @@ vi.mock('@ant-design/icons', () => {
     LinkOutlined: Icon,
     AimOutlined: Icon,
     TableOutlined: Icon,
-    AimOutlined: Icon,
     SortAscendingOutlined: Icon,
     SortDescendingOutlined: Icon,
     DatabaseOutlined: Icon,
