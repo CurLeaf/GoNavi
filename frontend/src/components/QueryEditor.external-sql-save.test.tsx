@@ -88,7 +88,7 @@ const editorState = vi.hoisted(() => {
   const state = {
     value: '',
     editor: null as any,
-    domNode: { style: { cursor: '' } },
+    domNode: { style: { cursor: '' }, addEventListener: vi.fn(), removeEventListener: vi.fn() },
     position: { lineNumber: 1, column: 1 },
     selection: null as any,
     providers: [] as any[],
@@ -1022,7 +1022,17 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       viewName: 'active_users',
       viewKind: 'view',
+      schemaName: 'reporting',
+      sidebarLocateKey: 'conn-1-main-view-active_users',
     });
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+      detail: expect.objectContaining({
+        tabId: 'conn-1-main-view-active_users',
+        schemaName: 'reporting',
+        objectGroup: 'views',
+      }),
+    }));
   });
 
   it('opens trigger and routine tabs on ctrl left click inside the editor', async () => {
@@ -1083,6 +1093,9 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'main',
       triggerName: 'audit.users_bi',
+      triggerTableName: 'audit.users',
+      schemaName: 'audit',
+      sidebarLocateKey: 'conn-1-main-trigger-audit.users_bi-audit.users',
     });
     expect(storeState.addTab).toHaveBeenCalledWith({
       id: 'routine-def-conn-1-main-reporting.refresh_stats',
@@ -1092,6 +1105,8 @@ describe('QueryEditor external SQL save', () => {
       dbName: 'main',
       routineName: 'reporting.refresh_stats',
       routineType: 'PROCEDURE',
+      schemaName: 'reporting',
+      sidebarLocateKey: 'conn-1-main-routine-reporting.refresh_stats',
     });
   });
 
@@ -2433,6 +2448,50 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.layout).toHaveBeenCalledTimes(2);
     expect(document.removeEventListener).toHaveBeenCalledWith('mousemove', expect.any(Function));
     expect(document.removeEventListener).toHaveBeenCalledWith('mouseup', expect.any(Function));
+  });
+
+  it('inserts sidebar object text when dropped into the SQL editor', async () => {
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode = {
+      style: { cursor: '' },
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        domListeners[type] ||= [];
+        domListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+    } as any;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'select * from ' })} />);
+    });
+
+    editorState.position = { lineNumber: 1, column: 'select * from '.length + 1 };
+
+    await act(async () => {
+      domListeners.drop?.forEach((listener) => listener({
+        clientX: 10,
+        clientY: 10,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        dataTransfer: {
+          getData: (type: string) => {
+            if (type === 'application/x-gonavi-sql-object') {
+              return JSON.stringify({ text: 'reporting.active_users' });
+            }
+            if (type === 'text/plain') {
+              return 'reporting.active_users';
+            }
+            return '';
+          },
+        },
+      }));
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-sidebar-drop',
+      [expect.objectContaining({ text: 'reporting.active_users' })],
+    );
+    expect(editorState.value).toContain('reporting.active_users');
   });
 
   it('runs selected SQL before cursor SQL', async () => {

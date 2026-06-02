@@ -24,6 +24,14 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
     const quoteSqlServerIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
+    const parseSchemaAndName = (fullName: string): { schema: string; name: string } => {
+        const raw = String(fullName || '').trim();
+        const idx = raw.lastIndexOf('.');
+        if (idx > 0 && idx < raw.length - 1) {
+            return { schema: raw.substring(0, idx), name: raw.substring(idx + 1) };
+        }
+        return { schema: '', name: raw };
+    };
 
     const getMetadataDialect = (conn: any): string => {
         const type = String(conn?.config?.type || '').trim().toLowerCase();
@@ -49,13 +57,14 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
     };
 
     const buildShowTriggerQueries = (dialect: string, triggerName: string, dbName: string): string[] => {
-        const safeTriggerName = escapeSQLLiteral(triggerName);
+        const { schema, name } = parseSchemaAndName(triggerName);
+        const safeTriggerName = escapeSQLLiteral(name);
         const safeDbName = escapeSQLLiteral(dbName);
         switch (dialect) {
             case 'mysql':
             case 'starrocks':
                 return [
-                    `SHOW CREATE TRIGGER \`${triggerName.replace(/`/g, '``')}\``,
+                    `SHOW CREATE TRIGGER \`${name.replace(/`/g, '``')}\``,
                     safeDbName
                         ? `SELECT ACTION_STATEMENT AS trigger_definition FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' AND trigger_name = '${safeTriggerName}' LIMIT 1`
                         : '',
@@ -75,10 +84,13 @@ WHERE t.tgname = '${safeTriggerName}'
   AND NOT t.tgisinternal
 LIMIT 1`];
             case 'sqlserver': {
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${safeTriggerName.replace(/'/g, "''")}')) AS trigger_definition`];
+                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(triggerName)}')) AS trigger_definition`];
             }
             case 'oracle':
             case 'dm':
+                if (schema) {
+                    return [`SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${escapeSQLLiteral(schema).toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
+                }
                 if (!safeDbName) {
                     return [`SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
                 }

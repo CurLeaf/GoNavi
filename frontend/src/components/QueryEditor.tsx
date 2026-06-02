@@ -21,6 +21,7 @@ import { resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
+import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
@@ -239,6 +240,14 @@ type QueryStatementPlan = {
     pkColumns: string[];
     editLocator?: EditRowLocator;
     warning?: string;
+};
+
+const readSidebarSqlDropText = (event: DragEvent): string => {
+    const payload = decodeSidebarSqlEditorDragPayload(String(event.dataTransfer?.getData(SIDEBAR_SQL_EDITOR_DRAG_MIME) || ''));
+    if (payload?.text) {
+        return payload.text;
+    }
+    return String(event.dataTransfer?.getData('text/plain') || '').trim();
 };
 
 const stripQueryIdentifierQuotes = (part: string): string => {
@@ -2007,6 +2016,41 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return query || '';
   };
 
+  const insertTextIntoEditorAtPosition = useCallback((text: string, position?: { lineNumber: number; column: number } | null) => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const targetPosition = normalizeEditorPosition(position || editor?.getPosition?.() || lastEditorCursorPositionRef.current);
+      if (!editor || !monaco?.Range || !targetPosition || !text) {
+          return false;
+      }
+      editor.focus?.();
+      editor.setPosition?.(targetPosition);
+      editor.executeEdits?.('gonavi-sidebar-drop', [{
+          range: new monaco.Range(
+              targetPosition.lineNumber,
+              targetPosition.column,
+              targetPosition.lineNumber,
+              targetPosition.column,
+          ),
+          text,
+          forceMoveMarkers: true,
+      }]);
+      editor.pushUndoStop?.();
+      return true;
+  }, []);
+
+  const handleSidebarObjectDrop = useCallback((event: DragEvent) => {
+      const dragText = readSidebarSqlDropText(event);
+      if (!dragText) {
+          return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const editor = editorRef.current;
+      const dropTarget = editor?.getTargetAtClientPoint?.(event.clientX, event.clientY);
+      insertTextIntoEditorAtPosition(dragText, normalizeEditorPosition(dropTarget?.position));
+  }, [insertTextIntoEditorAtPosition]);
+
   const handleSelectCurrentStatement = () => {
       const editor = editorRef.current;
       const monaco = monacoRef.current;
@@ -2509,6 +2553,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           editor.updateOptions?.({ mouseStyle: 'text' });
           setQueryEditorMouseCursor(editor, '');
       };
+      const editorDomNode = editor.getDomNode?.();
+      const handleEditorDragOver = (rawEvent: Event) => {
+          const event = rawEvent as DragEvent;
+          const dragText = readSidebarSqlDropText(event);
+          if (!dragText) return;
+          event.preventDefault();
+          if (event.dataTransfer) {
+              event.dataTransfer.dropEffect = 'copy';
+          }
+      };
+      const handleEditorDrop = (rawEvent: Event) => {
+          handleSidebarObjectDrop(rawEvent as DragEvent);
+      };
 
       // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
@@ -2598,6 +2655,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       window.addEventListener('keydown', syncModifierState);
       window.addEventListener('keyup', syncModifierState);
       window.addEventListener('blur', handleWindowBlur);
+      editorDomNode?.addEventListener('dragover', handleEditorDragOver);
+      editorDomNode?.addEventListener('drop', handleEditorDrop);
 
       editor.onMouseDown?.((event: any) => {
           const browserEvent = event?.event;
@@ -2681,6 +2740,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {
               const targetViewName = String(navigationTarget.viewName || '').trim();
               if (!targetViewName) return;
+              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+              const sidebarLocateKey = navigationTarget.type === 'materialized-view'
+                  ? `${connectionId}-${targetDbName}-materialized-view-${targetViewName}`
+                  : `${connectionId}-${targetDbName}-view-${targetViewName}`;
               addTab({
                   id: `view-def-${connectionId}-${targetDbName}-${targetViewName}`,
                   title: `${navigationTarget.type === 'materialized-view' ? '物化视图' : '视图'}: ${targetViewName}`,
@@ -2689,13 +2752,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   dbName: targetDbName,
                   viewName: targetViewName,
                   viewKind: navigationTarget.type === 'materialized-view' ? 'materialized' : 'view',
+                  schemaName: targetSchemaName || undefined,
+                  sidebarLocateKey,
               });
               dispatchQueryEditorSidebarLocate({
+                  tabId: sidebarLocateKey,
                   connectionId,
                   dbName: targetDbName,
                   viewName: targetViewName,
                   tableName: targetViewName,
-                  schemaName: navigationTarget.schemaName,
+                  schemaName: targetSchemaName,
                   objectGroup: navigationTarget.type === 'materialized-view' ? 'materializedViews' : 'views',
               });
               return;
@@ -2704,6 +2770,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (navigationTarget.type === 'trigger') {
               const targetTriggerName = String(navigationTarget.triggerName || '').trim();
               if (!targetTriggerName) return;
+              const targetTriggerTableName = String(navigationTarget.tableName || '').trim();
+              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+              const sidebarLocateKey = `${connectionId}-${targetDbName}-trigger-${targetTriggerName}-${targetTriggerTableName}`;
               addTab({
                   id: `trigger-${connectionId}-${targetDbName}-${targetTriggerName}`,
                   title: `触发器: ${targetTriggerName}`,
@@ -2711,13 +2780,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   connectionId,
                   dbName: targetDbName,
                   triggerName: targetTriggerName,
+                  triggerTableName: targetTriggerTableName || undefined,
+                  schemaName: targetSchemaName || undefined,
+                  sidebarLocateKey,
               });
               dispatchQueryEditorSidebarLocate({
+                  tabId: sidebarLocateKey,
                   connectionId,
                   dbName: targetDbName,
                   triggerName: targetTriggerName,
                   tableName: targetTriggerName,
-                  schemaName: navigationTarget.schemaName,
+                  schemaName: targetSchemaName,
                   objectGroup: 'triggers',
               });
               return;
@@ -2725,6 +2798,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           const targetRoutineName = String(navigationTarget.routineName || '').trim();
           if (!targetRoutineName) return;
+          const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+          const sidebarLocateKey = `${connectionId}-${targetDbName}-routine-${targetRoutineName}`;
           addTab({
               id: `routine-def-${connectionId}-${targetDbName}-${targetRoutineName}`,
               title: `${navigationTarget.routineType === 'PROCEDURE' ? '存储过程' : '函数'}: ${targetRoutineName}`,
@@ -2733,13 +2808,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               dbName: targetDbName,
               routineName: targetRoutineName,
               routineType: navigationTarget.routineType,
+              schemaName: targetSchemaName || undefined,
+              sidebarLocateKey,
           });
           dispatchQueryEditorSidebarLocate({
+              tabId: sidebarLocateKey,
               connectionId,
               dbName: targetDbName,
               routineName: targetRoutineName,
               tableName: targetRoutineName,
-              schemaName: navigationTarget.schemaName,
+              schemaName: targetSchemaName,
               objectGroup: 'routines',
           });
       });
@@ -2755,6 +2833,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
           window.removeEventListener('blur', handleWindowBlur);
+          editorDomNode?.removeEventListener('dragover', handleEditorDragOver);
+          editorDomNode?.removeEventListener('drop', handleEditorDrop);
       });
 
       refreshObjectDecorations();

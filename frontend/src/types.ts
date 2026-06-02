@@ -420,11 +420,14 @@ export interface TabData {
   resourceKind?: string;
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
+  triggerTableName?: string; // Trigger target table for trigger tabs
   viewName?: string; // View name for view definition tabs
   viewKind?: "view" | "materialized";
   eventName?: string; // Event name for MySQL event definition tabs
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
+  schemaName?: string; // Schema / owner name for schema-grouped objects
+  sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
 }
 

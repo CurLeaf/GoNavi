@@ -82,6 +82,7 @@ import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
     V2DatabaseContextMenuView,
@@ -163,6 +164,16 @@ const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined):
       || node?.type === 'db-trigger'
       || node?.type === 'db-event'
       || node?.type === 'routine';
+};
+
+const resolveSidebarObjectDragText = (node: Pick<TreeNode, 'type' | 'title' | 'dataRef'> | null | undefined): string => {
+  const dataRef = node?.dataRef || {};
+  if (node?.type === 'table') return String(dataRef.tableName || node?.title || '').trim();
+  if (node?.type === 'view' || node?.type === 'materialized-view') return String(dataRef.viewName || dataRef.tableName || node?.title || '').trim();
+  if (node?.type === 'db-trigger') return String(dataRef.triggerName || node?.title || '').trim();
+  if (node?.type === 'routine') return String(dataRef.routineName || node?.title || '').trim();
+  if (node?.type === 'db-event') return String(dataRef.eventName || node?.title || '').trim();
+  return '';
 };
 
 export const hasSidebarLazyChildren = (children: unknown): boolean => {
@@ -2926,7 +2937,7 @@ const Sidebar: React.FC<{
 	                key: `${conn.id}-${conn.dbName}-trigger-${entry.triggerName}-${entry.tableName}`,
 	                icon: <FunctionOutlined />,
 	                type: 'db-trigger',
-	                dataRef: { ...conn, triggerName: entry.triggerName, triggerTableName: entry.tableName, schemaName: entry.schemaName },
+	                dataRef: { ...conn, triggerName: entry.triggerName, triggerTableName: entry.tableName, tableName: entry.tableName, schemaName: entry.schemaName },
 	                isLeaf: true,
 	            });
 
@@ -3121,7 +3132,15 @@ const Sidebar: React.FC<{
       const target = resolveSidebarLocateTarget(request, {
           groupBySchema: shouldHideSchemaPrefix(conn),
       });
-      const objectLabel = request.objectGroup === 'materializedViews' ? '物化视图' : (request.objectGroup === 'views' ? '视图' : '表');
+      const objectLabel = request.objectGroup === 'materializedViews'
+          ? '物化视图'
+          : request.objectGroup === 'views'
+              ? '视图'
+              : request.objectGroup === 'triggers'
+                  ? '触发器'
+                  : request.objectGroup === 'routines'
+                      ? '函数/存储过程'
+                      : '表';
 
       let path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
       const dbLoadKey = `dbs-${request.connectionId}`;
@@ -3440,14 +3459,17 @@ const Sidebar: React.FC<{
           });
           return;
       } else if (node.type === 'db-trigger') {
-          const { triggerName, dbName, id } = node.dataRef;
+          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
           addTab({
               id: `trigger-${node.key}`,
               title: `触发器: ${triggerName}`,
               type: 'trigger',
               connectionId: id,
               dbName,
-              triggerName
+              triggerName,
+              triggerTableName,
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
           });
           return;
       } else if (node.type === 'db-event') {
@@ -6758,6 +6780,7 @@ const Sidebar: React.FC<{
   const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {
       const rawTitle = String(node.title ?? '');
       const groupKey = String(node?.dataRef?.groupKey || '');
+      const dragText = resolveSidebarObjectDragText(node);
       if (node.type === 'v2-table-section') {
           return (
               <span
@@ -6846,10 +6869,32 @@ const Sidebar: React.FC<{
           <span
               className={titleClassName}
               title={hoverTitle}
+              draggable={!!dragText}
               data-node-type={node.type}
               data-group-key={groupKey || undefined}
               data-sidebar-node-key={String(node.key || '')}
               data-sidebar-node-type={String(node.type || '')}
+              onDragStart={dragText ? (event) => {
+                  snapshotTreeSelectionBeforeDrag();
+                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                  setIsTreeDragging(true);
+                  event.stopPropagation();
+                  event.dataTransfer.effectAllowed = 'copy';
+                  event.dataTransfer.setData('text/plain', dragText);
+                  event.dataTransfer.setData(
+                      SIDEBAR_SQL_EDITOR_DRAG_MIME,
+                      encodeSidebarSqlEditorDragPayload({
+                          text: dragText,
+                          nodeType: node.type,
+                          connectionId: String(node?.dataRef?.id || ''),
+                          dbName: String(node?.dataRef?.dbName || ''),
+                      }),
+                  );
+              } : undefined}
+              onDragEnd={dragText ? () => {
+                  restoreTreeSelectionAfterDrag();
+                  setIsTreeDragging(false);
+              } : undefined}
           >
               {statusBadge}
               <span className="gn-v2-tree-label">{displayTitle}</span>
@@ -8089,6 +8134,7 @@ const Sidebar: React.FC<{
     ) : null;
 
     const displayTitle = String(node.title ?? '');
+    const dragText = resolveSidebarObjectDragText(node);
     let hoverTitle = displayTitle;
     if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'db-event') {
         const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
@@ -8154,6 +8200,38 @@ const Sidebar: React.FC<{
 
     if (isV2Ui) {
         return renderV2TreeTitle(node, hoverTitle, statusBadge);
+    }
+
+    if (dragText) {
+        return (
+            <span
+                title={hoverTitle}
+                draggable
+                onDragStart={(event) => {
+                    snapshotTreeSelectionBeforeDrag();
+                    treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                    setIsTreeDragging(true);
+                    event.stopPropagation();
+                    event.dataTransfer.effectAllowed = 'copy';
+                    event.dataTransfer.setData('text/plain', dragText);
+                    event.dataTransfer.setData(
+                        SIDEBAR_SQL_EDITOR_DRAG_MIME,
+                        encodeSidebarSqlEditorDragPayload({
+                            text: dragText,
+                            nodeType: node.type,
+                            connectionId: String(node?.dataRef?.id || ''),
+                            dbName: String(node?.dataRef?.dbName || ''),
+                        }),
+                    );
+                }}
+                onDragEnd={() => {
+                    restoreTreeSelectionAfterDrag();
+                    setIsTreeDragging(false);
+                }}
+            >
+                {statusBadge}{displayTitle}
+            </span>
+        );
     }
 
     return <span title={hoverTitle}>{statusBadge}{displayTitle}</span>;

@@ -52,7 +52,10 @@ export interface SidebarLocateTabLike {
   viewName?: string;
   viewKind?: string;
   triggerName?: string;
+  triggerTableName?: string;
   routineName?: string;
+  schemaName?: string;
+  sidebarLocateKey?: string;
   filePath?: string;
 }
 
@@ -154,10 +157,11 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
   }
 
   return normalizeSidebarLocateObjectRequest({
-    tabId: tab.id,
+    tabId: toTrimmedString(tab.sidebarLocateKey || tab.id) || undefined,
     connectionId: tab.connectionId,
     dbName: tab.dbName,
     tableName: objectName,
+    schemaName: tab.schemaName,
     objectGroup: tab.type === 'view-def'
       ? (tab.viewKind === 'materialized' ? 'materializedViews' : 'views')
       : (tab.type === 'trigger' ? 'triggers' : (tab.type === 'routine-def' ? 'routines' : undefined)),
