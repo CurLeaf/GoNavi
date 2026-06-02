@@ -1018,6 +1018,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
           )
         ) : (
           <Input
+            {...noAutoCapInputProps}
             ref={inputRef}
             className="data-grid-inline-editor-input"
             style={{ width: '100%', ...inputCellPadding }}
@@ -5039,6 +5040,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                       )
                                   ) : (
                                       <Input
+                                          {...noAutoCapInputProps}
                                           ref={virtualInlineInputRef}
                                           className="data-grid-inline-editor-input"
                                           style={{ width: '100%', ...inputCellPadding }}

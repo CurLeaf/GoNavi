@@ -433,6 +433,15 @@ describe('DataGrid layout', () => {
     expect(source).toContain('.${gridId} .data-grid-inline-editor-input');
   });
 
+  it('disables browser autocapitalization for inline cell editors', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    const editorInputCount = source.match(/\{\.\.\.noAutoCapInputProps\}[\s\S]{0,180}className="data-grid-inline-editor-input"/g)?.length || 0;
+
+    expect(source).toContain("import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';");
+    expect(editorInputCount).toBe(2);
+  });
+
   it('renders a quick WHERE condition editor when table filters are visible', () => {
     const markup = renderToStaticMarkup(
       <DataGrid
