@@ -564,7 +564,13 @@ describe('DataGrid layout', () => {
     expect(css).toContain('width: 66px !important;');
     expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
     expect(css).toContain('container-name: gn-v2-data-grid-statusbar;');
-    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-right::-webkit-scrollbar');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-statusbar::-webkit-scrollbar');
+    expect(css).toContain('scrollbar-width: thin;');
+    expect(css).toContain('min-width: max-content;');
+    expect(css).toContain('flex: 0 0 auto;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-center {');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:last-child {\n    display: none;');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:nth-child(2) {\n    display: none;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap::-webkit-scrollbar');
     expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 960px)');
     expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 760px)');
