@@ -1921,6 +1921,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const externalSyncRafRef = useRef<number | null>(null);
   const tableTargetSyncRafRef = useRef<number | null>(null);
   const tableHorizontalWheelRafRef = useRef<number | null>(null);
+  const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);
   const pendingTableHorizontalDeltaRef = useRef(0);
   const pendingTableTargetSyncSourceRef = useRef<HTMLElement | null>(null);
   const scrollSnapshotRafRef = useRef<number | null>(null);
@@ -6311,7 +6312,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return { holderEl, clampedOffset, currentOffset };
   }, [resolveVirtualHorizontalElements, tableScrollX]);
 
-  const applyVirtualHorizontalOffset = useCallback((tableContainer: HTMLElement, nextOffset: number) => {
+  const applyVirtualHorizontalOffset = useCallback((tableContainer: HTMLElement, nextOffset: number, options?: { forceInternalScroll?: boolean }) => {
       const synced = syncVirtualHorizontalVisualOffset(tableContainer, nextOffset);
       if (!synced) {
           return false;
@@ -6319,7 +6320,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const { holderEl, clampedOffset, currentOffset } = synced;
       const deltaX = clampedOffset - currentOffset;
-      if (Math.abs(deltaX) < 0.5) return true;
+      if (Math.abs(deltaX) < 0.5 && !options?.forceInternalScroll) return true;
 
       const tableInstance = tableRef.current;
       if (tableInstance && typeof tableInstance.scrollTo === 'function') {
@@ -6337,6 +6338,34 @@ const DataGrid: React.FC<DataGridProps> = ({
       }));
       return true;
   }, [syncVirtualHorizontalVisualOffset]);
+
+  const scheduleVirtualHorizontalAlignment = useCallback((preferredLeft?: number) => {
+      if (!enableVirtual || !isTableSurfaceActive) return;
+      if (virtualHorizontalAlignmentRafRef.current !== null) {
+          cancelAnimationFrame(virtualHorizontalAlignmentRafRef.current);
+      }
+      virtualHorizontalAlignmentRafRef.current = requestAnimationFrame(() => {
+          virtualHorizontalAlignmentRafRef.current = null;
+          const tableContainer = tableContainerRef.current;
+          if (!(tableContainer instanceof HTMLElement)) return;
+
+          virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };
+          const externalScroll = externalHorizontalScrollRef.current;
+          const nextLeft = Math.max(0, preferredLeft ?? externalScroll?.scrollLeft ?? lastTableScrollLeftRef.current);
+          const applied = applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });
+          const resolvedLeft = applied ? readVirtualHorizontalOffset(tableContainer) : nextLeft;
+          lastTableScrollLeftRef.current = resolvedLeft;
+          if (externalScroll && Math.abs(externalScroll.scrollLeft - resolvedLeft) > 1) {
+              externalScroll.scrollLeft = resolvedLeft;
+          }
+          lastExternalScrollLeftRef.current = externalScroll?.scrollLeft ?? resolvedLeft;
+          requestAnimationFrame(() => {
+              const latestContainer = tableContainerRef.current;
+              if (!(latestContainer instanceof HTMLElement)) return;
+              syncVirtualHorizontalVisualOffset(latestContainer, resolvedLeft);
+          });
+      });
+  }, [applyVirtualHorizontalOffset, enableVirtual, isTableSurfaceActive, readVirtualHorizontalOffset, syncVirtualHorizontalVisualOffset]);
 
   const flushVirtualHorizontalWheel = useCallback((tableContainer: HTMLElement) => {
       tableHorizontalWheelRafRef.current = null;
@@ -6586,7 +6615,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 虚拟表格路径：通过合成 WheelEvent 驱动 rc-virtual-list 内部状态，
           // rc-table 自动同步 header scrollLeft。
           if (enableVirtual && tableContainer instanceof HTMLElement) {
-              const applied = applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft);
+              const applied = applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });
               if (applied) {
                   // WheelEvent 经 rc-virtual-list 处理后状态异步更新，延迟同步 ref
                   requestAnimationFrame(() => {
@@ -6874,6 +6903,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       const rafId = requestAnimationFrame(() => recalculateTableMetrics(containerRef.current));
       return () => cancelAnimationFrame(rafId);
   }, [isTableSurfaceActive, totalWidth, mergedDisplayData.length, pagination?.total, pagination?.pageSize, recalculateTableMetrics]);
+
+  useEffect(() => {
+      if (!horizontalScrollVisible) return;
+      scheduleVirtualHorizontalAlignment();
+      return () => {
+          if (virtualHorizontalAlignmentRafRef.current !== null) {
+              cancelAnimationFrame(virtualHorizontalAlignmentRafRef.current);
+              virtualHorizontalAlignmentRafRef.current = null;
+          }
+      };
+  }, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);
 
   // 虚拟表列对齐：antd 虚拟表 body 使用 <div>+<td>（非 <table>），
   // 不会自动拉伸列宽到视口。而 header <table> 会被 antd 的 CSS 或 JS

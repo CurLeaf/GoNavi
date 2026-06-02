@@ -7,6 +7,7 @@ import Sidebar, {
   buildSidebarTableChildrenForUi,
   buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
+  estimateV2TreeHorizontalScrollWidth,
   filterV2ExplorerTreeByKind,
   getV2RailConnectionGroupBadgeText,
   hasSidebarLazyChildren,
@@ -176,6 +177,12 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   SelectSQLDirectory: mocks.noop,
   ListSQLDirectory: mocks.noop,
   ReadSQLFile: mocks.noop,
+  CreateSQLFile: mocks.noop,
+  CreateSQLDirectory: mocks.noop,
+  DeleteSQLFile: mocks.noop,
+  DeleteSQLDirectory: mocks.noop,
+  RenameSQLFile: mocks.noop,
+  RenameSQLDirectory: mocks.noop,
   JVMProbeCapabilities: mocks.noop,
   GetDriverStatusList: mocks.noop,
 }));
@@ -368,8 +375,45 @@ describe('Sidebar locate toolbar', () => {
     const locateActionIndex = markup.indexOf('data-sidebar-locate-current-tab-action="true"');
 
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
-    expect(markup).toContain('aria-label="定位当前打开表"');
+    expect(markup).toContain('aria-label="定位当前标签页"');
     expect(locateActionIndex).toBeGreaterThan(externalSqlActionIndex);
+  });
+
+  it('wires external SQL directory file actions to dedicated Wails APIs', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const loadTablesSource = source.slice(
+      source.indexOf('const loadTables = async'),
+      source.indexOf('const locateObjectInSidebarRef'),
+    );
+
+    expect(source).toContain('CreateSQLFile(directoryPath, name)');
+    expect(source).toContain('RenameSQLFile(filePath, name)');
+    expect(source).toContain('DeleteSQLFile(filePath)');
+    expect(source).toContain('CreateSQLDirectory(directoryPath, name)');
+    expect(source).toContain('RenameSQLDirectory(directoryPath, name)');
+    expect(source).toContain('DeleteSQLDirectory(directoryPath)');
+    expect(source).toContain('refreshGlobalExternalSQLRootNode(false)');
+    expect(source).toContain("request.objectGroup === 'externalSqlFiles'");
+    expect(source).toContain('SQL 文件未在外部 SQL 目录中找到');
+    expect(source).toContain('filePath: data.filePath || undefined');
+    expect(source).toContain("key: 'add-external-sql-directory'");
+    expect(source).toContain("key: 'new-external-sql-file'");
+    expect(source).toContain("key: 'rename-external-sql-file'");
+    expect(source).toContain("key: 'delete-external-sql-file'");
+    expect(source).toContain("key: 'new-external-sql-directory'");
+    expect(source).toContain("key: 'rename-external-sql-directory'");
+    expect(source).toContain("key: 'delete-external-sql-directory'");
+    expect(source).toContain('新建 SQL 文件');
+    expect(source).toContain('重命名 SQL 文件');
+    expect(source).toContain('确认删除 SQL 文件');
+    expect(source).toContain('新建目录');
+    expect(source).toContain('重命名目录');
+    expect(source).toContain('确认删除目录');
+    expect(source).toContain('仅支持删除空目录');
+    expect(source).toContain('文件名不能包含路径分隔符');
+    expect(source).toContain('目录名不能包含路径分隔符');
+    expect(loadTablesSource).not.toContain('externalSQLRootNode');
+    expect(loadTablesSource).not.toContain('dbExternalSQLDirectories');
   });
 
   it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
@@ -509,14 +553,25 @@ describe('Sidebar locate toolbar', () => {
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
   });
 
-  it('keeps v2 tree status dots circular while truncating only the label text', () => {
+  it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-tree-status is-${status}');
     expect(source).toContain('data-sidebar-tree-folder-icon="true"');
+    expect(source).toContain("overflow: 'hidden'");
+    expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
+    expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*overflow: hidden !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*width: 100%;[^}]*min-width: 0;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: 100%;[^}]*min-width: 100%;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: max-content;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*overflow-x: auto !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-node-content-wrapper \{[^}]*display: flex !important;/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-connection \{[^}]*align-items:\s*center;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*overflow: visible;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*flex: 1 1 auto;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title > \.gn-v2-tree-title \{[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status \{[^}]*width: 14px;[^}]*height: 14px;[^}]*flex: 0 0 14px;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
@@ -524,6 +579,32 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-tree-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
     expect(css).toMatch(/\.gn-v2-tree-folder-icon \{[^}]*width: 22px;[^}]*height: 22px;[^}]*flex: 0 0 22px;/s);
     expect(css).not.toContain('.gn-v2-tree-connection-meta');
+  });
+
+  it('estimates a v2 tree scroll width only when content is wider than the viewport', () => {
+    const narrowWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: 'front_end_sys',
+        key: 'db-front-end',
+        type: 'database',
+        children: [{
+          title: 'com_vod_error_file_tmp_with_a_very_long_table_name',
+          key: 'table-long',
+          type: 'table',
+        }],
+      },
+    ] as any, 260);
+    const wideWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: 'users',
+        key: 'table-users',
+        type: 'table',
+      },
+    ] as any, 900);
+
+    expect(narrowWidth).toBeGreaterThan(260);
+    expect(narrowWidth).toBeLessThanOrEqual(960);
+    expect(wideWidth).toBeUndefined();
   });
 
   it('does not repeat the active connection as an object-tree root in v2', () => {
