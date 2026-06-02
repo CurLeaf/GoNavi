@@ -1,5 +1,175 @@
 import type { ConnectionConfig, SavedConnection, TabData } from '../types';
 
+export const TAB_DISPLAY_ELEMENT_KEYS = ['connection', 'kind', 'object', 'database', 'schema', 'host'] as const;
+
+export type TabDisplayElementKey = typeof TAB_DISPLAY_ELEMENT_KEYS[number];
+export type TabDisplayLayout = 'single' | 'double';
+
+export interface TabDisplayLayoutSnapshot {
+  primaryElements: TabDisplayElementKey[];
+  secondaryElements: TabDisplayElementKey[];
+}
+
+export interface TabDisplaySettings {
+  layout: TabDisplayLayout;
+  primaryElements: TabDisplayElementKey[];
+  secondaryElements: TabDisplayElementKey[];
+  single?: TabDisplayLayoutSnapshot;
+  double?: TabDisplayLayoutSnapshot;
+}
+
+export const TAB_DISPLAY_SECONDARY_DEFAULT_KEYS: TabDisplayElementKey[] = ['connection', 'database', 'schema', 'host'];
+
+export const TAB_DISPLAY_ELEMENT_META: Record<TabDisplayElementKey, { label: string; description: string }> = {
+  connection: { label: '连接名', description: '连接简称或环境名，例如 DEV' },
+  kind: { label: '对象类型', description: 'SQL / TABLE / VIEW 等类型标签' },
+  object: { label: '对象名', description: '表名、查询名、资源名等核心名称' },
+  database: { label: '数据库', description: '当前 DB / catalog 名称' },
+  schema: { label: 'Schema', description: 'schema / owner 前缀' },
+  host: { label: 'Host/IP', description: '连接目标地址摘要' },
+};
+
+export const DEFAULT_TAB_DISPLAY_SETTINGS: TabDisplaySettings = {
+  layout: 'single',
+  primaryElements: ['connection', 'kind', 'object'],
+  secondaryElements: [],
+};
+
+export const getCurrentTabDisplaySnapshot = (settings: TabDisplaySettings): TabDisplayLayoutSnapshot => ({
+  primaryElements: [...settings.primaryElements],
+  secondaryElements: [...settings.secondaryElements],
+});
+
+export const getDefaultTabDisplaySnapshot = (layout: TabDisplayLayout): TabDisplayLayoutSnapshot => {
+  if (layout === 'single') {
+    return {
+      primaryElements: [...DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements],
+      secondaryElements: [],
+    };
+  }
+
+  return {
+    primaryElements: [...DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements],
+    secondaryElements: TAB_DISPLAY_SECONDARY_DEFAULT_KEYS.filter((key) => !DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements.includes(key)),
+  };
+};
+
+export const getSavedTabDisplaySnapshot = (
+  settings: TabDisplaySettings,
+  layout: TabDisplayLayout,
+): TabDisplayLayoutSnapshot => {
+  const saved = settings[layout];
+  if (saved) {
+    return {
+      primaryElements: [...saved.primaryElements],
+      secondaryElements: [...saved.secondaryElements],
+    };
+  }
+  if (settings.layout === layout) {
+    return getCurrentTabDisplaySnapshot(settings);
+  }
+  return getDefaultTabDisplaySnapshot(layout);
+};
+
+export const applyTabDisplaySettingsPatch = (
+  currentSettings: TabDisplaySettings,
+  patch: Partial<TabDisplaySettings>,
+): TabDisplaySettings => {
+  const nextSettings = sanitizeTabDisplaySettings({
+    ...currentSettings,
+    ...patch,
+  });
+  const nextSnapshot = getCurrentTabDisplaySnapshot(nextSettings);
+  return sanitizeTabDisplaySettings({
+    ...nextSettings,
+    [nextSettings.layout]: nextSnapshot,
+  });
+};
+
+export const switchTabDisplayLayout = (
+  currentSettings: TabDisplaySettings,
+  layout: TabDisplayLayout,
+): TabDisplaySettings => {
+  if (layout === currentSettings.layout) {
+    return sanitizeTabDisplaySettings(currentSettings);
+  }
+  const currentSnapshot = getCurrentTabDisplaySnapshot(currentSettings);
+  const targetSnapshot = getSavedTabDisplaySnapshot(currentSettings, layout);
+  return sanitizeTabDisplaySettings({
+    ...currentSettings,
+    [currentSettings.layout]: currentSnapshot,
+    layout,
+    primaryElements: targetSnapshot.primaryElements,
+    secondaryElements: targetSnapshot.secondaryElements,
+    [layout]: targetSnapshot,
+  });
+};
+
+const isTabDisplayElementKey = (value: unknown): value is TabDisplayElementKey => (
+  typeof value === 'string' && (TAB_DISPLAY_ELEMENT_KEYS as readonly string[]).includes(value)
+);
+
+const sanitizeTabDisplayElementList = (
+  value: unknown,
+  used: Set<TabDisplayElementKey>,
+): TabDisplayElementKey[] => {
+  if (!Array.isArray(value)) return [];
+  const result: TabDisplayElementKey[] = [];
+  value.forEach((entry) => {
+    if (!isTabDisplayElementKey(entry) || used.has(entry)) return;
+    used.add(entry);
+    result.push(entry);
+  });
+  return result;
+};
+
+const sanitizeTabDisplayLayoutSnapshot = (value: unknown): TabDisplayLayoutSnapshot | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const raw = value as Partial<TabDisplayLayoutSnapshot>;
+  const used = new Set<TabDisplayElementKey>();
+  const primaryElements = sanitizeTabDisplayElementList(raw.primaryElements, used);
+  const secondaryElements = sanitizeTabDisplayElementList(raw.secondaryElements, used);
+  return {
+    primaryElements: primaryElements.length > 0 ? primaryElements : [...DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements],
+    secondaryElements,
+  };
+};
+
+export const sanitizeTabDisplaySettings = (value: unknown): TabDisplaySettings => {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_TAB_DISPLAY_SETTINGS, primaryElements: [...DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements], secondaryElements: [...DEFAULT_TAB_DISPLAY_SETTINGS.secondaryElements] };
+  }
+  const raw = value as Partial<TabDisplaySettings>;
+  const used = new Set<TabDisplayElementKey>();
+  const primaryElements = sanitizeTabDisplayElementList(raw.primaryElements, used);
+  const secondaryElements = sanitizeTabDisplayElementList(raw.secondaryElements, used);
+  const result: TabDisplaySettings = {
+    layout: raw.layout === 'double' ? 'double' : 'single',
+    primaryElements: primaryElements.length > 0 ? primaryElements : [...DEFAULT_TAB_DISPLAY_SETTINGS.primaryElements],
+    secondaryElements,
+  };
+  const single = sanitizeTabDisplayLayoutSnapshot(raw.single);
+  const double = sanitizeTabDisplayLayoutSnapshot(raw.double);
+  if (single) {
+    result.single = single;
+  }
+  if (double) {
+    result.double = double;
+  }
+  return result;
+};
+
+export const resolveTabDisplayElementOrder = (settings?: Partial<TabDisplaySettings> | null): TabDisplayElementKey[] => {
+  const sanitized = sanitizeTabDisplaySettings(settings);
+  const visible = [...sanitized.primaryElements, ...sanitized.secondaryElements];
+  return [
+    ...visible,
+    ...TAB_DISPLAY_ELEMENT_KEYS.filter((key) => !visible.includes(key)),
+  ];
+};
+
 export const detectConnectionEnvLabel = (connectionName: string): string | null => {
   const tokens = connectionName.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   if (tokens.includes('prod') || tokens.includes('production')) return 'PROD';
@@ -78,7 +248,321 @@ const buildRedisBaseTitle = (tab: TabData): string => {
   return dbLabel;
 };
 
-export const buildTabDisplayTitle = (tab: TabData, connection?: SavedConnection): string => {
+const splitQualifiedIdentifier = (value: unknown): string[] => {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | '`' | '[' | null = null;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    const next = raw[index + 1];
+
+    if (char === '\\' && next === '"') {
+      current += '"';
+      index += 1;
+      continue;
+    }
+
+    if (quote === '"') {
+      current += char;
+      if (char === '"' && next === '"') {
+        current += next;
+        index += 1;
+      } else if (char === '"') {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (quote === '`') {
+      current += char;
+      if (char === '`' && next === '`') {
+        current += next;
+        index += 1;
+      } else if (char === '`') {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (quote === '[') {
+      current += char;
+      if (char === ']') {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === '`' || char === '[') {
+      quote = char;
+      current += char;
+      continue;
+    }
+
+    if (char === '.') {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  parts.push(current.trim());
+  return parts.filter(Boolean);
+};
+
+const unwrapIdentifierLabel = (value: string): string => {
+  let text = String(value || '').trim().replace(/\\"/g, '"');
+  if (!text) return '';
+
+  const first = text[0];
+  const last = text[text.length - 1];
+  if ((first === '"' && last === '"') || (first === '`' && last === '`')) {
+    text = text.slice(1, -1);
+  } else if (first === '[' && last === ']') {
+    text = text.slice(1, -1);
+  }
+
+  return text
+    .replace(/""/g, '"')
+    .replace(/``/g, '`')
+    .replace(/\]\]/g, ']')
+    .trim();
+};
+
+export const stripSchemaFromTabObjectLabel = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const parts = splitQualifiedIdentifier(raw);
+  const lastPart = parts[parts.length - 1] || raw;
+  return unwrapIdentifierLabel(lastPart) || raw;
+};
+
+const getSchemaFromTabObjectLabel = (value: unknown): string => {
+  const parts = splitQualifiedIdentifier(value);
+  if (parts.length <= 1) return '';
+  return parts.slice(0, -1).map((part) => unwrapIdentifierLabel(part)).filter(Boolean).join('.');
+};
+
+const replaceTitleObjectLabel = (title: string, objectName?: string): string => {
+  const rawTitle = String(title || '').trim();
+  if (!rawTitle) return rawTitle;
+
+  const rawObjectName = String(objectName || '').trim();
+  const displayObjectName = stripSchemaFromTabObjectLabel(rawObjectName);
+  if (rawObjectName && displayObjectName && displayObjectName !== rawObjectName) {
+    const lastIndex = rawTitle.lastIndexOf(rawObjectName);
+    if (lastIndex >= 0) {
+      return `${rawTitle.slice(0, lastIndex)}${displayObjectName}${rawTitle.slice(lastIndex + rawObjectName.length)}`;
+    }
+  }
+
+  const parenMatch = rawTitle.match(/^(.*\()([^()]*)\)(\s*)$/);
+  if (parenMatch) {
+    const objectLabel = stripSchemaFromTabObjectLabel(parenMatch[2]);
+    return `${parenMatch[1]}${objectLabel})${parenMatch[3]}`;
+  }
+
+  const colonMatch = rawTitle.match(/^([^:：]+[:：]\s*)(.+)$/);
+  if (colonMatch) {
+    return `${colonMatch[1]}${stripSchemaFromTabObjectLabel(colonMatch[2])}`;
+  }
+
+  return stripSchemaFromTabObjectLabel(rawTitle);
+};
+
+const stripSchemaFromTableOverviewTitle = (title: string): string => {
+  const rawTitle = String(title || '').trim();
+  return rawTitle.replace(/\s+\([^()]+\)\s*$/, '').trim() || rawTitle;
+};
+
+const QUERY_TAB_FALLBACK_TITLE = '新建查询';
+const QUERY_TAB_TITLE_MAX_LENGTH = 28;
+
+const getFileNameFromPath = (value: string): string => (
+  value.split(/[\\/]/).filter(Boolean).pop() || value
+);
+
+const isLikelyRawSqlTitle = (value: string): boolean => {
+  const text = value.trim();
+  if (!text) return false;
+  if (/[\r\n;]/.test(text)) return true;
+  return /^(select|with|insert|update|delete|merge|create|alter|drop|truncate|explain|show|desc|describe)\b/i.test(text);
+};
+
+const compactQueryTabTitle = (tab: TabData): string => {
+  const filePath = String(tab.filePath || '').trim();
+  if (filePath) {
+    return getFileNameFromPath(filePath);
+  }
+
+  const rawTitle = String(tab.title || '').trim();
+  const title = rawTitle && !isLikelyRawSqlTitle(rawTitle) ? rawTitle : QUERY_TAB_FALLBACK_TITLE;
+  if (title.length <= QUERY_TAB_TITLE_MAX_LENGTH) {
+    return title;
+  }
+  return `${title.slice(0, QUERY_TAB_TITLE_MAX_LENGTH - 3)}...`;
+};
+
+const buildCompactObjectTabTitle = (tab: TabData): string => {
+  if (tab.type === 'query') {
+    return compactQueryTabTitle(tab);
+  }
+  if (tab.type === 'table') {
+    return stripSchemaFromTabObjectLabel(tab.tableName || tab.title) || tab.title;
+  }
+  if (tab.type === 'design') {
+    return replaceTitleObjectLabel(tab.title, tab.tableName);
+  }
+  if (tab.type === 'table-overview') {
+    return stripSchemaFromTableOverviewTitle(tab.title);
+  }
+  if (tab.type === 'view-def') {
+    return replaceTitleObjectLabel(tab.title, tab.viewName);
+  }
+  if (tab.type === 'trigger') {
+    return replaceTitleObjectLabel(tab.title, tab.triggerName);
+  }
+  if (tab.type === 'event-def') {
+    return replaceTitleObjectLabel(tab.title, tab.eventName);
+  }
+  if (tab.type === 'routine-def') {
+    return replaceTitleObjectLabel(tab.title, tab.routineName);
+  }
+  return tab.title;
+};
+
+export const getTabDisplayKindLabel = (tab: TabData): string => {
+  if (tab.type === 'query') return 'SQL';
+  if (tab.type === 'table') return 'TABLE';
+  if (tab.type === 'design') return 'DESIGN';
+  if (tab.type === 'table-overview') return 'DB';
+  if (tab.type.startsWith('redis')) return 'REDIS';
+  if (tab.type.startsWith('jvm')) return 'JVM';
+  if (tab.type === 'trigger') return 'TRG';
+  if (tab.type === 'view-def') return tab.viewKind === 'materialized' ? 'MV' : 'VIEW';
+  if (tab.type === 'event-def') return 'EVT';
+  if (tab.type === 'routine-def') return 'FUNC';
+  return 'TAB';
+};
+
+const getTabRawObjectLabel = (tab: TabData): string => {
+  if (tab.type === 'query') return compactQueryTabTitle(tab);
+  if (tab.tableName) return tab.tableName;
+  if (tab.viewName) return tab.viewName;
+  if (tab.eventName) return tab.eventName;
+  if (tab.routineName) return tab.routineName;
+  if (tab.triggerName) return tab.triggerName;
+  if (tab.resourcePath) return tab.resourcePath;
+  if (tab.filePath) return getFileNameFromPath(tab.filePath);
+  if (tab.type.startsWith('redis')) return `db${tab.redisDB ?? 0}`;
+  return tab.title;
+};
+
+const getTabConnectionLabel = (connection?: SavedConnection): string => {
+  const connectionName = String(connection?.name || '').trim();
+  return detectConnectionEnvLabel(connectionName) || connectionName;
+};
+
+const getTabDisplayElementValue = (
+  key: TabDisplayElementKey,
+  tab: TabData,
+  connection?: SavedConnection,
+): string => {
+  const rawObjectLabel = getTabRawObjectLabel(tab);
+  switch (key) {
+    case 'connection':
+      return getTabConnectionLabel(connection);
+    case 'kind':
+      return getTabDisplayKindLabel(tab);
+    case 'object':
+      return buildCompactObjectTabTitle({
+        ...tab,
+        title: tab.type === 'table' || tab.type === 'query' ? rawObjectLabel : tab.title,
+      });
+    case 'database':
+      return String(tab.dbName || '').trim();
+    case 'schema':
+      return getSchemaFromTabObjectLabel(rawObjectLabel);
+    case 'host':
+      return resolveConnectionHostSummary(connection?.config);
+    default:
+      return '';
+  }
+};
+
+const formatTabDisplayPartValue = (key: TabDisplayElementKey, value: string): string => {
+  if (!value) return '';
+  if (key === 'connection') return `[${value}]`;
+  if (key === 'schema') return `SCHEMA:${value}`;
+  return value;
+};
+
+export interface TabDisplayPart {
+  key: TabDisplayElementKey;
+  value: string;
+  text: string;
+}
+
+export interface TabDisplayModel {
+  layout: TabDisplayLayout;
+  primaryParts: TabDisplayPart[];
+  secondaryParts: TabDisplayPart[];
+  primaryText: string;
+  secondaryText: string;
+  fullTitle: string;
+}
+
+const buildTabDisplayParts = (
+  keys: TabDisplayElementKey[],
+  tab: TabData,
+  connection?: SavedConnection,
+): TabDisplayPart[] => keys
+  .map((key) => {
+    const value = getTabDisplayElementValue(key, tab, connection);
+    return {
+      key,
+      value,
+      text: formatTabDisplayPartValue(key, value),
+    };
+  })
+  .filter((part) => part.text);
+
+export const buildTabDisplayModel = (
+  tab: TabData,
+  connection?: SavedConnection,
+  settings?: Partial<TabDisplaySettings> | null,
+): TabDisplayModel => {
+  const sanitized = sanitizeTabDisplaySettings(settings);
+  const primaryParts = buildTabDisplayParts(sanitized.primaryElements, tab, connection);
+  const secondaryParts = buildTabDisplayParts(sanitized.secondaryElements, tab, connection);
+  const primaryText = primaryParts.map((part) => part.text).join(' ').trim() || buildCompactObjectTabTitle(tab);
+  const secondaryText = secondaryParts.map((part) => part.text).join('·').trim();
+  const fullTitle = [primaryText, secondaryText].filter(Boolean).join(' · ');
+  return {
+    layout: sanitized.layout,
+    primaryParts,
+    secondaryParts,
+    primaryText,
+    secondaryText,
+    fullTitle,
+  };
+};
+
+export const buildTabDisplayTitle = (
+  tab: TabData,
+  connection?: SavedConnection,
+  settings?: Partial<TabDisplaySettings> | null,
+): string => {
+  if (settings) {
+    return buildTabDisplayModel(tab, connection, settings).fullTitle;
+  }
+
   const connectionName = String(connection?.name || '').trim();
 
   if (isRedisTab(tab)) {
@@ -87,13 +571,14 @@ export const buildTabDisplayTitle = (tab: TabData, connection?: SavedConnection)
     return identity ? `[${identity}] ${buildRedisBaseTitle(tab)}` : buildRedisBaseTitle(tab);
   }
 
+  const baseTitle = buildCompactObjectTabTitle(tab);
   if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') {
-    return tab.title;
+    return baseTitle;
   }
   if (!connectionName) {
-    return tab.title;
+    return baseTitle;
   }
 
   const prefix = detectConnectionEnvLabel(connectionName) || connectionName;
-  return `[${prefix}] ${tab.title}`;
+  return `[${prefix}] ${baseTitle}`;
 };

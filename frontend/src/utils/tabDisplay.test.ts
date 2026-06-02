@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import type { SavedConnection, TabData } from '../types';
-import { buildTabDisplayTitle, resolveConnectionHostSummary } from './tabDisplay';
+import {
+  applyTabDisplaySettingsPatch,
+  buildTabDisplayModel,
+  buildTabDisplayTitle,
+  resolveTabDisplayElementOrder,
+  resolveConnectionHostSummary,
+  sanitizeTabDisplaySettings,
+  switchTabDisplayLayout,
+  stripSchemaFromTabObjectLabel,
+} from './tabDisplay';
 
 const redisConnection: SavedConnection = {
   id: 'redis-1',
@@ -64,5 +73,284 @@ describe('tabDisplay', () => {
     };
 
     expect(buildTabDisplayTitle(tableTab, redisConnection)).toBe('[订单缓存] orders');
+  });
+
+  it('hides schema prefixes from schema-qualified table tab labels', () => {
+    const connection: SavedConnection = {
+      id: 'kingbase-1',
+      name: 'Kingbase DEV',
+      config: {
+        type: 'kingbase',
+        host: '127.0.0.1',
+        port: 54321,
+        user: 'SYSTEM',
+        database: 'appdb',
+      },
+    };
+    const tableTab: TabData = {
+      id: 'kingbase-1-appdb-table-ldf_server.andon_events',
+      title: 'ldf_server.andon_events',
+      type: 'table',
+      connectionId: 'kingbase-1',
+      dbName: 'appdb',
+      tableName: 'ldf_server.andon_events',
+    };
+
+    expect(buildTabDisplayTitle(tableTab, connection)).toBe('[DEV] andon_events');
+  });
+
+  it('hides schema prefixes from design and definition tab labels', () => {
+    const designTab: TabData = {
+      id: 'design-1',
+      title: '表结构 (public.orders)',
+      type: 'design',
+      connectionId: 'pg-1',
+      dbName: 'app',
+      tableName: 'public.orders',
+      readOnly: true,
+    };
+    const viewTab: TabData = {
+      id: 'view-1',
+      title: '视图: reporting.active_users',
+      type: 'view-def',
+      connectionId: 'pg-1',
+      dbName: 'app',
+      viewName: 'reporting.active_users',
+    };
+    const triggerTab: TabData = {
+      id: 'trigger-1',
+      title: '触发器: audit.users_bi',
+      type: 'trigger',
+      connectionId: 'pg-1',
+      dbName: 'app',
+      triggerName: 'audit.users_bi',
+    };
+    const routineTab: TabData = {
+      id: 'routine-1',
+      title: '存储过程: reporting.refresh_stats',
+      type: 'routine-def',
+      connectionId: 'pg-1',
+      dbName: 'app',
+      routineName: 'reporting.refresh_stats',
+      routineType: 'PROCEDURE',
+    };
+
+    expect(buildTabDisplayTitle(designTab)).toBe('表结构 (orders)');
+    expect(buildTabDisplayTitle(viewTab)).toBe('视图: active_users');
+    expect(buildTabDisplayTitle(triggerTab)).toBe('触发器: users_bi');
+    expect(buildTabDisplayTitle(routineTab)).toBe('存储过程: refresh_stats');
+  });
+
+  it('keeps quoted dots inside object names when hiding schema prefixes', () => {
+    expect(stripSchemaFromTabObjectLabel('"sales.schema"."order.items"')).toBe('order.items');
+    expect(stripSchemaFromTabObjectLabel('\\"ldf_server\\".\\"andon_events\\"')).toBe('andon_events');
+    expect(stripSchemaFromTabObjectLabel('[dbo].[order.items]')).toBe('order.items');
+  });
+
+  it('builds configurable single-line tab labels from ordered elements', () => {
+    const connection: SavedConnection = {
+      id: 'kingbase-1',
+      name: 'Kingbase DEV',
+      config: {
+        type: 'kingbase',
+        host: '192.168.10.8',
+        port: 54321,
+        user: 'SYSTEM',
+        database: 'appdb',
+      },
+    };
+    const tableTab: TabData = {
+      id: 'kingbase-1-appdb-table-ldf_server.andon_events',
+      title: 'ldf_server.andon_events',
+      type: 'table',
+      connectionId: 'kingbase-1',
+      dbName: 'appdb',
+      tableName: 'ldf_server.andon_events',
+    };
+
+    expect(buildTabDisplayTitle(tableTab, connection, {
+      layout: 'single',
+      primaryElements: ['object', 'schema', 'host'],
+      secondaryElements: [],
+    })).toBe('andon_events SCHEMA:ldf_server 192.168.10.8');
+  });
+
+  it('builds the default configurable model with connection, type and compact object name', () => {
+    const connection: SavedConnection = {
+      id: 'kingbase-1',
+      name: 'Kingbase DEV',
+      config: {
+        type: 'kingbase',
+        host: '192.168.10.8',
+        port: 54321,
+        user: 'SYSTEM',
+        database: 'appdb',
+      },
+    };
+    const tableTab: TabData = {
+      id: 'kingbase-1-appdb-table-ldf_server.andon_events',
+      title: 'ldf_server.andon_events',
+      type: 'table',
+      connectionId: 'kingbase-1',
+      dbName: 'appdb',
+      tableName: 'ldf_server.andon_events',
+    };
+
+    expect(buildTabDisplayModel(tableTab, connection).fullTitle).toBe('[DEV] TABLE andon_events');
+  });
+
+  it('keeps query tab labels compact when the title is raw SQL', () => {
+    const connection: SavedConnection = {
+      id: 'mysql-1',
+      name: '开发240',
+      config: {
+        type: 'mysql',
+        host: '192.168.1.240',
+        port: 3306,
+        user: 'root',
+        database: 'front_end_sys',
+      },
+    };
+    const queryTab: TabData = {
+      id: 'query-1',
+      title: 'select * from fs_org_auth_application where application_id is not null;',
+      type: 'query',
+      connectionId: 'mysql-1',
+      dbName: 'front_end_sys',
+      query: 'select * from fs_org_auth_application where application_id is not null;',
+    };
+
+    const model = buildTabDisplayModel(queryTab, connection);
+
+    expect(model.primaryText).toBe('[开发240] SQL 新建查询');
+    expect(model.fullTitle).not.toContain('fs_org_auth_application');
+    expect(model.fullTitle).not.toContain('select *');
+  });
+
+  it('uses SQL file names as compact query tab object labels', () => {
+    const queryTab: TabData = {
+      id: 'query-file-1',
+      title: 'select * from very_long_table_name;',
+      type: 'query',
+      connectionId: 'mysql-1',
+      filePath: '/Users/me/sql/monthly-report.sql',
+      query: 'select * from very_long_table_name;',
+    };
+
+    const model = buildTabDisplayModel(queryTab);
+
+    expect(model.primaryText).toBe('SQL monthly-report.sql');
+  });
+
+  it('builds configurable double-line tab display models', () => {
+    const connection: SavedConnection = {
+      id: 'pg-1',
+      name: 'Postgres PROD',
+      config: {
+        type: 'postgres',
+        host: '10.0.0.9',
+        port: 5432,
+        user: 'postgres',
+        database: 'analytics',
+      },
+    };
+    const tableTab: TabData = {
+      id: 'pg-1-analytics-table-reporting.events',
+      title: 'reporting.events',
+      type: 'table',
+      connectionId: 'pg-1',
+      dbName: 'analytics',
+      tableName: 'reporting.events',
+    };
+
+    const model = buildTabDisplayModel(tableTab, connection, {
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database', 'schema', 'host'],
+    });
+
+    expect(model.layout).toBe('double');
+    expect(model.primaryText).toBe('TABLE events');
+    expect(model.secondaryText).toBe('[PROD]·analytics·SCHEMA:reporting·10.0.0.9');
+    expect(model.fullTitle).toBe('TABLE events · [PROD]·analytics·SCHEMA:reporting·10.0.0.9');
+  });
+
+  it('sanitizes tab display settings with fallback defaults', () => {
+    expect(sanitizeTabDisplaySettings({
+      layout: 'invalid' as never,
+      primaryElements: ['schema', 'schema', 'bad' as never],
+      secondaryElements: ['object', 'schema', 'host'],
+    })).toEqual({
+      layout: 'single',
+      primaryElements: ['schema'],
+      secondaryElements: ['object', 'host'],
+    });
+
+    expect(sanitizeTabDisplaySettings({
+      layout: 'double',
+      primaryElements: ['bad' as never],
+      secondaryElements: [],
+    })).toEqual({
+      layout: 'double',
+      primaryElements: ['connection', 'kind', 'object'],
+      secondaryElements: [],
+    });
+
+    expect(sanitizeTabDisplaySettings({
+      layout: 'single',
+      primaryElements: ['object'],
+      secondaryElements: [],
+      single: {
+        primaryElements: ['object', 'object', 'host'],
+        secondaryElements: ['bad' as never],
+      },
+      double: {
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'kind', 'schema'],
+      },
+    })).toEqual({
+      layout: 'single',
+      primaryElements: ['object'],
+      secondaryElements: [],
+      single: {
+        primaryElements: ['object', 'host'],
+        secondaryElements: [],
+      },
+      double: {
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'schema'],
+      },
+    });
+  });
+
+  it('resolves visible tab display elements before hidden elements', () => {
+    expect(resolveTabDisplayElementOrder({
+      layout: 'double',
+      primaryElements: ['object', 'kind'],
+      secondaryElements: ['host'],
+    })).toEqual(['object', 'kind', 'host', 'connection', 'database', 'schema']);
+  });
+
+  it('keeps separate single-line and double-line settings when switching layouts', () => {
+    const doubleConfigured = sanitizeTabDisplaySettings({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database'],
+    });
+
+    const singleLayout = switchTabDisplayLayout(doubleConfigured, 'single');
+    const singleConfigured = applyTabDisplaySettingsPatch(singleLayout, {
+      primaryElements: ['object', 'host'],
+      secondaryElements: [],
+    });
+    const restoredDouble = switchTabDisplayLayout(singleConfigured, 'double');
+    const restoredSingle = switchTabDisplayLayout(restoredDouble, 'single');
+
+    expect(restoredDouble.layout).toBe('double');
+    expect(restoredDouble.primaryElements).toEqual(['kind', 'object']);
+    expect(restoredDouble.secondaryElements).toEqual(['connection', 'database']);
+    expect(restoredSingle.layout).toBe('single');
+    expect(restoredSingle.primaryElements).toEqual(['object', 'host']);
+    expect(restoredSingle.secondaryElements).toEqual([]);
   });
 });

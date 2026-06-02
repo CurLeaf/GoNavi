@@ -47,6 +47,11 @@ import {
   resolveOceanBaseProtocolFromQueryText,
 } from "./utils/oceanBaseProtocol";
 import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
+import {
+  DEFAULT_TAB_DISPLAY_SETTINGS,
+  sanitizeTabDisplaySettings,
+  type TabDisplaySettings,
+} from "./utils/tabDisplay";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -56,6 +61,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   useNativeMacWindowControls: boolean;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
+  tabDisplay: TabDisplaySettings;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -66,6 +72,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   useNativeMacWindowControls: false,
   customUIFontFamily: null,
   customMonoFontFamily: null,
+  tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -1313,13 +1320,17 @@ const sanitizeExternalSQLDirectories = (
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
+  const seenPaths = new Set<string>();
   value.forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
+    if (!path) return;
+    const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
+    if (seenPaths.has(normalizedPath)) return;
+    seenPaths.add(normalizedPath);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
-    if (!path || !connectionId || !dbName) return;
     const fallbackName =
       path.split(/[\\/]/).filter(Boolean).pop() || `SQL目录-${index + 1}`;
     result.push({
@@ -1330,8 +1341,8 @@ const sanitizeExternalSQLDirectories = (
         ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
       name: toTrimmedString(raw.name, fallbackName) || fallbackName,
       path,
-      connectionId,
-      dbName,
+      ...(connectionId ? { connectionId } : {}),
+      ...(dbName ? { dbName } : {}),
       createdAt: Number.isFinite(Number(raw.createdAt))
         ? Number(raw.createdAt)
         : Date.now(),
@@ -1628,6 +1639,7 @@ const sanitizeAppearance = (
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
+    tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -2547,11 +2559,11 @@ export const useStore = create<AppState>()(
       saveExternalSQLDirectory: (directory) =>
         set((state) => {
           const path = toTrimmedString(directory.path);
-          const connectionId = toTrimmedString(directory.connectionId);
-          const dbName = toTrimmedString(directory.dbName);
-          if (!path || !connectionId || !dbName) {
+          if (!path) {
             return state;
           }
+          const connectionId = toTrimmedString(directory.connectionId);
+          const dbName = toTrimmedString(directory.dbName);
           const nextDirectory: ExternalSQLDirectory = {
             id:
               toTrimmedString(
@@ -2564,18 +2576,17 @@ export const useStore = create<AppState>()(
                 path.split(/[\\/]/).filter(Boolean).pop() || "SQL目录",
               ) || "SQL目录",
             path,
-            connectionId,
-            dbName,
+            ...(connectionId ? { connectionId } : {}),
+            ...(dbName ? { dbName } : {}),
             createdAt: Number.isFinite(Number(directory.createdAt))
               ? Number(directory.createdAt)
               : Date.now(),
           };
+          const nextPathKey = path.replace(/\\/g, "/").toLowerCase();
           const existingIndex = state.externalSQLDirectories.findIndex(
             (item) =>
               item.id === nextDirectory.id ||
-              (item.connectionId === nextDirectory.connectionId &&
-                item.dbName === nextDirectory.dbName &&
-                item.path === nextDirectory.path),
+              item.path.replace(/\\/g, "/").toLowerCase() === nextPathKey,
           );
           if (existingIndex === -1) {
             return {

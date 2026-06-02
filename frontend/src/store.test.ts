@@ -77,6 +77,11 @@ describe('store appearance persistence', () => {
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
     expect(appearance.customUIFontFamily).toBeNull();
     expect(appearance.customMonoFontFamily).toBeNull();
+    expect(appearance.tabDisplay).toEqual({
+      layout: 'single',
+      primaryElements: ['connection', 'kind', 'object'],
+      secondaryElements: [],
+    });
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -117,6 +122,83 @@ describe('store appearance persistence', () => {
 
     expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
     expect(appearance.customMonoFontFamily).toBeNull();
+  });
+
+  it('persists tab display appearance settings and sanitizes invalid elements', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      tabDisplay: {
+        layout: 'double',
+        primaryElements: ['kind', 'object', 'invalid' as never, 'object'],
+        secondaryElements: ['connection', 'host', 'schema', 'kind'],
+      },
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'host', 'schema'],
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'host', 'schema'],
+    });
+  });
+
+  it('persists independent single-line and double-line tab display snapshots', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      tabDisplay: {
+        layout: 'double',
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'database'],
+        single: {
+          primaryElements: ['object', 'host'],
+          secondaryElements: [],
+        },
+        double: {
+          primaryElements: ['kind', 'object'],
+          secondaryElements: ['connection', 'database'],
+        },
+      },
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database'],
+      single: {
+        primaryElements: ['object', 'host'],
+        secondaryElements: [],
+      },
+      double: {
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'database'],
+      },
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.tabDisplay.single).toEqual({
+      primaryElements: ['object', 'host'],
+      secondaryElements: [],
+    });
+    expect(appearance.tabDisplay.double).toEqual({
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database'],
+    });
   });
 
   it('does not clear persisted legacy connections during hydration migration', async () => {
@@ -688,8 +770,6 @@ describe('store appearance persistence', () => {
       id: 'ext-1',
       name: 'scripts',
       path: 'D:/sql/scripts',
-      connectionId: 'conn-1',
-      dbName: 'demo',
       createdAt: 1,
     });
 
@@ -699,8 +779,6 @@ describe('store appearance persistence', () => {
         id: 'ext-1',
         name: 'scripts',
         path: 'D:/sql/scripts',
-        connectionId: 'conn-1',
-        dbName: 'demo',
         createdAt: 1,
       },
     ]);
@@ -709,6 +787,14 @@ describe('store appearance persistence', () => {
       state: {
         externalSQLDirectories: [
           persisted.state.externalSQLDirectories[0],
+          {
+            id: 'legacy-ext-1',
+            name: 'legacy duplicate',
+            path: 'D:\\sql\\scripts',
+            connectionId: 'conn-1',
+            dbName: 'demo',
+            createdAt: 2,
+          },
           { path: '', name: 'broken' },
         ],
       },
@@ -722,8 +808,6 @@ describe('store appearance persistence', () => {
         id: 'ext-1',
         name: 'scripts',
         path: 'D:/sql/scripts',
-        connectionId: 'conn-1',
-        dbName: 'demo',
         createdAt: 1,
       },
     ]);

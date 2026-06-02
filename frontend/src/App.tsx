@@ -27,6 +27,17 @@ import {
   sanitizeDataTableFontSize,
   sanitizeSidebarTreeFontSize,
 } from './utils/dataGridDisplay';
+import {
+  TAB_DISPLAY_SECONDARY_DEFAULT_KEYS,
+  TAB_DISPLAY_ELEMENT_META,
+  applyTabDisplaySettingsPatch,
+  resolveTabDisplayElementOrder,
+  sanitizeTabDisplaySettings,
+  switchTabDisplayLayout,
+  type TabDisplayElementKey,
+  type TabDisplayLayout,
+  type TabDisplaySettings,
+} from './utils/tabDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
@@ -273,6 +284,90 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const tabDisplaySettings = useMemo(
+      () => sanitizeTabDisplaySettings(appearance.tabDisplay),
+      [appearance.tabDisplay],
+  );
+  const tabDisplayElementOrder = useMemo(
+      () => resolveTabDisplayElementOrder(tabDisplaySettings),
+      [tabDisplaySettings],
+  );
+  const visibleTabDisplayElementKeys = useMemo(
+      () => new Set<TabDisplayElementKey>([
+          ...tabDisplaySettings.primaryElements,
+          ...tabDisplaySettings.secondaryElements,
+      ]),
+      [tabDisplaySettings],
+  );
+  const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
+      setAppearance({
+          tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
+      });
+  }, [setAppearance, tabDisplaySettings]);
+  const setTabDisplayLayout = useCallback((layout: TabDisplayLayout) => {
+      if (layout === tabDisplaySettings.layout) return;
+      setAppearance({
+          tabDisplay: switchTabDisplayLayout(tabDisplaySettings, layout),
+      });
+  }, [setAppearance, tabDisplaySettings]);
+  const updateTabDisplayElementVisibility = useCallback((key: TabDisplayElementKey, checked: boolean) => {
+      setFocusedTabDisplayElementKey(key);
+      const removeKey = (keys: TabDisplayElementKey[]) => keys.filter((item) => item !== key);
+      if (!checked) {
+          setTabDisplaySettings({
+              layout: tabDisplaySettings.layout,
+              primaryElements: removeKey(tabDisplaySettings.primaryElements),
+              secondaryElements: removeKey(tabDisplaySettings.secondaryElements),
+          });
+          return;
+      }
+
+      const primaryElements = removeKey(tabDisplaySettings.primaryElements);
+      const secondaryElements = removeKey(tabDisplaySettings.secondaryElements);
+      if (tabDisplaySettings.layout === 'double' && TAB_DISPLAY_SECONDARY_DEFAULT_KEYS.includes(key)) {
+          secondaryElements.push(key);
+      } else {
+          primaryElements.push(key);
+      }
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements,
+          secondaryElements,
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
+  const moveTabDisplayElement = useCallback((key: TabDisplayElementKey, offset: -1 | 1) => {
+      setFocusedTabDisplayElementKey(key);
+      const moveWithin = (keys: TabDisplayElementKey[]) => {
+          const index = keys.indexOf(key);
+          if (index < 0) return keys;
+          const nextIndex = index + offset;
+          if (nextIndex < 0 || nextIndex >= keys.length) return keys;
+          const next = [...keys];
+          [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+          return next;
+      };
+
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements: moveWithin(tabDisplaySettings.primaryElements),
+          secondaryElements: moveWithin(tabDisplaySettings.secondaryElements),
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
+  const setTabDisplayElementRow = useCallback((key: TabDisplayElementKey, row: 'primary' | 'secondary') => {
+      setFocusedTabDisplayElementKey(key);
+      const primaryElements = tabDisplaySettings.primaryElements.filter((item) => item !== key);
+      const secondaryElements = tabDisplaySettings.secondaryElements.filter((item) => item !== key);
+      if (row === 'primary') {
+          primaryElements.push(key);
+      } else {
+          secondaryElements.push(key);
+      }
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements,
+          secondaryElements,
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
   const resolvedUiFontFamily = resolveUIFontFamily(appearance.customUIFontFamily);
   const resolvedMonoFontFamily = resolveMonoFontFamily(appearance.customMonoFontFamily);
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
@@ -312,6 +407,7 @@ function App() {
   const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
   const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState('正在检查已保存配置');
   const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
+  const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
@@ -2082,6 +2178,8 @@ function App() {
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
   useEffect(() => {
       if (!isThemeModalOpen || themeModalSection !== 'appearance') {
           return;
@@ -2132,6 +2230,16 @@ function App() {
           cancelled = true;
       };
   }, [isThemeModalOpen, themeModalSection]);
+
+  useEffect(() => {
+      if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
+          return;
+      }
+      const timer = window.setTimeout(() => {
+          tabDisplaySettingsPanelRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }, 80);
+      return () => window.clearTimeout(timer);
+  }, [isThemeModalOpen, themeModalSection, tabDisplaySettingsFocusRequest]);
 
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
@@ -2864,6 +2972,19 @@ function App() {
       window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
+      };
+  }, []);
+
+  useEffect(() => {
+      const handleOpenTabDisplaySettingsEvent = () => {
+          setIsSettingsModalOpen(false);
+          setThemeModalSection('appearance');
+          setIsThemeModalOpen(true);
+          setTabDisplaySettingsFocusRequest((current) => current + 1);
+      };
+      window.addEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
       };
   }, []);
 
@@ -4216,6 +4337,181 @@ function App() {
                                                   : '优先展示当前系统已安装字体，名称接近 Mono/Code/Console 的字体会靠前。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'}
                                           </div>
                                       </div>
+                                  </div>
+                              </div>
+                              <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                      <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontWeight: 500 }}>Tab 标签展示</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                              自定义连接名、对象类型、对象名、数据库、Schema 和 Host/IP 的展示顺序；双行模式可把上下文放到副行。
+                                          </div>
+                                      </div>
+                                      <Segmented
+                                          size="small"
+                                          options={[
+                                              { label: '单行', value: 'single' },
+                                              { label: '双行', value: 'double' },
+                                          ]}
+                                          value={tabDisplaySettings.layout}
+                                          onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
+                                      />
+                                  </div>
+                                  <div style={{ display: 'grid', gap: 8 }}>
+                                      {tabDisplayElementOrder.map((key) => {
+                                          const meta = TAB_DISPLAY_ELEMENT_META[key];
+                                          const checked = visibleTabDisplayElementKeys.has(key);
+                                          const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
+                                          const currentRowElements = row === 'secondary'
+                                              ? tabDisplaySettings.secondaryElements
+                                              : tabDisplaySettings.primaryElements;
+                                          const indexInRow = currentRowElements.indexOf(key);
+                                          const canMoveUp = checked && indexInRow > 0;
+                                          const canMoveDown = checked && indexInRow >= 0 && indexInRow < currentRowElements.length - 1;
+                                          const isFocused = focusedTabDisplayElementKey === key;
+                                          return (
+                                              <div
+                                                  key={key}
+                                                  role="button"
+                                                  tabIndex={0}
+                                                  onClick={() => setFocusedTabDisplayElementKey(key)}
+                                                  onKeyDown={(event) => {
+                                                      if (event.key === 'Enter' || event.key === ' ') {
+                                                          event.preventDefault();
+                                                          setFocusedTabDisplayElementKey(key);
+                                                      }
+                                                  }}
+                                                  style={{
+                                                      display: 'grid',
+                                                      gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                      gap: 10,
+                                                      alignItems: 'center',
+                                                      padding: '9px 10px',
+                                                      borderRadius: 10,
+                                                      border: `1px solid ${isFocused
+                                                          ? (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      boxShadow: isFocused
+                                                          ? (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)')
+                                                          : 'none',
+                                                      background: isFocused
+                                                          ? (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)')
+                                                          : checked
+                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                      cursor: 'pointer',
+                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                      <span style={{
+                                                          width: 22,
+                                                          height: 22,
+                                                          borderRadius: 999,
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          justifyContent: 'center',
+                                                          flexShrink: 0,
+                                                          fontFamily: resolvedMonoFontFamily,
+                                                          fontSize: 11,
+                                                          fontWeight: 800,
+                                                          background: isFocused
+                                                              ? (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)')
+                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          color: isFocused
+                                                              ? (darkMode ? '#ffd666' : '#1677ff')
+                                                              : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
+                                                      }}>
+                                                          {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
+                                                      </span>
+                                                      <Switch
+                                                          size="small"
+                                                          checked={checked}
+                                                          onClick={(_, event) => event.stopPropagation()}
+                                                          onChange={(nextChecked) => updateTabDisplayElementVisibility(key, nextChecked)}
+                                                      />
+                                                      <div style={{ minWidth: 0 }}>
+                                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                              <span style={{ fontWeight: 600 }}>{meta.label}</span>
+                                                              {isFocused ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)',
+                                                                      color: darkMode ? '#ffd666' : '#1677ff',
+                                                                  }}>
+                                                                      当前
+                                                                  </span>
+                                                              ) : null}
+                                                              {checked && tabDisplaySettings.layout === 'double' ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: row === 'secondary'
+                                                                          ? (darkMode ? 'rgba(56,189,248,0.14)' : 'rgba(2,132,199,0.08)')
+                                                                          : (darkMode ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.08)'),
+                                                                      color: row === 'secondary'
+                                                                          ? (darkMode ? '#7dd3fc' : '#0369a1')
+                                                                          : (darkMode ? '#86efac' : '#15803d'),
+                                                                  }}>
+                                                                      {row === 'secondary' ? '副行' : '主行'}
+                                                                  </span>
+                                                              ) : null}
+                                                          </div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{meta.description}</div>
+                                                      </div>
+                                                  </div>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                      {tabDisplaySettings.layout === 'double' && checked ? (
+                                                          <Segmented
+                                                              size="small"
+                                                              options={[
+                                                                  { label: '主行', value: 'primary' },
+                                                                  { label: '副行', value: 'secondary' },
+                                                              ]}
+                                                              value={row}
+                                                              onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
+                                                              onClick={(event) => event.stopPropagation()}
+                                                          />
+                                                      ) : null}
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveUp}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, -1);
+                                                          }}
+                                                      >
+                                                          上移
+                                                      </Button>
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveDown}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, 1);
+                                                          }}
+                                                      >
+                                                          下移
+                                                      </Button>
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                                      当前预览：{tabDisplaySettings.layout === 'double' ? '主行 ' : ''}
+                                      {tabDisplaySettings.primaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ') || '默认标签'}
+                                      {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
+                                          ? `，副行 ${tabDisplaySettings.secondaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ')}`
+                                          : ''}
+                                      {focusedTabDisplayElementKey
+                                          ? `；当前选中 ${TAB_DISPLAY_ELEMENT_META[focusedTabDisplayElementKey].label}`
+                                          : ''}
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
