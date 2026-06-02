@@ -27,9 +27,11 @@ describe('windowStateUi', () => {
     expect(shouldToggleMaximisedWindowForScaleFix('restore', true)).toBe(false);
   });
 
-  it('only calls the backend WebView2 zoom reset after a real restore drift', () => {
+  it('calls the backend WebView2 zoom reset whenever a minimized window is restored', () => {
     expect(shouldResetWebViewZoomForScaleFix('restore', true)).toBe(true);
-    expect(shouldResetWebViewZoomForScaleFix('restore', false)).toBe(false);
+    // 字体模糊/DirectWrite 度量缓存异常不一定表现为 viewport ratio drift，
+    // 因此任务栏恢复场景必须直接走零动画 WebView2 zoom reset。
+    expect(shouldResetWebViewZoomForScaleFix('restore', false)).toBe(true);
     expect(shouldResetWebViewZoomForScaleFix('activation', true)).toBe(false);
     expect(shouldResetWebViewZoomForScaleFix('ratio-change', true)).toBe(false);
   });

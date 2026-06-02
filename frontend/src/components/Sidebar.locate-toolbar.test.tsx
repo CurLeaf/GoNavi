@@ -7,11 +7,14 @@ import Sidebar, {
   buildSidebarTableChildrenForUi,
   buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
+  estimateV2TreeHorizontalScrollWidth,
+  filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
   getV2RailConnectionGroupBadgeText,
   hasSidebarLazyChildren,
   normalizeSidebarTreeRelativeDropPosition,
   parseV2CommandSearchQuery,
+  type V2CommandSearchItem,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarTagDropInsertBefore,
   resolveSidebarDropTargetMetricsFromDomEvent,
@@ -24,6 +27,7 @@ import Sidebar, {
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldLoadSidebarNodeOnExpand,
+  shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
 } from './Sidebar';
 import {
@@ -66,6 +70,7 @@ const mocks = vi.hoisted(() => ({
       blur: 0,
       uiVersion: 'legacy',
     } as any,
+    shortcutOptions: null as any,
   },
 }));
 
@@ -148,7 +153,7 @@ vi.mock('../store', () => ({
     setSidebarTablePinned: mocks.noop,
     addSqlLog: mocks.noop,
     sqlLogs: [],
-    shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
+    shortcutOptions: mocks.state.shortcutOptions ?? cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
     setAIPanelVisible: mocks.noop,
     addAIContext: mocks.noop,
   }),
@@ -175,6 +180,12 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   SelectSQLDirectory: mocks.noop,
   ListSQLDirectory: mocks.noop,
   ReadSQLFile: mocks.noop,
+  CreateSQLFile: mocks.noop,
+  CreateSQLDirectory: mocks.noop,
+  DeleteSQLFile: mocks.noop,
+  DeleteSQLDirectory: mocks.noop,
+  RenameSQLFile: mocks.noop,
+  RenameSQLDirectory: mocks.noop,
   JVMProbeCapabilities: mocks.noop,
   GetDriverStatusList: mocks.noop,
 }));
@@ -182,6 +193,14 @@ vi.mock('../../wailsjs/go/app/App', () => ({
 vi.mock('../../wailsjs/runtime/runtime', () => ({
   EventsOn: mocks.noop,
 }));
+
+vi.mock('../utils/appearance', async () => {
+  const actual = await vi.importActual<typeof import('../utils/appearance')>('../utils/appearance');
+  return {
+    ...actual,
+    isMacLikePlatform: () => true,
+  };
+});
 
 describe('Sidebar locate toolbar', () => {
   beforeEach(() => {
@@ -203,6 +222,7 @@ describe('Sidebar locate toolbar', () => {
       blur: 0,
       uiVersion: 'legacy',
     };
+    mocks.state.shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
   });
 
   it('resolves the table name used by the sidebar copy action', () => {
@@ -255,6 +275,80 @@ describe('Sidebar locate toolbar', () => {
       keyword: 'payment',
       normalizedKeyword: 'payment',
     });
+  });
+
+  it('only runs v2 command search enter for a real selected result outside IME composition', () => {
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      activeItemCount: 1,
+    })).toBe(true);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      isComposing: true,
+      activeItemCount: 1,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      keyCode: 229,
+      activeItemCount: 1,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      activeItemCount: 0,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Escape',
+      activeItemCount: 1,
+    })).toBe(false);
+  });
+
+  it('keeps all loaded v2 command table matches once a keyword is entered', () => {
+    const items: V2CommandSearchItem[] = Array.from({ length: 40 }, (_, index) => ({
+      key: `node-table-${index}`,
+      kind: 'node' as const,
+      title: `fs_order_${index}`,
+      meta: '开发240 · front_end_sys',
+      icon: null,
+      node: {
+        type: 'table',
+        key: `table-${index}`,
+        title: `fs_order_${index}`,
+        dataRef: {
+          tableName: `fs_order_${index}`,
+          dbName: 'front_end_sys',
+        },
+      },
+    }));
+
+    expect(filterV2CommandSearchTreeItems(
+      items,
+      parseV2CommandSearchQuery('fs_order'),
+    )).toHaveLength(40);
+    expect(filterV2CommandSearchTreeItems(
+      items,
+      parseV2CommandSearchQuery(''),
+    )).toHaveLength(24);
+    expect(filterV2CommandSearchTreeItems(
+      [
+        ...items,
+        {
+          key: 'node-db',
+          kind: 'node' as const,
+          title: 'front_end_sys',
+          meta: '开发240',
+          icon: null,
+          node: {
+            type: 'database',
+            key: 'db-front-end-sys',
+            title: 'front_end_sys',
+            dataRef: {
+              dbName: 'front_end_sys',
+            },
+          },
+        },
+      ],
+      parseV2CommandSearchQuery('@fs_order'),
+    )).toHaveLength(40);
   });
 
   it('keeps the v2 active host on the selected database connection', () => {
@@ -358,8 +452,45 @@ describe('Sidebar locate toolbar', () => {
     const locateActionIndex = markup.indexOf('data-sidebar-locate-current-tab-action="true"');
 
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
-    expect(markup).toContain('aria-label="定位当前打开表"');
+    expect(markup).toContain('aria-label="定位当前标签页"');
     expect(locateActionIndex).toBeGreaterThan(externalSqlActionIndex);
+  });
+
+  it('wires external SQL directory file actions to dedicated Wails APIs', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const loadTablesSource = source.slice(
+      source.indexOf('const loadTables = async'),
+      source.indexOf('const locateObjectInSidebarRef'),
+    );
+
+    expect(source).toContain('CreateSQLFile(directoryPath, name)');
+    expect(source).toContain('RenameSQLFile(filePath, name)');
+    expect(source).toContain('DeleteSQLFile(filePath)');
+    expect(source).toContain('CreateSQLDirectory(directoryPath, name)');
+    expect(source).toContain('RenameSQLDirectory(directoryPath, name)');
+    expect(source).toContain('DeleteSQLDirectory(directoryPath)');
+    expect(source).toContain('refreshGlobalExternalSQLRootNode(false)');
+    expect(source).toContain("request.objectGroup === 'externalSqlFiles'");
+    expect(source).toContain('SQL 文件未在外部 SQL 目录中找到');
+    expect(source).toContain('filePath: data.filePath || undefined');
+    expect(source).toContain("key: 'add-external-sql-directory'");
+    expect(source).toContain("key: 'new-external-sql-file'");
+    expect(source).toContain("key: 'rename-external-sql-file'");
+    expect(source).toContain("key: 'delete-external-sql-file'");
+    expect(source).toContain("key: 'new-external-sql-directory'");
+    expect(source).toContain("key: 'rename-external-sql-directory'");
+    expect(source).toContain("key: 'delete-external-sql-directory'");
+    expect(source).toContain('新建 SQL 文件');
+    expect(source).toContain('重命名 SQL 文件');
+    expect(source).toContain('确认删除 SQL 文件');
+    expect(source).toContain('新建目录');
+    expect(source).toContain('重命名目录');
+    expect(source).toContain('确认删除目录');
+    expect(source).toContain('仅支持删除空目录');
+    expect(source).toContain('文件名不能包含路径分隔符');
+    expect(source).toContain('目录名不能包含路径分隔符');
+    expect(loadTablesSource).not.toContain('externalSQLRootNode');
+    expect(loadTablesSource).not.toContain('dbExternalSQLDirectories');
   });
 
   it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
@@ -385,17 +516,28 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('gn-v2-object-explorer');
     expect(markup).toContain('gn-v2-active-connection-header');
     expect(markup).toContain('gn-v2-explorer-search');
+    expect(markup).toContain('data-v2-sidebar-search-mode="command"');
     expect(markup).toContain('gn-v2-explorer-command-trigger');
+    expect(markup).toContain('gn-v2-explorer-filter-action');
+    expect(markup).toContain('重置侧栏筛选');
     expect(markup).toContain('搜索表、连接、动作... 或问 AI');
     expect(markup).toContain('gn-v2-search-shortcut');
-    expect(markup).toContain('<kbd>Ctrl</kbd>');
+    expect(markup).toContain('<kbd>⌘</kbd>');
     expect(markup).toContain('<kbd>K</kbd>');
+    expect(source).toContain("const focusSidebarSearchShortcut = resolveShortcutDisplay(shortcutOptions, 'focusSidebarSearch', activeShortcutPlatform);");
+    expect(source).not.toContain('<kbd>⌘</kbd>');
+    expect(source).not.toContain('<kbd>K</kbd>');
     expect(markup).toContain('gn-v2-explorer-filter-tabs');
     expect(markup).toContain('全部');
     expect(markup).toContain('视图');
     expect(markup).toContain('函数');
     expect(markup).toContain('aria-pressed="true"');
     expect(source).toContain("const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');");
+    expect(source).toContain("const v2SidebarSearchMode = appearance.v2SidebarSearchMode ?? 'command';");
+    expect(source).toContain('const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;');
+    expect(source).toContain('handleV2CommandSearchValueChange(event.target.value)');
+    expect(source).toContain('toggleV2CommandSearchPersistentFilter');
+    expect(source).toContain('gn-v2-command-filter-switch');
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');
@@ -437,6 +579,30 @@ describe('Sidebar locate toolbar', () => {
     expect(contextMenuFunction).not.toContain('setSelectedKeys');
     expect(contextMenuFunction).not.toContain('selectedNodesRef.current');
     expect(contextMenuFunction).not.toContain('setActiveContext');
+  });
+
+  it('can render the v2 sidebar with legacy persistent filter input', () => {
+    mocks.state.appearance.v2SidebarSearchMode = 'filter';
+    mocks.state.appearance.v2SidebarPersistedFilter = 'fs_org';
+
+    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+
+    expect(markup).toContain('data-v2-sidebar-search-mode="filter"');
+    expect(markup).toContain('筛选左侧表、连接、对象...');
+    expect(markup).toContain('value="fs_org"');
+    expect(markup).toContain('重置侧栏筛选');
+  });
+
+  it('renders the v2 search shortcut from the user shortcut settings', () => {
+    mocks.state.shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
+    mocks.state.shortcutOptions.focusSidebarSearch.mac = { combo: 'Meta+F', enabled: true };
+
+    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+
+    expect(markup).toContain('gn-v2-search-shortcut');
+    expect(markup).toContain('<kbd>⌘</kbd>');
+    expect(markup).toContain('<kbd>F</kbd>');
+    expect(markup).not.toContain('<kbd>K</kbd>');
   });
 
   it('keeps the v2 command search footer hints tied to real prefix actions', () => {
@@ -484,14 +650,25 @@ describe('Sidebar locate toolbar', () => {
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
   });
 
-  it('keeps v2 tree status dots circular while truncating only the label text', () => {
+  it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-tree-status is-${status}');
     expect(source).toContain('data-sidebar-tree-folder-icon="true"');
+    expect(source).toContain("overflow: 'hidden'");
+    expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
+    expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*overflow: hidden !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*width: 100%;[^}]*min-width: 0;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: 100%;[^}]*min-width: 100%;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: max-content;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*overflow-x: auto !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-node-content-wrapper \{[^}]*display: flex !important;/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-connection \{[^}]*align-items:\s*center;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*overflow: visible;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*flex: 1 1 auto;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title > \.gn-v2-tree-title \{[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status \{[^}]*width: 14px;[^}]*height: 14px;[^}]*flex: 0 0 14px;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
@@ -499,6 +676,32 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-tree-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
     expect(css).toMatch(/\.gn-v2-tree-folder-icon \{[^}]*width: 22px;[^}]*height: 22px;[^}]*flex: 0 0 22px;/s);
     expect(css).not.toContain('.gn-v2-tree-connection-meta');
+  });
+
+  it('estimates a v2 tree scroll width only when content is wider than the viewport', () => {
+    const narrowWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: 'front_end_sys',
+        key: 'db-front-end',
+        type: 'database',
+        children: [{
+          title: 'com_vod_error_file_tmp_with_a_very_long_table_name',
+          key: 'table-long',
+          type: 'table',
+        }],
+      },
+    ] as any, 260);
+    const wideWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: 'users',
+        key: 'table-users',
+        type: 'table',
+      },
+    ] as any, 900);
+
+    expect(narrowWidth).toBeGreaterThan(260);
+    expect(narrowWidth).toBeLessThanOrEqual(960);
+    expect(wideWidth).toBeUndefined();
   });
 
   it('does not repeat the active connection as an object-tree root in v2', () => {

@@ -162,20 +162,41 @@ describe('tool center menu entries', () => {
       ['runQuery', 'gonavi:run-active-query'],
       ['focusSidebarSearch', 'gonavi:focus-sidebar-search'],
       ['newQueryTab', 'handleNewQuery();'],
+      ['switchToNextTab', 'switchActiveTabByOffset(1);'],
+      ['switchToPreviousTab', 'switchActiveTabByOffset(-1);'],
       ['newConnection', 'handleCreateConnection();'],
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
       ['toggleTheme', 'setTheme('],
       ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
-      ['toggleMacFullscreen', 'handleTitleBarWindowToggle();'],
+      ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],
     ]);
 
     for (const [action, handler] of expectedHandlers) {
       expect(getGlobalShortcutCaseBlock(action)).toContain(handler);
     }
+    expect(appSource).toContain('const switchActiveTabByOffset = useCallback((offset: 1 | -1) => {');
+    expect(appSource).toContain('const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;');
+    expect(appSource).toContain('setActiveTab(tabs[nextIndex].id);');
     expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
-    expect(appSource).toContain('setTheme, toggleAIPanel, useNativeMacWindowControls');
+    expect(appSource).toContain('switchActiveTabByOffset, themeMode');
+  });
+
+  it('automatically resets WebView2 zoom when a Windows taskbar restore returns focus', () => {
+    expect(appSource).toContain('shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)');
+    expect(appSource).toContain('const shouldResetWebViewZoom = shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift);');
+    expect(appSource).toContain('if (shouldResetWebViewZoom && !isMaximised)');
+    expect(appSource).toContain('const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();');
+    expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
+  });
+
+  it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
+    expect(appSource).toContain('const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {');
+    expect(appSource).toContain('const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;');
+    expect(appSource).toContain('if (allowMacNativeFullscreen && useNativeMacWindowControls && isMacRuntime) {');
+    expect(appSource).toContain('void handleTitleBarWindowToggle({ allowMacNativeFullscreen: false });');
+    expect(getGlobalShortcutCaseBlock('toggleMacFullscreen')).toContain('handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });');
   });
 
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {

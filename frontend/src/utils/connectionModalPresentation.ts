@@ -39,6 +39,7 @@ export type ConnectionConfigLayoutKind =
   | 'postgres-compatible'
   | 'oracle'
   | 'file'
+  | 'search'
   | 'custom'
   | 'jvm'
   | 'generic-sql';
@@ -157,6 +158,8 @@ export const getConnectionConfigLayoutKindLabel = (
       return 'Oracle 服务';
     case 'file':
       return '文件型数据库';
+    case 'search':
+      return '搜索引擎';
     case 'custom':
       return '自定义连接';
     case 'jvm':
@@ -228,6 +231,19 @@ export const resolveConnectionConfigLayout = (
         'uri',
         'target',
         'connectionMode',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'elasticsearch') {
+    return {
+      kind: 'search',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
         'credentials',
         'databaseScope',
       ],

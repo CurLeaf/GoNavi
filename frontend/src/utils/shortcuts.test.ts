@@ -82,6 +82,18 @@ describe('findReservedConflicts', () => {
     const results = findReservedConflicts('Ctrl+F');
     expect(results[0].monacoCommandId).toBe('actions.find');
   });
+
+  it('uses Command instead of Control for macOS find shortcut conflicts', () => {
+    expect(findReservedConflicts('Ctrl+F', 'mac')).toEqual([]);
+    expect(findReservedConflicts('Meta+F', 'mac')[0]).toMatchObject({
+      label: '编辑器查找',
+      monacoCommandId: 'actions.find',
+    });
+    expect(findReservedConflicts('Ctrl+F', 'windows')[0]).toMatchObject({
+      label: '编辑器查找',
+      monacoCommandId: 'actions.find',
+    });
+  });
 });
 
 // ─── describeConflictContext ─────────────────────────────────────────
@@ -160,14 +172,41 @@ describe('shortcut defaults', () => {
     });
   });
 
+  it('keeps configurable shortcut descriptions free of hardcoded shortcut labels', () => {
+    Object.values(SHORTCUT_ACTION_META).forEach((meta) => {
+      expect(meta.description).not.toMatch(/⌘|⌃|Ctrl|Meta|Cmd|Command|Alt\+/);
+    });
+  });
+
+  it('keeps enabled default shortcuts unique per platform', () => {
+    for (const platform of ['mac', 'windows'] as const) {
+      const seen = new Map<string, string>();
+      Object.entries(DEFAULT_SHORTCUT_OPTIONS).forEach(([action, bindings]) => {
+        const binding = bindings[platform];
+        if (!binding.enabled || !binding.combo) return;
+        const existingAction = seen.get(binding.combo);
+        expect(existingAction, `${platform} ${binding.combo} is shared by ${existingAction} and ${action}`).toBeUndefined();
+        seen.set(binding.combo, action);
+      });
+    }
+  });
+
   it('uses Navicat-inspired defaults separately for macOS and Windows/Linux', () => {
     expect(DEFAULT_SHORTCUT_OPTIONS.runQuery).toEqual({
       mac: { combo: 'Meta+R', enabled: true },
       windows: { combo: 'Ctrl+R', enabled: true },
     });
     expect(DEFAULT_SHORTCUT_OPTIONS.newQueryTab).toEqual({
-      mac: { combo: 'Meta+Y', enabled: true },
-      windows: { combo: 'Ctrl+Q', enabled: true },
+      mac: { combo: 'Meta+N', enabled: true },
+      windows: { combo: 'Ctrl+N', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.switchToNextTab).toEqual({
+      mac: { combo: 'Ctrl+Tab', enabled: true },
+      windows: { combo: 'Ctrl+Tab', enabled: true },
+    });
+    expect(DEFAULT_SHORTCUT_OPTIONS.switchToPreviousTab).toEqual({
+      mac: { combo: 'Ctrl+Shift+Tab', enabled: true },
+      windows: { combo: 'Ctrl+Shift+Tab', enabled: true },
     });
     expect(DEFAULT_SHORTCUT_OPTIONS.toggleLogPanel).toEqual({
       mac: { combo: 'Meta+Shift+H', enabled: true },
@@ -177,8 +216,8 @@ describe('shortcut defaults', () => {
 
   it('registers connection and AI panel actions as real shortcuts', () => {
     expect(DEFAULT_SHORTCUT_OPTIONS.newConnection).toEqual({
-      mac: { combo: 'Meta+N', enabled: true },
-      windows: { combo: 'Ctrl+N', enabled: true },
+      mac: { combo: 'Meta+Shift+N', enabled: true },
+      windows: { combo: 'Ctrl+Shift+N', enabled: true },
     });
     expect(DEFAULT_SHORTCUT_OPTIONS.toggleAIPanel).toEqual({
       mac: { combo: 'Meta+J', enabled: true },
@@ -197,21 +236,21 @@ describe('shortcut defaults', () => {
       mac: { combo: 'Ctrl+Shift+R', enabled: false },
       windows: { combo: 'Ctrl+Shift+R', enabled: false },
     });
-    expect(options.newQueryTab.windows.combo).toBe('Ctrl+Q');
+    expect(options.newQueryTab.windows.combo).toBe('Ctrl+N');
   });
 
   it('sanitizes partial platform shortcut bindings without losing defaults', () => {
     const options = sanitizeShortcutOptions({
       newQueryTab: {
-        mac: { combo: 'Meta+Y', enabled: false },
+        mac: { combo: 'Meta+N', enabled: false },
       },
       sendAIChatMessage: {
         windows: { combo: 'A', enabled: true },
       },
     });
 
-    expect(options.newQueryTab.mac).toEqual({ combo: 'Meta+Y', enabled: false });
-    expect(options.newQueryTab.windows).toEqual({ combo: 'Ctrl+Q', enabled: true });
+    expect(options.newQueryTab.mac).toEqual({ combo: 'Meta+N', enabled: false });
+    expect(options.newQueryTab.windows).toEqual({ combo: 'Ctrl+N', enabled: true });
     expect(options.saveQuery.windows).toEqual({ combo: 'Ctrl+S', enabled: true });
     expect(options.sendAIChatMessage.windows).toEqual({ combo: 'Enter', enabled: true });
   });
@@ -219,13 +258,13 @@ describe('shortcut defaults', () => {
   it('resolves and displays platform-specific bindings', () => {
     const options = sanitizeShortcutOptions({
       newQueryTab: {
-        mac: { combo: 'Meta+Y', enabled: true },
-        windows: { combo: 'Ctrl+Q', enabled: true },
+        mac: { combo: 'Meta+N', enabled: true },
+        windows: { combo: 'Ctrl+N', enabled: true },
       },
     });
 
     expect(resolveShortcutBinding(options, 'newQueryTab', 'mac')).toEqual({
-      combo: 'Meta+Y',
+      combo: 'Meta+N',
       enabled: true,
     });
     expect(getShortcutDisplayLabel('Meta+N', 'mac')).toBe('⌘N');
@@ -239,7 +278,7 @@ describe('shortcut defaults', () => {
     expect(getPrimaryShortcutDisplayLabel('C', 'windows')).toBe('Ctrl+C');
     expect(getPrimaryShortcutDisplayLabel('Enter', 'mac')).toBe('⌘↵');
     expect(getPrimaryShortcutDisplayLabel('Enter', 'windows')).toBe('Ctrl+Enter');
-    expect(resolveShortcutDisplay(options, 'newQueryTab', 'windows')).toBe('Ctrl+Q');
+    expect(resolveShortcutDisplay(options, 'newQueryTab', 'windows')).toBe('Ctrl+N');
   });
 });
 

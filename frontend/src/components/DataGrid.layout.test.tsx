@@ -104,6 +104,9 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-v2-page-chip="true"');
     expect(markup).toContain('data-grid-v2-pagination-prev="true"');
     expect(markup).toContain('data-grid-v2-pagination-next="true"');
+    expect(markup).toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('跳页');
+    expect(markup).toContain('跳转页码');
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
@@ -430,6 +433,15 @@ describe('DataGrid layout', () => {
     expect(source).toContain('.${gridId} .data-grid-inline-editor-input');
   });
 
+  it('disables browser autocapitalization for inline cell editors', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    const editorInputCount = source.match(/\{\.\.\.noAutoCapInputProps\}[\s\S]{0,180}className="data-grid-inline-editor-input"/g)?.length || 0;
+
+    expect(source).toContain("import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';");
+    expect(editorInputCount).toBe(2);
+  });
+
   it('renders a quick WHERE condition editor when table filters are visible', () => {
     const markup = renderToStaticMarkup(
       <DataGrid
@@ -498,10 +510,16 @@ describe('DataGrid layout', () => {
     expect(source).toContain('type VirtualTableScrollReference = TableReference & {');
     expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
     expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
+    expect(source).toContain('const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
+    expect(source).toContain('const scheduleVirtualHorizontalAlignment = useCallback((preferredLeft?: number) => {');
+    expect(source).toContain('virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
+    expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });');
     expect(source).toContain('if (externalSyncRafRef.current !== null)');
     expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
     expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');
@@ -545,9 +563,25 @@ describe('DataGrid layout', () => {
     expect(secondaryActionsSource.indexOf('{pageFindContent}')).toBeLessThan(secondaryActionsSource.indexOf('gn-v2-data-grid-status-center'));
     expect(css).toContain('width: 66px !important;');
     expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
+    expect(css).toContain('container-name: gn-v2-data-grid-statusbar;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-statusbar::-webkit-scrollbar');
+    expect(css).toContain('scrollbar-width: thin;');
+    expect(css).toContain('min-width: max-content;');
+    expect(css).toContain('flex: 0 0 auto;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-center {');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:last-child {\n    display: none;');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:nth-child(2) {\n    display: none;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap::-webkit-scrollbar');
+    expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 960px)');
+    expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 760px)');
     expect(css).toContain('.data-grid-pagination-size-select.ant-select-focused .ant-select-selector');
     expect(css).toContain('overflow-x: auto;');
     expect(paginationBarSource).toContain("label: `${value}/页`");
+    expect(paginationBarSource).toContain('const maxJumpPage = Math.max(1, paginationTotalPages);');
+    expect(paginationBarSource).toContain('Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))');
+    expect(paginationBarSource).toContain('onPressEnter={submitJumpPage}');
+    expect(paginationBarSource).toContain('data-grid-pagination-jump="true"');
+    expect(css).toContain('.data-grid-pagination-jump-input.ant-input-number-focused');
     expect(css).toContain('background: transparent !important;');
   });
 

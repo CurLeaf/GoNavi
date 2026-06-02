@@ -54,6 +54,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Elasticsearch as a queryable read-only datasource', () => {
+    expect(getDataSourceCapabilities({ type: 'elasticsearch' })).toMatchObject({
+      type: 'elasticsearch',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'elastic' })).toMatchObject({
+      type: 'elasticsearch',
+      supportsQueryEditor: true,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

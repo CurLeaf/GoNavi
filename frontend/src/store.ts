@@ -47,6 +47,11 @@ import {
   resolveOceanBaseProtocolFromQueryText,
 } from "./utils/oceanBaseProtocol";
 import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
+import {
+  DEFAULT_TAB_DISPLAY_SETTINGS,
+  sanitizeTabDisplaySettings,
+  type TabDisplaySettings,
+} from "./utils/tabDisplay";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -54,8 +59,12 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  v2SidebarSearchMode: "command" | "filter";
+  v2CommandSearchPersistentFilterEnabled: boolean;
+  v2SidebarPersistedFilter: string;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
+  tabDisplay: TabDisplaySettings;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -64,8 +73,12 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  v2SidebarSearchMode: "command",
+  v2CommandSearchPersistentFilterEnabled: false,
+  v2SidebarPersistedFilter: "",
   customUIFontFamily: null,
   customMonoFontFamily: null,
+  tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -77,6 +90,20 @@ const MAX_FONT_SIZE = 20;
 const DEFAULT_STARTUP_FULLSCREEN = false;
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
+const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
+
+const sanitizeV2SidebarSearchMode = (
+  value: unknown,
+): AppearanceSettings["v2SidebarSearchMode"] => {
+  return value === "filter" ? "filter" : DEFAULT_APPEARANCE.v2SidebarSearchMode;
+};
+
+const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return DEFAULT_APPEARANCE.v2SidebarPersistedFilter;
+  }
+  return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
+};
 const MAX_URI_LENGTH = 4096;
 const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
@@ -237,6 +264,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "sqlserver",
   "iris",
   "mongodb",
+  "elasticsearch",
   "highgo",
   "vastbase",
   "opengauss",
@@ -263,6 +291,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "opengauss",
   "mongodb",
   "redis",
+  "elasticsearch",
   "tdengine",
 ]);
 
@@ -305,6 +334,8 @@ const getDefaultPortByType = (type: string): number => {
       return 1972;
     case "mongodb":
       return 27017;
+    case "elasticsearch":
+      return 9200;
     case "highgo":
       return 5866;
     default:
@@ -1313,13 +1344,17 @@ const sanitizeExternalSQLDirectories = (
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
+  const seenPaths = new Set<string>();
   value.forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
+    if (!path) return;
+    const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
+    if (seenPaths.has(normalizedPath)) return;
+    seenPaths.add(normalizedPath);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
-    if (!path || !connectionId || !dbName) return;
     const fallbackName =
       path.split(/[\\/]/).filter(Boolean).pop() || `SQL目录-${index + 1}`;
     result.push({
@@ -1330,8 +1365,8 @@ const sanitizeExternalSQLDirectories = (
         ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
       name: toTrimmedString(raw.name, fallbackName) || fallbackName,
       path,
-      connectionId,
-      dbName,
+      ...(connectionId ? { connectionId } : {}),
+      ...(dbName ? { dbName } : {}),
       createdAt: Number.isFinite(Number(raw.createdAt))
         ? Number(raw.createdAt)
         : Date.now(),
@@ -1626,8 +1661,19 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    v2SidebarSearchMode: sanitizeV2SidebarSearchMode(
+      appearance.v2SidebarSearchMode,
+    ),
+    v2CommandSearchPersistentFilterEnabled:
+      typeof appearance.v2CommandSearchPersistentFilterEnabled === "boolean"
+        ? appearance.v2CommandSearchPersistentFilterEnabled
+        : DEFAULT_APPEARANCE.v2CommandSearchPersistentFilterEnabled,
+    v2SidebarPersistedFilter: sanitizeV2SidebarPersistedFilter(
+      appearance.v2SidebarPersistedFilter,
+    ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
+    tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -2547,11 +2593,11 @@ export const useStore = create<AppState>()(
       saveExternalSQLDirectory: (directory) =>
         set((state) => {
           const path = toTrimmedString(directory.path);
-          const connectionId = toTrimmedString(directory.connectionId);
-          const dbName = toTrimmedString(directory.dbName);
-          if (!path || !connectionId || !dbName) {
+          if (!path) {
             return state;
           }
+          const connectionId = toTrimmedString(directory.connectionId);
+          const dbName = toTrimmedString(directory.dbName);
           const nextDirectory: ExternalSQLDirectory = {
             id:
               toTrimmedString(
@@ -2564,18 +2610,17 @@ export const useStore = create<AppState>()(
                 path.split(/[\\/]/).filter(Boolean).pop() || "SQL目录",
               ) || "SQL目录",
             path,
-            connectionId,
-            dbName,
+            ...(connectionId ? { connectionId } : {}),
+            ...(dbName ? { dbName } : {}),
             createdAt: Number.isFinite(Number(directory.createdAt))
               ? Number(directory.createdAt)
               : Date.now(),
           };
+          const nextPathKey = path.replace(/\\/g, "/").toLowerCase();
           const existingIndex = state.externalSQLDirectories.findIndex(
             (item) =>
               item.id === nextDirectory.id ||
-              (item.connectionId === nextDirectory.connectionId &&
-                item.dbName === nextDirectory.dbName &&
-                item.path === nextDirectory.path),
+              item.path.replace(/\\/g, "/").toLowerCase() === nextPathKey,
           );
           if (existingIndex === -1) {
             return {

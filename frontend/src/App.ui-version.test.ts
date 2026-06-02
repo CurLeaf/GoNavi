@@ -30,6 +30,9 @@ describe('UI version switch placement', () => {
     expect(appSource).toContain("onClick={() => setAppearance({ uiVersion: item.key as 'legacy' | 'v2' })}");
     expect(appSource).toContain('新版 UI 仍在 Beta');
     expect(appSource).toContain('Windows、macOS 与 Linux 均可切换');
+    expect(appSource).toContain('新版左侧搜索模式');
+    expect(appSource).toContain("value={appearance.v2SidebarSearchMode ?? 'command'}");
+    expect(appSource).toContain("setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })");
   });
 
   it('uses the card-style v2 switch from the redesign instead of the segmented pill', () => {
@@ -42,6 +45,7 @@ describe('UI version switch placement', () => {
     expect(uiVersionBlock).toContain("label: '旧版 UI'");
     expect(uiVersionBlock).toContain("label: '新版 UI'");
     expect(uiVersionBlock).toContain('CheckOutlined');
-    expect(uiVersionBlock).not.toContain('<Segmented');
+    expect(uiVersionBlock).toContain('新版左侧搜索模式');
+    expect(uiVersionBlock).toContain('<Segmented');
   });
 });

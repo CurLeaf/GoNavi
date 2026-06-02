@@ -33,8 +33,12 @@ func TestBuiltinLikeDriversRemainAvailable(t *testing.T) {
 
 func TestOptionalDriverAgentRevisionsGeneratedForOptionalDrivers(t *testing.T) {
 	for driverType := range optionalGoDrivers {
-		if revision := OptionalDriverAgentRevision(driverType); revision == "" {
+		revision := OptionalDriverAgentRevision(driverType)
+		if revision == "" {
 			t.Fatalf("%s 缺少自动生成的 driver-agent revision", driverType)
+		}
+		if revision == "src-local" {
+			t.Fatalf("%s driver-agent revision 仍是本地占位值", driverType)
 		}
 	}
 	if OptionalDriverAgentRevision("doris") != OptionalDriverAgentRevision("diros") {

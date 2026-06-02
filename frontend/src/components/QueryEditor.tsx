@@ -23,6 +23,11 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
+import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import {
+    getColumnDefinitionKey,
+    getColumnDefinitionName,
+} from '../utils/columnDefinition';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -184,8 +189,12 @@ const SQL_FUNCTIONS: { name: string; detail: string }[] = [
 
 // HMR 重载时释放旧注册避免补全项重复
 const _g = globalThis as any;
+const SQL_COMPLETION_PROVIDER_VERSION = '20260602-table-fuzzy-lazy-v2';
 if (!_g.__gonaviSqlCompletionState) {
-    _g.__gonaviSqlCompletionState = { registered: false, disposables: [] as any[] };
+    _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
+}
+if (!Array.isArray(_g.__gonaviSqlCompletionState.disposables)) {
+    _g.__gonaviSqlCompletionState.disposables = [];
 }
 let sqlCompletionRegistered = _g.__gonaviSqlCompletionState.registered;
 let sqlCompletionDisposables = _g.__gonaviSqlCompletionState.disposables;
@@ -204,6 +213,8 @@ let sharedTablesData: CompletionTableMeta[] = [];
 let sharedAllColumnsData: CompletionColumnMeta[] = [];
 let sharedVisibleDbs: string[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
+const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
+const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
 
 const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
 
@@ -605,6 +616,9 @@ const getTabQueryValue = (tab: TabData): string => (
 );
 
 const getInitialEditorQuery = (tab: TabData): string => {
+    if (hasQueryTabDraft(tab.id)) {
+        return getQueryTabDraft(tab.id);
+    }
     const tabQuery = getTabQueryValue(tab);
     if (tabQuery || tab.filePath || tab.savedQueryId || tab.readOnly) {
         return tabQuery;
@@ -621,16 +635,19 @@ const resolveNextResultSetIndex = (sets: Array<{ key?: string }>): number => {
     return maxIndex + 1;
 };
 
-const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => (
-    left.length === right.length && left.every((statement, index) => statement === right[index])
-);
-
 const normalizeExecutedSqlKey = (sql: string): string => String(sql || '')
     .replace(/\r\n/g, '\n')
     .replace(/；/g, ';')
     .trim()
     .replace(/;+\s*$/g, '')
-    .trim();
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+
+const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => (
+    left.length === right.length
+    && left.every((statement, index) => normalizeExecutedSqlKey(statement) === normalizeExecutedSqlKey(right[index]))
+);
 
 const normalizeEditorPosition = (position: any): { lineNumber: number; column: number } | null => {
     if (!position) return null;
@@ -895,6 +912,37 @@ type QueryEditorHoverTarget =
 
 const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
 const QUERY_EDITOR_HOVER_DELAY_MS = 1000;
+const QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH = 200_000;
+const QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS = 800;
+const QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH = 50_000;
+const QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH = 50_000;
+
+const getQueryEditorModelValueLength = (model: any): number | null => {
+    if (!model || typeof model.getValueLength !== 'function') {
+        return null;
+    }
+    try {
+        const length = Number(model.getValueLength());
+        return Number.isFinite(length) ? length : null;
+    } catch {
+        return null;
+    }
+};
+
+const getQueryEditorModelTextIfWithinLimit = (model: any, maxTextLength: number): string | null => {
+    const modelLength = getQueryEditorModelValueLength(model);
+    if (modelLength !== null && modelLength > maxTextLength) {
+        return null;
+    }
+    const text = String(model?.getValue?.() || '');
+    return text.length <= maxTextLength ? text : null;
+};
+
+const getQueryEditorObjectResolveText = (
+    model: any,
+    lineContent: string,
+    maxTextLength = QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH,
+): string => getQueryEditorModelTextIfWithinLimit(model, maxTextLength) ?? lineContent;
 
 const findIdentifierWindowAtOffset = (
     lineContent: string,
@@ -1530,10 +1578,10 @@ const resolveQueryLocatorPlan = async ({
         }
 
         const tableColumns = resCols.data as ColumnDefinition[];
-        const tableColumnNames = tableColumns.map((column) => String(column?.name || '').trim()).filter(Boolean);
+        const tableColumnNames = tableColumns.map(getColumnDefinitionName).filter(Boolean);
         const primaryKeys = tableColumns
-            .filter((column: any) => column?.key === 'PRI')
-            .map((column: any) => String(column?.name || '').trim())
+            .filter((column: any) => getColumnDefinitionKey(column) === 'PRI')
+            .map(getColumnDefinitionName)
             .filter(Boolean);
         const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
             ? resIndexes.data as IndexDefinition[]
@@ -1625,6 +1673,7 @@ const resolveQueryLocatorPlan = async ({
 
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const [query, setQuery] = useState(getInitialEditorQuery(tab));
+  const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
   
   type ResultSet = {
       key: string;
@@ -1659,6 +1708,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   // Resizing state
   const [editorHeight, setEditorHeight] = useState(300);
+  const editorShellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const runQueryActionRef = useRef<any>(null);
@@ -1673,7 +1723,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const objectDecorationIdsRef = useRef<string[]>([]);
   const objectHoverActionRef = useRef<any>(null);
   const hoverProviderDisposableRef = useRef<any>(null);
-  const dragRef = useRef<{ startY: number, startHeight: number } | null>(null);
+  const dragRef = useRef<{ startY: number, startHeight: number, currentHeight: number } | null>(null);
+  const pendingEditorHeightRef = useRef(editorHeight);
+  const resizeFrameRef = useRef<number | null>(null);
   const queryEditorRootRef = useRef<HTMLDivElement | null>(null);
   const editorPaneRef = useRef<HTMLDivElement | null>(null);
   const tablesRef = useRef<CompletionTableMeta[]>([]); // Store tables for autocomplete (cross-db)
@@ -1739,6 +1791,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return savedQueries.find((item) => item.id === tabId) || null;
   }, [savedQueries, tab.id, tab.savedQueryId]);
 
+  const syncQueryDraft = useCallback((nextQuery: string) => {
+      const next = String(nextQuery ?? '');
+      if (isExternalSQLFileTab) {
+          setSQLFileTabDraft(tab.id, next);
+          return;
+      }
+      setQueryTabDraft(tab.id, next);
+  }, [isExternalSQLFileTab, tab.id]);
+
+  const applyQueryState = useCallback((nextQuery: string) => {
+      const next = String(nextQuery ?? '');
+      syncQueryDraft(next);
+      if (!isExternalSQLFileTab || next.length <= QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH) {
+          setQuery(next);
+      }
+  }, [isExternalSQLFileTab, syncQueryDraft]);
+
+  useEffect(() => {
+      setQueryTabDraft(tab.id, query);
+  }, [query, tab.id]);
+
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
   }, [currentConnectionId]);
@@ -1758,12 +1831,31 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [currentDb]);
 
   useEffect(() => {
+      if (isExternalSQLFileTab) return;
+      const currentDraft = getQueryTabDraft(tab.id, query);
+      const shouldPersistQuery = currentDraft.length <= QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH;
       updateQueryTabDraft(tab.id, {
-          query,
+          ...(shouldPersistQuery ? { query: currentDraft } : {}),
           connectionId: currentConnectionId,
           dbName: currentDb,
       });
-  }, [currentConnectionId, currentDb, query, tab.id, updateQueryTabDraft]);
+  }, [currentConnectionId, currentDb, isExternalSQLFileTab, query, tab.id, updateQueryTabDraft]);
+
+  useEffect(() => {
+      if (!isExternalSQLFileTab) return;
+      updateQueryTabDraft(tab.id, {
+          connectionId: currentConnectionId,
+          dbName: currentDb,
+      });
+  }, [currentConnectionId, currentDb, isExternalSQLFileTab, tab.id, updateQueryTabDraft]);
+
+  useEffect(() => {
+      if (!isExternalSQLFileTab) return;
+      setSQLFileTabDraft(tab.id, getCurrentQuery());
+      return () => {
+          setSQLFileTabDraft(tab.id, getCurrentQuery());
+      };
+  }, [isExternalSQLFileTab, tab.id]);
 
   // 当此 Tab 成为活跃 Tab 时，将本实例的状态同步到模块级共享变量
   // 确保 completion provider 始终使用当前活跃 Tab 的上下文
@@ -1782,7 +1874,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       connectionsRef.current = connections;
   }, [connections]);
 
-  const refreshObjectDecorations = useCallback(() => {
+  const refreshObjectDecorations = useCallback((maxTextLength = QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH) => {
       const editor = editorRef.current;
       const monaco = monacoRef.current;
       const model = editor?.getModel?.();
@@ -1790,16 +1882,26 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
 
-      const text = String(model.getValue?.() || '');
+      const text = getQueryEditorModelTextIfWithinLimit(model, maxTextLength);
+      if (text === null) {
+          objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, []);
+          return;
+      }
+
       const decorations: any[] = [];
       const seen = new Set<string>();
+      let scannedIdentifiers = 0;
       const identifierRegex = /[`"\[]?[A-Za-z_][A-Za-z0-9_$]*(?:[`"\]]?\s*\.\s*[`"\[]?[A-Za-z_][A-Za-z0-9_$]*){0,2}[`"\]]?/g;
       const lines = text.replace(/\r\n/g, '\n').split('\n');
 
-      lines.forEach((lineContent, lineIndex) => {
+      for (const [lineIndex, lineContent] of lines.entries()) {
           let match: RegExpExecArray | null;
           identifierRegex.lastIndex = 0;
           while ((match = identifierRegex.exec(lineContent)) !== null) {
+              scannedIdentifiers += 1;
+              if (scannedIdentifiers > QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS) {
+                  break;
+              }
               const positionColumn = match.index + 2;
               const hoverTarget = resolveQueryEditorHoverTarget(
                   text,
@@ -1834,7 +1936,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   options: { inlineClassName },
               });
           }
-      });
+          if (scannedIdentifiers > QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS) {
+              break;
+          }
+      }
 
       objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, decorations);
   }, []);
@@ -1848,8 +1953,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return false;
       }
       const lineContent = String(model.getLineContent?.(normalizedPosition.lineNumber) || '');
+      const resolveText = getQueryEditorObjectResolveText(model, lineContent);
       const hoverTarget = resolveQueryEditorHoverTarget(
-          String(model.getValue?.() || ''),
+          resolveText,
           lineContent,
           normalizedPosition.column,
           currentDbRef.current,
@@ -1892,8 +1998,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, []);
 
   useEffect(() => {
-      refreshObjectDecorations();
-  }, [query, currentDb, refreshObjectDecorations]);
+      refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
+  }, [currentDb, refreshObjectDecorations]);
 
   const getCurrentQuery = () => {
       const val = editorRef.current?.getValue?.();
@@ -1928,7 +2034,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const syncQueryToEditor = (sql: string) => {
       const next = sql || '';
-      setQuery(next);
+      applyQueryState(next);
       const editor = editorRef.current;
       if (editor && editor.getValue?.() !== next) {
           editor.setValue(next);
@@ -1982,8 +2088,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               setDbList(dbs);
               if (!currentDbRef.current) {
-                  if (conn.config.database && dbs.includes(conn.config.database)) setCurrentDb(conn.config.database);
-                  else if (dbs.length > 0 && dbs[0] !== 'information_schema') setCurrentDb(dbs[0]);
+                  const configuredDb = String(conn.config.database || '').trim();
+                  const fallbackDb = dbs.find((db: string) => String(db || '').toLowerCase() !== 'information_schema') || dbs[0] || '';
+                  const nextDb = configuredDb && dbs.includes(configuredDb) ? configuredDb : fallbackDb;
+                  if (nextDb) {
+                      currentDbRef.current = nextDb;
+                      setCurrentDb(nextDb);
+                  }
               }
           } else {
               visibleDbsRef.current = [];
@@ -2211,26 +2322,82 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       setCurrentQueryId('');
   };
 
-  // Handle Resizing
-  const handleMouseDown = (e: React.MouseEvent) => {
-      e.preventDefault();
-      dragRef.current = { startY: e.clientY, startHeight: editorHeight };
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-  };
+  const clampEditorHeight = useCallback((height: number) => {
+      const viewportHeight = Number.isFinite(window.innerHeight) ? window.innerHeight : 800;
+      const maxHeight = Math.max(100, viewportHeight - 200);
+      return Math.max(100, Math.min(maxHeight, height));
+  }, []);
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const applyEditorHeightToDom = useCallback(() => {
+      const nextHeight = pendingEditorHeightRef.current;
+      if (editorShellRef.current) {
+          editorShellRef.current.style.height = `${nextHeight}px`;
+      }
+      editorRef.current?.layout?.();
+  }, []);
+
+  const cancelEditorResizeFrame = useCallback(() => {
+      if (resizeFrameRef.current === null) return;
+      if (typeof window.cancelAnimationFrame === 'function') {
+          window.cancelAnimationFrame(resizeFrameRef.current);
+      } else {
+          window.clearTimeout(resizeFrameRef.current);
+      }
+      resizeFrameRef.current = null;
+  }, []);
+
+  const scheduleEditorHeightDomUpdate = useCallback((height: number) => {
+      pendingEditorHeightRef.current = height;
+      if (resizeFrameRef.current !== null) return;
+
+      const requestFrame = typeof window.requestAnimationFrame === 'function'
+          ? window.requestAnimationFrame.bind(window)
+          : (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 16);
+
+      resizeFrameRef.current = requestFrame(() => {
+          resizeFrameRef.current = null;
+          applyEditorHeightToDom();
+      });
+  }, [applyEditorHeightToDom]);
+
+  // Handle Resizing
+  const handleMouseMove = useCallback((e: MouseEvent) => {
       if (!dragRef.current) return;
       const delta = e.clientY - dragRef.current.startY;
-      const newHeight = Math.max(100, Math.min(window.innerHeight - 200, dragRef.current.startHeight + delta));
-      setEditorHeight(newHeight);
-  };
+      const newHeight = clampEditorHeight(dragRef.current.startHeight + delta);
+      dragRef.current.currentHeight = newHeight;
+      scheduleEditorHeightDomUpdate(newHeight);
+  }, [clampEditorHeight, scheduleEditorHeightDomUpdate]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
+      const finalHeight = dragRef.current?.currentHeight;
       dragRef.current = null;
+      cancelEditorResizeFrame();
+      if (typeof finalHeight === 'number') {
+          pendingEditorHeightRef.current = finalHeight;
+          applyEditorHeightToDom();
+          setEditorHeight(finalHeight);
+      }
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-  };
+  }, [applyEditorHeightToDom, cancelEditorResizeFrame, handleMouseMove]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+      e.preventDefault();
+      dragRef.current = { startY: e.clientY, startHeight: editorHeight, currentHeight: editorHeight };
+      pendingEditorHeightRef.current = editorHeight;
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+  }, [editorHeight, handleMouseMove, handleMouseUp]);
+
+  useEffect(() => {
+      return () => {
+          dragRef.current = null;
+          cancelEditorResizeFrame();
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+      };
+  }, [cancelEditorResizeFrame, handleMouseMove, handleMouseUp]);
 
   // Setup Autocomplete and Editor
   const handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -2239,9 +2406,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
       editor.updateOptions?.({
+          fixedOverflowWidgets: true,
           hover: {
               enabled: true,
               delay: QUERY_EDITOR_HOVER_DELAY_MS,
+              above: false,
           },
       });
 
@@ -2279,7 +2448,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
           const hoverTarget = resolveQueryEditorHoverTarget(
-              String(model?.getValue?.() || ''),
+              getQueryEditorObjectResolveText(model, lineContent),
               lineContent,
               targetPosition.column,
               currentDbRef.current,
@@ -2352,8 +2521,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   return null;
               }
               const lineContent = String(model?.getLineContent?.(normalizedPosition.lineNumber) || '');
+              const resolveText = getQueryEditorObjectResolveText(model, lineContent);
               const hoverTarget = resolveQueryEditorHoverTarget(
-                  String(model?.getValue?.() || ''),
+                  resolveText,
                   lineContent,
                   normalizedPosition.column,
                   currentDbRef.current,
@@ -2407,8 +2577,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       });
 
-      editor.onDidChangeModelContent?.(() => {
-          refreshObjectDecorations();
+      editor.onDidChangeModelContent?.((event: any) => {
+          const hasSlashCommandMarker = Array.isArray(event?.changes)
+              && event.changes.some((change: any) => /__AI_\w+__/.test(String(change?.text || '')));
+          if (!hasSlashCommandMarker) return;
+          refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
       });
 
       editor.onMouseMove?.((event: any) => {
@@ -2668,14 +2841,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       }
 
+      // HMR 重载或测试重置时，以全局状态为准，避免本地闭包状态和 provider 列表不同步。
+      sqlCompletionRegistered = Boolean(_g.__gonaviSqlCompletionState.registered);
+      sqlCompletionDisposables = _g.__gonaviSqlCompletionState.disposables;
+      const shouldRegisterSqlCompletion = !sqlCompletionRegistered
+          || _g.__gonaviSqlCompletionState.version !== SQL_COMPLETION_PROVIDER_VERSION;
+
       // HMR 重载时释放旧注册避免补全项重复
-      if (!sqlCompletionRegistered) {
+      if (shouldRegisterSqlCompletion) {
       sqlCompletionRegistered = true;
       _g.__gonaviSqlCompletionState.registered = true;
+      _g.__gonaviSqlCompletionState.version = SQL_COMPLETION_PROVIDER_VERSION;
       sqlCompletionDisposables.forEach((d: any) => d?.dispose?.());
       sqlCompletionDisposables.length = 0;
       sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
-          triggerCharacters: ['.'],
+          triggerCharacters: ['.', '_', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')],
           provideCompletionItems: async (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
               const range = {
@@ -2710,6 +2890,45 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       useSSH: conn.config.useSSH || false,
                       ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
                   };
+              };
+
+              const getLazyTablesByDB = async (dbName: string) => {
+                  const connId = sharedCurrentConnectionId;
+                  if (!connId || !dbName) return [] as CompletionTableMeta[];
+                  const key = `${connId}|${dbName}`;
+                  if (sharedLazyTablesCache[key]) {
+                      return sharedLazyTablesCache[key];
+                  }
+                  if (sharedLazyTablesInFlight[key]) {
+                      return sharedLazyTablesInFlight[key];
+                  }
+
+                  const config = buildConnConfig();
+                  if (!config) return [] as CompletionTableMeta[];
+
+                  sharedLazyTablesInFlight[key] = DBGetTables(buildRpcConnectionConfig(config) as any, dbName)
+                      .then((res) => {
+                          const tables = res?.success && Array.isArray(res.data)
+                              ? res.data
+                                  .map((row: any) => String(Object.values(row || {})[0] || '').trim())
+                                  .filter(Boolean)
+                                  .map((tableName: string) => ({ dbName, tableName }))
+                              : [];
+                          sharedLazyTablesCache[key] = tables;
+                          if (tables.length > 0) {
+                              const existingKeys = new Set(sharedTablesData.map((table) => `${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`));
+                              const missingTables = tables.filter((table) => !existingKeys.has(`${table.dbName.toLowerCase()}.${table.tableName.toLowerCase()}`));
+                              if (missingTables.length > 0) {
+                                  sharedTablesData = [...sharedTablesData, ...missingTables];
+                              }
+                          }
+                          return tables;
+                      })
+                      .catch(() => [])
+                      .finally(() => {
+                          delete sharedLazyTablesInFlight[key];
+                      });
+                  return sharedLazyTablesInFlight[key];
               };
 
               const getColumnsByDB = async (tableIdent: string) => {
@@ -2916,6 +3135,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const currentDatabase = sharedCurrentDb || '';
               const wordPrefix = (word.word || '').toLowerCase();
               const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
+              const includesWordPrefix = (candidate: string) => !wordPrefix || String(candidate || '').toLowerCase().includes(wordPrefix);
+              const getPrefixMatchRank = (...candidates: string[]) => {
+                  if (!wordPrefix) return '0';
+                  const normalized = candidates
+                      .map((candidate) => String(candidate || '').toLowerCase())
+                      .filter(Boolean);
+                  if (normalized.some((candidate) => candidate.startsWith(wordPrefix))) return '0';
+                  if (normalized.some((candidate) => candidate.includes(wordPrefix))) return '1';
+                  return '9';
+              };
               const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
               const shouldBoostKeywords = !expectsTableName
                   && wordPrefix.length > 0
@@ -2925,10 +3154,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : expectsTableName
                       ? { keyword: '20', func: '25', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
                       : { keyword: '30', func: '25', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
+              let completionTables = sharedTablesData;
+              if (
+                  expectsTableName
+                  && currentDatabase
+                  && !sharedTablesData.some((t) => (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase())
+              ) {
+                  const lazyTables = await getLazyTablesByDB(currentDatabase);
+                  if (lazyTables.length > 0) {
+                      const seenTableKeys = new Set<string>();
+                      completionTables = [...sharedTablesData, ...lazyTables].filter((table) => {
+                          const key = `${String(table.dbName || '').toLowerCase()}.${String(table.tableName || '').toLowerCase()}`;
+                          if (seenTableKeys.has(key)) return false;
+                          seenTableKeys.add(key);
+                          return true;
+                      });
+                  }
+              }
 
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
-              const relevantColumns = sharedAllColumnsData
+              const relevantColumns = (expectsTableName ? [] : sharedAllColumnsData)
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
@@ -2953,7 +3199,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               // 表提示：当前库智能处理 schema.table 格式
               // 1. 构建纯表名到 schema 列表的映射，检测同名表
-              const currentDbTables = sharedTablesData.filter(t =>
+              const currentDbTables = completionTables.filter(t =>
                   (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase()
               );
               const tableNameToSchemas = new Map<string, string[]>();
@@ -2965,20 +3211,24 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   tableNameToSchemas.set(pureTable, schemas);
               }
 
-              const tableSuggestions = sharedTablesData
+              const tableSuggestions = completionTables
                 .filter(t => {
                     const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
-                    if (!isCurrentDb) {
-                        // 跨库：用 db.table 格式匹配
-                        return startsWithPrefix(`${t.dbName}.${t.tableName}`);
-                    }
-                    // 当前库：同时用完整名和纯表名匹配
                     const parsed = splitSchemaAndTable(t.tableName || '');
                     const pureTable = parsed.table || t.tableName || '';
-                    return startsWithPrefix(t.tableName || '') || startsWithPrefix(pureTable);
+                    if (!isCurrentDb) {
+                        // 跨库：用 db.table 格式匹配
+                        return includesWordPrefix(`${t.dbName}.${t.tableName}`)
+                            || includesWordPrefix(t.tableName || '')
+                            || includesWordPrefix(pureTable);
+                    }
+                    // 当前库：同时用完整名和纯表名匹配
+                    return includesWordPrefix(t.tableName || '') || includesWordPrefix(pureTable);
                 })
                 .map(t => {
                   const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                  const parsed = splitSchemaAndTable(t.tableName || '');
+                  const pureTable = parsed.table || t.tableName || '';
                   if (!isCurrentDb) {
                       const label = `${t.dbName}.${t.tableName}`;
                       return {
@@ -2988,12 +3238,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           detail: appendCommentToDetail(`Table (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
-                          sortText: sortGroups.tableOther + t.tableName,
+                          sortText: sortGroups.tableOther + getPrefixMatchRank(`${t.dbName}.${t.tableName}`, t.tableName || '', pureTable) + t.tableName,
                       };
                   }
                   // 当前库：检查是否有跨 schema 同名表
-                  const parsed = splitSchemaAndTable(t.tableName || '');
-                  const pureTable = parsed.table || t.tableName || '';
                   const schemas = tableNameToSchemas.get(pureTable.toLowerCase()) || [];
                   const hasDuplicate = schemas.length > 1;
                   // 同名表存在于多个 schema → 显示 schema.table；否则只显示纯表名
@@ -3007,7 +3255,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       detail: appendCommentToDetail(`Table${schemaInfo}`, t.comment),
                       documentation: buildCompletionDocumentation(t.comment),
                       range,
-                      sortText: sortGroups.tableCurrent + pureTable,
+                      sortText: sortGroups.tableCurrent + getPrefixMatchRank(t.tableName || '', pureTable) + pureTable,
                   };
               });
 
@@ -3140,8 +3388,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       // 每个编辑器实例都注册内容变化监听（检测斜杠命令标记）
       let _handlingSlash = false;
-      editor.onDidChangeModelContent(() => {
+      editor.onDidChangeModelContent((event: any) => {
           if (_handlingSlash) return;
+          const hasSlashCommandMarker = Array.isArray(event?.changes)
+              && event.changes.some((change: any) => /__AI_\w+__/.test(String(change?.text || '')));
+          if (!hasSlashCommandMarker) return;
           const model = editor.getModel();
           if (!model) return;
           const content = model.getValue();
@@ -3202,7 +3453,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }]);
               editor.pushUndoStop?.();
               const nextValue = editor.getValue?.();
-              setQuery(typeof nextValue === 'string' ? nextValue : formatted);
+              applyQueryState(typeof nextValue === 'string' ? nextValue : formatted);
               refreshObjectDecorations();
               return;
           }
@@ -3416,6 +3667,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return merged;
   };
 
+  const resolveActiveResultKeyAfterMerge = (merged: ResultSet[], executed: ResultSet[]): string => {
+      const firstExecutedResult = executed[0];
+      if (!firstExecutedResult) {
+          return '';
+      }
+      const executedSqlKey = normalizeExecutedSqlKey(firstExecutedResult.exportSql || firstExecutedResult.sql);
+      return merged.find((item) => normalizeExecutedSqlKey(item.exportSql || item.sql) === executedSqlKey)?.key
+          || firstExecutedResult.key
+          || merged[0]?.key
+          || '';
+  };
+
   const resolveExecutableSQLAtEditorPosition = (model: any, sqlText: string, position: any): string => {
       const normalizedPosition = normalizeEditorPosition(position);
       if (!normalizedPosition) return '';
@@ -3553,8 +3816,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     const executableSQL = getExecutableSQL();
     if (!executableSQL.trim()) {
         message.info('没有可执行的 SQL。');
-        setResultSets([]);
-        setActiveResultKey('');
         return;
     }
     if (!currentDb) {
@@ -3627,8 +3888,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             );
             if (statements.length === 0) {
                 message.info('没有可执行的 SQL。');
-                setResultSets([]);
-                setActiveResultKey('');
                 return;
             }
 
@@ -3730,8 +3989,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 }
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => mergeResultSets(prev, nextResultSets, shouldReplaceAllResults));
-            setActiveResultKey(nextResultSets[0]?.key || '');
+            setResultSets(prev => {
+                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
+                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
+                return merged;
+            });
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -3754,8 +4016,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             );
             if (sourceStatements.length === 0) {
                 message.info('没有可执行的 SQL。');
-                setResultSets([]);
-                setActiveResultKey('');
                 return;
             }
 
@@ -3898,8 +4158,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
 
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => mergeResultSets(prev, nextResultSets, shouldReplaceAllResults));
-            setActiveResultKey(nextResultSets[0]?.key || '');
+            setResultSets(prev => {
+                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
+                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
+                return merged;
+            });
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -3924,7 +4187,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         addSqlLog({
             id: `log-${Date.now()}-error`,
             timestamp: Date.now(),
-            sql: executableSQL || getExecutableSQL() || query,
+            sql: executableSQL || getExecutableSQL() || getCurrentQuery(),
             status: 'error',
             duration: Date.now() - runStartTime,
             message: e.message,
@@ -4195,7 +4458,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }]);
                   const nextValue = editor.getValue?.();
                   if (typeof nextValue === 'string') {
-                      setQuery(nextValue);
+                      applyQueryState(nextValue);
                   }
                   
                   // 定位并滚动到可见区域
@@ -4220,7 +4483,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
               }
           } else {
-              setQuery((prev: string) => prev ? prev + '\n' + sqlText : sqlText);
+              applyQueryState(getCurrentQuery() ? `${getCurrentQuery()}\n${sqlText}` : sqlText);
               message.success('代码已追加');
           }
       };
@@ -4282,6 +4545,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   filePath,
                   savedQueryId: undefined,
               });
+              setSQLFileTabDraft(tab.id, sql);
               message.success('SQL 文件已保存！');
           } catch (error) {
               message.error('保存 SQL 文件失败: ' + (error instanceof Error ? error.message : String(error)));
@@ -4420,6 +4684,65 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
   };
 
+  const replaceResultSetsAfterMenuClose = (next: ResultSet[], preferredKey?: string) => {
+      setResultSets(next);
+      setActiveResultKey(prevActive => {
+          if (preferredKey && next.some(result => result.key === preferredKey)) return preferredKey;
+          if (prevActive && next.some(result => result.key === prevActive)) return prevActive;
+          return next[0]?.key || '';
+      });
+  };
+
+  const closeOtherResultTabs = (key: string) => {
+      const target = resultSets.find(result => result.key === key);
+      replaceResultSetsAfterMenuClose(target ? [target] : resultSets, key);
+  };
+
+  const closeResultTabsToLeft = (key: string) => {
+      const index = resultSets.findIndex(result => result.key === key);
+      if (index <= 0) return;
+      replaceResultSetsAfterMenuClose(resultSets.slice(index), key);
+  };
+
+  const closeResultTabsToRight = (key: string) => {
+      const index = resultSets.findIndex(result => result.key === key);
+      if (index < 0 || index >= resultSets.length - 1) return;
+      replaceResultSetsAfterMenuClose(resultSets.slice(0, index + 1), key);
+  };
+
+  const closeAllResultTabs = () => {
+      setResultSets([]);
+      setActiveResultKey('');
+  };
+
+  const buildResultTabMenuItems = (key: string, index: number): MenuProps['items'] => [
+      {
+          key: 'close-other',
+          label: '关闭其他页',
+          disabled: resultSets.length <= 1,
+          onClick: () => closeOtherResultTabs(key),
+      },
+      {
+          key: 'close-left',
+          label: '关闭左侧',
+          disabled: index <= 0,
+          onClick: () => closeResultTabsToLeft(key),
+      },
+      {
+          key: 'close-right',
+          label: '关闭右侧',
+          disabled: index >= resultSets.length - 1,
+          onClick: () => closeResultTabsToRight(key),
+      },
+      { type: 'divider' },
+      {
+          key: 'close-all',
+          label: '关闭所有',
+          disabled: resultSets.length === 0,
+          onClick: closeAllResultTabs,
+      },
+  ];
+
   return (
     <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <style>{`
@@ -4433,16 +4756,42 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         .query-result-tabs .ant-tabs-nav {
           flex: 0 0 auto;
           margin: 0;
+          min-height: 38px;
+        }
+        .query-result-tabs .ant-tabs-nav-wrap {
+          flex: 0 1 auto;
+          min-width: 0;
         }
         .query-result-tabs .ant-tabs-nav-list {
-          align-items: stretch;
+          align-items: center;
+          width: auto;
         }
         .query-result-tabs .ant-tabs-tab {
-          min-height: 34px;
-          padding: 4px 10px !important;
+          width: auto !important;
+          min-width: 0 !important;
+          max-width: 148px !important;
+          height: 30px !important;
+          min-height: 30px;
+          margin: 4px 6px 4px 0 !important;
+          padding: 0 9px !important;
+          border-radius: 999px !important;
+          border: 0.5px solid transparent !important;
+          border-right: 0.5px solid transparent !important;
+          align-items: center !important;
+          justify-content: center !important;
         }
         .query-result-tabs .ant-tabs-tab-btn {
+          width: auto !important;
+          height: 100%;
           max-width: 100%;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          font-size: 14px !important;
+          line-height: 1 !important;
+        }
+        .query-result-tabs .ant-tabs-tab.ant-tabs-tab-active::after {
+          display: none;
         }
         .query-result-tabs .ant-tabs-content-holder {
           flex: 1 1 auto;
@@ -4477,16 +4826,36 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         .query-result-tab-label {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           min-width: 0;
-          max-width: 100%;
-          line-height: 1.1;
+          max-width: 126px;
+          height: 100%;
+          line-height: 1;
+          user-select: none;
+          -webkit-user-select: none;
         }
         .query-result-tab-text {
           min-width: 0;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          font-size: 14px;
+          font-weight: 700;
+        }
+        .query-result-tab-count {
+          flex: 0 0 auto;
+          min-width: 17px;
+          height: 17px;
+          padding: 0 5px;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(148, 163, 184, 0.16);
+          color: inherit;
+          font-size: 11px;
+          font-weight: 700;
+          line-height: 17px;
         }
         .query-result-tab-close {
           display: inline-flex;
@@ -4506,107 +4875,131 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       `}</style>
       <div ref={editorPaneRef} className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}>
       <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
-        <Select 
-            style={{ width: 150 }} 
-            placeholder="选择连接"
-            value={currentConnectionId}
-            onChange={(val) => {
-                setCurrentConnectionId(val);
-                setCurrentDb('');
-            }}
-            options={queryCapableConnections.map(c => ({ label: c.name, value: c.id }))}
-            showSearch
-        />
-        <Select 
-            style={{ width: 200 }} 
-            placeholder="选择数据库"
-            value={currentDb}
-            onChange={setCurrentDb}
-            options={dbList.map(db => ({ label: db, value: db }))}
-            showSearch
-        />
-        <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
-            <Select
-                style={{ width: 170 }}
-                value={queryOptions?.maxRows ?? 5000}
-                onChange={(val) => setQueryOptions({ maxRows: Number(val) })}
-                options={[
-                    { label: '最大行数：500', value: 500 },
-                    { label: '最大行数：1000', value: 1000 },
-                    { label: '最大行数：5000', value: 5000 },
-                    { label: '最大行数：20000', value: 20000 },
-                    { label: '最大行数：不限', value: 0 },
-                ]}
-            />
-        </Tooltip>
-        <Button.Group>
-          <Tooltip
-              title={
-	                  runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
-	                      ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-	                      : '运行'
-              }
-          >
-              <Button type="primary" icon={<PlayCircleOutlined />} onMouseDown={captureEditorCursorPosition} onClick={handleRun} loading={loading}>
-                运行
-              </Button>
+        <div
+          className={isV2Ui ? 'gn-v2-query-toolbar-selects' : undefined}
+          style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
+        >
+          <Select
+              className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-connection-select' : undefined}
+              style={isV2Ui ? undefined : { width: 150 }}
+              placeholder="选择连接"
+              value={currentConnectionId}
+              onChange={(val) => {
+                  setCurrentConnectionId(val);
+                  setCurrentDb('');
+              }}
+              options={queryCapableConnections.map(c => ({ label: c.name, value: c.id }))}
+              showSearch
+          />
+          <Select
+              className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-database-select' : undefined}
+              style={isV2Ui ? undefined : { width: 200 }}
+              placeholder="选择数据库"
+              value={currentDb}
+              onChange={setCurrentDb}
+              options={dbList.map(db => ({ label: db, value: db }))}
+              showSearch
+          />
+          <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
+              <Select
+                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-max-rows-select' : undefined}
+                  style={isV2Ui ? undefined : { width: 170 }}
+                  value={queryOptions?.maxRows ?? 5000}
+                  onChange={(val) => setQueryOptions({ maxRows: Number(val) })}
+                  options={[
+                      { label: '最大行数：500', value: 500 },
+                      { label: '最大行数：1000', value: 1000 },
+                      { label: '最大行数：5000', value: 5000 },
+                      { label: '最大行数：20000', value: 20000 },
+                      { label: '最大行数：不限', value: 0 },
+                  ]}
+              />
           </Tooltip>
-          {loading && (
-            <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
-              停止
-            </Button>
-          )}
-        </Button.Group>
-        <Button.Group>
+        </div>
+        <div
+          className={isV2Ui ? 'gn-v2-query-toolbar-actions' : undefined}
+          style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
+        >
+          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
             <Tooltip
                 title={
-                    saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
-                        ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-                        : '保存'
+	                    runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
+	                        ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
+	                        : '运行'
                 }
             >
-              <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
-                保存
+                <Button className={isV2Ui ? 'gn-v2-query-toolbar-run-action' : undefined} type="primary" icon={<PlayCircleOutlined />} onMouseDown={captureEditorCursorPosition} onClick={handleRun} loading={loading}>
+                  运行
+                </Button>
+            </Tooltip>
+            {loading && (
+              <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
+                停止
               </Button>
-            </Tooltip>
-            <Dropdown menu={{ items: saveMoreMenuItems }} placement="bottomRight">
-                <Button>更多</Button>
-            </Dropdown>
-        </Button.Group>
-        
-        <Button.Group>
-            <Tooltip title="美化 SQL">
-                <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>美化</Button>
-            </Tooltip>
-            <Dropdown menu={{ items: formatSettingsMenu }} placement="bottomRight">
-                <Button icon={<SettingOutlined />} />
-            </Dropdown>
-        </Button.Group>
+            )}
+          </Button.Group>
+          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
+              <Tooltip
+                  title={
+                      saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
+                          ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
+                          : '保存'
+                  }
+              >
+                <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
+                  保存
+                </Button>
+              </Tooltip>
+              <Dropdown menu={{ items: saveMoreMenuItems }} placement="bottomRight">
+                  <Button>更多</Button>
+              </Dropdown>
+          </Button.Group>
 
-        <Dropdown menu={{ items: [
-            { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
-            { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
-            { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
-            { type: 'divider' as const },
-            { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
-        ] }} placement="bottomRight">
-            <Button icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
-        </Dropdown>
+          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
+              <Tooltip title="美化 SQL">
+                  <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>美化</Button>
+              </Tooltip>
+              <Dropdown menu={{ items: formatSettingsMenu }} placement="bottomRight">
+                  <Button className={isV2Ui ? 'gn-v2-query-toolbar-icon-action' : undefined} icon={<SettingOutlined />} />
+              </Dropdown>
+          </Button.Group>
+
+          <Dropdown menu={{ items: [
+              { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
+              { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
+              { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
+              { type: 'divider' as const },
+              { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
+          ] }} placement="bottomRight">
+              <Button className={isV2Ui ? 'gn-v2-query-toolbar-ai-action' : undefined} icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
+          </Dropdown>
+        </div>
       </div>
       
-      <div className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined} style={{ height: editorHeight, minHeight: '100px' }}>
+      <div ref={editorShellRef} className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined} style={{ height: editorHeight, minHeight: '100px' }}>
         <Editor 
           height="100%" 
           gonaviTypography="code"
           defaultLanguage="sql" 
           theme={darkMode ? "transparent-dark" : "transparent-light"}
           defaultValue={query}
-          onChange={(val) => setQuery(val || '')}
+          onChange={(val) => {
+              const nextValue = val || '';
+              syncQueryDraft(nextValue);
+          }}
           onMount={handleEditorDidMount}
           options={{ 
             minimap: { enabled: false }, 
             automaticLayout: true,
+            fixedOverflowWidgets: true,
+            hover: {
+              enabled: true,
+              delay: QUERY_EDITOR_HOVER_DELAY_MS,
+              above: false,
+            },
             scrollBeyondLastLine: false,
+            quickSuggestions: { other: true, comments: false, strings: false },
+            suggestOnTriggerCharacters: true,
           }}
         />
       </div>
@@ -4636,27 +5029,44 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               items={resultSets.map((rs, idx) => ({
                   key: rs.key,
                   label: (
-                      <div className="query-result-tab-label">
-                          <Tooltip title={rs.sql}>
-                          <span className="query-result-tab-text">{(() => {
-                              const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
-                              if (isAffected) return `结果 ${idx + 1} ✓`;
-                              return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length})` : ''}`;
-                          })()}</span>
-                          </Tooltip>
-                          <Tooltip title="关闭结果">
-                              <span
-                                  className="query-result-tab-close"
-                                  onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      handleCloseResult(rs.key);
-                                  }}
-                              >
-                                  <CloseOutlined style={{ fontSize: 12 }} />
-                              </span>
-                          </Tooltip>
-                      </div>
+                      <Dropdown
+                          menu={{ items: buildResultTabMenuItems(rs.key, idx) }}
+                          trigger={['contextMenu']}
+                          rootClassName={isV2Ui ? 'gn-v2-tab-context-menu-popup' : undefined}
+                      >
+                          <div
+                              className="query-result-tab-label"
+                              onContextMenu={(event) => {
+                                  event.preventDefault();
+                              }}
+                          >
+                              <Tooltip title={rs.sql}>
+                                  <span className="query-result-tab-text">结果 {idx + 1}</span>
+                              </Tooltip>
+                              {(() => {
+                                  const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
+                                  if (isAffected) {
+                                      return <span className="query-result-tab-count">✓</span>;
+                                  }
+                                  if (!Array.isArray(rs.rows)) {
+                                      return null;
+                                  }
+                                  return <span className="query-result-tab-count">{rs.rows.length}</span>;
+                              })()}
+                              <Tooltip title="关闭结果">
+                                  <span
+                                      className="query-result-tab-close"
+                                      onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          handleCloseResult(rs.key);
+                                      }}
+                                  >
+                                      <CloseOutlined style={{ fontSize: 12 }} />
+                                  </span>
+                              </Tooltip>
+                          </div>
+                      </Dropdown>
                   ),
                   children: (() => {
                       // affectedRows 类型结果集（UPDATE/INSERT/DELETE）：简洁提示

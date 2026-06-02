@@ -325,9 +325,9 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	metadataTableName := escapeOracleMetadataLiteral(tableName)
 	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
-	query := fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
-		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key,
-		cc.comments AS comment
+	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
+		cc.comments AS "COMMENT"
 		FROM all_tab_columns c
 		LEFT JOIN all_col_comments cc
 		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
@@ -342,9 +342,9 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
 
 	if dbName == "" {
-		query = fmt.Sprintf(`SELECT c.column_name, c.data_type, c.nullable, c.data_default,
-			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS column_key,
-			cc.comments AS comment
+		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
+			cc.comments AS "COMMENT"
 			FROM user_tab_columns c
 			LEFT JOIN user_col_comments cc
 			  ON cc.table_name = c.table_name AND cc.column_name = c.column_name

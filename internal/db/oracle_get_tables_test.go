@@ -104,6 +104,11 @@ func TestOracleGetColumnsIncludesColumnComments(t *testing.T) {
 	if len(queries) == 0 || !strings.Contains(queries[0], "all_col_comments") {
 		t.Fatalf("expected GetColumns to join all_col_comments, queries=%v", queries)
 	}
+	for _, want := range []string{`AS "COLUMN_NAME"`, `AS "DATA_TYPE"`, `AS "COMMENT"`} {
+		if !strings.Contains(queries[0], want) {
+			t.Fatalf("expected GetColumns query to contain stable alias %q, got %s", want, queries[0])
+		}
+	}
 }
 
 func TestOracleGetCreateStatementAppendsTableAndColumnComments(t *testing.T) {

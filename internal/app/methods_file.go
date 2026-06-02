@@ -84,6 +84,200 @@ type SQLDirectoryEntry struct {
 	Children []SQLDirectoryEntry `json:"children,omitempty"`
 }
 
+func normalizeSQLFileName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return "", fmt.Errorf("SQL 文件名不能为空")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", fmt.Errorf("SQL 文件名不能包含路径分隔符")
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".sql") {
+		name += ".sql"
+	}
+	return name, nil
+}
+
+func normalizeSQLDirectoryName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return "", fmt.Errorf("目录名不能为空")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", fmt.Errorf("目录名不能包含路径分隔符")
+	}
+	return name, nil
+}
+
+func normalizeSQLDirectoryPath(directoryPath string) (string, error) {
+	target := strings.TrimSpace(directoryPath)
+	if target == "" {
+		return "", fmt.Errorf("目录路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("无法读取目录信息: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("所选路径不是目录")
+	}
+	return target, nil
+}
+
+func normalizeExistingSQLDirectoryPath(directoryPath string) (string, os.FileInfo, error) {
+	target := strings.TrimSpace(directoryPath)
+	if target == "" {
+		return "", nil, fmt.Errorf("目录路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("无法读取目录信息: %w", err)
+	}
+	if !info.IsDir() {
+		return "", nil, fmt.Errorf("所选路径不是目录")
+	}
+	return target, info, nil
+}
+
+func normalizeExistingSQLFilePath(filePath string) (string, os.FileInfo, error) {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return "", nil, fmt.Errorf("文件路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("无法读取文件信息: %w", err)
+	}
+	if info.IsDir() {
+		return "", nil, fmt.Errorf("所选路径不是 SQL 文件")
+	}
+	if !strings.EqualFold(filepath.Ext(target), ".sql") {
+		return "", nil, fmt.Errorf("仅支持 SQL 文件")
+	}
+	return target, info, nil
+}
+
+func createSQLFileInDirectory(directoryPath string, rawName string) connection.QueryResult {
+	directory, err := normalizeSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLFileName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(directory, name)
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "SQL 文件已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+	if err := os.WriteFile(target, []byte(""), 0o644); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+}
+
+func createSQLDirectoryInDirectory(parentPath string, rawName string) connection.QueryResult {
+	parent, err := normalizeSQLDirectoryPath(parentPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLDirectoryName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(parent, name)
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目录已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目录信息: %v", err)}
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建目录: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+}
+
+func deleteSQLFileByPath(filePath string) connection.QueryResult {
+	target, _, err := normalizeExistingSQLFilePath(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.Remove(target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
+}
+
+func deleteSQLDirectoryByPath(directoryPath string) connection.QueryResult {
+	target, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.Remove(target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除目录: %v（仅支持删除空目录）", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target}}
+}
+
+func renameSQLFileByPath(filePath string, rawName string) connection.QueryResult {
+	source, _, err := normalizeExistingSQLFilePath(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLFileName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(filepath.Dir(source), name)
+	if source == target {
+		return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+	}
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目标 SQL 文件已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标文件信息: %v", err)}
+	}
+	if err := os.Rename(source, target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+}
+
+func renameSQLDirectoryByPath(directoryPath string, rawName string) connection.QueryResult {
+	source, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLDirectoryName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(filepath.Dir(source), name)
+	if source == target {
+		return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+	}
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目标目录已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标目录信息: %v", err)}
+	}
+	if err := os.Rename(source, target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名目录: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+}
+
 func normalizeDirectoryDialogPath(currentDir string) string {
 	defaultDir := strings.TrimSpace(currentDir)
 	if defaultDir == "" {
@@ -138,6 +332,28 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+func readSQLFileWithMetadataByPath(filePath string) connection.QueryResult {
+	result := readSQLFileByPath(filePath)
+	if !result.Success {
+		return result
+	}
+	if data, ok := result.Data.(map[string]interface{}); ok {
+		return connection.QueryResult{Success: true, Data: data}
+	}
+	selection := strings.TrimSpace(filePath)
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	return connection.QueryResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"content":  result.Data,
+			"filePath": selection,
+			"name":     filepath.Base(selection),
+		},
+	}
 }
 
 func writeSQLFileByPath(filePath string, content string) connection.QueryResult {
@@ -238,9 +454,6 @@ func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
 			if childErr != nil {
 				return nil, childErr
 			}
-			if len(children) == 0 {
-				continue
-			}
 			result = append(result, SQLDirectoryEntry{
 				Name:     entry.Name(),
 				Path:     entryPath,
@@ -291,7 +504,7 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	return readSQLFileByPath(selection)
+	return readSQLFileWithMetadataByPath(selection)
 }
 
 func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
@@ -345,6 +558,30 @@ func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
 
 func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
 	return writeSQLFileByPath(filePath, content)
+}
+
+func (a *App) CreateSQLFile(directoryPath string, name string) connection.QueryResult {
+	return createSQLFileInDirectory(directoryPath, name)
+}
+
+func (a *App) CreateSQLDirectory(directoryPath string, name string) connection.QueryResult {
+	return createSQLDirectoryInDirectory(directoryPath, name)
+}
+
+func (a *App) DeleteSQLFile(filePath string) connection.QueryResult {
+	return deleteSQLFileByPath(filePath)
+}
+
+func (a *App) DeleteSQLDirectory(directoryPath string) connection.QueryResult {
+	return deleteSQLDirectoryByPath(directoryPath)
+}
+
+func (a *App) RenameSQLFile(filePath string, name string) connection.QueryResult {
+	return renameSQLFileByPath(filePath, name)
+}
+
+func (a *App) RenameSQLDirectory(directoryPath string, name string) connection.QueryResult {
+	return renameSQLDirectoryByPath(directoryPath, name)
 }
 
 func (a *App) ExportSQLFile(defaultName string, content string) connection.QueryResult {

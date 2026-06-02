@@ -215,6 +215,12 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 SelectSQLDirectory: async (currentPath: string) => ({ success: false, message: currentPath ? '已取消' : '已取消' }),
                 ListSQLDirectory: async () => ({ success: true, data: [] }),
                 ReadSQLFile: async () => ({ success: false, message: '已取消' }),
+                CreateSQLFile: async (_directoryPath: string, _name: string) => ({ success: true, data: { filePath: '', name: _name } }),
+                CreateSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath}/${name}`, name } }),
+                DeleteSQLFile: async (_filePath: string) => ({ success: true }),
+                DeleteSQLDirectory: async (_directoryPath: string) => ({ success: true }),
+                RenameSQLFile: async (_filePath: string, name: string) => ({ success: true, data: { filePath: _filePath, name } }),
+                RenameSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath.replace(/[\\/][^\\/]*$/, '')}/${name}`, name } }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
                 ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: '浏览器 mock 不支持 SQL 文件导出' }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
@@ -302,4 +308,3 @@ ReactDOM.createRoot(rootNode).render(
     {rootComponent}
   </React.StrictMode>,
 )
-

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Pagination, Select } from 'antd';
+import { Button, InputNumber, Pagination, Select } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 
 interface DataGridPaginationState {
@@ -38,9 +38,52 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   onPageSizeChange,
   onV2PageStep,
 }) => {
+  const [jumpPage, setJumpPage] = React.useState<number | null>(pagination?.current ?? null);
+
+  React.useEffect(() => {
+    setJumpPage(pagination?.current ?? null);
+  }, [pagination?.current]);
+
   if (!pagination) {
     return null;
   }
+
+  const maxJumpPage = Math.max(1, paginationTotalPages);
+  const normalizedJumpPage = Number.isFinite(Number(jumpPage)) && Number(jumpPage) > 0
+    ? Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))
+    : null;
+  const jumpDisabled = !onPageChange || normalizedJumpPage === null || normalizedJumpPage === pagination.current;
+  const submitJumpPage = () => {
+    if (!onPageChange || normalizedJumpPage === null) return;
+    if (normalizedJumpPage === pagination.current) return;
+    onPageChange(normalizedJumpPage, pagination.pageSize);
+  };
+  const jumpPageControl = (
+    <div className="data-grid-pagination-jump" data-grid-pagination-jump="true">
+      <span className="data-grid-pagination-jump-label">跳页</span>
+      <InputNumber
+        size="small"
+        min={1}
+        max={maxJumpPage}
+        precision={0}
+        controls={false}
+        value={jumpPage}
+        onChange={(value) => setJumpPage(typeof value === 'number' && Number.isFinite(value) ? value : null)}
+        onPressEnter={submitJumpPage}
+        className="data-grid-pagination-jump-input"
+        aria-label="跳转页码"
+        disabled={!onPageChange}
+      />
+      <Button
+        size="small"
+        className="data-grid-pagination-jump-button"
+        disabled={jumpDisabled}
+        onClick={submitJumpPage}
+      >
+        跳
+      </Button>
+    </div>
+  );
 
   return (
     <div
@@ -71,6 +114,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             disabled={!onPageChange || pagination.current >= paginationTotalPages}
             onClick={() => onV2PageStep('next')}
           />
+          {jumpPageControl}
           <Select
             size="small"
             popupMatchSelectWidth={false}
@@ -105,6 +149,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
               return originalElement;
             }}
           />
+          {jumpPageControl}
           <Select
             size="small"
             popupMatchSelectWidth={false}

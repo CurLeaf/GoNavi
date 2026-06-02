@@ -472,8 +472,8 @@ export interface ExternalSQLDirectory {
   id: string;
   name: string;
   path: string;
-  connectionId: string;
-  dbName: string;
+  connectionId?: string;
+  dbName?: string;
   createdAt: number;
 }
 

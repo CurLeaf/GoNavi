@@ -54,6 +54,32 @@ func TestCurrentDriverReleaseTagUsesDevLatestForDevBuild(t *testing.T) {
 	}
 }
 
+func TestCurrentDriverReleaseTagUsesDevLatestForLocalTestBuild(t *testing.T) {
+	originalVersion := AppVersion
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	for _, version := range []string{"0.0.1-test", "0.7.9-dev", "0.7.9-local", "0.7.9-SNAPSHOT"} {
+		AppVersion = version
+		if got := currentDriverReleaseTag(); got != driverReleaseDevTag {
+			t.Fatalf("expected %s to use dev driver release tag %q, got %q", version, driverReleaseDevTag, got)
+		}
+	}
+}
+
+func TestCurrentDriverReleaseTagUsesVersionedReleaseForStableBuild(t *testing.T) {
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	if got := currentDriverReleaseTag(); got != "v0.7.9" {
+		t.Fatalf("expected stable driver release tag v0.7.9, got %q", got)
+	}
+}
+
 func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing.T) {
 	originalVersion := AppVersion
 	AppVersion = "0.7.4"
@@ -239,6 +265,39 @@ func TestIRISDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 	if tags != "gonavi_iris_driver" {
 		t.Fatalf("unexpected iris build tag: %q", tags)
+	}
+}
+
+func TestElasticsearchDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("elasticsearch")
+	if !ok {
+		t.Fatal("expected elasticsearch driver definition")
+	}
+	if definition.Name != "Elasticsearch" {
+		t.Fatalf("unexpected elasticsearch driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected elasticsearch to be an optional driver agent")
+	}
+	if driverGoModulePathMap["elasticsearch"] != "github.com/elastic/go-elasticsearch/v8" {
+		t.Fatalf("unexpected elasticsearch go module path: %q", driverGoModulePathMap["elasticsearch"])
+	}
+	if definition.PinnedVersion != "8.19.6" {
+		t.Fatalf("unexpected elasticsearch definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/elasticsearch" {
+		t.Fatalf("unexpected elasticsearch default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["elasticsearch"] != "8.19.6" {
+		t.Fatalf("unexpected elasticsearch pinned version: %q", latestDriverVersionMap["elasticsearch"])
+	}
+
+	tags, err := optionalDriverBuildTags("elasticsearch", "")
+	if err != nil {
+		t.Fatalf("resolve elasticsearch build tags failed: %v", err)
+	}
+	if tags != "gonavi_elasticsearch_driver" {
+		t.Fatalf("unexpected elasticsearch build tag: %q", tags)
 	}
 }
 

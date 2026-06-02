@@ -96,6 +96,12 @@
       "version": "1.11.1",
       "checksumPolicy": "off",
       "downloadUrl": "builtin://activate/postgres"
+    },
+    "elasticsearch": {
+      "engine": "go",
+      "version": "8.19.0",
+      "checksumPolicy": "off",
+      "downloadUrl": "builtin://activate/elasticsearch"
     }
   }
 }

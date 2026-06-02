@@ -21,6 +21,11 @@ import {
   type EditRowLocator,
 } from '../utils/rowLocator';
 import { isOracleLikeDialect } from '../utils/sqlDialect';
+import {
+  getColumnDefinitionKey,
+  getColumnDefinitionName,
+  getColumnDefinitionType,
+} from '../utils/columnDefinition';
 
 type ViewerPaginationState = {
   current: number;
@@ -104,7 +109,7 @@ const formatDataViewerTableName = (dbName: string, tableName: string): string =>
 
 const getTableColumnNames = (columns: ColumnDefinition[] | undefined): string[] => (
   (columns || [])
-    .map((column) => String(column?.name || '').trim())
+    .map(getColumnDefinitionName)
     .filter(Boolean)
 );
 
@@ -572,8 +577,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 } else {
                     const columnDefs = resCols.data as ColumnDefinition[];
                     const primaryKeys = columnDefs
-                        .filter((column: any) => column?.key === 'PRI')
-                        .map((column: any) => String(column?.name || '').trim())
+                        .filter((column: any) => getColumnDefinitionKey(column) === 'PRI')
+                        .map(getColumnDefinitionName)
                         .filter(Boolean);
                     const indexes = resIndexes?.success && Array.isArray(resIndexes.data)
                         ? resIndexes.data as IndexDefinition[]
@@ -721,10 +726,10 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     if (resCols?.success && Array.isArray(resCols.data)) {
                         const columnDefs = resCols.data as ColumnDefinition[];
                         const selectParts = columnDefs.map((col) => {
-                            const colName = String(col?.name || '').trim();
+                            const colName = getColumnDefinitionName(col);
                             if (!colName) return '';
                             const quotedCol = quoteIdentPart(dbType, colName);
-                            if (isDuckDBComplexColumnType(col?.type)) {
+                            if (isDuckDBComplexColumnType(getColumnDefinitionType(col))) {
                                 return `CAST(${quotedCol} AS VARCHAR) AS ${quotedCol}`;
                             }
                             return quotedCol;

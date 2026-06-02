@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
@@ -53,9 +53,9 @@ import {
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, SavedQuery, ConnectionTag, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, SavedQuery, ConnectionTag, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -80,7 +80,7 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
-import { getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, resolveShortcutDisplay } from '../utils/shortcuts';
+import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
@@ -114,6 +114,10 @@ type SidebarContextMenuState = {
 const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
 const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
 const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
+type ExternalSQLFileModalMode = 'create' | 'rename' | 'create-directory' | 'rename-directory';
+
+const isExternalSQLDirectoryModalMode = (mode: ExternalSQLFileModalMode): boolean =>
+  mode === 'create-directory' || mode === 'rename-directory';
 
 export const resolveSidebarContextMenuPosition = (
   x: number,
@@ -171,6 +175,7 @@ export const shouldLoadSidebarNodeOnExpand = (
   if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
   return node.type === 'connection'
       || node.type === 'database'
+      || node.type === 'external-sql-root'
       || node.type === 'table'
       || node.type === 'jvm-mode'
       || node.type === 'jvm-resource';
@@ -417,6 +422,46 @@ const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, st
   events: ['events'],
 };
 
+const V2_TREE_HORIZONTAL_SCROLL_MAX_WIDTH = 960;
+const V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH = 88;
+const V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH = 24;
+const V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH = 8;
+const V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER = 48;
+
+export const estimateV2TreeHorizontalScrollWidth = (
+  nodes: TreeNode[],
+  viewportWidth: number,
+): number | undefined => {
+  const safeViewportWidth = Math.max(0, Math.ceil(viewportWidth || 0));
+  let estimatedContentWidth = safeViewportWidth;
+
+  const visit = (items: TreeNode[], depth: number) => {
+    items.forEach((node) => {
+      const title = String(node?.title || '');
+      const metaText = node?.dataRef?.groupKey === 'tables' && Array.isArray(node.children)
+        ? String(node.children.length)
+        : '';
+      const nodeWidth = V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH
+        + (depth * V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH)
+        + ((title.length + metaText.length) * V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH);
+      estimatedContentWidth = Math.max(estimatedContentWidth, nodeWidth);
+      if (node.children?.length) {
+        visit(node.children, depth + 1);
+      }
+    });
+  };
+  visit(nodes, 0);
+
+  if (estimatedContentWidth <= safeViewportWidth + 8) {
+    return undefined;
+  }
+  const scrollWidth = Math.min(
+    V2_TREE_HORIZONTAL_SCROLL_MAX_WIDTH,
+    Math.max(safeViewportWidth + V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER, Math.ceil(estimatedContentWidth)),
+  );
+  return scrollWidth;
+};
+
 export const filterV2ExplorerTreeByKind = (
   nodes: TreeNode[],
   filter: V2ExplorerFilter,
@@ -432,6 +477,9 @@ export const filterV2ExplorerTreeByKind = (
   };
 
   const visit = (node: TreeNode): TreeNode | null => {
+    if (node.type === 'external-sql-root') {
+      return node;
+    }
     const groupKey = String(node?.dataRef?.groupKey || '');
     if (node.type === 'object-group') {
       if (allowedGroupKeys.has(groupKey)) {
@@ -464,7 +512,7 @@ interface BatchObjectItem {
   dataRef: any;
 }
 
-type V2CommandSearchItem =
+export type V2CommandSearchItem =
   | {
       key: string;
       kind: 'node';
@@ -537,6 +585,66 @@ export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery 
     normalizedKeyword: trimmedValue.toLowerCase(),
     aiPrompt: '',
   };
+};
+
+const isV2CommandSearchObjectNode = (node: TreeNode): boolean => {
+  return node.type === 'table'
+      || node.type === 'view'
+      || node.type === 'materialized-view';
+};
+
+const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
+
+export const filterV2CommandSearchTreeItems = (
+  items: V2CommandSearchItem[],
+  query: V2CommandSearchQuery,
+): V2CommandSearchItem[] => {
+  if (query.mode === 'ai') return [];
+  const normalizedKeyword = query.normalizedKeyword;
+  const objectMode = query.mode === 'object';
+  const matchedItems = items.filter((item) => {
+    if (item.kind !== 'node') return false;
+    const node = item.node;
+    const dataRef = node.dataRef || {};
+    if (objectMode && !isV2CommandSearchObjectNode(node)) {
+      return false;
+    }
+    if (!normalizedKeyword) return true;
+    const objectName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
+    if (objectMode) {
+      return objectName.includes(normalizedKeyword)
+          || String(item.title || '').toLowerCase().includes(normalizedKeyword);
+    }
+    const haystack = [
+      item.title,
+      item.meta,
+      dataRef.tableName,
+      dataRef.viewName,
+      dataRef.dbName,
+      dataRef.name,
+      dataRef.config?.host,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(normalizedKeyword);
+  });
+  return normalizedKeyword ? matchedItems : matchedItems.slice(0, V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT);
+};
+
+export interface V2CommandSearchEnterState {
+  key: string;
+  isComposing?: boolean;
+  keyCode?: number;
+  activeItemCount: number;
+}
+
+export const shouldRunV2CommandSearchEnter = ({
+  key,
+  isComposing,
+  keyCode,
+  activeItemCount,
+}: V2CommandSearchEnterState): boolean => {
+  if (key !== 'Enter') return false;
+  if (isComposing || keyCode === 229) return false;
+  return activeItemCount > 0;
 };
 
 export const resolveSidebarConnectionIdFromKey = (
@@ -906,6 +1014,7 @@ const Sidebar: React.FC<{
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
+  const setAppearance = useStore(state => state.setAppearance);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const addAIContext = useStore(state => state.addAIContext);
   const darkMode = theme === 'dark';
@@ -914,7 +1023,11 @@ const Sidebar: React.FC<{
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
-  const primaryShortcutModifierLabel = getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform);
+  const focusSidebarSearchShortcut = resolveShortcutDisplay(shortcutOptions, 'focusSidebarSearch', activeShortcutPlatform);
+  const focusSidebarSearchShortcutTokens = focusSidebarSearchShortcut === '-'
+      ? []
+      : focusSidebarSearchShortcut.match(/Ctrl|Alt|Shift|Esc|Space|[⌘⌃⌥⇧↵↑↓←→]|[^+]/g) ?? [];
+  const isV2Ui = (uiVersion ?? appearance.uiVersion) === 'v2';
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
@@ -970,7 +1083,11 @@ const Sidebar: React.FC<{
           </div>
       </div>
   );
-  const [searchValue, setSearchValue] = useState('');
+  const v2SidebarSearchMode = appearance.v2SidebarSearchMode ?? 'command';
+  const v2UseLegacySidebarFilter = isV2Ui && v2SidebarSearchMode === 'filter';
+  const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;
+  const v2PersistedSidebarFilter = appearance.v2SidebarPersistedFilter ?? '';
+  const [searchValue, setSearchValue] = useState(v2PersistedSidebarFilter);
   const deferredSearchValue = useDeferredValue(searchValue);
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
   const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');
@@ -979,6 +1096,7 @@ const Sidebar: React.FC<{
   const commandSearchInputRef = useRef<any>(null);
   const [isV2CommandSearchOpen, setIsV2CommandSearchOpen] = useState(false);
   const [v2CommandSearchValue, setV2CommandSearchValue] = useState('');
+  const deferredV2CommandSearchValue = useDeferredValue(v2CommandSearchValue);
   const [v2CommandActiveIndex, setV2CommandActiveIndex] = useState(0);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [autoExpandParent, setAutoExpandParent] = useState(true);
@@ -1042,12 +1160,63 @@ const Sidebar: React.FC<{
       setV2CommandSearchValue('');
       setV2CommandActiveIndex(0);
   }, []);
+
+  useEffect(() => {
+      setSearchValue(v2PersistedSidebarFilter);
+  }, [v2PersistedSidebarFilter]);
+
+  useEffect(() => {
+      if (!v2UseLegacySidebarFilter) {
+          return;
+      }
+      const nextFilter = searchValue.trim();
+      if (nextFilter !== v2PersistedSidebarFilter) {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }
+  }, [searchValue, setAppearance, v2PersistedSidebarFilter, v2UseLegacySidebarFilter]);
+
+  const handleV2CommandSearchValueChange = useCallback((value: string) => {
+      setV2CommandSearchValue(value);
+  }, []);
+
+  useEffect(() => {
+      if (!v2CommandSearchPersistentFilterEnabled) {
+          return;
+      }
+      const nextFilter = deferredV2CommandSearchValue.trim();
+      setSearchValue(nextFilter);
+      const timer = window.setTimeout(() => {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }, 160);
+      return () => window.clearTimeout(timer);
+  }, [deferredV2CommandSearchValue, setAppearance, v2CommandSearchPersistentFilterEnabled]);
+
+  const toggleV2CommandSearchPersistentFilter = useCallback((enabled: boolean) => {
+      const nextFilter = enabled ? v2CommandSearchValue.trim() : '';
+      setSearchValue(nextFilter);
+      setAppearance({
+          v2CommandSearchPersistentFilterEnabled: enabled,
+          v2SidebarPersistedFilter: nextFilter,
+      });
+      message.success(enabled ? '已开启左侧筛选同步' : '已关闭左侧筛选同步');
+  }, [setAppearance, v2CommandSearchValue]);
+
+  const resetV2SidebarFilter = useCallback(() => {
+      setSearchValue('');
+      setAppearance({
+          v2CommandSearchPersistentFilterEnabled: false,
+          v2SidebarPersistedFilter: '',
+      });
+      message.success('已重置侧栏筛选');
+  }, [setAppearance]);
   
   // Virtual Scroll State
   const [treeHeight, setTreeHeight] = useState(500);
+  const [treeViewportWidth, setTreeViewportWidth] = useState(0);
   const treeContainerRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<any>(null);
   const treeDataRef = useRef<TreeNode[]>([]);
+  const externalSQLDirectoryTreesRef = useRef<Record<string, ExternalSQLTreeEntry[]>>({});
   const findTreeNodeByKeyRef = useRef<(nodes: TreeNode[], targetKey: React.Key) => TreeNode | null>(() => null);
   const expandConnectionFromRailRef = useRef<(connectionId: string) => void>(() => {});
   useEffect(() => {
@@ -1059,6 +1228,7 @@ const Sidebar: React.FC<{
       const resizeObserver = new ResizeObserver(entries => {
           for (let entry of entries) {
               setTreeHeight(entry.contentRect.height);
+              setTreeViewportWidth(entry.contentRect.width);
           }
       });
       resizeObserver.observe(treeContainerRef.current);
@@ -1067,7 +1237,7 @@ const Sidebar: React.FC<{
 
   useEffect(() => {
       const handleFocusSidebarSearch = () => {
-          if ((uiVersion ?? appearance.uiVersion) === 'v2') {
+          if (isV2Ui && !v2UseLegacySidebarFilter) {
               openV2CommandSearch();
               return;
           }
@@ -1082,7 +1252,7 @@ const Sidebar: React.FC<{
       return () => {
           window.removeEventListener('gonavi:focus-sidebar-search', handleFocusSidebarSearch as EventListener);
       };
-  }, [appearance.uiVersion, openV2CommandSearch, uiVersion]);
+  }, [isV2Ui, openV2CommandSearch, v2UseLegacySidebarFilter]);
 
   useEffect(() => {
       if (!isV2CommandSearchOpen) return;
@@ -1117,6 +1287,10 @@ const Sidebar: React.FC<{
   const [isRenameSavedQueryModalOpen, setIsRenameSavedQueryModalOpen] = useState(false);
   const [renameSavedQueryForm] = Form.useForm();
   const [renameSavedQueryTarget, setRenameSavedQueryTarget] = useState<SavedQuery | null>(null);
+  const [isExternalSQLFileModalOpen, setIsExternalSQLFileModalOpen] = useState(false);
+  const [externalSQLFileForm] = Form.useForm();
+  const [externalSQLFileModalMode, setExternalSQLFileModalMode] = useState<ExternalSQLFileModalMode>('create');
+  const [externalSQLFileTarget, setExternalSQLFileTarget] = useState<any>(null);
 
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
@@ -1193,7 +1367,7 @@ const Sidebar: React.FC<{
               loadTables(node);
           }
       });
-  }, [autoFetchVisible, externalSQLDirectories, savedQueries]);
+  }, [autoFetchVisible, savedQueries]);
 
   useEffect(() => {
     const previousSignatures = connectionReloadSignaturesRef.current;
@@ -1325,7 +1499,8 @@ const Sidebar: React.FC<{
 
       orderedNodes.push(...Array.from(tagNodesById.values()));
       orderedNodes.push(...Array.from(ungroupedNodesById.values()));
-      return orderedNodes;
+      const externalSQLRootNode = prev.find((node) => node.type === 'external-sql-root');
+      return externalSQLRootNode ? [...orderedNodes, externalSQLRootNode] : orderedNodes;
     });
   }, [connections, connectionTags, sidebarRootOrder]);
 
@@ -1430,6 +1605,51 @@ const Sidebar: React.FC<{
       children: node.children?.map((child) => decorateExternalSQLTreeNode(child)),
     };
   };
+
+  const buildExternalSQLRootTreeNode = useCallback((
+      directories: ExternalSQLDirectory[] = externalSQLDirectories,
+      directoryTrees: Record<string, ExternalSQLTreeEntry[]> = externalSQLDirectoryTreesRef.current,
+  ): TreeNode => decorateExternalSQLTreeNode(buildExternalSQLRootNode({
+      directories,
+      directoryTrees,
+  })), [externalSQLDirectories]);
+
+  const refreshGlobalExternalSQLRootNode = useCallback(async (
+      showSuccess = false,
+      directoriesOverride?: ExternalSQLDirectory[],
+  ) => {
+      const targetDirectories = directoriesOverride || externalSQLDirectories;
+      const directoryTrees: Record<string, ExternalSQLTreeEntry[]> = {};
+      await Promise.all(targetDirectories.map(async (directory) => {
+          const directoryRes = await ListSQLDirectory(directory.path);
+          if (!directoryRes.success) {
+              message.warning({
+                  key: `external-sql-${directory.id}`,
+                  content: `SQL 目录读取失败: ${directory.name} (${directoryRes.message})`,
+              });
+              directoryTrees[directory.id] = [];
+              return;
+          }
+          directoryTrees[directory.id] = Array.isArray(directoryRes.data)
+              ? directoryRes.data as ExternalSQLTreeEntry[]
+              : [];
+      }));
+      externalSQLDirectoryTreesRef.current = directoryTrees;
+      const rootNode = buildExternalSQLRootTreeNode(targetDirectories, directoryTrees);
+      setTreeData((prev) => {
+          const withoutExternalRoot = prev.filter((node) => node.type !== 'external-sql-root');
+          const nextTreeData = [...withoutExternalRoot, rootNode];
+          treeDataRef.current = nextTreeData;
+          return nextTreeData;
+      });
+      if (showSuccess) {
+          message.success('外部 SQL 目录已刷新');
+      }
+  }, [buildExternalSQLRootTreeNode, externalSQLDirectories]);
+
+  useEffect(() => {
+      void refreshGlobalExternalSQLRootNode(false);
+  }, [refreshGlobalExternalSQLRootNode]);
 
   const getNodeDatabaseContext = (node: any): { connectionId: string; dbName: string; dbNodeKey: string } | null => {
     if (!node) return null;
@@ -2411,8 +2631,6 @@ const Sidebar: React.FC<{
       loadingNodesRef.current.add(loadKey);
       
       const dbQueries = savedQueries.filter(q => q.connectionId === conn.id && q.dbName === dbName);
-      const dbExternalSQLDirectories = useStore.getState().externalSQLDirectories.filter(directory => directory.connectionId === conn.id && directory.dbName === dbName);
-      
       const queriesNode: TreeNode = {
           title: '已存查询',
           key: `${key}-queries`,
@@ -2480,34 +2698,6 @@ const Sidebar: React.FC<{
 	                loadFunctions(conn, conn.dbName),
 	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
-                const externalSQLDirectoryResults = await Promise.all(
-                    dbExternalSQLDirectories.map(async (directory) => {
-                        const directoryRes = await ListSQLDirectory(directory.path);
-                        if (!directoryRes.success) {
-                            message.warning({
-                                key: `external-sql-${directory.id}`,
-                                content: `SQL 目录读取失败: ${directory.name} (${directoryRes.message})`,
-                            });
-                            return { id: directory.id, entries: [] as ExternalSQLTreeEntry[] };
-                        }
-                        return {
-                            id: directory.id,
-                            entries: Array.isArray(directoryRes.data) ? directoryRes.data as ExternalSQLTreeEntry[] : [],
-                        };
-                    }),
-                );
-                const externalSQLTrees = externalSQLDirectoryResults.reduce<Record<string, ExternalSQLTreeEntry[]>>((accumulator, item) => {
-                    accumulator[item.id] = item.entries;
-                    return accumulator;
-                }, {});
-                const externalSQLRootNode = decorateExternalSQLTreeNode(buildExternalSQLRootNode({
-                    dbNodeKey: String(key),
-                    connectionId: String(conn.id),
-                    dbName: String(conn.dbName),
-                    directories: dbExternalSQLDirectories,
-                    directoryTrees: externalSQLTrees,
-                }));
-
             const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
             const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
@@ -2790,7 +2980,7 @@ const Sidebar: React.FC<{
 	                        };
 	                    });
 
-	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...schemaNodes]);
+	                replaceTreeNodeChildren(key, [queriesNode, ...schemaNodes]);
 	            } else {
 	                const includeMaterializedViews = getMetadataDialect(conn as SavedConnection) === 'starrocks';
 	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
@@ -2803,7 +2993,7 @@ const Sidebar: React.FC<{
 	                    ...(includeEvents ? [buildObjectGroup(key as string, 'events', '事件', <ClockCircleOutlined />, eventEntries.map(buildEventNode))] : []),
 	                ];
 
-	                replaceTreeNodeChildren(key, [queriesNode, externalSQLRootNode, ...groupedNodes]);
+	                replaceTreeNodeChildren(key, [queriesNode, ...groupedNodes]);
 	            }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
@@ -2828,7 +3018,30 @@ const Sidebar: React.FC<{
   const locateObjectInSidebar = async (detail: unknown) => {
       const request = normalizeSidebarLocateObjectRequest(detail);
       if (!request) {
-          message.warning('当前标签页没有可定位的表上下文');
+          message.warning('当前标签页没有可定位的上下文');
+          return;
+      }
+
+      if (request.objectGroup === 'externalSqlFiles') {
+          await refreshGlobalExternalSQLRootNode(false);
+          const target = resolveSidebarLocateTarget(request, { groupBySchema: false });
+          const path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
+          if (!path) {
+              message.warning(`SQL 文件未在外部 SQL 目录中找到：${request.filePath}`);
+              return;
+          }
+          const targetKey = path[path.length - 1];
+          const targetNode = findTreeNodeByKey(treeDataRef.current, targetKey);
+          setSearchValue('');
+          mergeExpandedTreeKeys(path.slice(0, -1));
+          setSelectedKeys([targetKey]);
+          selectedNodesRef.current = targetNode ? [targetNode] : [];
+          const connectionId = String(request.connectionId || activeContext?.connectionId || activeTab?.connectionId || '').trim();
+          const dbName = String(request.dbName || activeContext?.dbName || activeTab?.dbName || '').trim();
+          if (connectionId) {
+              setActiveContext({ connectionId, dbName });
+          }
+          scrollSidebarTreeToKey(targetKey);
           return;
       }
 
@@ -2893,7 +3106,7 @@ const Sidebar: React.FC<{
 
   const handleLocateActiveTabInSidebar = () => {
       if (!activeTabLocateRequest) {
-          message.warning('当前标签页没有可定位的表上下文');
+          message.warning('当前标签页没有可定位的上下文');
           return;
       }
       void locateObjectInSidebar(activeTabLocateRequest);
@@ -2940,6 +3153,8 @@ const Sidebar: React.FC<{
         await loadJVMResources({ key, dataRef });
     } else if (type === 'database') {
         await loadTables({ key, dataRef });
+    } else if (type === 'external-sql-root') {
+        await refreshGlobalExternalSQLRootNode(false);
     } else if (type === 'table') {
         // Expand table to show object categories
         const conn = dataRef; 
@@ -3011,8 +3226,6 @@ const Sidebar: React.FC<{
       });
   };
 
-  const isV2Ui = (uiVersion ?? appearance.uiVersion) === 'v2';
-
   const onSelect = (keys: React.Key[], info: any) => {
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
           return;
@@ -3049,8 +3262,6 @@ const Sidebar: React.FC<{
       } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
-          setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
-      } else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       } else if (type === 'redis-db') {
           setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
@@ -3110,7 +3321,6 @@ const Sidebar: React.FC<{
       } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
-      else if (type === 'external-sql-root' || type === 'external-sql-directory' || type === 'external-sql-folder' || type === 'external-sql-file') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
 
       if (node.type === 'table') {
@@ -3812,9 +4022,9 @@ const Sidebar: React.FC<{
   const handleRunSQLFile = async (node: any) => {
       const res = await OpenSQLFile();
       if (res.success) {
-          const data = res.data;
+          const data = normalizeSQLFileDialogData(res.data);
           // 大文件：后端返回文件路径，走流式执行
-          if (data && typeof data === 'object' && data.isLargeFile) {
+          if (data.isLargeFile) {
               const connId = node.type === 'connection' ? node.key : node.dataRef?.id;
               const dbName = node.dataRef?.dbName || '';
               const conn = connections.find(c => c.id === connId);
@@ -3822,19 +4032,20 @@ const Sidebar: React.FC<{
                   message.error('未找到对应的连接配置');
                   return;
               }
-              startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
+              startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB || '');
               return;
           }
           // 小文件：加载到编辑器
-          const sqlContent = data;
           const { dbName, id } = node.dataRef;
+          const connectionId = node.type === 'connection' ? String(node.key) : String(id || node.dataRef.id || '');
           addTab({
-              id: `query-${Date.now()}`,
-              title: `运行外部SQL文件`,
+              id: data.filePath ? buildExternalSQLTabId(connectionId, dbName || '', data.filePath) : `query-${Date.now()}`,
+              title: data.fileName || `运行外部SQL文件`,
               type: 'query',
-              connectionId: node.type === 'connection' ? node.key : node.dataRef.id,
+              connectionId,
               dbName: dbName,
-              query: sqlContent
+              query: data.content,
+              filePath: data.filePath || undefined,
           });
       } else if (res.message !== '已取消') {
           message.error('读取文件失败: ' + res.message);
@@ -3849,25 +4060,26 @@ const Sidebar: React.FC<{
       }
       const res = await OpenSQLFile();
       if (res.success) {
-          const data = res.data;
+          const data = normalizeSQLFileDialogData(res.data);
           // 大文件：后端流式执行
-          if (data && typeof data === 'object' && data.isLargeFile) {
+          if (data.isLargeFile) {
               const conn = connections.find(c => c.id === ctx.connectionId);
               if (!conn) {
                   message.error('未找到对应的连接配置');
                   return;
               }
-              startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB);
+              startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB || '');
               return;
           }
           // 小文件
           addTab({
-              id: `query-${Date.now()}`,
-              title: `运行外部SQL文件`,
+              id: data.filePath ? buildExternalSQLTabId(ctx.connectionId, ctx.dbName || '', data.filePath) : `query-${Date.now()}`,
+              title: data.fileName || `运行外部SQL文件`,
               type: 'query',
               connectionId: ctx.connectionId,
               dbName: ctx.dbName || undefined,
-              query: data
+              query: data.content,
+              filePath: data.filePath || undefined,
           });
       } else if (res.message !== '已取消') {
           message.error('读取文件失败: ' + res.message);
@@ -3941,13 +4153,80 @@ const Sidebar: React.FC<{
       }
   };
 
+  const normalizeExternalSQLFileName = (rawName: unknown): string => {
+      const name = String(rawName || '').trim();
+      if (!name) return '';
+      return /\.sql$/i.test(name) ? name : `${name}.sql`;
+  };
+
+  const normalizeExternalSQLDirectoryName = (rawName: unknown): string => {
+      return String(rawName || '').trim();
+  };
+
+  const getExternalSQLParentDirectoryPath = (node: any): string => {
+      const path = String(node?.dataRef?.path || '').trim();
+      if (node?.type === 'external-sql-directory' || node?.type === 'external-sql-folder') {
+          return path;
+      }
+      if (node?.type === 'external-sql-file') {
+          const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+          return index > 0 ? path.slice(0, index) : '';
+      }
+      return '';
+  };
+
+  const resolveExternalSQLExecutionContext = (): { connectionId: string; dbName: string } => {
+      const activeStoreContext = useStore.getState().activeContext;
+      const selectedConnectionId = selectedNodesRef.current
+          .map((node) => resolveSidebarNodeConnectionId(node, connectionIds))
+          .find(Boolean) || '';
+      return {
+          connectionId: String(
+              activeStoreContext?.connectionId
+              || activeTab?.connectionId
+              || selectedConnectionId
+              || '',
+          ).trim(),
+          dbName: String(
+              activeStoreContext?.dbName
+              || activeTab?.dbName
+              || '',
+          ).trim(),
+      };
+  };
+
+  const normalizeSQLFileDialogData = (data: unknown): { content: string; filePath: string; fileName: string; isLargeFile: boolean; fileSizeMB?: string } => {
+      if (data && typeof data === 'object') {
+          const payload = data as Record<string, unknown>;
+          const filePath = String(payload.filePath || '').trim();
+          return {
+              content: String(payload.content ?? ''),
+              filePath,
+              fileName: String(payload.name || filePath.split(/[\\/]/).filter(Boolean).pop() || '运行外部SQL文件').trim(),
+              isLargeFile: payload.isLargeFile === true,
+              fileSizeMB: String(payload.fileSizeMB || '').trim() || undefined,
+          };
+      }
+      return {
+          content: String(data || ''),
+          filePath: '',
+          fileName: '运行外部SQL文件',
+          isLargeFile: false,
+      };
+  };
+
   const openExternalSQLFile = async (fileNode: any) => {
-      const connectionId = String(fileNode?.dataRef?.connectionId || '').trim();
-      const dbName = String(fileNode?.dataRef?.dbName || '').trim();
+      const fileContext = {
+          connectionId: String(fileNode?.dataRef?.connectionId || '').trim(),
+          dbName: String(fileNode?.dataRef?.dbName || '').trim(),
+      };
+      const fallbackContext = resolveExternalSQLExecutionContext();
+      const connectionId = fileContext.connectionId || fallbackContext.connectionId;
+      const dbName = fileContext.dbName || fallbackContext.dbName;
       const filePath = String(fileNode?.dataRef?.path || '').trim();
       const fileName = String(fileNode?.dataRef?.name || fileNode?.title || 'SQL文件').trim() || 'SQL文件';
-      if (!connectionId || !dbName || !filePath) {
-          message.error('SQL 文件上下文不完整，无法打开');
+      if (!filePath) {
+          message.error('SQL 文件路径不完整，无法打开');
           return;
       }
 
@@ -3961,6 +4240,10 @@ const Sidebar: React.FC<{
 
       const data = res.data;
       if (data && typeof data === 'object' && data.isLargeFile) {
+          if (!connectionId) {
+              message.warning('请先选择一个 Host 后再执行大 SQL 文件');
+              return;
+          }
           const conn = connections.find((item) => item.id === connectionId);
           if (!conn) {
               message.error('未找到对应的连接配置');
@@ -3975,22 +4258,226 @@ const Sidebar: React.FC<{
           title: fileName,
           type: 'query',
           connectionId,
-          dbName,
+          dbName: dbName || undefined,
           query: String(data || ''),
           filePath,
       });
   };
 
-  const handleAddExternalSQLDirectory = async (node: any) => {
-      const context = getNodeDatabaseContext(node);
-      if (!context?.connectionId || !context?.dbName || !context?.dbNodeKey) {
-          message.warning('请在具体数据库下添加外部 SQL 目录');
+  const openCreateExternalSQLFileModal = (node: any) => {
+      const directoryPath = getExternalSQLParentDirectoryPath(node);
+      if (!directoryPath) {
+          message.error('未找到可新建 SQL 文件的目录');
+          return;
+      }
+      setExternalSQLFileModalMode('create');
+      setExternalSQLFileTarget(node);
+      externalSQLFileForm.setFieldsValue({ name: 'new-query.sql' });
+      setIsExternalSQLFileModalOpen(true);
+  };
+
+  const openRenameExternalSQLFileModal = (node: any) => {
+      const currentName = String(node?.dataRef?.name || node?.title || '').trim();
+      if (!currentName) {
+          message.error('未找到可重命名的 SQL 文件');
+          return;
+      }
+      setExternalSQLFileModalMode('rename');
+      setExternalSQLFileTarget(node);
+      externalSQLFileForm.setFieldsValue({ name: currentName });
+      setIsExternalSQLFileModalOpen(true);
+  };
+
+  const openCreateExternalSQLDirectoryModal = (node: any) => {
+      const directoryPath = getExternalSQLParentDirectoryPath(node);
+      if (!directoryPath) {
+          message.error('未找到可新建目录的位置');
+          return;
+      }
+      setExternalSQLFileModalMode('create-directory');
+      setExternalSQLFileTarget(node);
+      externalSQLFileForm.setFieldsValue({ name: 'new-folder' });
+      setIsExternalSQLFileModalOpen(true);
+  };
+
+  const openRenameExternalSQLDirectoryModal = (node: any) => {
+      const currentName = String(node?.dataRef?.name || node?.title || '').trim();
+      if (!currentName) {
+          message.error('未找到可重命名的目录');
+          return;
+      }
+      setExternalSQLFileModalMode('rename-directory');
+      setExternalSQLFileTarget(node);
+      externalSQLFileForm.setFieldsValue({ name: currentName });
+      setIsExternalSQLFileModalOpen(true);
+  };
+
+  const handleExternalSQLFileModalOk = async () => {
+      try {
+          const values = await externalSQLFileForm.validateFields();
+          const isDirectoryMode = isExternalSQLDirectoryModalMode(externalSQLFileModalMode);
+          const name = isDirectoryMode
+              ? normalizeExternalSQLDirectoryName(values.name)
+              : normalizeExternalSQLFileName(values.name);
+          if (!name) {
+              message.error(isDirectoryMode ? '目录名不能为空' : 'SQL 文件名不能为空');
+              return;
+          }
+
+          if (externalSQLFileModalMode === 'create') {
+              const directoryPath = getExternalSQLParentDirectoryPath(externalSQLFileTarget);
+              if (!directoryPath) {
+                  message.error('未找到可新建 SQL 文件的目录');
+                  return;
+              }
+              const res = await CreateSQLFile(directoryPath, name);
+              if (!res.success) {
+                  message.error('新建 SQL 文件失败: ' + res.message);
+                  return;
+              }
+              await refreshGlobalExternalSQLRootNode(false);
+              message.success('SQL 文件已新建');
+          } else if (externalSQLFileModalMode === 'rename') {
+              const filePath = String(externalSQLFileTarget?.dataRef?.path || '').trim();
+              if (!filePath) {
+                  message.error('未找到可重命名的 SQL 文件');
+                  return;
+              }
+              const res = await RenameSQLFile(filePath, name);
+              if (!res.success) {
+                  message.error('重命名 SQL 文件失败: ' + res.message);
+                  return;
+              }
+              await refreshGlobalExternalSQLRootNode(false);
+              message.success('SQL 文件已重命名');
+          } else if (externalSQLFileModalMode === 'create-directory') {
+              const directoryPath = getExternalSQLParentDirectoryPath(externalSQLFileTarget);
+              if (!directoryPath) {
+                  message.error('未找到可新建目录的位置');
+                  return;
+              }
+              const res = await CreateSQLDirectory(directoryPath, name);
+              if (!res.success) {
+                  message.error('新建目录失败: ' + res.message);
+                  return;
+              }
+              await refreshGlobalExternalSQLRootNode(false);
+              message.success('目录已新建');
+          } else {
+              const directoryPath = String(externalSQLFileTarget?.dataRef?.path || '').trim();
+              if (!directoryPath) {
+                  message.error('未找到可重命名的目录');
+                  return;
+              }
+              const res = await RenameSQLDirectory(directoryPath, name);
+              if (!res.success) {
+                  message.error('重命名目录失败: ' + res.message);
+                  return;
+              }
+
+              if (externalSQLFileTarget?.type === 'external-sql-directory') {
+                  const payload = (res.data && typeof res.data === 'object') ? res.data as Record<string, unknown> : {};
+                  const nextPath = String(payload.directoryPath || payload.path || '').trim();
+                  const nextName = String(payload.name || name).trim();
+                  const oldDirectoryId = String(externalSQLFileTarget?.dataRef?.id || '').trim();
+                  if (!nextPath || !oldDirectoryId) {
+                      message.error('目录已重命名，但无法同步外部 SQL 目录列表，请重新添加目录');
+                      await refreshGlobalExternalSQLRootNode(false);
+                      return;
+                  }
+                  const nextDirectory: ExternalSQLDirectory = {
+                      id: buildExternalSQLDirectoryId('', '', nextPath),
+                      name: nextName || nextPath.split(/[\\/]/).filter(Boolean).pop() || 'SQL目录',
+                      path: nextPath,
+                      createdAt: Number(externalSQLFileTarget?.dataRef?.createdAt) || Date.now(),
+                  };
+                  deleteExternalSQLDirectory(oldDirectoryId);
+                  saveExternalSQLDirectory(nextDirectory);
+                  const nextDirectories = [
+                      ...externalSQLDirectories.filter((item) => item.id !== oldDirectoryId),
+                      nextDirectory,
+                  ];
+                  await refreshGlobalExternalSQLRootNode(false, nextDirectories);
+              } else {
+                  await refreshGlobalExternalSQLRootNode(false);
+              }
+              message.success('目录已重命名');
+          }
+
+          setIsExternalSQLFileModalOpen(false);
+          setExternalSQLFileTarget(null);
+          externalSQLFileForm.resetFields();
+      } catch {
+          // Validate failed
+      }
+  };
+
+  const handleDeleteExternalSQLFile = (node: any) => {
+      const filePath = String(node?.dataRef?.path || '').trim();
+      const fileName = String(node?.dataRef?.name || node?.title || 'SQL 文件').trim();
+      if (!filePath) {
+          message.error('未找到可删除的 SQL 文件');
           return;
       }
 
-      const currentDirectory = externalSQLDirectories.find((item) =>
-          item.connectionId === context.connectionId && item.dbName === context.dbName,
-      )?.path || '';
+      Modal.confirm({
+          title: '确认删除 SQL 文件',
+          content: `确定删除 "${fileName}" 吗？该操作会删除本地磁盘文件，无法恢复。`,
+          okText: '删除',
+          cancelText: '取消',
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const res = await DeleteSQLFile(filePath);
+              if (!res.success) {
+                  message.error('删除 SQL 文件失败: ' + res.message);
+                  return;
+              }
+              await refreshGlobalExternalSQLRootNode(false);
+              message.success('SQL 文件已删除');
+          },
+      });
+  };
+
+  const handleDeleteExternalSQLDirectory = (node: any) => {
+      const directoryPath = String(node?.dataRef?.path || '').trim();
+      const directoryName = String(node?.dataRef?.name || node?.title || '目录').trim();
+      if (!directoryPath) {
+          message.error('未找到可删除的目录');
+          return;
+      }
+
+      Modal.confirm({
+          title: '确认删除目录',
+          content: `确定删除 "${directoryName}" 吗？该操作会删除本地磁盘目录，且仅支持删除空目录。`,
+          okText: '删除',
+          cancelText: '取消',
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const res = await DeleteSQLDirectory(directoryPath);
+              if (!res.success) {
+                  message.error('删除目录失败: ' + res.message);
+                  return;
+              }
+
+              if (node?.type === 'external-sql-directory') {
+                  const directoryId = String(node?.dataRef?.id || '').trim();
+                  if (directoryId) {
+                      deleteExternalSQLDirectory(directoryId);
+                      const nextDirectories = externalSQLDirectories.filter((item) => item.id !== directoryId);
+                      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
+                  } else {
+                      await refreshGlobalExternalSQLRootNode(false);
+                  }
+              } else {
+                  await refreshGlobalExternalSQLRootNode(false);
+              }
+              message.success('目录已删除');
+          },
+      });
+  };
+
+  const handleAddExternalSQLDirectory = async (node: any) => {
+      const currentDirectory = externalSQLDirectories[0]?.path || '';
       const selection = await SelectSQLDirectory(currentDirectory);
       if (!selection.success) {
           if (selection.message !== '已取消') {
@@ -4007,42 +4494,39 @@ const Sidebar: React.FC<{
           return;
       }
 
-      const directoryId = buildExternalSQLDirectoryId(context.connectionId, context.dbName, path);
-      saveExternalSQLDirectory({
+      const directoryId = buildExternalSQLDirectoryId('', '', path);
+      const nextDirectory: ExternalSQLDirectory = {
           id: directoryId,
           name: name || path.split(/[\\/]/).filter(Boolean).pop() || 'SQL目录',
           path,
-          connectionId: context.connectionId,
-          dbName: context.dbName,
           createdAt: Date.now(),
-      });
+      };
+      saveExternalSQLDirectory(nextDirectory);
 
-      setExpandedKeys((prev) => Array.from(new Set([...prev, context.dbNodeKey, `${context.dbNodeKey}-external-sql`])));
+      const nextDirectories = [
+          ...externalSQLDirectories.filter((item) => item.path.replace(/\\/g, '/').toLowerCase() !== path.replace(/\\/g, '/').toLowerCase()),
+          nextDirectory,
+      ];
+      setExpandedKeys((prev) => Array.from(new Set([...prev, 'external-sql-root'])));
       setAutoExpandParent(false);
-      await refreshDatabaseNode(context.dbNodeKey);
+      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
       message.success('外部 SQL 目录已添加');
   };
 
   const handleRemoveExternalSQLDirectory = async (node: any) => {
       const directoryId = String(node?.dataRef?.id || '').trim();
-      const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
       if (!directoryId) {
           message.error('未找到可移除的 SQL 目录');
           return;
       }
       deleteExternalSQLDirectory(directoryId);
-      await refreshDatabaseNode(dbNodeKey);
+      const nextDirectories = externalSQLDirectories.filter((item) => item.id !== directoryId);
+      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
       message.success('外部 SQL 目录已移除');
   };
 
   const handleRefreshExternalSQLDirectory = async (node: any) => {
-      const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
-      if (!dbNodeKey) {
-          message.warning('当前目录缺少数据库上下文，无法刷新');
-          return;
-      }
-      await refreshDatabaseNode(dbNodeKey);
-      message.success('外部 SQL 目录已刷新');
+      await refreshGlobalExternalSQLRootNode(true);
   };
 
   const handleCreateDatabase = async () => {
@@ -5391,6 +5875,10 @@ const Sidebar: React.FC<{
       if (scopes.includes('object') && (isV2SidebarObjectNode(node) || node.type === 'object-group') && title.includes(keyword)) {
           return true;
       }
+      if (node.type === 'external-sql-root' || node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
+          const pathText = String(node?.dataRef?.path || '').toLowerCase();
+          return title.includes(keyword) || pathText.includes(keyword);
+      }
       return false;
   };
 
@@ -5410,7 +5898,10 @@ const Sidebar: React.FC<{
               const shouldKeepFullSubtree = isSmartMode
                   || item.type === 'connection'
                   || item.type === 'database'
-                  || item.type === 'tag';
+                  || item.type === 'tag'
+                  || item.type === 'external-sql-root'
+                  || item.type === 'external-sql-directory'
+                  || item.type === 'external-sql-folder';
               if (item.children && shouldKeepFullSubtree) {
                   result.push(item);
               } else if (item.children && filteredChildren.length > 0) {
@@ -5541,49 +6032,15 @@ const Sidebar: React.FC<{
 		  ], [activeShortcutPlatform, onCreateConnection, onToggleAI, onToggleLogPanel, shortcutOptions]);
 
 	  const v2CommandSearchQuery = useMemo(
-	      () => parseV2CommandSearchQuery(v2CommandSearchValue),
-	      [v2CommandSearchValue],
+	      () => parseV2CommandSearchQuery(deferredV2CommandSearchValue),
+	      [deferredV2CommandSearchValue],
 	  );
 	  const normalizedV2CommandSearchValue = v2CommandSearchQuery.normalizedKeyword;
 	  const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';
 	  const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';
 	  const filteredCommandSearchTreeItems = useMemo(() => {
-	      if (v2CommandSearchAiMode) return [];
-	      const matchLimit = v2CommandSearchObjectMode ? 16 : 8;
-	      if (!normalizedV2CommandSearchValue) {
-	          return commandSearchTreeItems
-	              .filter((item) => !v2CommandSearchObjectMode || (
-	                  item.kind === 'node'
-	                  && (item.node.type === 'table' || item.node.type === 'view' || item.node.type === 'materialized-view')
-	              ))
-	              .slice(0, matchLimit);
-	      }
-	      return commandSearchTreeItems
-	          .filter((item) => {
-	              if (item.kind !== 'node') return false;
-	              const node = item.node;
-	              const dataRef = node.dataRef || {};
-	              if (v2CommandSearchObjectMode && node.type !== 'table' && node.type !== 'view' && node.type !== 'materialized-view') {
-	                  return false;
-	              }
-	              const tableName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
-	              if (v2CommandSearchObjectMode) {
-	                  return tableName.includes(normalizedV2CommandSearchValue)
-	                      || String(item.title || '').toLowerCase().includes(normalizedV2CommandSearchValue);
-	              }
-	              const haystack = [
-	                  item.title,
-	                  item.meta,
-	                  dataRef.tableName,
-                  dataRef.viewName,
-                  dataRef.dbName,
-                  dataRef.name,
-	                  dataRef.config?.host,
-	              ].filter(Boolean).join(' ').toLowerCase();
-	              return haystack.includes(normalizedV2CommandSearchValue);
-	          })
-	          .slice(0, matchLimit);
-	  }, [commandSearchTreeItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
+	      return filterV2CommandSearchTreeItems(commandSearchTreeItems, v2CommandSearchQuery);
+	  }, [commandSearchTreeItems, v2CommandSearchQuery]);
 
 	  const filteredCommandSearchActionItems = useMemo(() => {
 	      if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
@@ -5669,12 +6126,14 @@ const Sidebar: React.FC<{
       return String(activeTab?.dbName || '').trim();
   }, [activeContext, activeTab?.dbName]);
   const activeConnectionTreeData = useMemo(() => {
+      const externalSQLNodes = displayTreeData.filter((node) => node.type === 'external-sql-root');
       if (!activeConnection) return displayTreeData;
       const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
       if (activeConnectionNode) {
-          return activeConnectionNode.children && activeConnectionNode.children.length > 0
-              ? activeConnectionNode.children
-              : [];
+          return [
+              ...(activeConnectionNode.children && activeConnectionNode.children.length > 0 ? activeConnectionNode.children : []),
+              ...externalSQLNodes,
+          ];
       }
       const filterTree = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
           if (node.type === 'tag') {
@@ -5688,7 +6147,7 @@ const Sidebar: React.FC<{
       });
 
       const filtered = filterTree(displayTreeData);
-      return filtered;
+      return [...filtered, ...externalSQLNodes];
   }, [activeConnection, displayTreeData]);
   const v2VisibleTreeData = useMemo(() => {
       if (v2ExplorerFilter === 'all') {
@@ -5696,6 +6155,10 @@ const Sidebar: React.FC<{
       }
       return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
   }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
+  const v2TreeHorizontalScrollWidth = useMemo(
+      () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
+      [treeViewportWidth, v2VisibleTreeData],
+  );
   const v2TreeMetrics = useMemo(() => {
       const databaseTableCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
@@ -6409,15 +6872,19 @@ const Sidebar: React.FC<{
           setV2CommandActiveIndex((prev) => Math.max(prev - 1, 0));
           return;
       }
-	      if (event.key === 'Enter') {
-	          event.preventDefault();
-	          if (v2CommandSearchAiMode && !v2CommandSearchQuery.aiPrompt) {
-	              message.warning('请输入要问 AI 的问题');
-	              return;
-	          }
-	          runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
-	          return;
-	      }
+      if (event.key === 'Enter') {
+          if (!shouldRunV2CommandSearchEnter({
+              key: event.key,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.nativeEvent.keyCode,
+              activeItemCount: commandSearchFlatItems.length,
+          })) {
+              return;
+          }
+          event.preventDefault();
+          runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
+          return;
+      }
       if (event.key === 'Escape') {
           event.preventDefault();
           closeV2CommandSearch();
@@ -6463,7 +6930,7 @@ const Sidebar: React.FC<{
 	              ? '未找到匹配的表、视图或物化视图。'
 	              : '未找到匹配项。可输入 @表名 只搜表对象，或输入 ?问题 让 AI 回答。');
 	      return (
-	          <div className="gn-v2-command-backdrop" data-v2-command-search="true" onMouseDown={closeV2CommandSearch}>
+	          <div className="gn-v2-command-backdrop" data-v2-command-search="true">
               <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label="搜索表、连接、动作" onMouseDown={(event) => event.stopPropagation()}>
                   <div className="gn-v2-command-searchbar">
                       <SearchOutlined />
@@ -6472,10 +6939,29 @@ const Sidebar: React.FC<{
                           ref={commandSearchInputRef}
                           variant="borderless"
                           value={v2CommandSearchValue}
-                          onChange={(event) => setV2CommandSearchValue(event.target.value)}
+                          onChange={(event) => handleV2CommandSearchValueChange(event.target.value)}
                           onKeyDown={handleV2CommandSearchKeyDown}
                           placeholder="搜索表、连接、动作... 或问 AI"
                       />
+                      <Tooltip title="同步输入内容到左侧筛选">
+                          <span className="gn-v2-command-filter-switch" aria-label="同步到左侧筛选">
+                              <Switch
+                                  size="small"
+                                  checked={v2CommandSearchPersistentFilterEnabled}
+                                  onChange={toggleV2CommandSearchPersistentFilter}
+                              />
+                          </span>
+                      </Tooltip>
+                      <Tooltip title={v2PersistedSidebarFilter ? '重置侧栏筛选' : '没有已同步的侧栏筛选'}>
+                          <Button
+                              size="small"
+                              type="text"
+                              icon={<ReloadOutlined />}
+                              aria-label="重置侧栏筛选"
+                              disabled={!v2PersistedSidebarFilter}
+                              onClick={resetV2SidebarFilter}
+                          />
+                      </Tooltip>
                       <kbd>esc</kbd>
                   </div>
                   <div className="gn-v2-command-list">
@@ -7368,6 +7854,31 @@ const Sidebar: React.FC<{
     if (node.type === 'external-sql-directory') {
         return [
             {
+                key: 'new-external-sql-file',
+                label: '新建 SQL 文件',
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory',
+                label: '新建目录',
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-directory',
+                label: '重命名目录',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLDirectoryModal(node);
+                }
+            },
+            { type: 'divider' },
+            {
                 key: 'refresh-external-sql-directory',
                 label: '刷新目录',
                 icon: <ReloadOutlined />,
@@ -7384,6 +7895,62 @@ const Sidebar: React.FC<{
                 onClick: () => {
                     void handleRemoveExternalSQLDirectory(node);
                 }
+            },
+            {
+                key: 'delete-external-sql-directory',
+                label: '删除本地目录',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-folder') {
+        return [
+            {
+                key: 'new-external-sql-file',
+                label: '新建 SQL 文件',
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory',
+                label: '新建目录',
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-directory',
+                label: '重命名目录',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'refresh-external-sql-directory',
+                label: '刷新目录',
+                icon: <ReloadOutlined />,
+                onClick: () => {
+                    void handleRefreshExternalSQLDirectory(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-external-sql-directory',
+                label: '删除目录',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLDirectory(node);
+                }
             }
         ];
     }
@@ -7396,6 +7963,40 @@ const Sidebar: React.FC<{
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                     void openExternalSQLFile(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-file',
+                label: '重命名 SQL 文件',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-file-sibling',
+                label: '在此目录新建 SQL 文件',
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory-sibling',
+                label: '在此目录新建目录',
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-external-sql-file',
+                label: '删除 SQL 文件',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLFile(node);
                 }
             }
         ];
@@ -7900,13 +8501,13 @@ const Sidebar: React.FC<{
                       <FileAddOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'} placement="right">
+              <Tooltip title={canLocateActiveTab ? '定位当前标签页' : '当前标签页没有可定位的内容'} placement="right">
                   <span className="gn-v2-rail-action-wrap">
                       <button
                           type="button"
                           className="gn-v2-rail-tool gn-v2-rail-action"
                           onClick={handleLocateActiveTabInSidebar}
-                          aria-label="定位当前打开表"
+                          aria-label="定位当前标签页"
                           data-sidebar-locate-current-tab-action="true"
                           disabled={!canLocateActiveTab}
                       >
@@ -7991,23 +8592,62 @@ const Sidebar: React.FC<{
             </div>
         )}
         <div className={isV2Ui ? 'gn-v2-explorer-search' : undefined} style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
-            {isV2Ui ? (
-                <button
-                    type="button"
-                    className="gn-v2-explorer-command-trigger"
-                    onClick={() => {
-                        openV2CommandSearch();
-                        onFocusCommandSearch?.();
-                    }}
-                    aria-label="搜索表、连接、动作"
-                >
-                    <SearchOutlined />
-                    <span>搜索表、连接、动作... 或问 AI</span>
-                    <span className="gn-v2-search-shortcut" aria-hidden="true">
-                        <kbd>{primaryShortcutModifierLabel}</kbd>
-                        <kbd>K</kbd>
-                    </span>
-                </button>
+            {isV2Ui && !v2UseLegacySidebarFilter ? (
+                <div className="gn-v2-explorer-command-row" data-v2-sidebar-search-mode="command">
+                    <button
+                        type="button"
+                        className="gn-v2-explorer-command-trigger"
+                        onClick={() => {
+                            openV2CommandSearch();
+                            onFocusCommandSearch?.();
+                        }}
+                        aria-label="搜索表、连接、动作"
+                    >
+                        <SearchOutlined />
+                        <span>{v2PersistedSidebarFilter || '搜索表、连接、动作... 或问 AI'}</span>
+                        {focusSidebarSearchShortcutTokens.length > 0 ? (
+                            <span className="gn-v2-search-shortcut" aria-hidden="true">
+                                {focusSidebarSearchShortcutTokens.map((token, index) => (
+                                    <kbd key={`${token}-${index}`}>{token}</kbd>
+                                ))}
+                            </span>
+                        ) : null}
+                    </button>
+                    <Tooltip title={v2PersistedSidebarFilter ? '重置侧栏筛选' : '没有已同步的侧栏筛选'}>
+                        <button
+                            type="button"
+                            className="gn-v2-explorer-filter-action"
+                            aria-label="重置侧栏筛选"
+                            disabled={!v2PersistedSidebarFilter}
+                            onClick={resetV2SidebarFilter}
+                        >
+                            <ReloadOutlined />
+                        </button>
+                    </Tooltip>
+                </div>
+            ) : isV2Ui ? (
+                <div className="gn-v2-explorer-legacy-filter-row" data-v2-sidebar-search-mode="filter">
+                    <Input
+                        {...noAutoCapInputProps}
+                        ref={searchInputRef}
+                        value={searchValue}
+                        placeholder="筛选左侧表、连接、对象..."
+                        onChange={onSearch}
+                        size="small"
+                        prefix={<SearchOutlined />}
+                    />
+                    <Tooltip title={searchValue ? '重置侧栏筛选' : '没有筛选内容'}>
+                        <button
+                            type="button"
+                            className="gn-v2-explorer-filter-action"
+                            aria-label="重置侧栏筛选"
+                            disabled={!searchValue}
+                            onClick={resetV2SidebarFilter}
+                        >
+                            <ReloadOutlined />
+                        </button>
+                    </Tooltip>
+                </div>
             ) : (
                 <Input
                     {...noAutoCapInputProps}
@@ -8149,13 +8789,13 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'}>
+                <Tooltip title={canLocateActiveTab ? '定位当前标签页' : '当前标签页没有可定位的内容'}>
                     <span style={legacyToolbarDisabledWrapStyle}>
                         <Button
                             size="small"
                             type="text"
                             icon={<AimOutlined />}
-                            aria-label="定位当前打开表"
+                            aria-label="定位当前标签页"
                             data-sidebar-locate-current-tab-action="true"
                             disabled={!canLocateActiveTab}
                             onClick={handleLocateActiveTabInSidebar}
@@ -8167,7 +8807,15 @@ const Sidebar: React.FC<{
         </div>
         )}
 
-        <div ref={treeContainerRef} className={`sidebar-tree-scroll-shell${isV2Ui ? ' gn-v2-explorer-tree-shell' : ''}`} style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        <div
+            ref={treeContainerRef}
+            className={`sidebar-tree-scroll-shell${isV2Ui ? ' gn-v2-explorer-tree-shell' : ''}`}
+            style={{
+                flex: 1,
+                overflow: 'hidden',
+                minHeight: 0,
+            }}
+        >
             <div className="sidebar-tree-scroll-content">
                 <Tree
                     ref={treeRef}
@@ -8203,6 +8851,7 @@ const Sidebar: React.FC<{
                     selectedKeys={selectedKeys}
                     blockNode
                     height={treeHeight}
+                    scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}
                     onRightClick={onRightClick}
                 />
             </div>
@@ -8416,6 +9065,49 @@ const Sidebar: React.FC<{
             <Form form={renameSavedQueryForm} layout="vertical">
                 <Form.Item name="name" label="查询名称" rules={[{ required: true, message: '请输入查询名称' }]}>
                     <Input {...noAutoCapInputProps} />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={
+                externalSQLFileModalMode === 'create'
+                    ? '新建 SQL 文件'
+                    : externalSQLFileModalMode === 'rename'
+                        ? '重命名 SQL 文件'
+                        : externalSQLFileModalMode === 'create-directory'
+                            ? '新建目录'
+                            : '重命名目录'
+            }
+            open={isExternalSQLFileModalOpen}
+            onOk={handleExternalSQLFileModalOk}
+            onCancel={() => {
+                setIsExternalSQLFileModalOpen(false);
+                setExternalSQLFileTarget(null);
+                externalSQLFileForm.resetFields();
+            }}
+            okText={externalSQLFileModalMode === 'create' || externalSQLFileModalMode === 'create-directory' ? '新建' : '重命名'}
+            cancelText="取消"
+        >
+            <Form form={externalSQLFileForm} layout="vertical">
+                <Form.Item
+                    name="name"
+                    label={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? '目录名' : 'SQL 文件名'}
+                    rules={[
+                        { required: true, message: isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? '请输入目录名' : '请输入 SQL 文件名' },
+                        {
+                            validator: async (_, value) => {
+                                const name = String(value || '').trim();
+                                if (!name) return;
+                                if (/[\\/]/.test(name) || name === '.' || name === '..') {
+                                    throw new Error(isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? '目录名不能包含路径分隔符' : '文件名不能包含路径分隔符');
+                                }
+                            },
+                        },
+                    ]}
+                    extra={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? '目录只会显示在外部 SQL 目录树中，非 SQL 文件仍不会显示' : '不输入 .sql 后缀时会自动补齐'}
+                >
+                    <Input {...noAutoCapInputProps} placeholder={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? '例如：reports' : '例如：report.sql'} />
                 </Form.Item>
             </Form>
         </Modal>

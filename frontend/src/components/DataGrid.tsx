@@ -105,6 +105,11 @@ import {
     type EditRowLocator,
 } from '../utils/rowLocator';
 import {
+    getColumnDefinitionComment,
+    getColumnDefinitionName,
+    getColumnDefinitionType,
+} from '../utils/columnDefinition';
+import {
     V2CellContextMenuView,
     V2ColumnHeaderContextMenuView,
     type V2CellContextMenuActionKey,
@@ -1013,6 +1018,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
           )
         ) : (
           <Input
+            {...noAutoCapInputProps}
             ref={inputRef}
             className="data-grid-inline-editor-input"
             style={{ width: '100%', ...inputCellPadding }}
@@ -1916,6 +1922,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const externalSyncRafRef = useRef<number | null>(null);
   const tableTargetSyncRafRef = useRef<number | null>(null);
   const tableHorizontalWheelRafRef = useRef<number | null>(null);
+  const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);
   const pendingTableHorizontalDeltaRef = useRef(0);
   const pendingTableTargetSyncSourceRef = useRef<HTMLElement | null>(null);
   const scrollSnapshotRafRef = useRef<number | null>(null);
@@ -2142,10 +2149,10 @@ const DataGrid: React.FC<DataGridProps> = ({
               }
               const nextMap: Record<string, ColumnMeta> = {};
               (res.data as ColumnDefinition[]).forEach((column: any) => {
-                  const name = String(column?.name ?? column?.Name ?? '').trim();
+                  const name = getColumnDefinitionName(column);
                   if (!name) return;
-                  const type = String(column?.type ?? column?.Type ?? '').trim();
-                  const comment = String(column?.comment ?? column?.Comment ?? '').trim();
+                  const type = getColumnDefinitionType(column);
+                  const comment = getColumnDefinitionComment(column);
                   nextMap[name] = { type, comment };
               });
               columnMetaCacheRef.current[cacheKey] = nextMap;
@@ -2907,6 +2914,57 @@ const DataGrid: React.FC<DataGridProps> = ({
                     justify-content: center;
                     width: 100%;
                     height: 100%;
+                }
+                .${gridId} .data-grid-pagination-jump {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    height: 34px;
+                    color: ${paginationSecondaryTextColor};
+                    font-size: 12px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                }
+                .${gridId} .data-grid-pagination-jump-label {
+                    color: ${paginationSecondaryTextColor};
+                    font-variant-numeric: tabular-nums;
+                }
+                .${gridId} .data-grid-pagination-jump-input,
+                .${gridId} .data-grid-pagination-jump-input.ant-input-number {
+                    width: 64px;
+                    min-width: 64px;
+                    height: 34px;
+                    display: inline-flex;
+                    align-items: stretch;
+                }
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input-wrap,
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input {
+                    height: 100%;
+                }
+                .${gridId} .data-grid-pagination-jump-input .ant-input-number-input {
+                    padding: 0 10px;
+                    text-align: center;
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 600;
+                    font-variant-numeric: tabular-nums;
+                    line-height: 34px;
+                }
+                .${gridId} .data-grid-pagination-jump-input.ant-input-number {
+                    border-radius: 12px;
+                    border: 1px solid ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    box-shadow: none;
+                }
+                .${gridId} .data-grid-pagination-jump-button.ant-btn {
+                    height: 34px;
+                    min-width: 34px;
+                    padding: 0 10px;
+                    border-radius: 12px;
+                    border-color: ${paginationChipBorderColor};
+                    background: ${paginationChipBg};
+                    color: ${paginationPrimaryTextColor};
+                    font-weight: 700;
+                    box-shadow: none;
                 }
                 .${gridId} .data-grid-pagination-size-select {
                     width: 72px;
@@ -4982,6 +5040,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                       )
                                   ) : (
                                       <Input
+                                          {...noAutoCapInputProps}
                                           ref={virtualInlineInputRef}
                                           className="data-grid-inline-editor-input"
                                           style={{ width: '100%', ...inputCellPadding }}
@@ -6255,7 +6314,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return { holderEl, clampedOffset, currentOffset };
   }, [resolveVirtualHorizontalElements, tableScrollX]);
 
-  const applyVirtualHorizontalOffset = useCallback((tableContainer: HTMLElement, nextOffset: number) => {
+  const applyVirtualHorizontalOffset = useCallback((tableContainer: HTMLElement, nextOffset: number, options?: { forceInternalScroll?: boolean }) => {
       const synced = syncVirtualHorizontalVisualOffset(tableContainer, nextOffset);
       if (!synced) {
           return false;
@@ -6263,7 +6322,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const { holderEl, clampedOffset, currentOffset } = synced;
       const deltaX = clampedOffset - currentOffset;
-      if (Math.abs(deltaX) < 0.5) return true;
+      if (Math.abs(deltaX) < 0.5 && !options?.forceInternalScroll) return true;
 
       const tableInstance = tableRef.current;
       if (tableInstance && typeof tableInstance.scrollTo === 'function') {
@@ -6281,6 +6340,34 @@ const DataGrid: React.FC<DataGridProps> = ({
       }));
       return true;
   }, [syncVirtualHorizontalVisualOffset]);
+
+  const scheduleVirtualHorizontalAlignment = useCallback((preferredLeft?: number) => {
+      if (!enableVirtual || !isTableSurfaceActive) return;
+      if (virtualHorizontalAlignmentRafRef.current !== null) {
+          cancelAnimationFrame(virtualHorizontalAlignmentRafRef.current);
+      }
+      virtualHorizontalAlignmentRafRef.current = requestAnimationFrame(() => {
+          virtualHorizontalAlignmentRafRef.current = null;
+          const tableContainer = tableContainerRef.current;
+          if (!(tableContainer instanceof HTMLElement)) return;
+
+          virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };
+          const externalScroll = externalHorizontalScrollRef.current;
+          const nextLeft = Math.max(0, preferredLeft ?? externalScroll?.scrollLeft ?? lastTableScrollLeftRef.current);
+          const applied = applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });
+          const resolvedLeft = applied ? readVirtualHorizontalOffset(tableContainer) : nextLeft;
+          lastTableScrollLeftRef.current = resolvedLeft;
+          if (externalScroll && Math.abs(externalScroll.scrollLeft - resolvedLeft) > 1) {
+              externalScroll.scrollLeft = resolvedLeft;
+          }
+          lastExternalScrollLeftRef.current = externalScroll?.scrollLeft ?? resolvedLeft;
+          requestAnimationFrame(() => {
+              const latestContainer = tableContainerRef.current;
+              if (!(latestContainer instanceof HTMLElement)) return;
+              syncVirtualHorizontalVisualOffset(latestContainer, resolvedLeft);
+          });
+      });
+  }, [applyVirtualHorizontalOffset, enableVirtual, isTableSurfaceActive, readVirtualHorizontalOffset, syncVirtualHorizontalVisualOffset]);
 
   const flushVirtualHorizontalWheel = useCallback((tableContainer: HTMLElement) => {
       tableHorizontalWheelRafRef.current = null;
@@ -6530,7 +6617,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 虚拟表格路径：通过合成 WheelEvent 驱动 rc-virtual-list 内部状态，
           // rc-table 自动同步 header scrollLeft。
           if (enableVirtual && tableContainer instanceof HTMLElement) {
-              const applied = applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft);
+              const applied = applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });
               if (applied) {
                   // WheelEvent 经 rc-virtual-list 处理后状态异步更新，延迟同步 ref
                   requestAnimationFrame(() => {
@@ -6818,6 +6905,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       const rafId = requestAnimationFrame(() => recalculateTableMetrics(containerRef.current));
       return () => cancelAnimationFrame(rafId);
   }, [isTableSurfaceActive, totalWidth, mergedDisplayData.length, pagination?.total, pagination?.pageSize, recalculateTableMetrics]);
+
+  useEffect(() => {
+      if (!horizontalScrollVisible) return;
+      scheduleVirtualHorizontalAlignment();
+      return () => {
+          if (virtualHorizontalAlignmentRafRef.current !== null) {
+              cancelAnimationFrame(virtualHorizontalAlignmentRafRef.current);
+              virtualHorizontalAlignmentRafRef.current = null;
+          }
+      };
+  }, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);
 
   // 虚拟表列对齐：antd 虚拟表 body 使用 <div>+<td>（非 <table>），
   // 不会自动拉伸列宽到视口。而 header <table> 会被 antd 的 CSS 或 JS

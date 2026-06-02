@@ -25,6 +25,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'mariadb')).toBe('mariadb');
     expect(resolveSqlDialect('custom', 'open_gauss')).toBe('opengauss');
+    expect(resolveSqlDialect('Elasticsearch')).toBe('elasticsearch');
+    expect(resolveSqlDialect('custom', 'elastic')).toBe('elasticsearch');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
