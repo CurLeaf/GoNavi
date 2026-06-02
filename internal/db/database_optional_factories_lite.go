@@ -20,4 +20,5 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("mongodb"), "mongodb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("tdengine"), "tdengine")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("clickhouse"), "clickhouse")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("elasticsearch"), "elasticsearch", "elastic")
 }
