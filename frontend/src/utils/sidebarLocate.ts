@@ -1,13 +1,25 @@
-export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines';
+export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines' | 'externalSqlFiles';
+export type SidebarLocateDatabaseObjectGroup = Exclude<SidebarLocateObjectGroup, 'externalSqlFiles'>;
 
-export interface SidebarLocateObjectRequest {
+export interface SidebarLocateDatabaseObjectRequest {
   tabId?: string;
   connectionId: string;
   dbName: string;
   tableName: string;
   schemaName?: string;
-  objectGroup: SidebarLocateObjectGroup;
+  objectGroup: SidebarLocateDatabaseObjectGroup;
 }
+
+export interface SidebarLocateExternalSQLFileRequest {
+  tabId?: string;
+  connectionId?: string;
+  dbName?: string;
+  filePath: string;
+  fileName?: string;
+  objectGroup: 'externalSqlFiles';
+}
+
+export type SidebarLocateObjectRequest = SidebarLocateDatabaseObjectRequest | SidebarLocateExternalSQLFileRequest;
 
 export interface SidebarLocateTarget {
   connectionKey: string;
@@ -21,6 +33,7 @@ export interface SidebarLocateTarget {
   dbName: string;
   tableName: string;
   schemaName: string;
+  filePath?: string;
 }
 
 export interface SidebarLocateTreeNodeLike {
@@ -40,9 +53,12 @@ export interface SidebarLocateTabLike {
   viewKind?: string;
   triggerName?: string;
   routineName?: string;
+  filePath?: string;
 }
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeExternalSQLLocatePath = (value: unknown): string => toTrimmedString(value).replace(/\\/g, '/');
 
 export const splitSidebarQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
   const raw = toTrimmedString(qualifiedName);
@@ -55,7 +71,7 @@ export const splitSidebarQualifiedName = (qualifiedName: string): { schemaName: 
   };
 };
 
-const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string, dbName: string): SidebarLocateObjectGroup => {
+const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string, dbName: string): SidebarLocateDatabaseObjectGroup => {
   const explicitGroup = toTrimmedString(detail.objectGroup);
   if (explicitGroup === 'views' || explicitGroup === 'view') return 'views';
   if (explicitGroup === 'materializedViews' || explicitGroup === 'materialized-view') return 'materializedViews';
@@ -80,6 +96,18 @@ const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string,
 
 export const normalizeSidebarLocateObjectRequest = (detail: unknown): SidebarLocateObjectRequest | null => {
   const raw = (detail || {}) as Record<string, unknown>;
+  const filePath = normalizeExternalSQLLocatePath(raw.filePath);
+  if (filePath) {
+    return {
+      tabId: toTrimmedString(raw.tabId) || undefined,
+      connectionId: toTrimmedString(raw.connectionId) || undefined,
+      dbName: toTrimmedString(raw.dbName) || undefined,
+      filePath,
+      fileName: toTrimmedString(raw.fileName || raw.title) || undefined,
+      objectGroup: 'externalSqlFiles',
+    };
+  }
+
   const connectionId = toTrimmedString(raw.connectionId);
   const dbName = toTrimmedString(raw.dbName);
   const tableName = toTrimmedString(raw.tableName || raw.objectName || raw.viewName || raw.triggerName || raw.routineName);
@@ -103,6 +131,17 @@ export const normalizeSidebarLocateObjectRequest = (detail: unknown): SidebarLoc
 
 export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTabLike | null | undefined): SidebarLocateObjectRequest | null => {
   if (!tab) return null;
+  const filePath = normalizeExternalSQLLocatePath(tab.filePath);
+  if (tab.type === 'query' && filePath) {
+    return normalizeSidebarLocateObjectRequest({
+      tabId: tab.id,
+      connectionId: tab.connectionId,
+      dbName: tab.dbName,
+      filePath,
+      fileName: tab.id,
+    });
+  }
+
   const objectName = tab.type === 'view-def'
     ? toTrimmedString(tab.viewName || tab.tableName)
     : tab.type === 'trigger'
@@ -129,6 +168,23 @@ export const resolveSidebarLocateTarget = (
   request: SidebarLocateObjectRequest,
   options: { groupBySchema: boolean },
 ): SidebarLocateTarget => {
+  if (request.objectGroup === 'externalSqlFiles') {
+    const filePath = normalizeExternalSQLLocatePath(request.filePath);
+    return {
+      connectionKey: toTrimmedString(request.connectionId),
+      databaseKey: request.connectionId && request.dbName ? `${request.connectionId}-${request.dbName}` : '',
+      targetKey: request.tabId || filePath,
+      objectGroup: 'externalSqlFiles',
+      objectGroupKey: 'external-sql-root',
+      expectedAncestorKeys: ['external-sql-root'],
+      connectionId: toTrimmedString(request.connectionId),
+      dbName: toTrimmedString(request.dbName),
+      tableName: request.fileName || filePath.split('/').filter(Boolean).pop() || filePath,
+      schemaName: '',
+      filePath,
+    };
+  }
+
   const connectionKey = request.connectionId;
   const databaseKey = `${request.connectionId}-${request.dbName}`;
   const fallbackTargetKey = request.objectGroup === 'materializedViews'
@@ -205,6 +261,12 @@ const matchesLocateObjectName = (target: SidebarLocateTarget, nodeObjectName: st
 
 const matchesLocateObjectNode = (node: SidebarLocateTreeNodeLike, target: SidebarLocateTarget): boolean => {
   const dataRef = node.dataRef || {};
+
+  if (target.objectGroup === 'externalSqlFiles') {
+    return node.type === 'external-sql-file'
+      && normalizeExternalSQLLocatePath(dataRef.path) === normalizeExternalSQLLocatePath(target.filePath);
+  }
+
   const nodeConnectionId = toTrimmedString(dataRef.id || dataRef.connectionId);
   const nodeDbName = toTrimmedString(dataRef.dbName);
 

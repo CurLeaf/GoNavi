@@ -28,6 +28,10 @@ export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):P
 
 export function CreateDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function CreateSQLDirectory(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function CreateSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
 export function CreateSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
@@ -63,6 +67,10 @@ export function DataSyncAnalyze(arg1:sync.SyncConfig):Promise<connection.QueryRe
 export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Promise<connection.QueryResult>;
 
 export function DeleteConnection(arg1:string):Promise<void>;
+
+export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
+
+export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
 
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
 
@@ -245,6 +253,10 @@ export function RedisZSetRemove(arg1:connection.ConnectionConfig,arg2:string,arg
 export function RemoveDriverPackage(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function RenameDatabase(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function RenameSQLDirectory(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function RenameSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 

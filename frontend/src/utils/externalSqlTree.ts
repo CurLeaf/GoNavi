@@ -16,9 +16,9 @@ export interface ExternalSQLTreeNode {
 }
 
 type BuildExternalSQLRootNodeParams = {
-  dbNodeKey: string;
-  connectionId: string;
-  dbName: string;
+  dbNodeKey?: string;
+  connectionId?: string;
+  dbName?: string;
   directories: ExternalSQLDirectory[];
   directoryTrees: Record<string, ExternalSQLTreeEntry[]>;
 };
@@ -35,7 +35,7 @@ const resolveDirectoryDisplayName = (directory: ExternalSQLDirectory): string =>
 };
 
 export const buildExternalSQLDirectoryId = (connectionId: string, dbName: string, directoryPath: string): string =>
-  `external-sql-dir:${String(connectionId || '').trim()}:${String(dbName || '').trim()}:${normalizeExternalSQLPath(directoryPath)}`;
+  `external-sql-dir:${normalizeExternalSQLPath(directoryPath)}`;
 
 export const buildExternalSQLTabId = (connectionId: string, dbName: string, filePath: string): string =>
   `external-sql-tab:${String(connectionId || '').trim()}:${String(dbName || '').trim()}:${normalizeExternalSQLPath(filePath)}`;
@@ -43,14 +43,20 @@ export const buildExternalSQLTabId = (connectionId: string, dbName: string, file
 const buildExternalSQLNodeKey = (type: ExternalSQLNodeType, base: string): string =>
   `${type}:${normalizeExternalSQLPath(base)}`;
 
+const isExternalSQLFileEntry = (entry: ExternalSQLTreeEntry): boolean => {
+  const name = String(entry.name || '').trim();
+  const path = normalizeExternalSQLPath(entry.path);
+  return /\.sql$/i.test(name) || /\.sql$/i.test(path);
+};
+
 const mapExternalSQLTreeEntries = (
   entries: ExternalSQLTreeEntry[],
   context: { connectionId: string; dbName: string; dbNodeKey: string; directoryId: string },
-): ExternalSQLTreeNode[] => entries.map((entry) => {
+): ExternalSQLTreeNode[] => entries.flatMap((entry): ExternalSQLTreeNode[] => {
   const entryPath = normalizeExternalSQLPath(entry.path);
   if (entry.isDir) {
     const children = mapExternalSQLTreeEntries(entry.children || [], context);
-    return {
+    return [{
       title: entry.name,
       key: buildExternalSQLNodeKey('external-sql-folder', entryPath),
       type: 'external-sql-folder',
@@ -64,10 +70,14 @@ const mapExternalSQLTreeEntries = (
         path: entry.path,
         name: entry.name,
       },
-    };
+    }];
   }
 
-  return {
+  if (!isExternalSQLFileEntry(entry)) {
+    return [];
+  }
+
+  return [{
     title: entry.name,
     key: buildExternalSQLNodeKey('external-sql-file', entryPath),
     type: 'external-sql-file',
@@ -80,13 +90,13 @@ const mapExternalSQLTreeEntries = (
       path: entry.path,
       name: entry.name,
     },
-  };
+  }];
 });
 
 export const buildExternalSQLRootNode = ({
-  dbNodeKey,
-  connectionId,
-  dbName,
+  dbNodeKey = 'external-sql-root',
+  connectionId = '',
+  dbName = '',
   directories,
   directoryTrees,
 }: BuildExternalSQLRootNodeParams): ExternalSQLTreeNode => {
@@ -118,7 +128,7 @@ export const buildExternalSQLRootNode = ({
 
   return {
     title: children.length > 0 ? `外部 SQL 目录 (${children.length})` : '外部 SQL 目录',
-    key: `${dbNodeKey}-external-sql`,
+    key: dbNodeKey === 'external-sql-root' ? 'external-sql-root' : `${dbNodeKey}-external-sql`,
     type: 'external-sql-root',
     isLeaf: children.length === 0,
     children: children.length > 0 ? children : undefined,

@@ -9,8 +9,12 @@ import (
 func TestBuildSQLDirectoryEntriesKeepsOnlySQLFilesAndNestedFolders(t *testing.T) {
 	root := t.TempDir()
 	nestedDir := filepath.Join(root, "nested")
+	emptyDir := filepath.Join(root, "empty")
 	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll empty returned error: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "z-last.sql"), []byte("select 1;"), 0o644); err != nil {
 		t.Fatalf("WriteFile sql returned error: %v", err)
@@ -27,17 +31,20 @@ func TestBuildSQLDirectoryEntriesKeepsOnlySQLFilesAndNestedFolders(t *testing.T)
 		t.Fatalf("buildSQLDirectoryEntries returned error: %v", err)
 	}
 
-	if len(entries) != 2 {
-		t.Fatalf("expected one folder and one sql file, got %d entries", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected two folders and one sql file, got %d entries", len(entries))
 	}
-	if !entries[0].IsDir || entries[0].Name != "nested" {
-		t.Fatalf("expected nested directory first, got %#v", entries[0])
+	if !entries[0].IsDir || entries[0].Name != "empty" || len(entries[0].Children) != 0 {
+		t.Fatalf("expected empty directory first, got %#v", entries[0])
 	}
-	if len(entries[0].Children) != 1 || entries[0].Children[0].Name != "inner.SQL" {
-		t.Fatalf("expected nested sql child, got %#v", entries[0].Children)
+	if !entries[1].IsDir || entries[1].Name != "nested" {
+		t.Fatalf("expected nested directory second, got %#v", entries[1])
 	}
-	if entries[1].IsDir || entries[1].Name != "z-last.sql" {
-		t.Fatalf("expected top-level sql file second, got %#v", entries[1])
+	if len(entries[1].Children) != 1 || entries[1].Children[0].Name != "inner.SQL" {
+		t.Fatalf("expected nested sql child, got %#v", entries[1].Children)
+	}
+	if entries[2].IsDir || entries[2].Name != "z-last.sql" {
+		t.Fatalf("expected top-level sql file third, got %#v", entries[2])
 	}
 }
 
@@ -72,6 +79,156 @@ func TestWriteSQLFileByPathRejectsEmptyPath(t *testing.T) {
 	result := writeSQLFileByPath("   ", "select 1;")
 	if result.Success {
 		t.Fatalf("expected empty path write to fail, got %#v", result)
+	}
+}
+
+func TestCreateSQLFileInDirectoryCreatesEmptySQLFile(t *testing.T) {
+	root := t.TempDir()
+
+	result := createSQLFileInDirectory(root, "draft")
+	if !result.Success {
+		t.Fatalf("expected sql file create to succeed, got %#v", result)
+	}
+
+	filePath := filepath.Join(root, "draft.sql")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if string(data) != "" {
+		t.Fatalf("expected empty sql file, got %q", string(data))
+	}
+}
+
+func TestCreateSQLFileInDirectoryRejectsPathTraversalName(t *testing.T) {
+	result := createSQLFileInDirectory(t.TempDir(), "../escape.sql")
+	if result.Success {
+		t.Fatalf("expected path traversal name to fail, got %#v", result)
+	}
+}
+
+func TestCreateSQLDirectoryInDirectoryCreatesEmptyDirectory(t *testing.T) {
+	root := t.TempDir()
+
+	result := createSQLDirectoryInDirectory(root, "reports")
+	if !result.Success {
+		t.Fatalf("expected sql directory create to succeed, got %#v", result)
+	}
+
+	target := filepath.Join(root, "reports")
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("Stat returned error: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected target to be a directory")
+	}
+}
+
+func TestCreateSQLDirectoryInDirectoryRejectsPathTraversalName(t *testing.T) {
+	result := createSQLDirectoryInDirectory(t.TempDir(), "../escape")
+	if result.Success {
+		t.Fatalf("expected path traversal directory name to fail, got %#v", result)
+	}
+}
+
+func TestDeleteSQLFileByPathRemovesExistingSQLFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "old.sql")
+	if err := os.WriteFile(filePath, []byte("select 1;"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := deleteSQLFileByPath(filePath)
+	if !result.Success {
+		t.Fatalf("expected sql file delete to succeed, got %#v", result)
+	}
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Fatalf("expected deleted sql file to be gone, stat err=%v", err)
+	}
+}
+
+func TestDeleteSQLFileByPathRejectsNonSQLFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(filePath, []byte("skip"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := deleteSQLFileByPath(filePath)
+	if result.Success {
+		t.Fatalf("expected non sql file delete to fail, got %#v", result)
+	}
+}
+
+func TestDeleteSQLDirectoryByPathRemovesEmptyDirectory(t *testing.T) {
+	directoryPath := filepath.Join(t.TempDir(), "old")
+	if err := os.Mkdir(directoryPath, 0o755); err != nil {
+		t.Fatalf("Mkdir returned error: %v", err)
+	}
+
+	result := deleteSQLDirectoryByPath(directoryPath)
+	if !result.Success {
+		t.Fatalf("expected sql directory delete to succeed, got %#v", result)
+	}
+	if _, err := os.Stat(directoryPath); !os.IsNotExist(err) {
+		t.Fatalf("expected deleted sql directory to be gone, stat err=%v", err)
+	}
+}
+
+func TestDeleteSQLDirectoryByPathRejectsNonEmptyDirectory(t *testing.T) {
+	directoryPath := filepath.Join(t.TempDir(), "non-empty")
+	if err := os.Mkdir(directoryPath, 0o755); err != nil {
+		t.Fatalf("Mkdir returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directoryPath, "query.sql"), []byte("select 1;"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := deleteSQLDirectoryByPath(directoryPath)
+	if result.Success {
+		t.Fatalf("expected non-empty sql directory delete to fail, got %#v", result)
+	}
+	if _, err := os.Stat(directoryPath); err != nil {
+		t.Fatalf("expected non-empty sql directory to remain, stat err=%v", err)
+	}
+}
+
+func TestRenameSQLFileByPathRenamesWithinSameDirectory(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "old.sql")
+	if err := os.WriteFile(source, []byte("select 1;"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := renameSQLFileByPath(source, "new-name")
+	if !result.Success {
+		t.Fatalf("expected sql file rename to succeed, got %#v", result)
+	}
+	target := filepath.Join(root, "new-name.sql")
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected target sql file, got err=%v", err)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("expected source sql file to be gone, stat err=%v", err)
+	}
+}
+
+func TestRenameSQLDirectoryByPathRenamesWithinSameParent(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "old")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatalf("Mkdir returned error: %v", err)
+	}
+
+	result := renameSQLDirectoryByPath(source, "new-name")
+	if !result.Success {
+		t.Fatalf("expected sql directory rename to succeed, got %#v", result)
+	}
+	target := filepath.Join(root, "new-name")
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("expected target sql directory, got info=%#v err=%v", info, err)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("expected source sql directory to be gone, stat err=%v", err)
 	}
 }
 
@@ -142,5 +299,31 @@ func TestReadSQLFileByPathReturnsLargeFileMetadata(t *testing.T) {
 	}
 	if data["filePath"] != filePath {
 		t.Fatalf("expected filePath %q, got %#v", filePath, data["filePath"])
+	}
+}
+
+func TestReadSQLFileWithMetadataByPathReturnsSmallFileContentAndPath(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "report.sql")
+	if err := os.WriteFile(filePath, []byte("select 1;"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	result := readSQLFileWithMetadataByPath(filePath)
+	if !result.Success {
+		t.Fatalf("expected sql file read to succeed, got %#v", result)
+	}
+
+	data, ok := result.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %#v", result.Data)
+	}
+	if data["content"] != "select 1;" {
+		t.Fatalf("expected content, got %#v", data["content"])
+	}
+	if data["filePath"] != filePath {
+		t.Fatalf("expected filePath %q, got %#v", filePath, data["filePath"])
+	}
+	if data["name"] != "report.sql" {
+		t.Fatalf("expected name report.sql, got %#v", data["name"])
 	}
 }

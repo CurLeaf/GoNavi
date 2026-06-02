@@ -122,6 +122,29 @@ describe('sidebarLocate', () => {
     });
   });
 
+  it('builds and resolves locate requests from external SQL file query tabs', () => {
+    const request = normalizeSidebarLocateObjectRequestFromTab({
+      id: 'external-sql-tab:conn-1:main:/Users/me/sql/report.sql',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      filePath: '/Users/me/sql/report.sql',
+    });
+
+    expect(request).toMatchObject({
+      connectionId: 'conn-1',
+      dbName: 'main',
+      filePath: '/Users/me/sql/report.sql',
+      objectGroup: 'externalSqlFiles',
+    });
+
+    expect(resolveSidebarLocateTarget(request!, { groupBySchema: false })).toMatchObject({
+      objectGroupKey: 'external-sql-root',
+      expectedAncestorKeys: ['external-sql-root'],
+      filePath: '/Users/me/sql/report.sql',
+    });
+  });
+
   it('keeps StarRocks materialized view tabs on the materialized views branch', () => {
     const request = normalizeSidebarLocateObjectRequestFromTab({
       id: 'view-def-conn-1-main-sales.mv_daily',
@@ -283,6 +306,40 @@ describe('sidebarLocate', () => {
       'conn-1-main-schema-reporting',
       'conn-1-main-schema-reporting-routines',
       'conn-1-main-routine-reporting.refresh_stats',
+    ]);
+  });
+
+  it('finds external SQL file paths from loaded tree data', () => {
+    const target = resolveSidebarLocateTarget({
+      filePath: 'C:\\Users\\me\\sql\\report.sql',
+      objectGroup: 'externalSqlFiles',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'external-sql-root',
+        type: 'external-sql-root',
+        children: [
+          {
+            key: 'external-sql-directory:C:/Users/me/sql',
+            type: 'external-sql-directory',
+            dataRef: { path: 'C:/Users/me/sql' },
+            children: [
+              {
+                key: 'external-sql-file:C:/Users/me/sql/report.sql',
+                type: 'external-sql-file',
+                dataRef: { path: 'C:/Users/me/sql/report.sql' },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'external-sql-root',
+      'external-sql-directory:C:/Users/me/sql',
+      'external-sql-file:C:/Users/me/sql/report.sql',
     ]);
   });
 });

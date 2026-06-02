@@ -46,6 +46,14 @@ export function CreateDatabase(arg1, arg2) {
   return window['go']['app']['App']['CreateDatabase'](arg1, arg2);
 }
 
+export function CreateSQLDirectory(arg1, arg2) {
+  return window['go']['app']['App']['CreateSQLDirectory'](arg1, arg2);
+}
+
+export function CreateSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['CreateSQLFile'](arg1, arg2);
+}
+
 export function CreateSchema(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateSchema'](arg1, arg2, arg3);
 }
@@ -116,6 +124,14 @@ export function DataSyncPreview(arg1, arg2, arg3) {
 
 export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
+}
+
+export function DeleteSQLDirectory(arg1) {
+  return window['go']['app']['App']['DeleteSQLDirectory'](arg1);
+}
+
+export function DeleteSQLFile(arg1) {
+  return window['go']['app']['App']['DeleteSQLFile'](arg1);
 }
 
 export function DismissSecurityUpdateReminder() {
@@ -480,6 +496,14 @@ export function RemoveDriverPackage(arg1, arg2) {
 
 export function RenameDatabase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RenameDatabase'](arg1, arg2, arg3);
+}
+
+export function RenameSQLDirectory(arg1, arg2) {
+  return window['go']['app']['App']['RenameSQLDirectory'](arg1, arg2);
+}
+
+export function RenameSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['RenameSQLFile'](arg1, arg2);
 }
 
 export function RenameTable(arg1, arg2, arg3, arg4) {
