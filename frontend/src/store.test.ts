@@ -69,6 +69,9 @@ describe('store appearance persistence', () => {
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
+    expect(appearance.v2SidebarSearchMode).toBe('command');
+    expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
+    expect(appearance.v2SidebarPersistedFilter).toBe('');
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
@@ -122,6 +125,30 @@ describe('store appearance persistence', () => {
 
     expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
     expect(appearance.customMonoFontFamily).toBeNull();
+  });
+
+  it('persists v2 sidebar search preferences and sanitizes filter text', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      v2SidebarSearchMode: 'filter',
+      v2CommandSearchPersistentFilterEnabled: true,
+      v2SidebarPersistedFilter: `  ${'orders'.repeat(40)}  `,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.v2SidebarSearchMode).toBe('filter');
+    expect(persisted.state.appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
+    expect(persisted.state.appearance.v2SidebarPersistedFilter).toHaveLength(120);
+    expect(persisted.state.appearance.v2SidebarPersistedFilter.startsWith('orders')).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.v2SidebarSearchMode).toBe('filter');
+    expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
+    expect(appearance.v2SidebarPersistedFilter).toHaveLength(120);
   });
 
   it('persists tab display appearance settings and sanitizes invalid elements', async () => {

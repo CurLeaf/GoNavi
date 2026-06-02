@@ -4197,6 +4197,23 @@ function App() {
                                           新版 UI 仍在 Beta，部分屏幕样式可能与旧版有差异，遇到问题可随时切回。
                                       </div>
                                   )}
+                                  {appearance.uiVersion === 'v2' && (
+                                      <div style={{ marginTop: 14 }}>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>新版左侧搜索模式</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: '新版命令搜索', value: 'command' },
+                                                  { label: '旧版侧栏筛选', value: 'filter' },
+                                              ]}
+                                              value={appearance.v2SidebarSearchMode ?? 'command'}
+                                              onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              新版命令搜索适合跳转连接、表和动作，可在面板中开启同步开关持续过滤左侧树；旧版侧栏筛选会直接显示输入框并持久保留筛选内容。
+                                          </div>
+                                      </div>
+                                  )}
                               </div>
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 600 }}>主题模式</div>

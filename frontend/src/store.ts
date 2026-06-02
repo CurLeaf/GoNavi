@@ -59,6 +59,9 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  v2SidebarSearchMode: "command" | "filter";
+  v2CommandSearchPersistentFilterEnabled: boolean;
+  v2SidebarPersistedFilter: string;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   tabDisplay: TabDisplaySettings;
@@ -70,6 +73,9 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  v2SidebarSearchMode: "command",
+  v2CommandSearchPersistentFilterEnabled: false,
+  v2SidebarPersistedFilter: "",
   customUIFontFamily: null,
   customMonoFontFamily: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
@@ -84,6 +90,20 @@ const MAX_FONT_SIZE = 20;
 const DEFAULT_STARTUP_FULLSCREEN = false;
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
+const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
+
+const sanitizeV2SidebarSearchMode = (
+  value: unknown,
+): AppearanceSettings["v2SidebarSearchMode"] => {
+  return value === "filter" ? "filter" : DEFAULT_APPEARANCE.v2SidebarSearchMode;
+};
+
+const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return DEFAULT_APPEARANCE.v2SidebarPersistedFilter;
+  }
+  return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
+};
 const MAX_URI_LENGTH = 4096;
 const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
@@ -1637,6 +1657,16 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    v2SidebarSearchMode: sanitizeV2SidebarSearchMode(
+      appearance.v2SidebarSearchMode,
+    ),
+    v2CommandSearchPersistentFilterEnabled:
+      typeof appearance.v2CommandSearchPersistentFilterEnabled === "boolean"
+        ? appearance.v2CommandSearchPersistentFilterEnabled
+        : DEFAULT_APPEARANCE.v2CommandSearchPersistentFilterEnabled,
+    v2SidebarPersistedFilter: sanitizeV2SidebarPersistedFilter(
+      appearance.v2SidebarPersistedFilter,
+    ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
     tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),

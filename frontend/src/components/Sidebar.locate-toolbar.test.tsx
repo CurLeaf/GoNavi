@@ -439,7 +439,10 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('gn-v2-object-explorer');
     expect(markup).toContain('gn-v2-active-connection-header');
     expect(markup).toContain('gn-v2-explorer-search');
+    expect(markup).toContain('data-v2-sidebar-search-mode="command"');
     expect(markup).toContain('gn-v2-explorer-command-trigger');
+    expect(markup).toContain('gn-v2-explorer-filter-action');
+    expect(markup).toContain('重置侧栏筛选');
     expect(markup).toContain('搜索表、连接、动作... 或问 AI');
     expect(markup).toContain('gn-v2-search-shortcut');
     expect(markup).toContain('<kbd>⌘</kbd>');
@@ -453,6 +456,11 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('函数');
     expect(markup).toContain('aria-pressed="true"');
     expect(source).toContain("const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');");
+    expect(source).toContain("const v2SidebarSearchMode = appearance.v2SidebarSearchMode ?? 'command';");
+    expect(source).toContain('const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;');
+    expect(source).toContain('handleV2CommandSearchValueChange(event.target.value)');
+    expect(source).toContain('toggleV2CommandSearchPersistentFilter');
+    expect(source).toContain('gn-v2-command-filter-switch');
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');
@@ -494,6 +502,18 @@ describe('Sidebar locate toolbar', () => {
     expect(contextMenuFunction).not.toContain('setSelectedKeys');
     expect(contextMenuFunction).not.toContain('selectedNodesRef.current');
     expect(contextMenuFunction).not.toContain('setActiveContext');
+  });
+
+  it('can render the v2 sidebar with legacy persistent filter input', () => {
+    mocks.state.appearance.v2SidebarSearchMode = 'filter';
+    mocks.state.appearance.v2SidebarPersistedFilter = 'fs_org';
+
+    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+
+    expect(markup).toContain('data-v2-sidebar-search-mode="filter"');
+    expect(markup).toContain('筛选左侧表、连接、对象...');
+    expect(markup).toContain('value="fs_org"');
+    expect(markup).toContain('重置侧栏筛选');
   });
 
   it('renders the v2 search shortcut from the user shortcut settings', () => {

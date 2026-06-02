@@ -1831,8 +1831,22 @@ body[data-ui-version="v2"] .gn-v2-explorer-search {
   border-bottom: none !important;
 }
 
+body[data-ui-version="v2"] .gn-v2-explorer-command-row,
+body[data-ui-version="v2"] .gn-v2-explorer-legacy-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-legacy-filter-row .ant-input-affix-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 body[data-ui-version="v2"] .gn-v2-explorer-command-trigger {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 30px;
   display: flex;
   align-items: center;
@@ -1860,6 +1874,31 @@ body[data-ui-version="v2"] .gn-v2-explorer-command-trigger > span:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-filter-action {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5px solid var(--gn-br-2);
+  border-radius: 7px;
+  background: var(--gn-bg-input);
+  color: var(--gn-fg-4);
+  cursor: pointer;
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-filter-action:hover:not(:disabled) {
+  border-color: var(--gn-accent);
+  background: var(--gn-bg-hover);
+  color: var(--gn-fg-2);
+}
+
+body[data-ui-version="v2"] .gn-v2-explorer-filter-action:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
 
 body[data-ui-version="v2"] .gn-v2-command-backdrop {
@@ -1916,6 +1955,38 @@ body[data-ui-version="v2"] .gn-v2-command-searchbar .ant-input::placeholder {
 body[data-ui-version="v2"] .gn-v2-command-searchbar > .anticon {
   font-size: 18px;
   color: var(--gn-fg-4);
+}
+
+body[data-ui-version="v2"] .gn-v2-command-filter-switch {
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-searchbar .ant-switch {
+  flex: 0 0 auto;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-searchbar .ant-btn {
+  width: 30px !important;
+  height: 30px !important;
+  flex: 0 0 30px;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 8px !important;
+  color: var(--gn-fg-4) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-searchbar .ant-btn:hover:not(:disabled) {
+  background: var(--gn-bg-hover) !important;
+  color: var(--gn-fg-2) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-command-searchbar .ant-btn:disabled {
+  color: var(--gn-fg-5) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-command-searchbar > kbd,

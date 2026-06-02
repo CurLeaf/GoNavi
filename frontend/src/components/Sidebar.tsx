@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
@@ -954,6 +954,7 @@ const Sidebar: React.FC<{
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
+  const setAppearance = useStore(state => state.setAppearance);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const addAIContext = useStore(state => state.addAIContext);
   const darkMode = theme === 'dark';
@@ -966,6 +967,7 @@ const Sidebar: React.FC<{
   const focusSidebarSearchShortcutTokens = focusSidebarSearchShortcut === '-'
       ? []
       : focusSidebarSearchShortcut.match(/Ctrl|Alt|Shift|Esc|Space|[⌘⌃⌥⇧↵↑↓←→]|[^+]/g) ?? [];
+  const isV2Ui = (uiVersion ?? appearance.uiVersion) === 'v2';
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const activeTab = useMemo(() => tabs.find(tab => tab.id === activeTabId) || null, [tabs, activeTabId]);
   const activeTabLocateRequest = useMemo(() => normalizeSidebarLocateObjectRequestFromTab(activeTab), [activeTab]);
@@ -1021,7 +1023,11 @@ const Sidebar: React.FC<{
           </div>
       </div>
   );
-  const [searchValue, setSearchValue] = useState('');
+  const v2SidebarSearchMode = appearance.v2SidebarSearchMode ?? 'command';
+  const v2UseLegacySidebarFilter = isV2Ui && v2SidebarSearchMode === 'filter';
+  const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;
+  const v2PersistedSidebarFilter = appearance.v2SidebarPersistedFilter ?? '';
+  const [searchValue, setSearchValue] = useState(v2PersistedSidebarFilter);
   const deferredSearchValue = useDeferredValue(searchValue);
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
   const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');
@@ -1093,6 +1099,49 @@ const Sidebar: React.FC<{
       setV2CommandSearchValue('');
       setV2CommandActiveIndex(0);
   }, []);
+
+  useEffect(() => {
+      setSearchValue(v2PersistedSidebarFilter);
+  }, [v2PersistedSidebarFilter]);
+
+  useEffect(() => {
+      if (!v2UseLegacySidebarFilter) {
+          return;
+      }
+      const nextFilter = searchValue.trim();
+      if (nextFilter !== v2PersistedSidebarFilter) {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }
+  }, [searchValue, setAppearance, v2PersistedSidebarFilter, v2UseLegacySidebarFilter]);
+
+  const handleV2CommandSearchValueChange = useCallback((value: string) => {
+      setV2CommandSearchValue(value);
+      if (!v2CommandSearchPersistentFilterEnabled) {
+          return;
+      }
+      const nextFilter = value.trim();
+      setSearchValue(nextFilter);
+      setAppearance({ v2SidebarPersistedFilter: nextFilter });
+  }, [setAppearance, v2CommandSearchPersistentFilterEnabled]);
+
+  const toggleV2CommandSearchPersistentFilter = useCallback((enabled: boolean) => {
+      const nextFilter = enabled ? v2CommandSearchValue.trim() : '';
+      setSearchValue(nextFilter);
+      setAppearance({
+          v2CommandSearchPersistentFilterEnabled: enabled,
+          v2SidebarPersistedFilter: nextFilter,
+      });
+      message.success(enabled ? '已开启左侧筛选同步' : '已关闭左侧筛选同步');
+  }, [setAppearance, v2CommandSearchValue]);
+
+  const resetV2SidebarFilter = useCallback(() => {
+      setSearchValue('');
+      setAppearance({
+          v2CommandSearchPersistentFilterEnabled: false,
+          v2SidebarPersistedFilter: '',
+      });
+      message.success('已重置侧栏筛选');
+  }, [setAppearance]);
   
   // Virtual Scroll State
   const [treeHeight, setTreeHeight] = useState(500);
@@ -1121,7 +1170,7 @@ const Sidebar: React.FC<{
 
   useEffect(() => {
       const handleFocusSidebarSearch = () => {
-          if ((uiVersion ?? appearance.uiVersion) === 'v2') {
+          if (isV2Ui && !v2UseLegacySidebarFilter) {
               openV2CommandSearch();
               return;
           }
@@ -1136,7 +1185,7 @@ const Sidebar: React.FC<{
       return () => {
           window.removeEventListener('gonavi:focus-sidebar-search', handleFocusSidebarSearch as EventListener);
       };
-  }, [appearance.uiVersion, openV2CommandSearch, uiVersion]);
+  }, [isV2Ui, openV2CommandSearch, v2UseLegacySidebarFilter]);
 
   useEffect(() => {
       if (!isV2CommandSearchOpen) return;
@@ -3109,8 +3158,6 @@ const Sidebar: React.FC<{
           readOnly: false
       });
   };
-
-  const isV2Ui = (uiVersion ?? appearance.uiVersion) === 'v2';
 
   const onSelect = (keys: React.Key[], info: any) => {
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
@@ -6792,15 +6839,15 @@ const Sidebar: React.FC<{
           setV2CommandActiveIndex((prev) => Math.max(prev - 1, 0));
           return;
       }
-	      if (event.key === 'Enter') {
-	          event.preventDefault();
-	          if (v2CommandSearchAiMode && !v2CommandSearchQuery.aiPrompt) {
-	              message.warning('请输入要问 AI 的问题');
-	              return;
-	          }
-	          runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
-	          return;
-	      }
+      if (event.key === 'Enter') {
+          event.preventDefault();
+          if (v2CommandSearchAiMode && !v2CommandSearchQuery.aiPrompt) {
+              message.warning('请输入要问 AI 的问题');
+              return;
+          }
+          runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
+          return;
+      }
       if (event.key === 'Escape') {
           event.preventDefault();
           closeV2CommandSearch();
@@ -6855,10 +6902,29 @@ const Sidebar: React.FC<{
                           ref={commandSearchInputRef}
                           variant="borderless"
                           value={v2CommandSearchValue}
-                          onChange={(event) => setV2CommandSearchValue(event.target.value)}
+                          onChange={(event) => handleV2CommandSearchValueChange(event.target.value)}
                           onKeyDown={handleV2CommandSearchKeyDown}
                           placeholder="搜索表、连接、动作... 或问 AI"
                       />
+                      <Tooltip title="同步输入内容到左侧筛选">
+                          <span className="gn-v2-command-filter-switch" aria-label="同步到左侧筛选">
+                              <Switch
+                                  size="small"
+                                  checked={v2CommandSearchPersistentFilterEnabled}
+                                  onChange={toggleV2CommandSearchPersistentFilter}
+                              />
+                          </span>
+                      </Tooltip>
+                      <Tooltip title={v2PersistedSidebarFilter ? '重置侧栏筛选' : '没有已同步的侧栏筛选'}>
+                          <Button
+                              size="small"
+                              type="text"
+                              icon={<ReloadOutlined />}
+                              aria-label="重置侧栏筛选"
+                              disabled={!v2PersistedSidebarFilter}
+                              onClick={resetV2SidebarFilter}
+                          />
+                      </Tooltip>
                       <kbd>esc</kbd>
                   </div>
                   <div className="gn-v2-command-list">
@@ -8489,26 +8555,62 @@ const Sidebar: React.FC<{
             </div>
         )}
         <div className={isV2Ui ? 'gn-v2-explorer-search' : undefined} style={{ padding: '8px 14px', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}` }}>
-            {isV2Ui ? (
-                <button
-                    type="button"
-                    className="gn-v2-explorer-command-trigger"
-                    onClick={() => {
-                        openV2CommandSearch();
-                        onFocusCommandSearch?.();
-                    }}
-                    aria-label="搜索表、连接、动作"
-                >
-                    <SearchOutlined />
-                    <span>搜索表、连接、动作... 或问 AI</span>
-                    {focusSidebarSearchShortcutTokens.length > 0 ? (
-                        <span className="gn-v2-search-shortcut" aria-hidden="true">
-                            {focusSidebarSearchShortcutTokens.map((token, index) => (
-                                <kbd key={`${token}-${index}`}>{token}</kbd>
-                            ))}
-                        </span>
-                    ) : null}
-                </button>
+            {isV2Ui && !v2UseLegacySidebarFilter ? (
+                <div className="gn-v2-explorer-command-row" data-v2-sidebar-search-mode="command">
+                    <button
+                        type="button"
+                        className="gn-v2-explorer-command-trigger"
+                        onClick={() => {
+                            openV2CommandSearch();
+                            onFocusCommandSearch?.();
+                        }}
+                        aria-label="搜索表、连接、动作"
+                    >
+                        <SearchOutlined />
+                        <span>{v2PersistedSidebarFilter || '搜索表、连接、动作... 或问 AI'}</span>
+                        {focusSidebarSearchShortcutTokens.length > 0 ? (
+                            <span className="gn-v2-search-shortcut" aria-hidden="true">
+                                {focusSidebarSearchShortcutTokens.map((token, index) => (
+                                    <kbd key={`${token}-${index}`}>{token}</kbd>
+                                ))}
+                            </span>
+                        ) : null}
+                    </button>
+                    <Tooltip title={v2PersistedSidebarFilter ? '重置侧栏筛选' : '没有已同步的侧栏筛选'}>
+                        <button
+                            type="button"
+                            className="gn-v2-explorer-filter-action"
+                            aria-label="重置侧栏筛选"
+                            disabled={!v2PersistedSidebarFilter}
+                            onClick={resetV2SidebarFilter}
+                        >
+                            <ReloadOutlined />
+                        </button>
+                    </Tooltip>
+                </div>
+            ) : isV2Ui ? (
+                <div className="gn-v2-explorer-legacy-filter-row" data-v2-sidebar-search-mode="filter">
+                    <Input
+                        {...noAutoCapInputProps}
+                        ref={searchInputRef}
+                        value={searchValue}
+                        placeholder="筛选左侧表、连接、对象..."
+                        onChange={onSearch}
+                        size="small"
+                        prefix={<SearchOutlined />}
+                    />
+                    <Tooltip title={searchValue ? '重置侧栏筛选' : '没有筛选内容'}>
+                        <button
+                            type="button"
+                            className="gn-v2-explorer-filter-action"
+                            aria-label="重置侧栏筛选"
+                            disabled={!searchValue}
+                            onClick={resetV2SidebarFilter}
+                        >
+                            <ReloadOutlined />
+                        </button>
+                    </Tooltip>
+                </div>
             ) : (
                 <Input
                     {...noAutoCapInputProps}
