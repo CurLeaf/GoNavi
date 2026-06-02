@@ -35,9 +35,10 @@ var optionalGoDrivers = map[string]struct{}{
 	"vastbase":   {},
 	"opengauss":  {},
 	"iris":       {},
-	"mongodb":    {},
-	"tdengine":   {},
-	"clickhouse": {},
+	"mongodb":      {},
+	"tdengine":     {},
+	"clickhouse":   {},
+	"elasticsearch": {},
 }
 
 // optionalDriverAgentRevisions 记录 GoNavi 对各可选 driver-agent 包装逻辑的兼容版本。
@@ -63,6 +64,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "opengauss"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
+	case "elastic":
+		return "elasticsearch"
 	default:
 		return normalized
 	}
@@ -112,6 +115,8 @@ func driverDisplayName(driverType string) string {
 		return "TDengine"
 	case "clickhouse":
 		return "ClickHouse"
+	case "elasticsearch":
+		return "Elasticsearch"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}
