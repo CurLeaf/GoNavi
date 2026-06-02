@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +17,6 @@ import (
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/ssh"
-
-	"github.com/elastic/go-elasticsearch/v8"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 
 // ElasticsearchDB 实现 Database 接口，提供 Elasticsearch 数据源连接能力。
 type ElasticsearchDB struct {
-	client      *elasticsearch.Client
+	client      *esRESTClient
 	database    string // 默认索引名
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder
@@ -85,7 +85,7 @@ func (e *ElasticsearchDB) Connect(config connection.ConnectionConfig) error {
 			idx+1, len(attempts), sslLabel, attempt.Host, attempt.Port)
 
 		esCfg := buildESClientConfig(attempt)
-		client, err := elasticsearch.NewClient(esCfg)
+		client, err := newESRESTClient(esCfg)
 		if err != nil {
 			logger.Warnf("Elasticsearch 创建客户端失败：%d/%d 模式=%s 错误=%v", idx+1, len(attempts), sslLabel, err)
 			lastErr = err
@@ -137,14 +137,14 @@ func (e *ElasticsearchDB) Ping() error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	res, err := e.client.Ping(e.client.Ping.WithContext(ctx))
+	res, err := e.client.do(ctx, http.MethodHead, "/", nil, nil)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return fmt.Errorf("Elasticsearch Ping 失败：%s", res.Status())
+	if esResponseIsError(res) {
+		return fmt.Errorf("Elasticsearch Ping 失败：%s", esResponseStatus(res))
 	}
 	return nil
 }
@@ -183,18 +183,17 @@ func (e *ElasticsearchDB) GetDatabases() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	res, err := e.client.Cat.Indices(
-		e.client.Cat.Indices.WithContext(ctx),
-		e.client.Cat.Indices.WithFormat("json"),
-		e.client.Cat.Indices.WithH("index"),
-	)
+	query := url.Values{}
+	query.Set("format", "json")
+	query.Set("h", "index")
+	res, err := e.client.do(ctx, http.MethodGet, "/_cat/indices", query, nil)
 	if err != nil {
 		return nil, fmt.Errorf("获取索引列表失败：%w", err)
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return nil, fmt.Errorf("获取索引列表失败：%s", res.Status())
+	if esResponseIsError(res) {
+		return nil, fmt.Errorf("获取索引列表失败：%s", esResponseStatus(res))
 	}
 
 	var indices []struct {
@@ -240,17 +239,14 @@ func (e *ElasticsearchDB) GetCreateStatement(dbName, tableName string) (string, 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	res, err := e.client.Indices.Get(
-		[]string{indexName},
-		e.client.Indices.Get.WithContext(ctx),
-	)
+	res, err := e.client.do(ctx, http.MethodGet, "/"+esPathSegment(indexName), nil, nil)
 	if err != nil {
 		return "", fmt.Errorf("获取索引定义失败：%w", err)
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return "", fmt.Errorf("获取索引定义失败：%s", res.Status())
+	if esResponseIsError(res) {
+		return "", fmt.Errorf("获取索引定义失败：%s", esResponseStatus(res))
 	}
 
 	body, err := io.ReadAll(res.Body)
@@ -322,19 +318,17 @@ func (e *ElasticsearchDB) GetIndexes(dbName, tableName string) ([]connection.Ind
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	res, err := e.client.Cat.Indices(
-		e.client.Cat.Indices.WithContext(ctx),
-		e.client.Cat.Indices.WithIndex(indexName),
-		e.client.Cat.Indices.WithFormat("json"),
-		e.client.Cat.Indices.WithH("index", "health", "status", "docs.count", "store.size"),
-	)
+	query := url.Values{}
+	query.Set("format", "json")
+	query.Set("h", "index,health,status,docs.count,store.size")
+	res, err := e.client.do(ctx, http.MethodGet, "/_cat/indices/"+esPathSegment(indexName), query, nil)
 	if err != nil {
 		return nil, fmt.Errorf("获取索引信息失败：%w", err)
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return nil, fmt.Errorf("获取索引信息失败：%s", res.Status())
+	if esResponseIsError(res) {
+		return nil, fmt.Errorf("获取索引信息失败：%s", esResponseStatus(res))
 	}
 
 	var info []esIndexInfo

@@ -11,8 +11,6 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
-
-	"github.com/elastic/go-elasticsearch/v8"
 )
 
 // ---- 测试辅助函数 ----
@@ -29,13 +27,10 @@ func newMockESServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	return server
 }
 
-// newTestESClient 创建连接到测试服务器的 ES 客户端。
-func newTestESClient(t *testing.T, serverURL string) *elasticsearch.Client {
+// newTestESClient 创建连接到测试服务器的 ES REST 客户端。
+func newTestESClient(t *testing.T, serverURL string) *esRESTClient {
 	t.Helper()
-	cfg := elasticsearch.Config{
-		Addresses: []string{serverURL},
-	}
-	client, err := elasticsearch.NewClient(cfg)
+	client, err := newESRESTClient(esHTTPClientConfig{BaseURL: serverURL})
 	if err != nil {
 		t.Fatalf("创建测试 ES 客户端失败: %v", err)
 	}
@@ -292,7 +287,7 @@ func TestElasticsearchQueryDSL(t *testing.T) {
 	t.Run("指定索引的 DSL 查询", func(t *testing.T) {
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/_search") {
-					w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{
 					"hits": {
 						"total": {"value": 1},
@@ -339,7 +334,7 @@ func TestElasticsearchQueryDSL(t *testing.T) {
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/_search") {
 				capturedPath = r.URL.Path
-					w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
 				return
 			}
@@ -379,7 +374,7 @@ func TestElasticsearchQueryString(t *testing.T) {
 				buf := make([]byte, r.ContentLength)
 				_, _ = r.Body.Read(buf)
 				capturedBody = string(buf)
-					w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{
 					"hits": {
 						"total": {"value": 2},
@@ -895,8 +890,8 @@ func TestBuildESClientConfig(t *testing.T) {
 			Port: 9200,
 			User: "elastic",
 		})
-		if len(cfg.Addresses) != 1 || cfg.Addresses[0] != "http://localhost:9200" {
-			t.Fatalf("HTTP 地址期望 http://localhost:9200，实际：%v", cfg.Addresses)
+		if cfg.BaseURL != "http://localhost:9200" {
+			t.Fatalf("HTTP 地址期望 http://localhost:9200，实际：%v", cfg.BaseURL)
 		}
 		if cfg.Username != "elastic" {
 			t.Fatalf("用户名期望 elastic，实际：%q", cfg.Username)
@@ -909,8 +904,8 @@ func TestBuildESClientConfig(t *testing.T) {
 			Port:   9200,
 			UseSSL: true,
 		})
-		if len(cfg.Addresses) != 1 || cfg.Addresses[0] != "https://es.example.com:9200" {
-			t.Fatalf("HTTPS 地址期望 https://es.example.com:9200，实际：%v", cfg.Addresses)
+		if cfg.BaseURL != "https://es.example.com:9200" {
+			t.Fatalf("HTTPS 地址期望 https://es.example.com:9200，实际：%v", cfg.BaseURL)
 		}
 	})
 }

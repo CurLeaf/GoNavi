@@ -15,9 +15,6 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	proxytunnel "GoNavi-Wails/internal/proxy"
-
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
 )
 
 const defaultEsPort = 9200
@@ -116,17 +113,31 @@ func esSSLAttemptLabel(config connection.ConnectionConfig, fallback bool) string
 	return "明文"
 }
 
+type esHTTPClientConfig struct {
+	BaseURL    string
+	Username   string
+	Password   string
+	HTTPClient *http.Client
+}
+
+type esRESTClient struct {
+	baseURL    string
+	username   string
+	password   string
+	httpClient *http.Client
+}
+
 // buildESClientConfig 从连接配置构建 ES 客户端配置。
-func buildESClientConfig(config connection.ConnectionConfig) elasticsearch.Config {
+func buildESClientConfig(config connection.ConnectionConfig) esHTTPClientConfig {
 	scheme := "http"
 	if config.UseSSL {
 		scheme = "https"
 	}
 
-	cfg := elasticsearch.Config{
-		Addresses: []string{
-			fmt.Sprintf("%s://%s:%d", scheme, config.Host, config.Port),
-		},
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+
+	cfg := esHTTPClientConfig{
+		BaseURL:  fmt.Sprintf("%s://%s:%d", scheme, config.Host, config.Port),
 		Username: strings.TrimSpace(config.User),
 		Password: config.Password,
 	}
@@ -134,34 +145,83 @@ func buildESClientConfig(config connection.ConnectionConfig) elasticsearch.Confi
 	// TLS 配置
 	tlsConfig, _ := resolveGenericTLSConfig(config)
 	if tlsConfig != nil {
-		cfg.Transport = &http.Transport{
-			TLSClientConfig: tlsConfig,
-		}
+		transport.TLSClientConfig = tlsConfig
 	}
 
 	// 代理支持
 	if config.UseProxy {
-		transport, ok := cfg.Transport.(*http.Transport)
-		if !ok {
-			transport = http.DefaultTransport.(*http.Transport).Clone()
-		}
 		proxyCfg := config.Proxy
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return proxytunnel.DialContext(ctx, proxyCfg, network, addr)
 		}
-		cfg.Transport = transport
 	}
 
 	// 超时设置
 	timeout := getConnectTimeout(config)
-	if cfg.Transport == nil {
-		cfg.Transport = http.DefaultTransport.(*http.Transport).Clone()
-	}
-	if transport, ok := cfg.Transport.(*http.Transport); ok {
-		transport.ResponseHeaderTimeout = timeout
-	}
+	transport.ResponseHeaderTimeout = timeout
+	cfg.HTTPClient = &http.Client{Transport: transport}
 
 	return cfg
+}
+
+func newESRESTClient(config esHTTPClientConfig) (*esRESTClient, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	if baseURL == "" {
+		return nil, fmt.Errorf("Elasticsearch 地址不能为空")
+	}
+	if _, err := url.ParseRequestURI(baseURL); err != nil {
+		return nil, fmt.Errorf("Elasticsearch 地址无效：%w", err)
+	}
+	httpClient := config.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &esRESTClient{
+		baseURL:    baseURL,
+		username:   strings.TrimSpace(config.Username),
+		password:   config.Password,
+		httpClient: httpClient,
+	}, nil
+}
+
+func (c *esRESTClient) do(ctx context.Context, method string, path string, query url.Values, body io.Reader) (*http.Response, error) {
+	if c == nil || c.httpClient == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	requestURL := c.baseURL + path
+	if len(query) > 0 {
+		requestURL += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.username != "" || c.password != "" {
+		req.SetBasicAuth(c.username, c.password)
+	}
+	return c.httpClient.Do(req)
+}
+
+func esPathSegment(value string) string {
+	if value == "*" {
+		return "*"
+	}
+	return url.PathEscape(value)
+}
+
+func esResponseIsError(res *http.Response) bool {
+	return res == nil || res.StatusCode >= http.StatusBadRequest
+}
+
+func esResponseStatus(res *http.Response) string {
+	if res == nil {
+		return ""
+	}
+	return res.Status
 }
 
 // ---- 查询响应解析 ----
@@ -196,11 +256,7 @@ func (e *ElasticsearchDB) esQueryWithDSL(ctx context.Context, dsl string) ([]map
 		indexName = "*"
 	}
 
-	res, err := e.client.Search(
-		e.client.Search.WithContext(ctx),
-		e.client.Search.WithIndex(indexName),
-		e.client.Search.WithBody(strings.NewReader(dsl)),
-	)
+	res, err := e.client.do(ctx, http.MethodPost, "/"+esPathSegment(indexName)+"/_search", nil, strings.NewReader(dsl))
 	if err != nil {
 		return nil, nil, fmt.Errorf("Elasticsearch DSL 查询失败：%w", err)
 	}
@@ -218,11 +274,7 @@ func (e *ElasticsearchDB) esQueryWithString(ctx context.Context, queryStr string
 
 	dsl := fmt.Sprintf(`{"query":{"query_string":{"query":"%s"}}}`, strings.ReplaceAll(queryStr, `"`, `\"`))
 
-	res, err := e.client.Search(
-		e.client.Search.WithContext(ctx),
-		e.client.Search.WithIndex(indexName),
-		e.client.Search.WithBody(strings.NewReader(dsl)),
-	)
+	res, err := e.client.do(ctx, http.MethodPost, "/"+esPathSegment(indexName)+"/_search", nil, strings.NewReader(dsl))
 	if err != nil {
 		return nil, nil, fmt.Errorf("Elasticsearch 查询失败：%w", err)
 	}
@@ -232,8 +284,8 @@ func (e *ElasticsearchDB) esQueryWithString(ctx context.Context, queryStr string
 }
 
 // parseSearchResponse 解析 ES _search 响应为标准行格式。
-func (e *ElasticsearchDB) parseSearchResponse(res *esapi.Response) ([]map[string]interface{}, []string, error) {
-	if res.IsError() {
+func (e *ElasticsearchDB) parseSearchResponse(res *http.Response) ([]map[string]interface{}, []string, error) {
+	if esResponseIsError(res) {
 		body, _ := io.ReadAll(res.Body)
 		return nil, nil, fmt.Errorf("Elasticsearch 查询错误：%s", string(body))
 	}
@@ -277,17 +329,14 @@ func (e *ElasticsearchDB) esFetchIndexMapping(indexName string) (map[string]inte
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	res, err := e.client.Indices.GetMapping(
-		e.client.Indices.GetMapping.WithContext(ctx),
-		e.client.Indices.GetMapping.WithIndex(indexName),
-	)
+	res, err := e.client.do(ctx, http.MethodGet, "/"+esPathSegment(indexName)+"/_mapping", nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("获取索引 mapping 失败：%w", err)
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		return nil, fmt.Errorf("获取索引 mapping 失败：%s", res.Status())
+	if esResponseIsError(res) {
+		return nil, fmt.Errorf("获取索引 mapping 失败：%s", esResponseStatus(res))
 	}
 
 	body, err := io.ReadAll(res.Body)

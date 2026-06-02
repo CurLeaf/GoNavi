@@ -8,7 +8,6 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/caretdev/go-irisnative v0.2.1
 	github.com/duckdb/duckdb-go/v2 v2.5.5
-	github.com/elastic/go-elasticsearch/v8 v8.19.6
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/highgo/pq-sm3 v0.0.0
@@ -30,11 +29,9 @@ require (
 )
 
 require (
-	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
-	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel/metric v1.39.0 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 require (
