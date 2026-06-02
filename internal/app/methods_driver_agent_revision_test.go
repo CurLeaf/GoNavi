@@ -142,6 +142,7 @@ func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 		"mongodb",
 		"tdengine",
 		"clickhouse",
+		"elasticsearch",
 	}
 	for _, driverType := range drivers {
 		if db.OptionalDriverAgentRevision(driverType) == "" {

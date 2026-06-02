@@ -54,6 +54,32 @@ func TestCurrentDriverReleaseTagUsesDevLatestForDevBuild(t *testing.T) {
 	}
 }
 
+func TestCurrentDriverReleaseTagUsesDevLatestForLocalTestBuild(t *testing.T) {
+	originalVersion := AppVersion
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	for _, version := range []string{"0.0.1-test", "0.7.9-dev", "0.7.9-local", "0.7.9-SNAPSHOT"} {
+		AppVersion = version
+		if got := currentDriverReleaseTag(); got != driverReleaseDevTag {
+			t.Fatalf("expected %s to use dev driver release tag %q, got %q", version, driverReleaseDevTag, got)
+		}
+	}
+}
+
+func TestCurrentDriverReleaseTagUsesVersionedReleaseForStableBuild(t *testing.T) {
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	if got := currentDriverReleaseTag(); got != "v0.7.9" {
+		t.Fatalf("expected stable driver release tag v0.7.9, got %q", got)
+	}
+}
+
 func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing.T) {
 	originalVersion := AppVersion
 	AppVersion = "0.7.4"

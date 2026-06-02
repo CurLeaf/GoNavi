@@ -4205,10 +4205,26 @@ func currentDriverReleaseTag() string {
 	if currentVersion == "" || currentVersion == "0.0.0" {
 		return ""
 	}
-	if strings.HasPrefix(strings.ToLower(currentVersion), "dev-") {
+	if isDevelopmentDriverReleaseVersion(currentVersion) {
 		return driverReleaseDevTag
 	}
 	return "v" + currentVersion
+}
+
+func isDevelopmentDriverReleaseVersion(version string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(normalizeVersion(version)))
+	if normalized == "" || normalized == "0.0.0" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "dev-") {
+		return true
+	}
+	for _, marker := range []string{"-dev", "-test", "-local", "-snapshot"} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func driverReleaseDownloadURL(tag string, assetName string) string {
