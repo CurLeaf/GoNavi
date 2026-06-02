@@ -2359,6 +2359,41 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
   });
 
+  it('keeps the v2 query editor toolbar grouped and compact', () => {
+    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(source).toContain('gn-v2-query-toolbar-selects');
+    expect(source).toContain('gn-v2-query-toolbar-actions');
+    expect(source).toContain('gn-v2-query-toolbar-connection-select');
+    expect(source).toContain('gn-v2-query-toolbar-database-select');
+    expect(source).toContain('gn-v2-query-toolbar-max-rows-select');
+    expect(source).toContain('gn-v2-query-toolbar-action-group');
+    expect(source).toContain('style={isV2Ui ? undefined : { width: 150 }}');
+    expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');
+    expect(source).toContain('style={isV2Ui ? undefined : { width: 170 }}');
+
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
+    expect(css).toContain('flex: 0 1 auto !important;');
+    expect(css).toContain('justify-content: flex-start;');
+    expect(css).toContain('height: 32px !important;');
+    expect(css).toContain('line-height: 30px !important;');
+    expect(css).toContain('display: inline-flex !important;');
+    expect(css).toContain('gap: 6px;');
+    expect(css).toContain('margin-left: 0 !important;');
+    expect(css).toContain('max-width: 520px;');
+    expect(css).toContain('width: 140px !important;');
+    expect(css).toContain('width: 166px !important;');
+    expect(css).toContain('width: 132px !important;');
+    expect(css).toContain('width: 34px !important;');
+    expect(css).toContain('@media (max-width: 900px)');
+
+    const queryToolbarCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-monaco-shell {'));
+    expect(queryToolbarCss).not.toContain('margin-left: auto;');
+    expect(queryToolbarCss).not.toContain('justify-content: flex-end;');
+  });
+
   it('coalesces editor result splitter dragging through requestAnimationFrame', async () => {
     const moveListeners: Array<(event: MouseEvent) => void> = [];
     const upListeners: Array<() => void> = [];
