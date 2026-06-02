@@ -2644,7 +2644,8 @@ function App() {
       }
   }, [securityUpdateRepairSource]);
 
-  const handleTitleBarWindowToggle = async () => {
+  const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {
+      const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;
       const syncWindowStateFromRuntime = async () => {
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
@@ -2665,7 +2666,7 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
-          if (useNativeMacWindowControls && isMacRuntime) {
+          if (allowMacNativeFullscreen && useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
               await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
@@ -2690,7 +2691,7 @@ function App() {
       if (target?.closest('[data-no-titlebar-toggle="true"]')) {
           return;
       }
-      void handleTitleBarWindowToggle();
+      void handleTitleBarWindowToggle({ allowMacNativeFullscreen: false });
   };
 
   // handleManualResetWindowZoom 由 resetWindowZoom 快捷键（默认 Ctrl+Shift+0）触发，
@@ -3080,7 +3081,7 @@ function App() {
                   break;
               case 'toggleMacFullscreen':
                   if (isMacRuntime && useNativeMacWindowControls) {
-                      void handleTitleBarWindowToggle();
+                      void handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });
                   }
                   break;
               case 'resetWindowZoom':

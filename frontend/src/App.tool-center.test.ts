@@ -169,7 +169,7 @@ describe('tool center menu entries', () => {
       ['toggleLogPanel', 'handleToggleLogPanel();'],
       ['toggleTheme', 'setTheme('],
       ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
-      ['toggleMacFullscreen', 'handleTitleBarWindowToggle();'],
+      ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],
     ]);
 
@@ -181,6 +181,14 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('setActiveTab(tabs[nextIndex].id);');
     expect(appSource).toContain('handleCreateConnection, handleManualResetWindowZoom');
     expect(appSource).toContain('switchActiveTabByOffset, themeMode');
+  });
+
+  it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
+    expect(appSource).toContain('const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {');
+    expect(appSource).toContain('const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;');
+    expect(appSource).toContain('if (allowMacNativeFullscreen && useNativeMacWindowControls && isMacRuntime) {');
+    expect(appSource).toContain('void handleTitleBarWindowToggle({ allowMacNativeFullscreen: false });');
+    expect(getGlobalShortcutCaseBlock('toggleMacFullscreen')).toContain('handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });');
   });
 
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {
