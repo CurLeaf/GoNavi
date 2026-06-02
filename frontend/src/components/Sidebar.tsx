@@ -427,6 +427,7 @@ const V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH = 88;
 const V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH = 24;
 const V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH = 8;
 const V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER = 48;
+const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;
 
 export const estimateV2TreeHorizontalScrollWidth = (
   nodes: TreeNode[],
@@ -6159,6 +6160,9 @@ const Sidebar: React.FC<{
       () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
       [treeViewportWidth, v2VisibleTreeData],
   );
+  const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth
+      ? Math.max(1, treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE)
+      : treeHeight;
   const v2TreeMetrics = useMemo(() => {
       const databaseTableCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
@@ -8850,7 +8854,7 @@ const Sidebar: React.FC<{
                     autoExpandParent={autoExpandParent}
                     selectedKeys={selectedKeys}
                     blockNode
-                    height={treeHeight}
+                    height={effectiveTreeHeight}
                     scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}
                     onRightClick={onRightClick}
                 />
