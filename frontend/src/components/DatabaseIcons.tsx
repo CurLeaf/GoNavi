@@ -35,6 +35,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     postgres:   '#336791',
     redis:      '#DC382D',
     mongodb:    '#47A248',
+    elasticsearch: '#005571',
     jvm:        '#1677FF',
     kingbase:   '#1890FF',
     dameng:     '#E6002D',
@@ -130,6 +131,9 @@ const RedisIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const MongoDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="mongodb" size={size} color={color} />
 );
+const ElasticsearchIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.elasticsearch} label="ES" />
+);
 const ClickHouseIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="clickhouse" size={size} color={color} />
 );
@@ -214,6 +218,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     postgres: PostgresIcon,
     redis: RedisIcon,
     mongodb: MongoDBIcon,
+    elasticsearch: ElasticsearchIcon,
     jvm: JVMIcon,
     kingbase: KingBaseIcon,
     dameng: DamengIcon,
@@ -232,7 +237,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 
 /** 可选图标类型列表（用于图标选择器 UI） */
 export const DB_ICON_TYPES: string[] = [
-    'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
+    'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
     'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'custom',
 ];
@@ -251,7 +256,7 @@ export const getDbIcon = (type: string, color?: string, size?: number): React.Re
 export const getDbIconLabel = (type: string): string => {
     const labels: Record<string, string> = {
         mysql: 'MySQL', mariadb: 'MariaDB', oceanbase: 'OceanBase', postgres: 'PostgreSQL',
-        redis: 'Redis', mongodb: 'MongoDB', jvm: 'JVM',
+        redis: 'Redis', mongodb: 'MongoDB', elasticsearch: 'Elasticsearch', jvm: 'JVM',
         oracle: 'Oracle',
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',

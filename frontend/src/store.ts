@@ -264,6 +264,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "sqlserver",
   "iris",
   "mongodb",
+  "elasticsearch",
   "highgo",
   "vastbase",
   "opengauss",
@@ -290,6 +291,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "opengauss",
   "mongodb",
   "redis",
+  "elasticsearch",
   "tdengine",
 ]);
 
@@ -332,6 +334,8 @@ const getDefaultPortByType = (type: string): number => {
       return 1972;
     case "mongodb":
       return 27017;
+    case "elasticsearch":
+      return 9200;
     case "highgo":
       return 5866;
     default:

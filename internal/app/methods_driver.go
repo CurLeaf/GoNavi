@@ -349,7 +349,8 @@ const builtinDriverManifestJSON = `{
     "iris":      { "engine": "go", "version": "0.2.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iris" },
     "mongodb":   { "engine": "go", "version": "2.5.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
-    "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" }
+    "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" },
+    "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" }
   }
 }`
 
@@ -389,47 +390,49 @@ var pinnedDriverPackageMap = map[string]pinnedDriverPackage{
 }
 
 var latestDriverVersionMap = map[string]string{
-	"mysql":      "1.9.3",
-	"mariadb":    "1.9.3",
-	"oceanbase":  "1.9.3",
-	"diros":      "1.9.3",
-	"starrocks":  "1.9.3",
-	"sphinx":     "1.9.3",
-	"sqlserver":  "1.9.6",
-	"sqlite":     "1.46.1",
-	"duckdb":     "2.5.6",
-	"dameng":     "1.8.22",
-	"kingbase":   "0.0.0-20201021123113-29bd62a876c3",
-	"highgo":     "0.0.0-local",
-	"vastbase":   "1.11.2",
-	"opengauss":  "1.11.1",
-	"iris":       "0.2.1",
-	"mongodb":    "2.5.0",
-	"tdengine":   "3.7.8",
-	"clickhouse": "2.43.1",
-	"oracle":     "2.9.0",
-	"postgres":   "1.11.2",
-	"redis":      "9.17.3",
+	"mysql":         "1.9.3",
+	"mariadb":       "1.9.3",
+	"oceanbase":     "1.9.3",
+	"diros":         "1.9.3",
+	"starrocks":     "1.9.3",
+	"sphinx":        "1.9.3",
+	"sqlserver":     "1.9.6",
+	"sqlite":        "1.46.1",
+	"duckdb":        "2.5.6",
+	"dameng":        "1.8.22",
+	"kingbase":      "0.0.0-20201021123113-29bd62a876c3",
+	"highgo":        "0.0.0-local",
+	"vastbase":      "1.11.2",
+	"opengauss":     "1.11.1",
+	"iris":          "0.2.1",
+	"mongodb":       "2.5.0",
+	"tdengine":      "3.7.8",
+	"clickhouse":    "2.43.1",
+	"elasticsearch": "8.19.6",
+	"oracle":        "2.9.0",
+	"postgres":      "1.11.2",
+	"redis":         "9.17.3",
 }
 
 var driverGoModulePathMap = map[string]string{
-	"mariadb":    "github.com/go-sql-driver/mysql",
-	"oceanbase":  "github.com/go-sql-driver/mysql",
-	"diros":      "github.com/go-sql-driver/mysql",
-	"starrocks":  "github.com/go-sql-driver/mysql",
-	"sphinx":     "github.com/go-sql-driver/mysql",
-	"sqlserver":  "github.com/microsoft/go-mssqldb",
-	"sqlite":     "modernc.org/sqlite",
-	"duckdb":     "github.com/duckdb/duckdb-go/v2",
-	"dameng":     "gitee.com/chunanyong/dm",
-	"kingbase":   "gitea.com/kingbase/gokb",
-	"highgo":     "github.com/highgo/pq-sm3",
-	"vastbase":   "github.com/lib/pq",
-	"opengauss":  "github.com/lib/pq",
-	"iris":       "github.com/caretdev/go-irisnative",
-	"mongodb":    "go.mongodb.org/mongo-driver/v2",
-	"tdengine":   "github.com/taosdata/driver-go/v3",
-	"clickhouse": "github.com/ClickHouse/clickhouse-go/v2",
+	"mariadb":       "github.com/go-sql-driver/mysql",
+	"oceanbase":     "github.com/go-sql-driver/mysql",
+	"diros":         "github.com/go-sql-driver/mysql",
+	"starrocks":     "github.com/go-sql-driver/mysql",
+	"sphinx":        "github.com/go-sql-driver/mysql",
+	"sqlserver":     "github.com/microsoft/go-mssqldb",
+	"sqlite":        "modernc.org/sqlite",
+	"duckdb":        "github.com/duckdb/duckdb-go/v2",
+	"dameng":        "gitee.com/chunanyong/dm",
+	"kingbase":      "gitea.com/kingbase/gokb",
+	"highgo":        "github.com/highgo/pq-sm3",
+	"vastbase":      "github.com/lib/pq",
+	"opengauss":     "github.com/lib/pq",
+	"iris":          "github.com/caretdev/go-irisnative",
+	"mongodb":       "go.mongodb.org/mongo-driver/v2",
+	"tdengine":      "github.com/taosdata/driver-go/v3",
+	"clickhouse":    "github.com/ClickHouse/clickhouse-go/v2",
+	"elasticsearch": "github.com/elastic/go-elasticsearch/v8",
 }
 
 var driverGoModuleAliasPathMap = map[string][]string{
@@ -1494,6 +1497,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
 		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
+		buildOptionalGoDriverDefinition("elasticsearch", "Elasticsearch", packages),
 	}
 }
 
@@ -3821,6 +3825,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_tdengine_driver", nil
 	case "clickhouse":
 		return "gonavi_clickhouse_driver", nil
+	case "elasticsearch":
+		return "gonavi_elasticsearch_driver", nil
 	default:
 		return "", fmt.Errorf("未配置驱动构建标签：%s", driverType)
 	}

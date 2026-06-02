@@ -29,6 +29,7 @@ export type SqlDialect =
   | 'tdengine'
   | 'mongodb'
   | 'redis'
+  | 'elasticsearch'
   | 'unknown'
   | string;
 
@@ -106,7 +107,10 @@ export const resolveSqlDialect = (
     case 'tdengine':
     case 'mongodb':
     case 'redis':
+    case 'elasticsearch':
       return source;
+    case 'elastic':
+      return 'elasticsearch';
     default:
       break;
   }
@@ -130,6 +134,7 @@ export const resolveSqlDialect = (
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
+  if (source.includes('elastic')) return 'elasticsearch';
 
   return source;
 };
