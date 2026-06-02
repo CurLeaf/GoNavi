@@ -512,7 +512,7 @@ interface BatchObjectItem {
   dataRef: any;
 }
 
-type V2CommandSearchItem =
+export type V2CommandSearchItem =
   | {
       key: string;
       kind: 'node';
@@ -585,6 +585,66 @@ export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery 
     normalizedKeyword: trimmedValue.toLowerCase(),
     aiPrompt: '',
   };
+};
+
+const isV2CommandSearchObjectNode = (node: TreeNode): boolean => {
+  return node.type === 'table'
+      || node.type === 'view'
+      || node.type === 'materialized-view';
+};
+
+const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
+
+export const filterV2CommandSearchTreeItems = (
+  items: V2CommandSearchItem[],
+  query: V2CommandSearchQuery,
+): V2CommandSearchItem[] => {
+  if (query.mode === 'ai') return [];
+  const normalizedKeyword = query.normalizedKeyword;
+  const objectMode = query.mode === 'object';
+  const matchedItems = items.filter((item) => {
+    if (item.kind !== 'node') return false;
+    const node = item.node;
+    const dataRef = node.dataRef || {};
+    if (objectMode && !isV2CommandSearchObjectNode(node)) {
+      return false;
+    }
+    if (!normalizedKeyword) return true;
+    const objectName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
+    if (objectMode) {
+      return objectName.includes(normalizedKeyword)
+          || String(item.title || '').toLowerCase().includes(normalizedKeyword);
+    }
+    const haystack = [
+      item.title,
+      item.meta,
+      dataRef.tableName,
+      dataRef.viewName,
+      dataRef.dbName,
+      dataRef.name,
+      dataRef.config?.host,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(normalizedKeyword);
+  });
+  return normalizedKeyword ? matchedItems : matchedItems.slice(0, V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT);
+};
+
+export interface V2CommandSearchEnterState {
+  key: string;
+  isComposing?: boolean;
+  keyCode?: number;
+  activeItemCount: number;
+}
+
+export const shouldRunV2CommandSearchEnter = ({
+  key,
+  isComposing,
+  keyCode,
+  activeItemCount,
+}: V2CommandSearchEnterState): boolean => {
+  if (key !== 'Enter') return false;
+  if (isComposing || keyCode === 229) return false;
+  return activeItemCount > 0;
 };
 
 export const resolveSidebarConnectionIdFromKey = (
@@ -1036,6 +1096,7 @@ const Sidebar: React.FC<{
   const commandSearchInputRef = useRef<any>(null);
   const [isV2CommandSearchOpen, setIsV2CommandSearchOpen] = useState(false);
   const [v2CommandSearchValue, setV2CommandSearchValue] = useState('');
+  const deferredV2CommandSearchValue = useDeferredValue(v2CommandSearchValue);
   const [v2CommandActiveIndex, setV2CommandActiveIndex] = useState(0);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [autoExpandParent, setAutoExpandParent] = useState(true);
@@ -1116,13 +1177,19 @@ const Sidebar: React.FC<{
 
   const handleV2CommandSearchValueChange = useCallback((value: string) => {
       setV2CommandSearchValue(value);
+  }, []);
+
+  useEffect(() => {
       if (!v2CommandSearchPersistentFilterEnabled) {
           return;
       }
-      const nextFilter = value.trim();
+      const nextFilter = deferredV2CommandSearchValue.trim();
       setSearchValue(nextFilter);
-      setAppearance({ v2SidebarPersistedFilter: nextFilter });
-  }, [setAppearance, v2CommandSearchPersistentFilterEnabled]);
+      const timer = window.setTimeout(() => {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }, 160);
+      return () => window.clearTimeout(timer);
+  }, [deferredV2CommandSearchValue, setAppearance, v2CommandSearchPersistentFilterEnabled]);
 
   const toggleV2CommandSearchPersistentFilter = useCallback((enabled: boolean) => {
       const nextFilter = enabled ? v2CommandSearchValue.trim() : '';
@@ -5965,49 +6032,15 @@ const Sidebar: React.FC<{
 		  ], [activeShortcutPlatform, onCreateConnection, onToggleAI, onToggleLogPanel, shortcutOptions]);
 
 	  const v2CommandSearchQuery = useMemo(
-	      () => parseV2CommandSearchQuery(v2CommandSearchValue),
-	      [v2CommandSearchValue],
+	      () => parseV2CommandSearchQuery(deferredV2CommandSearchValue),
+	      [deferredV2CommandSearchValue],
 	  );
 	  const normalizedV2CommandSearchValue = v2CommandSearchQuery.normalizedKeyword;
 	  const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';
 	  const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';
 	  const filteredCommandSearchTreeItems = useMemo(() => {
-	      if (v2CommandSearchAiMode) return [];
-	      const matchLimit = v2CommandSearchObjectMode ? 16 : 8;
-	      if (!normalizedV2CommandSearchValue) {
-	          return commandSearchTreeItems
-	              .filter((item) => !v2CommandSearchObjectMode || (
-	                  item.kind === 'node'
-	                  && (item.node.type === 'table' || item.node.type === 'view' || item.node.type === 'materialized-view')
-	              ))
-	              .slice(0, matchLimit);
-	      }
-	      return commandSearchTreeItems
-	          .filter((item) => {
-	              if (item.kind !== 'node') return false;
-	              const node = item.node;
-	              const dataRef = node.dataRef || {};
-	              if (v2CommandSearchObjectMode && node.type !== 'table' && node.type !== 'view' && node.type !== 'materialized-view') {
-	                  return false;
-	              }
-	              const tableName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
-	              if (v2CommandSearchObjectMode) {
-	                  return tableName.includes(normalizedV2CommandSearchValue)
-	                      || String(item.title || '').toLowerCase().includes(normalizedV2CommandSearchValue);
-	              }
-	              const haystack = [
-	                  item.title,
-	                  item.meta,
-	                  dataRef.tableName,
-                  dataRef.viewName,
-                  dataRef.dbName,
-                  dataRef.name,
-	                  dataRef.config?.host,
-	              ].filter(Boolean).join(' ').toLowerCase();
-	              return haystack.includes(normalizedV2CommandSearchValue);
-	          })
-	          .slice(0, matchLimit);
-	  }, [commandSearchTreeItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
+	      return filterV2CommandSearchTreeItems(commandSearchTreeItems, v2CommandSearchQuery);
+	  }, [commandSearchTreeItems, v2CommandSearchQuery]);
 
 	  const filteredCommandSearchActionItems = useMemo(() => {
 	      if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
@@ -6840,11 +6873,15 @@ const Sidebar: React.FC<{
           return;
       }
       if (event.key === 'Enter') {
-          event.preventDefault();
-          if (v2CommandSearchAiMode && !v2CommandSearchQuery.aiPrompt) {
-              message.warning('请输入要问 AI 的问题');
+          if (!shouldRunV2CommandSearchEnter({
+              key: event.key,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.nativeEvent.keyCode,
+              activeItemCount: commandSearchFlatItems.length,
+          })) {
               return;
           }
+          event.preventDefault();
           runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
           return;
       }
@@ -6893,7 +6930,7 @@ const Sidebar: React.FC<{
 	              ? '未找到匹配的表、视图或物化视图。'
 	              : '未找到匹配项。可输入 @表名 只搜表对象，或输入 ?问题 让 AI 回答。');
 	      return (
-	          <div className="gn-v2-command-backdrop" data-v2-command-search="true" onMouseDown={closeV2CommandSearch}>
+	          <div className="gn-v2-command-backdrop" data-v2-command-search="true">
               <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label="搜索表、连接、动作" onMouseDown={(event) => event.stopPropagation()}>
                   <div className="gn-v2-command-searchbar">
                       <SearchOutlined />

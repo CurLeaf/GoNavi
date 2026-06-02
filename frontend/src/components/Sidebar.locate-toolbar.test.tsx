@@ -8,11 +8,13 @@ import Sidebar, {
   buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
   estimateV2TreeHorizontalScrollWidth,
+  filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
   getV2RailConnectionGroupBadgeText,
   hasSidebarLazyChildren,
   normalizeSidebarTreeRelativeDropPosition,
   parseV2CommandSearchQuery,
+  type V2CommandSearchItem,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarTagDropInsertBefore,
   resolveSidebarDropTargetMetricsFromDomEvent,
@@ -25,6 +27,7 @@ import Sidebar, {
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldLoadSidebarNodeOnExpand,
+  shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
 } from './Sidebar';
 import {
@@ -272,6 +275,80 @@ describe('Sidebar locate toolbar', () => {
       keyword: 'payment',
       normalizedKeyword: 'payment',
     });
+  });
+
+  it('only runs v2 command search enter for a real selected result outside IME composition', () => {
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      activeItemCount: 1,
+    })).toBe(true);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      isComposing: true,
+      activeItemCount: 1,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      keyCode: 229,
+      activeItemCount: 1,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Enter',
+      activeItemCount: 0,
+    })).toBe(false);
+    expect(shouldRunV2CommandSearchEnter({
+      key: 'Escape',
+      activeItemCount: 1,
+    })).toBe(false);
+  });
+
+  it('keeps all loaded v2 command table matches once a keyword is entered', () => {
+    const items: V2CommandSearchItem[] = Array.from({ length: 40 }, (_, index) => ({
+      key: `node-table-${index}`,
+      kind: 'node' as const,
+      title: `fs_order_${index}`,
+      meta: '开发240 · front_end_sys',
+      icon: null,
+      node: {
+        type: 'table',
+        key: `table-${index}`,
+        title: `fs_order_${index}`,
+        dataRef: {
+          tableName: `fs_order_${index}`,
+          dbName: 'front_end_sys',
+        },
+      },
+    }));
+
+    expect(filterV2CommandSearchTreeItems(
+      items,
+      parseV2CommandSearchQuery('fs_order'),
+    )).toHaveLength(40);
+    expect(filterV2CommandSearchTreeItems(
+      items,
+      parseV2CommandSearchQuery(''),
+    )).toHaveLength(24);
+    expect(filterV2CommandSearchTreeItems(
+      [
+        ...items,
+        {
+          key: 'node-db',
+          kind: 'node' as const,
+          title: 'front_end_sys',
+          meta: '开发240',
+          icon: null,
+          node: {
+            type: 'database',
+            key: 'db-front-end-sys',
+            title: 'front_end_sys',
+            dataRef: {
+              dbName: 'front_end_sys',
+            },
+          },
+        },
+      ],
+      parseV2CommandSearchQuery('@fs_order'),
+    )).toHaveLength(40);
   });
 
   it('keeps the v2 active host on the selected database connection', () => {
