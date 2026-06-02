@@ -14,6 +14,7 @@ import Sidebar, {
   hasSidebarLazyChildren,
   normalizeSidebarTreeRelativeDropPosition,
   parseV2CommandSearchQuery,
+  resolveV2CommandSearchPersistentFilter,
   type V2CommandSearchItem,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarTagDropInsertBefore,
@@ -27,6 +28,7 @@ import Sidebar, {
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldLoadSidebarNodeOnExpand,
+  shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
 } from './Sidebar';
@@ -302,6 +304,51 @@ describe('Sidebar locate toolbar', () => {
     })).toBe(false);
   });
 
+  it('keeps v2 command search persisted filter after closing the palette', () => {
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: '  org  ',
+      persistedFilter: '',
+      enabled: true,
+      isOpen: true,
+    })).toBe('org');
+
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: '',
+      persistedFilter: 'org',
+      enabled: true,
+      isOpen: false,
+    })).toBe('org');
+
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: 'org',
+      persistedFilter: 'org',
+      enabled: false,
+      isOpen: true,
+    })).toBe('');
+  });
+
+  it('closes v2 command search on global escape only while the palette is open', () => {
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Escape',
+      isOpen: true,
+    })).toBe(true);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Esc',
+      isOpen: true,
+    })).toBe(true);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Escape',
+      isOpen: false,
+    })).toBe(false);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Enter',
+      isOpen: true,
+    })).toBe(false);
+  });
+
   it('keeps all loaded v2 command table matches once a keyword is entered', () => {
     const items: V2CommandSearchItem[] = Array.from({ length: 40 }, (_, index) => ({
       key: `node-table-${index}`,
@@ -538,6 +585,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('handleV2CommandSearchValueChange(event.target.value)');
     expect(source).toContain('toggleV2CommandSearchPersistentFilter');
     expect(source).toContain('gn-v2-command-filter-switch');
+    expect(source).toContain("window.addEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true)");
+    expect(source).toContain("window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true)");
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');

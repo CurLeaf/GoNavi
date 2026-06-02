@@ -648,6 +648,38 @@ export const shouldRunV2CommandSearchEnter = ({
   return activeItemCount > 0;
 };
 
+export interface V2CommandSearchPersistentFilterState {
+  commandSearchValue: string;
+  persistedFilter: string;
+  enabled: boolean;
+  isOpen: boolean;
+}
+
+export const resolveV2CommandSearchPersistentFilter = ({
+  commandSearchValue,
+  persistedFilter,
+  enabled,
+  isOpen,
+}: V2CommandSearchPersistentFilterState): string => {
+  if (!enabled) return '';
+  if (!isOpen) return String(persistedFilter ?? '').trim();
+  return String(commandSearchValue ?? '').trim();
+};
+
+export interface V2CommandSearchGlobalKeyState {
+  key: string;
+  isOpen: boolean;
+}
+
+export const shouldCloseV2CommandSearchOnGlobalKey = ({
+  key,
+  isOpen,
+}: V2CommandSearchGlobalKeyState): boolean => {
+  if (!isOpen) return false;
+  const normalizedKey = String(key || '').toLowerCase();
+  return normalizedKey === 'escape' || normalizedKey === 'esc';
+};
+
 export const resolveSidebarConnectionIdFromKey = (
   key: unknown,
   connectionIds: string[],
@@ -1156,11 +1188,23 @@ const Sidebar: React.FC<{
       setV2CommandActiveIndex(0);
   }, []);
 
+  const commitV2CommandSearchPersistentFilter = useCallback((value = v2CommandSearchValue) => {
+      if (!v2CommandSearchPersistentFilterEnabled) {
+          return;
+      }
+      const nextFilter = value.trim();
+      setSearchValue(nextFilter);
+      if (nextFilter !== v2PersistedSidebarFilter) {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }
+  }, [setAppearance, v2CommandSearchPersistentFilterEnabled, v2CommandSearchValue, v2PersistedSidebarFilter]);
+
   const closeV2CommandSearch = useCallback(() => {
+      commitV2CommandSearchPersistentFilter();
       setIsV2CommandSearchOpen(false);
       setV2CommandSearchValue('');
       setV2CommandActiveIndex(0);
-  }, []);
+  }, [commitV2CommandSearchPersistentFilter]);
 
   useEffect(() => {
       setSearchValue(v2PersistedSidebarFilter);
@@ -1184,13 +1228,21 @@ const Sidebar: React.FC<{
       if (!v2CommandSearchPersistentFilterEnabled) {
           return;
       }
-      const nextFilter = deferredV2CommandSearchValue.trim();
+      if (!isV2CommandSearchOpen) {
+          return;
+      }
+      const nextFilter = resolveV2CommandSearchPersistentFilter({
+          commandSearchValue: deferredV2CommandSearchValue,
+          persistedFilter: v2PersistedSidebarFilter,
+          enabled: v2CommandSearchPersistentFilterEnabled,
+          isOpen: isV2CommandSearchOpen,
+      });
       setSearchValue(nextFilter);
       const timer = window.setTimeout(() => {
           setAppearance({ v2SidebarPersistedFilter: nextFilter });
       }, 160);
       return () => window.clearTimeout(timer);
-  }, [deferredV2CommandSearchValue, setAppearance, v2CommandSearchPersistentFilterEnabled]);
+  }, [deferredV2CommandSearchValue, isV2CommandSearchOpen, setAppearance, v2CommandSearchPersistentFilterEnabled, v2PersistedSidebarFilter]);
 
   const toggleV2CommandSearchPersistentFilter = useCallback((enabled: boolean) => {
       const nextFilter = enabled ? v2CommandSearchValue.trim() : '';
@@ -1264,6 +1316,20 @@ const Sidebar: React.FC<{
       }, 0);
       return () => window.clearTimeout(timer);
   }, [isV2CommandSearchOpen]);
+
+  useEffect(() => {
+      if (!isV2CommandSearchOpen) return;
+      const handleV2CommandSearchGlobalKeyDown = (event: KeyboardEvent) => {
+          if (!shouldCloseV2CommandSearchOnGlobalKey({ key: event.key, isOpen: isV2CommandSearchOpen })) {
+              return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          closeV2CommandSearch();
+      };
+      window.addEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
+      return () => window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
+  }, [closeV2CommandSearch, isV2CommandSearchOpen]);
   
   // Connection Status State: key -> 'success' | 'error'
   const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
