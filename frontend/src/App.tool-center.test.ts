@@ -183,6 +183,14 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('switchActiveTabByOffset, themeMode');
   });
 
+  it('automatically resets WebView2 zoom when a Windows taskbar restore returns focus', () => {
+    expect(appSource).toContain('shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)');
+    expect(appSource).toContain('const shouldResetWebViewZoom = shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift);');
+    expect(appSource).toContain('if (shouldResetWebViewZoom && !isMaximised)');
+    expect(appSource).toContain('const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();');
+    expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
+  });
+
   it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
     expect(appSource).toContain('const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {');
     expect(appSource).toContain('const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;');

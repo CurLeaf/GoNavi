@@ -883,15 +883,28 @@ function App() {
                   devicePixelRatio: Number(window.devicePixelRatio) || 1,
                   visualViewportScale: window.visualViewport?.scale,
               });
+              const shouldResetWebViewZoom = shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift);
+
+              if (shouldResetWebViewZoom && !isMaximised) {
+                  try {
+                      const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+                      if (!res?.success) {
+                          console.warn('ResetWebViewZoom unavailable in fixWindowScaleIfNeeded:', res?.message);
+                      }
+                  } catch (e) {
+                      console.warn('ResetWebViewZoom call failed in fixWindowScaleIfNeeded', e);
+                  }
+              }
 
               if (isMaximised) {
                   if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
-                      // restore + drift（任务栏点击恢复后字体异常变大）的零感知修复路径：
+                      // restore（任务栏点击恢复后字体异常变大/变糊）的零感知修复路径：
                       // 调 backend App.ResetWebViewZoom 触发 WebView2 ICoreWebView2Controller::put_ZoomFactor(1.0)，
-                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
+                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。该异常不一定表现为 viewport ratio drift，
+                      // 所以 restore 场景不能依赖 hasViewportScaleDrift。完全不动窗口、零动画。
                       // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
                       // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
-                      if (shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)) {
+                      if (shouldResetWebViewZoom) {
                           try {
                               const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
                               if (!res?.success) {
