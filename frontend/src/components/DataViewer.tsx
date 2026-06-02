@@ -26,6 +26,7 @@ import {
   getColumnDefinitionName,
   getColumnDefinitionType,
 } from '../utils/columnDefinition';
+import { splitQualifiedNameLast, splitQualifiedNameSegments } from '../utils/qualifiedName';
 
 type ViewerPaginationState = {
   current: number;
@@ -171,33 +172,21 @@ const buildDataViewerBaseSelectSQL = (
   return `SELECT ${alias}.*, ${alias}.ROWID AS ${rowIDAlias} FROM ${quotedTableName} ${alias} ${whereSQL}`;
 };
 
-const normalizeDuckDBIdentifier = (raw: string): string => {
-  const text = String(raw || '').trim();
-  if (text.length >= 2) {
-    const first = text[0];
-    const last = text[text.length - 1];
-    if ((first === '"' && last === '"') || (first === '`' && last === '`')) {
-      return text.slice(1, -1).trim();
-    }
-  }
-  return text;
-};
-
 const resolveDuckDBSchemaAndTable = (dbName: string, tableName: string) => {
   const rawTable = String(tableName || '').trim();
   if (!rawTable) return { schemaName: 'main', pureTableName: '' };
 
-  const parts = rawTable.split('.');
-  if (parts.length >= 2) {
-    const pureTableName = normalizeDuckDBIdentifier(parts[parts.length - 1]);
-    const schemaName = normalizeDuckDBIdentifier(parts[parts.length - 2]);
-    if (schemaName && pureTableName) {
-      return { schemaName, pureTableName };
-    }
+  const segments = splitQualifiedNameSegments(rawTable);
+  if (segments.length >= 2) {
+    return {
+      schemaName: segments[segments.length - 2],
+      pureTableName: segments[segments.length - 1],
+    };
   }
 
-  const fallbackSchema = normalizeDuckDBIdentifier(String(dbName || '').trim()) || 'main';
-  return { schemaName: fallbackSchema, pureTableName: normalizeDuckDBIdentifier(rawTable) };
+  const fallbackParsed = splitQualifiedNameLast(String(dbName || '').trim());
+  const fallbackSchema = fallbackParsed.objectName || String(dbName || '').trim() || 'main';
+  return { schemaName: fallbackSchema, pureTableName: segments[0] || rawTable };
 };
 
 const escapeSQLLiteral = (value: string): string => String(value || '').replace(/'/g, "''");

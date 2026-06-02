@@ -320,6 +320,10 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 	}
 
+	if dbType == "duckdb" {
+		return rawDB, rawTable
+	}
+
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
 		schema := strings.TrimSpace(parts[0])
 		table := strings.TrimSpace(parts[1])

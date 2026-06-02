@@ -65,6 +65,7 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { resolveConnectionHostSummary, resolveConnectionHostTokens } from '../utils/tabDisplay';
@@ -1796,9 +1797,8 @@ const Sidebar: React.FC<{
       const rawName = String(tableName || '').trim();
       if (!rawName) return rawName;
       if (!shouldHideSchemaPrefix(conn)) return rawName;
-      const lastDotIndex = rawName.lastIndexOf('.');
-      if (lastDotIndex <= 0 || lastDotIndex >= rawName.length - 1) return rawName;
-      return rawName.substring(lastDotIndex + 1);
+      const parsed = splitQualifiedName(rawName);
+      return parsed.objectName || rawName;
   };
 
   const getMetadataDialect = (conn: SavedConnection | undefined): string => {
@@ -1984,15 +1984,10 @@ const Sidebar: React.FC<{
   };
 
   const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const raw = String(qualifiedName || '').trim();
-      if (!raw) return { schemaName: '', objectName: '' };
-      const idx = raw.lastIndexOf('.');
-      if (idx <= 0 || idx >= raw.length - 1) {
-          return { schemaName: '', objectName: raw };
-      }
+      const parsed = splitQualifiedNameLast(qualifiedName);
       return {
-          schemaName: raw.substring(0, idx),
-          objectName: raw.substring(idx + 1),
+          schemaName: parsed.parentPath,
+          objectName: parsed.objectName,
       };
   };
 
@@ -4785,12 +4780,7 @@ const Sidebar: React.FC<{
   };
 
   const extractObjectName = (fullName: string) => {
-      const raw = String(fullName || '').trim();
-      const idx = raw.lastIndexOf('.');
-      if (idx >= 0 && idx < raw.length - 1) {
-          return raw.substring(idx + 1);
-      }
-      return raw;
+      return splitQualifiedName(String(fullName || '').trim()).objectName || String(fullName || '').trim();
   };
 
   const handleRenameDatabase = async () => {
@@ -5012,9 +5002,9 @@ const Sidebar: React.FC<{
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
               case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
-                  const parts = viewName.split('.');
-                  const schema = parts.length > 1 ? parts[0] : 'public';
-                  const name = parts.length > 1 ? parts[1] : viewName;
+                  const parts = splitQualifiedName(viewName);
+                  const schema = parts.schemaName || 'public';
+                  const name = parts.objectName || viewName;
                   query = `SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`;
                   break;
               }
@@ -5133,7 +5123,10 @@ const Sidebar: React.FC<{
       const conn = node.dataRef;
       const { tableName, dbName, id } = conn;
       const safeTable = String(tableName || 'table_name').trim();
-      const quotedTable = safeTable.includes('`') ? safeTable : safeTable.split('.').map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
+      const safeTableParts = [splitQualifiedName(safeTable).schemaName, splitQualifiedName(safeTable).objectName].filter(Boolean);
+      const quotedTable = safeTable.includes('`')
+          ? safeTable
+          : (safeTableParts.length > 0 ? safeTableParts : [safeTable]).map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
       addTab({
           id: `query-create-starrocks-rollup-${Date.now()}`,
           title: '新增 Rollup',
@@ -6504,7 +6497,7 @@ const Sidebar: React.FC<{
       const dbName = String(conn?.dbName || '').trim();
       const tableName = String(conn?.tableName || node?.title || '').trim();
       const objectName = extractObjectName(tableName);
-      const schemaName = String(conn?.schemaName || (tableName.includes('.') ? tableName.split('.').slice(0, -1).join('.') : '')).trim();
+      const schemaName = String(conn?.schemaName || splitQualifiedName(tableName).schemaName || '').trim();
       switch (dialect) {
           case 'mysql':
           case 'starrocks':
@@ -8140,8 +8133,7 @@ const Sidebar: React.FC<{
         const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
         const conn = node?.dataRef as SavedConnection | undefined;
         if (rawTableName && shouldHideSchemaPrefix(conn)) {
-            const lastDotIndex = rawTableName.lastIndexOf('.');
-            if (lastDotIndex > 0 && lastDotIndex < rawTableName.length - 1) {
+            if (splitQualifiedName(rawTableName).schemaName) {
                 hoverTitle = rawTableName;
             }
         }

@@ -58,6 +58,10 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 		return targetDB, rawTable
 	}
 
+	if dbType == "duckdb" {
+		return rawDB, rawTable
+	}
+
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(rawTable)
 		if schema != "" && table != "" {

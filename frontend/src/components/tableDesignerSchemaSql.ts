@@ -10,6 +10,7 @@ import {
   unquoteSqlIdentifierPart,
   unquoteSqlIdentifierPath,
 } from '../utils/sqlDialect';
+import { splitQualifiedNameLast } from '../utils/qualifiedName';
 
 export interface EditableColumnSnapshot {
   _key: string;
@@ -83,13 +84,10 @@ const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''
 const stripIdentifierQuotes = unquoteSqlIdentifierPart;
 
 const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-  const raw = String(qualifiedName || '').trim();
-  if (!raw) return { schemaName: '', objectName: '' };
-  const idx = raw.lastIndexOf('.');
-  if (idx <= 0 || idx >= raw.length - 1) return { schemaName: '', objectName: raw };
+  const parsed = splitQualifiedNameLast(qualifiedName);
   return {
-    schemaName: stripIdentifierQuotes(raw.substring(0, idx)),
-    objectName: stripIdentifierQuotes(raw.substring(idx + 1)),
+    schemaName: parsed.parentPath,
+    objectName: parsed.objectName,
   };
 };
 

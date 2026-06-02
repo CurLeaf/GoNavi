@@ -1,17 +1,5 @@
 import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
-
-const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-  const raw = String(qualifiedName || '').trim();
-  if (!raw) return { schemaName: '', objectName: '' };
-  const idx = raw.lastIndexOf('.');
-  if (idx <= 0 || idx >= raw.length - 1) {
-    return { schemaName: '', objectName: raw };
-  }
-  return {
-    schemaName: raw.substring(0, idx),
-    objectName: raw.substring(idx + 1),
-  };
-};
+import { splitQualifiedNameLast } from './qualifiedName';
 
 const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBaseProtocol?: string): string => {
   const normalizedType = String(type || '').trim().toLowerCase();
@@ -45,7 +33,7 @@ export const normalizeSidebarViewName = (dialect: string, dbName: string, schema
   }
 
   if (normalizedDialect === 'mysql') {
-    const parsed = splitQualifiedName(normalizedViewName);
+    const parsed = splitQualifiedNameLast(normalizedViewName);
     if (parsed.objectName) {
       return parsed.objectName;
     }

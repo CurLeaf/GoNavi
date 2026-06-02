@@ -6,6 +6,7 @@ import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
+import { splitQualifiedNameLast } from '../utils/qualifiedName';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -63,12 +64,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     };
 
     const parseSchemaAndName = (fullName: string): { schema: string; name: string } => {
-        const raw = String(fullName || '').trim();
-        const idx = raw.lastIndexOf('.');
-        if (idx > 0 && idx < raw.length - 1) {
-            return { schema: raw.substring(0, idx), name: raw.substring(idx + 1) };
-        }
-        return { schema: '', name: raw };
+        const parsed = splitQualifiedNameLast(fullName);
+        return { schema: parsed.parentPath, name: parsed.objectName };
     };
 
     const getCaseInsensitiveRawValue = (row: Record<string, any>, candidateKeys: string[]): any => {

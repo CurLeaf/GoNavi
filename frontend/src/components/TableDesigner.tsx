@@ -29,6 +29,7 @@ import {
     resolveColumnTypeOptions,
     resolveSqlDialect,
 } from '../utils/sqlDialect';
+import { splitQualifiedNameLast, stripIdentifierQuotes } from '../utils/qualifiedName';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -1390,26 +1391,11 @@ ${selectedTrigger.statement}`;
   const escapeDoubleQuoteIdentifier = (name: string) => String(name || '').replace(/"/g, '""');
   const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
 
-  const stripIdentifierQuotes = (part: string): string => {
-      const text = String(part || '').trim();
-      if (!text) return '';
-      if ((text.startsWith('`') && text.endsWith('`')) || (text.startsWith('"') && text.endsWith('"'))) {
-          return text.slice(1, -1).trim();
-      }
-      if (text.startsWith('[') && text.endsWith(']')) {
-          return text.slice(1, -1).trim();
-      }
-      return text;
-  };
-
   const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const raw = String(qualifiedName || '').trim();
-      if (!raw) return { schemaName: '', objectName: '' };
-      const idx = raw.lastIndexOf('.');
-      if (idx <= 0 || idx >= raw.length - 1) return { schemaName: '', objectName: raw };
+      const parsed = splitQualifiedNameLast(qualifiedName);
       return {
-          schemaName: stripIdentifierQuotes(raw.substring(0, idx)),
-          objectName: stripIdentifierQuotes(raw.substring(idx + 1)),
+          schemaName: parsed.parentPath,
+          objectName: parsed.objectName,
       };
   };
 

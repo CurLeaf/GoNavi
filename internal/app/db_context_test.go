@@ -140,6 +140,21 @@ func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *te
 	}
 }
 
+func TestNormalizeSchemaAndTable_DuckDBPreservesQuotedQualifiedName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "duckdb",
+	}, `"analytics.catalog"."main.schema"`, `"daily.events"."2026.06"`)
+
+	if schemaOrDb != `"analytics.catalog"."main.schema"` {
+		t.Fatalf("expected duckdb dbName/catalog path preserved, got %q", schemaOrDb)
+	}
+	if table != `"daily.events"."2026.06"` {
+		t.Fatalf("expected duckdb qualified table preserved, got %q", table)
+	}
+}
+
 func TestQuoteTableIdentByType_KingbaseNormalizesQuotedQualifiedTable(t *testing.T) {
 	t.Parallel()
 
