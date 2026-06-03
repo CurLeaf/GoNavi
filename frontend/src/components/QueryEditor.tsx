@@ -2726,6 +2726,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   connectionId,
                   dbName: targetDbName,
                   tableName: targetTableName,
+                  objectType: 'table',
               });
               dispatchQueryEditorSidebarLocate({
                   connectionId,

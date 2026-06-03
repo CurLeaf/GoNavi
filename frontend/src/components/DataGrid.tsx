@@ -129,6 +129,7 @@ import DataGridPreviewPanel from './DataGridPreviewPanel';
 import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
 import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
+import TableDesigner from './TableDesigner';
 import { useDataGridFilters } from './useDataGridFilters';
 import { useDataGridDdlView } from './useDataGridDdlView';
 import { useDataGridModalEditors } from './useDataGridModalEditors';
@@ -1191,6 +1192,7 @@ interface DataGridProps {
     columnNames: string[];
     loading: boolean;
     tableName?: string;
+    objectType?: 'table' | 'view' | 'materialized-view';
     exportScope?: 'table' | 'queryResult';
     resultSql?: string;
     dbName?: string;
@@ -1482,7 +1484,7 @@ const VIRTUAL_EDITING_CELL_STYLE: React.CSSProperties = {
 };
 
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange
@@ -1720,6 +1722,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const canImport = exportScope === 'table' && !!tableName;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
   const canViewDdl = exportScope === 'table' && !!connectionId && !!tableName;
+  const canOpenObjectDesigner = exportScope === 'table' && objectType === 'table' && !!connectionId && !!tableName;
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
@@ -2357,6 +2360,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           connectionId,
           dbName: targetDbName,
           tableName: refTableName,
+          objectType: 'table',
       });
   }, [addTab, connectionId, dbName, setActiveContext]);
 
@@ -3224,6 +3228,22 @@ const DataGrid: React.FC<DataGridProps> = ({
           },
       },
   });
+
+  useEffect(() => {
+      const handleExternalViewModeChange = (event: Event) => {
+          const detail = (event as CustomEvent<any>)?.detail || {};
+          if (String(detail.connectionId || '') !== String(connectionId || '')) return;
+          if (String(detail.dbName || '') !== String(dbName || '')) return;
+          if (String(detail.tableName || '') !== String(tableName || '')) return;
+          const nextMode = String(detail.viewMode || '').trim();
+          if (!nextMode) return;
+          if (!['table', 'json', 'text', 'fields', 'ddl', 'er'].includes(nextMode)) return;
+          handleViewModeChange(nextMode as GridViewMode);
+      };
+
+      window.addEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
+      return () => window.removeEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
+  }, [canOpenObjectDesigner, connectionId, dbName, handleViewModeChange, tableName]);
 
   useEffect(() => {
       if (!isTableSurfaceActive || !isV2Ui || !cellContextMenu.visible) return;
@@ -7542,14 +7562,31 @@ const DataGrid: React.FC<DataGridProps> = ({
         {viewMode === 'table' ? (
             renderDataTableView()
         ) : isV2Ui && viewMode === 'fields' ? (
-            <DataGridV2FieldsView
-                tableName={tableName}
-                displayOutputColumnNames={displayOutputColumnNames}
-                pkColumns={pkColumns}
-                locatorColumns={effectiveEditLocator?.columns}
-                columnMetaMap={columnMetaMap}
-                columnMetaMapByLowerName={columnMetaMapByLowerName}
-            />
+            canOpenObjectDesigner ? (
+                <TableDesigner
+                    embedded
+                    tab={{
+                        id: `embedded-design-${connectionId || ''}-${dbName || ''}-${tableName || ''}`,
+                        title: `设计表 (${tableName || ''})`,
+                        type: 'design',
+                        connectionId: String(connectionId || ''),
+                        dbName,
+                        tableName,
+                        initialTab: 'columns',
+                        readOnly,
+                        objectType: 'table',
+                    }}
+                />
+            ) : (
+                <DataGridV2FieldsView
+                    tableName={tableName}
+                    displayOutputColumnNames={displayOutputColumnNames}
+                    pkColumns={pkColumns}
+                    locatorColumns={effectiveEditLocator?.columns}
+                    columnMetaMap={columnMetaMap}
+                    columnMetaMapByLowerName={columnMetaMapByLowerName}
+                />
+            )
         ) : isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side' ? (
             <DataGridV2DdlSideWorkspace
                 tableContent={renderDataTableView()}
@@ -7759,6 +7796,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 	       <DataGridSecondaryActions
                 isV2Ui={isV2Ui}
                 canViewDdl={canViewDdl}
+                canOpenObjectDesigner={canOpenObjectDesigner}
                 viewMode={viewMode}
                 ddlLoading={ddlLoading}
                 showColumnComment={showColumnComment}

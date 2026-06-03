@@ -3415,6 +3415,7 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName,
+              objectType: 'table',
           });
           return;
       } else if (node.type === 'view' || node.type === 'materialized-view') {
@@ -3426,6 +3427,7 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName: viewName,
+              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
           });
           return;
       } else if (node.type === 'saved-query') {

@@ -65,6 +65,8 @@ const backendApp = vi.hoisted(() => ({
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
   DBGetForeignKeys: vi.fn(),
+  DBGetTriggers: vi.fn(),
+  DBQuery: vi.fn(),
   DBShowCreateTable: vi.fn(),
 }));
 
@@ -112,6 +114,16 @@ vi.mock('./ImportPreviewModal', () => ({
   default: () => null,
 }));
 
+vi.mock('./TableDesigner', () => ({
+  default: ({ tab, embedded }: { tab: { tableName?: string; initialTab?: string }; embedded?: boolean }) => (
+    <div data-table-designer={embedded ? 'embedded' : 'standalone'}>
+      <span>SCHEMA DESIGNER</span>
+      <span>{tab.tableName || 'unknown-table'}</span>
+      <span>{tab.initialTab || 'columns'}</span>
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
 
@@ -152,6 +164,7 @@ vi.mock('@ant-design/icons', () => {
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: any) => <>{children}</>,
   PointerSensor: vi.fn(),
+  KeyboardSensor: vi.fn(),
   MouseSensor: vi.fn(),
   TouchSensor: vi.fn(),
   useSensor: vi.fn(() => ({})),
@@ -170,6 +183,7 @@ vi.mock('@dnd-kit/sortable', () => ({
     isDragging: false,
   })),
   horizontalListSortingStrategy: vi.fn(),
+  sortableKeyboardCoordinates: vi.fn(),
   arrayMove: (items: any[], from: number, to: number) => {
     const next = [...items];
     const [item] = next.splice(from, 1);
@@ -223,6 +237,29 @@ vi.mock('antd', () => {
   Modal.useModal = () => [{ info: vi.fn(() => ({ destroy: vi.fn() })) }, null];
 
   const passthrough = ({ children }: any) => <>{children}</>;
+  const Space = ({ children }: any) => <div>{children}</div>;
+  const Tabs = ({ items = [], activeKey, onChange }: any) => {
+    const resolvedActiveKey = activeKey ?? items[0]?.key;
+    const activeItem = items.find((item: any) => item.key === resolvedActiveKey) || items[0];
+    return (
+      <div data-tabs-active-key={resolvedActiveKey}>
+        <div>
+          {items.map((item: any) => (
+            <button key={item.key} type="button" data-tab-key={item.key} onClick={() => onChange?.(item.key)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div>{activeItem?.children ?? null}</div>
+      </div>
+    );
+  };
+  const Empty: any = ({ description }: any) => <div>{description || 'empty'}</div>;
+  Empty.PRESENTED_IMAGE_SIMPLE = 'presented-image-simple';
+  const Tag = ({ children }: any) => <span>{children}</span>;
+  const Radio: any = ({ children }: any) => <span>{children}</span>;
+  Radio.Group = ({ children }: any) => <div>{children}</div>;
+  Radio.Button = ({ children }: any) => <button type="button">{children}</button>;
   const Segmented = ({ value, options, onChange }: any) => (
     <div data-segmented-value={value}>
       {(options || []).map((option: any) => (
@@ -255,7 +292,7 @@ vi.mock('antd', () => {
     Dropdown: passthrough,
     Form,
     Pagination: () => null,
-    Select: () => null,
+    Select: ({ children }: any) => <div>{children}</div>,
     Modal,
     Checkbox: ({ checked, onChange }: any) => <input type="checkbox" checked={checked} onChange={onChange} />,
     Segmented,
@@ -264,6 +301,11 @@ vi.mock('antd', () => {
     DatePicker: () => null,
     TimePicker: () => null,
     AutoComplete: ({ children }: any) => <>{children}</>,
+    Tabs,
+    Empty,
+    Space,
+    Tag,
+    Radio,
   };
 });
 
@@ -509,6 +551,8 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetForeignKeys.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetTriggers.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
     storeState.appearance.uiVersion = 'legacy';
     storeState.addTab.mockReset();
@@ -557,6 +601,8 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBGetColumns.mockReset();
     backendApp.DBGetIndexes.mockReset();
     backendApp.DBGetForeignKeys.mockReset();
+    backendApp.DBGetTriggers.mockReset();
+    backendApp.DBQuery.mockReset();
     backendApp.DBShowCreateTable.mockReset();
     vi.unstubAllGlobals();
   });
@@ -654,6 +700,7 @@ describe('DataGrid DDL interactions', () => {
         connectionId: 'conn-1',
         dbName: 'main',
         tableName: 'customers',
+        objectType: 'table',
       });
     },
   );
@@ -949,8 +996,15 @@ describe('DataGrid DDL interactions', () => {
     renderer!.unmount();
   });
 
-  it('switches the v2 footer field tab into the main fields view', async () => {
+  it('switches the v2 footer object tab into the embedded designer view', async () => {
     storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: 'PRI', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -968,12 +1022,12 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     await act(async () => {
-      findButton(renderer!, '字段信息').props.onClick();
+      findButton(renderer!, '对象设计').props.onClick();
     });
 
     const content = textContent(renderer!.root);
-    expect(content).toContain('FIELDS');
-    expect(content).toContain('2 个字段');
+    expect(content).toContain('SCHEMA DESIGNER');
+    expect(content).toContain('字段');
     expect(content).toContain('id');
     expect(content).toContain('name');
   });
@@ -997,9 +1051,9 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     await act(async () => {
-      findButton(renderer!, '字段信息').props.onClick();
+      findButton(renderer!, '对象设计').props.onClick();
     });
-    expect(textContent(renderer!.root)).toContain('FIELDS');
+    expect(textContent(renderer!.root)).toContain('SCHEMA DESIGNER');
 
     storeState.appearance.uiVersion = 'legacy';
     await act(async () => {
@@ -1017,11 +1071,52 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     const content = textContent(renderer!.root);
-    expect(content).not.toContain('FIELDS');
+    expect(content).not.toContain('SCHEMA DESIGNER');
     expect(content).not.toContain('gn-v2-data-grid-fields-view');
     expect(content).toContain('数据预览');
     expect(content).toContain('结果视图');
     expect(content).toContain('字段信息');
+  });
+
+  it('keeps the v2 fields tab as read-only field info for views', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: '', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="user_view"
+          dbName="main"
+          connectionId="conn-1"
+          objectType="view"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(textContent(renderer!.root)).toContain('字段信息');
+    expect(textContent(renderer!.root)).not.toContain('对象设计');
+
+    await act(async () => {
+      findButton(renderer!, '字段信息').props.onClick();
+    });
+
+    const content = textContent(renderer!.root);
+    expect(content).toContain('FIELDS');
+    expect(content).toContain('2 个字段');
+    expect(content).toContain('id');
+    expect(content).toContain('name');
+    expect(content).not.toContain('SCHEMA DESIGNER');
   });
 
   it('renders the v2 footer DDL view with the Monaco SQL editor', async () => {

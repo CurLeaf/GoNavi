@@ -1095,6 +1095,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           columnNames={columnNames}
           loading={loading}
           tableName={tab.tableName}
+          objectType={tab.objectType || 'table'}
           exportScope="table"
           dbName={tab.dbName}
           connectionId={tab.connectionId}

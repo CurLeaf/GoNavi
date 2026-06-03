@@ -406,6 +406,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             connectionId: connection.id,
             dbName: tab.dbName,
             tableName,
+            objectType: 'table',
         });
     }, [connection, tab.dbName, addTab, setActiveContext]);
 

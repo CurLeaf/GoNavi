@@ -79,6 +79,8 @@ describe('DataGrid layout', () => {
         columnNames={['id', 'name']}
         loading={false}
         tableName="users"
+        dbName="main"
+        connectionId="conn-1"
         readOnly
         pagination={{
           current: 1,
@@ -95,6 +97,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
     expect(markup).toContain('跳列');
+    expect(markup).toContain('对象设计');
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
@@ -110,6 +113,34 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('keeps the v2 footer fields action labeled as field info for views', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="user_view"
+        objectType="view"
+        readOnly
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 1,
+        }}
+        onPageChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('字段信息');
+    expect(markup).not.toContain('对象设计');
   });
 
   it('hides current-page find in JSON and text record views', () => {
@@ -321,6 +352,7 @@ describe('DataGrid layout', () => {
 
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
+    expect(tableMarkup).toContain('对象设计');
     expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
     const schemaTableMarkup = renderToStaticMarkup(
@@ -342,6 +374,7 @@ describe('DataGrid layout', () => {
 
     expect(schemaTableMarkup).toContain('data-grid-ddl-action="true"');
     expect(schemaTableMarkup).toContain('查看 DDL');
+    expect(schemaTableMarkup).toContain('对象设计');
     expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
 
     const queryMarkup = renderToStaticMarkup(
@@ -363,6 +396,8 @@ describe('DataGrid layout', () => {
     );
 
     expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
+    expect(queryMarkup).toContain('字段信息');
+    expect(queryMarkup).not.toContain('对象设计');
   });
 
   it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {

@@ -429,6 +429,7 @@ export interface TabData {
   schemaName?: string; // Schema / owner name for schema-grouped objects
   sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
+  objectType?: 'table' | 'view' | 'materialized-view'; // Table-like object type for shared viewers
 }
 
 export interface JVMAIPlanContext {
