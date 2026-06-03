@@ -21,7 +21,7 @@ import { resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
-import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
+import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
@@ -188,9 +188,9 @@ const SQL_FUNCTIONS: { name: string; detail: string }[] = [
     { name: 'SLEEP', detail: '工具 - 延时' },
 ];
 
-// HMR 重载时释放旧注册避免补全项重复
+// HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
-const SQL_COMPLETION_PROVIDER_VERSION = '20260602-table-fuzzy-lazy-v2';
+const SQL_COMPLETION_PROVIDER_VERSION = '20260603-hover-singleton-v1';
 if (!_g.__gonaviSqlCompletionState) {
     _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
 }
@@ -213,6 +213,10 @@ type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: 
 let sharedTablesData: CompletionTableMeta[] = [];
 let sharedAllColumnsData: CompletionColumnMeta[] = [];
 let sharedVisibleDbs: string[] = [];
+let sharedViewsData: CompletionViewMeta[] = [];
+let sharedMaterializedViewsData: CompletionViewMeta[] = [];
+let sharedTriggersData: CompletionTriggerMeta[] = [];
+let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
@@ -242,9 +246,60 @@ type QueryStatementPlan = {
     warning?: string;
 };
 
-const readSidebarSqlDropText = (event: DragEvent): string => {
+const stripSidebarDropIdentifierQuotes = (part: string): string => {
+    const text = String(part || '').trim();
+    if (!text) return '';
+    if ((text.startsWith('`') && text.endsWith('`')) || (text.startsWith('"') && text.endsWith('"')) || (text.startsWith('[') && text.endsWith(']'))) {
+        return text.slice(1, -1).trim();
+    }
+    return text;
+};
+
+const shouldPrefixSidebarDropDatabase = (
+    payloadConnectionId: string,
+    payloadDbName: string,
+    payloadText: string,
+    currentConnectionId: string,
+    currentDb: string,
+): boolean => {
+    const sourceDbName = String(payloadDbName || '').trim();
+    if (!sourceDbName) return false;
+    const normalizedSourceDbName = sourceDbName.toLowerCase();
+    if (String(currentDb || '').trim().toLowerCase() === normalizedSourceDbName) return false;
+
+    const sourceConnectionId = String(payloadConnectionId || '').trim();
+    const targetConnectionId = String(currentConnectionId || '').trim();
+    if (sourceConnectionId && targetConnectionId && sourceConnectionId !== targetConnectionId) return false;
+
+    const parts = String(payloadText || '')
+        .split('.')
+        .map(stripSidebarDropIdentifierQuotes)
+        .filter(Boolean);
+    return parts[0]?.toLowerCase() !== normalizedSourceDbName;
+};
+
+const isQueryEditorPrimaryMouseButton = (event: any): boolean => {
+    if (event?.leftButton === true) return true;
+    if (event?.leftButton === false) return false;
+
+    const browserEvent = event?.browserEvent || event?.nativeEvent || event;
+    if (browserEvent?.button === 0) return true;
+    if (event?.button === 0) return true;
+    if (browserEvent?.buttons === 1) return true;
+    if (event?.buttons === 1) return true;
+    return false;
+};
+
+const readSidebarSqlDropText = (
+    event: DragEvent,
+    currentConnectionId = '',
+    currentDb = '',
+): string => {
     const payload = decodeSidebarSqlEditorDragPayload(String(event.dataTransfer?.getData(SIDEBAR_SQL_EDITOR_DRAG_MIME) || ''));
     if (payload?.text) {
+        if (shouldPrefixSidebarDropDatabase(payload.connectionId || '', payload.dbName || '', payload.text, currentConnectionId, currentDb)) {
+            return `${String(payload.dbName || '').trim()}.${payload.text}`;
+        }
         return payload.text;
     }
     return String(event.dataTransfer?.getData('text/plain') || '').trim();
@@ -1821,7 +1876,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const ctrlMetaPressedRef = useRef(false);
   const objectDecorationIdsRef = useRef<string[]>([]);
   const objectHoverActionRef = useRef<any>(null);
-  const hoverProviderDisposableRef = useRef<any>(null);
   const dragRef = useRef<{ startY: number, startHeight: number, currentHeight: number } | null>(null);
   const pendingEditorHeightRef = useRef(editorHeight);
   const resizeFrameRef = useRef<number | null>(null);
@@ -1966,6 +2020,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sharedTablesData = tablesRef.current;
       sharedAllColumnsData = allColumnsRef.current;
       sharedVisibleDbs = visibleDbsRef.current;
+      sharedViewsData = viewsRef.current;
+      sharedMaterializedViewsData = materializedViewsRef.current;
+      sharedTriggersData = triggersRef.current;
+      sharedRoutinesData = routinesRef.current;
       sharedColumnsCacheData = columnsCacheRef.current;
   }, [isActive, currentDb, currentConnectionId, connections]);
 
@@ -2130,16 +2188,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, []);
 
   const handleSidebarObjectDrop = useCallback((event: DragEvent) => {
-      const dragText = readSidebarSqlDropText(event);
-      if (!dragText) {
+      if (!hasSidebarSqlEditorDragPayload(event.dataTransfer)) {
           return;
       }
       event.preventDefault();
       event.stopPropagation();
+      const dragText = readSidebarSqlDropText(event, currentConnectionIdRef.current, currentDbRef.current);
+      if (!dragText) {
+          return;
+      }
       const editor = editorRef.current;
       const dropTarget = editor?.getTargetAtClientPoint?.(event.clientX, event.clientY);
-      insertTextIntoEditorAtPosition(dragText, normalizeEditorPosition(dropTarget?.position));
-  }, [insertTextIntoEditorAtPosition]);
+      if (insertTextIntoEditorAtPosition(dragText, normalizeEditorPosition(dropTarget?.position))) {
+          refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
+      }
+  }, [insertTextIntoEditorAtPosition, refreshObjectDecorations]);
 
   const handleSelectCurrentStatement = () => {
       const editor = editorRef.current;
@@ -2439,6 +2502,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (isActive) {
               sharedTablesData = allTables;
               sharedAllColumnsData = allColumns;
+              sharedViewsData = allViews;
+              sharedMaterializedViewsData = allMaterializedViews;
+              sharedTriggersData = allTriggers;
+              sharedRoutinesData = allRoutines;
           }
           refreshObjectDecorations();
       };
@@ -2646,9 +2713,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const editorDomNode = editor.getDomNode?.();
       const handleEditorDragOver = (rawEvent: Event) => {
           const event = rawEvent as DragEvent;
-          const dragText = readSidebarSqlDropText(event);
-          if (!dragText) return;
+          if (!hasSidebarSqlEditorDragPayload(event.dataTransfer)) return;
           event.preventDefault();
+          event.stopPropagation();
           if (event.dataTransfer) {
               event.dataTransfer.dropEffect = 'copy';
           }
@@ -2659,43 +2726,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       // 应用透明主题（主题由 MonacoEditor 包装组件按需注册）
       monaco.editor.setTheme(darkMode ? 'transparent-dark' : 'transparent-light');
-
-      hoverProviderDisposableRef.current?.dispose?.();
-      hoverProviderDisposableRef.current = monaco.languages.registerHoverProvider('sql', {
-          provideHover: (model: any, position: any) => {
-              const normalizedPosition = normalizeEditorPosition(position);
-              if (!normalizedPosition) {
-                  return null;
-              }
-              const lineContent = String(model?.getLineContent?.(normalizedPosition.lineNumber) || '');
-              const resolveText = getQueryEditorObjectResolveText(model, lineContent);
-              const hoverTarget = resolveQueryEditorHoverTarget(
-                  resolveText,
-                  lineContent,
-                  normalizedPosition.column,
-                  currentDbRef.current,
-                  visibleDbsRef.current,
-                  tablesRef.current,
-                  allColumnsRef.current,
-                  viewsRef.current,
-                  materializedViewsRef.current,
-                  triggersRef.current,
-                  routinesRef.current,
-              );
-              if (!hoverTarget) {
-                  return null;
-              }
-              return {
-                  range: new monaco.Range(
-                      normalizedPosition.lineNumber,
-                      hoverTarget.range.startColumn,
-                      normalizedPosition.lineNumber,
-                      hoverTarget.range.endColumn,
-                  ),
-                  contents: [{ value: buildQueryEditorHoverMarkdown(hoverTarget) }],
-              };
-          },
-      });
 
       objectHoverActionRef.current?.dispose?.();
       const showObjectInfoKeybinding = monaco.KeyMod?.CtrlCmd && monaco.KeyCode?.KeyQ
@@ -2745,8 +2775,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       window.addEventListener('keydown', syncModifierState);
       window.addEventListener('keyup', syncModifierState);
       window.addEventListener('blur', handleWindowBlur);
-      editorDomNode?.addEventListener('dragover', handleEditorDragOver);
-      editorDomNode?.addEventListener('drop', handleEditorDrop);
+      editorDomNode?.addEventListener('dragover', handleEditorDragOver, true);
+      editorDomNode?.addEventListener('drop', handleEditorDrop, true);
 
       editor.onMouseDown?.((event: any) => {
           const browserEvent = event?.event;
@@ -2755,7 +2785,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (!browserEvent || !targetPosition) {
               return;
           }
-          if (browserEvent.leftButton !== true) {
+          if (!isQueryEditorPrimaryMouseButton(browserEvent)) {
               return;
           }
           if (!browserEvent.ctrlKey && !browserEvent.metaKey) {
@@ -2919,13 +2949,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setQueryEditorMouseCursor(editor, '');
           objectHoverActionRef.current?.dispose?.();
           objectHoverActionRef.current = null;
-          hoverProviderDisposableRef.current?.dispose?.();
-          hoverProviderDisposableRef.current = null;
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
           window.removeEventListener('blur', handleWindowBlur);
-          editorDomNode?.removeEventListener('dragover', handleEditorDragOver);
-          editorDomNode?.removeEventListener('drop', handleEditorDrop);
+          editorDomNode?.removeEventListener('dragover', handleEditorDragOver, true);
+          editorDomNode?.removeEventListener('drop', handleEditorDrop, true);
       });
 
       refreshObjectDecorations();
@@ -3025,6 +3053,41 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       _g.__gonaviSqlCompletionState.version = SQL_COMPLETION_PROVIDER_VERSION;
       sqlCompletionDisposables.forEach((d: any) => d?.dispose?.());
       sqlCompletionDisposables.length = 0;
+      sqlCompletionDisposables.push(monaco.languages.registerHoverProvider('sql', {
+          provideHover: (model: any, position: any) => {
+              const normalizedPosition = normalizeEditorPosition(position);
+              if (!normalizedPosition) {
+                  return null;
+              }
+              const lineContent = String(model?.getLineContent?.(normalizedPosition.lineNumber) || '');
+              const resolveText = getQueryEditorObjectResolveText(model, lineContent);
+              const hoverTarget = resolveQueryEditorHoverTarget(
+                  resolveText,
+                  lineContent,
+                  normalizedPosition.column,
+                  sharedCurrentDb,
+                  sharedVisibleDbs,
+                  sharedTablesData,
+                  sharedAllColumnsData,
+                  sharedViewsData,
+                  sharedMaterializedViewsData,
+                  sharedTriggersData,
+                  sharedRoutinesData,
+              );
+              if (!hoverTarget) {
+                  return null;
+              }
+              return {
+                  range: new monaco.Range(
+                      normalizedPosition.lineNumber,
+                      hoverTarget.range.startColumn,
+                      normalizedPosition.lineNumber,
+                      hoverTarget.range.endColumn,
+                  ),
+                  contents: [{ value: buildQueryEditorHoverMarkdown(hoverTarget) }],
+              };
+          },
+      }));
       sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['.', '_', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')],
           provideCompletionItems: async (model: any, position: any) => {

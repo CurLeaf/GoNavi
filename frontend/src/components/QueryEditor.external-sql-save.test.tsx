@@ -675,9 +675,52 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'analytics',
       tableName: 'events',
+      objectType: 'table',
     });
     expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('opens a table tab on macOS cmd click when Monaco omits leftButton', async () => {
+    editorState.value = 'select * from fs_mkefu_regist_record;';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'fs_mkefu_regist_record' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 'select * from fs_mkefu_regist_record'.length } },
+        event: {
+          browserEvent: { button: 0, buttons: 1 },
+          ctrlKey: false,
+          metaKey: true,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'mkefu_location_dev_local' });
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'mkefu_location_dev_local',
+      tableName: 'fs_mkefu_regist_record',
+      objectType: 'table',
     }));
     expect(preventDefault).toHaveBeenCalled();
     expect(stopPropagation).toHaveBeenCalled();
@@ -910,6 +953,39 @@ describe('QueryEditor external SQL save', () => {
     expect(hover?.contents?.[0]?.value).toContain('**字段** `id`');
     expect(hover?.contents?.[0]?.value).toContain('类型：`bigint`');
     expect(hover?.contents?.[0]?.value).toContain('表：`users`');
+  });
+
+  it('registers SQL metadata hover provider only once across query editor instances', async () => {
+    editorState.value = 'select * from H2.S_BUSI';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValue({ success: true, data: [{ Database: 'H2' }] });
+    backendApp.DBGetTables.mockResolvedValue({ success: true, data: [{ Tables_in_H2: 'H2.S_BUSI' }] });
+    backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+    let firstRenderer: ReactTestRenderer;
+    let secondRenderer: ReactTestRenderer;
+    await act(async () => {
+      firstRenderer = create(<QueryEditor tab={createTab({ id: 'tab-1', query: editorState.value, dbName: 'H2' })} isActive={false} />);
+    });
+    await act(async () => {
+      secondRenderer = create(<QueryEditor tab={createTab({ id: 'tab-2', query: editorState.value, dbName: 'H2' })} isActive />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(editorState.hoverProviders).toHaveLength(1);
+    const hover = editorState.hoverProviders[0].provideHover(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 18 },
+    );
+    const hoverText = String(hover?.contents?.[0]?.value || '');
+    expect(hoverText.match(/\*\*表\*\*/g)).toHaveLength(1);
+    expect(hoverText).toContain('`H2.S_BUSI`');
+
+    firstRenderer!.unmount();
+    secondRenderer!.unmount();
   });
 
   it('keeps hover underline active when ctrl/cmd is pressed repeatedly without moving the mouse', async () => {
@@ -2550,6 +2626,7 @@ describe('QueryEditor external SQL save', () => {
         preventDefault: vi.fn(),
         stopPropagation: vi.fn(),
         dataTransfer: {
+          types: ['application/x-gonavi-sql-object', 'text/plain'],
           getData: (type: string) => {
             if (type === 'application/x-gonavi-sql-object') {
               return JSON.stringify({ text: 'reporting.active_users' });
@@ -2568,6 +2645,184 @@ describe('QueryEditor external SQL save', () => {
       [expect.objectContaining({ text: 'reporting.active_users' })],
     );
     expect(editorState.value).toContain('reporting.active_users');
+  });
+
+  it('prevents Monaco native drag marker and keeps metadata hover after sidebar object drops', async () => {
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode = {
+      style: { cursor: '' },
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        domListeners[type] ||= [];
+        domListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+    } as any;
+    editorState.editor.getTargetAtClientPoint = vi.fn(() => ({
+      position: { lineNumber: 1, column: 'SELECT * FROM '.length + 1 },
+    }));
+    editorState.value = 'SELECT * FROM ';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'front_end_sys' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_front_end_sys: 'fs_mkefu_regist_record' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'front_end_sys' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const dragOverEvent = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      dataTransfer: {
+        types: ['application/x-gonavi-sql-object', 'text/plain'],
+        dropEffect: 'none',
+        getData: vi.fn(() => ''),
+      },
+    };
+    await act(async () => {
+      domListeners.dragover?.forEach((listener) => listener(dragOverEvent));
+    });
+
+    expect(dragOverEvent.preventDefault).toHaveBeenCalled();
+    expect(dragOverEvent.stopPropagation).toHaveBeenCalled();
+    expect(dragOverEvent.dataTransfer.dropEffect).toBe('copy');
+    expect(dragOverEvent.dataTransfer.getData).not.toHaveBeenCalled();
+
+    await act(async () => {
+      domListeners.drop?.forEach((listener) => listener({
+        clientX: 10,
+        clientY: 10,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        dataTransfer: {
+          types: ['application/x-gonavi-sql-object', 'text/plain'],
+          getData: (type: string) => {
+            if (type === 'application/x-gonavi-sql-object') {
+              return JSON.stringify({ text: 'fs_mkefu_regist_record' });
+            }
+            if (type === 'text/plain') {
+              return 'fs_mkefu_regist_record';
+            }
+            return '';
+          },
+        },
+      }));
+    });
+
+    const hover = editorState.hoverProviders[0]?.provideHover(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 'SELECT * FROM fs_mkefu_regist_record'.length },
+    );
+    expect(editorState.value).toContain('fs_mkefu_regist_record');
+    expect(hover?.contents?.[0]?.value).toContain('**表** `fs_mkefu_regist_record`');
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 'SELECT * FROM fs_mkefu_regist_record'.length } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'front_end_sys',
+      tableName: 'fs_mkefu_regist_record',
+      objectType: 'table',
+    }));
+  });
+
+  it('keeps sidebar object navigation tied to the dragged database after drop', async () => {
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode = {
+      style: { cursor: '' },
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        domListeners[type] ||= [];
+        domListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+    } as any;
+    editorState.editor.getTargetAtClientPoint = vi.fn(() => ({
+      position: { lineNumber: 1, column: 'SELECT * FROM '.length + 1 },
+    }));
+    editorState.value = 'SELECT * FROM ';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'front_end_sys' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_front_end_sys: 'fs_mkefu_regist_record' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      domListeners.drop?.forEach((listener) => listener({
+        clientX: 10,
+        clientY: 10,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        dataTransfer: {
+          types: ['application/x-gonavi-sql-object', 'text/plain'],
+          getData: (type: string) => {
+            if (type === 'application/x-gonavi-sql-object') {
+              return JSON.stringify({
+                text: 'fs_mkefu_regist_record',
+                nodeType: 'table',
+                connectionId: 'conn-1',
+                dbName: 'front_end_sys',
+              });
+            }
+            if (type === 'text/plain') {
+              return 'fs_mkefu_regist_record';
+            }
+            return '';
+          },
+        },
+      }));
+    });
+
+    expect(editorState.value).toContain('front_end_sys.fs_mkefu_regist_record');
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 'SELECT * FROM front_end_sys.fs_mkefu_regist_record'.length } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'front_end_sys',
+      tableName: 'fs_mkefu_regist_record',
+      objectType: 'table',
+    }));
   });
 
   it('runs selected SQL before cursor SQL', async () => {
