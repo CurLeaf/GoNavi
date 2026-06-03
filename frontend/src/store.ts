@@ -225,6 +225,36 @@ const createDebouncedPersistStorage = <S>(
   };
 };
 
+const writePersistedStatePatch = (
+  patch: Record<string, unknown>,
+): void => {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const payload = localStorage.getItem(PERSIST_STORAGE_KEY);
+    const raw =
+      payload && payload.trim() !== ""
+        ? (JSON.parse(payload) as Record<string, unknown>)
+        : {};
+    const state = unwrapPersistedAppState(raw);
+    localStorage.setItem(
+      PERSIST_STORAGE_KEY,
+      JSON.stringify({
+        ...raw,
+        state: {
+          ...state,
+          ...patch,
+        },
+        version:
+          typeof raw.version === "number" ? raw.version : PERSIST_VERSION,
+      }),
+    );
+  } catch {
+    // ignore
+  }
+};
+
 const resolveOceanBaseProtocol = (
   raw: Record<string, unknown>,
   normalizedConnectionParams: string,
@@ -2654,7 +2684,11 @@ export const useStore = create<AppState>()(
         })),
       setUiScale: (scale) => set({ uiScale: sanitizeUiScale(scale) }),
       setFontSize: (size) => set({ fontSize: sanitizeFontSize(size) }),
-      setStartupFullscreen: (enabled) => set({ startupFullscreen: !!enabled }),
+      setStartupFullscreen: (enabled) => {
+        const nextValue = !!enabled;
+        set({ startupFullscreen: nextValue });
+        writePersistedStatePatch({ startupFullscreen: nextValue });
+      },
       setGlobalProxy: (proxy) =>
         set((state) => ({
           globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }),

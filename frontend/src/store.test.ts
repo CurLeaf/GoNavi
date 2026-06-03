@@ -1062,6 +1062,19 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('persists startup fullscreen immediately so next launch does not miss maximize preference', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setStartupFullscreen(true);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.startupFullscreen).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
+  });
+
   it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
