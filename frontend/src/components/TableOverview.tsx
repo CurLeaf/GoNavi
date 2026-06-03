@@ -188,6 +188,8 @@ ORDER BY s.name, t.name`;
         }
         case 'clickhouse':
             return `SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows, total_bytes AS data_length, 0 AS index_length FROM system.tables WHERE database = '${escapeLiteral(dbName)}' AND engine NOT IN ('View', 'MaterializedView') ORDER BY name`;
+        case 'tdengine':
+            return `SHOW TABLES FROM \`${dbName.replace(/`/g, '``')}\``;
         case 'dm':
         case 'oracle': {
             const owner = (schemaName || dbName).toUpperCase();
@@ -217,7 +219,7 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
         };
 
         return {
-            name: strVal(['Name', 'table_name', 'tablename', 'TABLE_NAME']),
+            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
             rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']),
             dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes']),

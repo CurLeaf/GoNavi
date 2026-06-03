@@ -251,3 +251,75 @@ func TestTDengineGetTablesIncludesSuperTables(t *testing.T) {
 		t.Fatalf("unexpected tables: got=%v want=%v", tables, want)
 	}
 }
+
+func TestTDengineGetColumnsFallsBackToLegacyDescribeSyntax(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openTDengineRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults["DESCRIBE `metrics`.`meters`"] = tdengineQueryResult{
+		err: fmt.Errorf("[0x2600] syntax error near '`metrics`.`meters`'"),
+	}
+	state.queryResults["DESCRIBE metrics.meters"] = tdengineQueryResult{
+		columns: []string{"Field", "Type", "Note", "Null"},
+		rows: [][]driver.Value{
+			{"ts", "TIMESTAMP", "", "NO"},
+			{"value", "DOUBLE", "", "YES"},
+		},
+	}
+	state.mu.Unlock()
+
+	td := &TDengineDB{conn: dbConn}
+	columns, err := td.GetColumns("metrics", "meters")
+	if err != nil {
+		t.Fatalf("GetColumns returned error: %v", err)
+	}
+
+	if len(columns) != 2 {
+		t.Fatalf("expected 2 columns, got %d", len(columns))
+	}
+	queries := state.snapshotQueries()
+	wantQueries := []string{"DESCRIBE `metrics`.`meters`", "DESCRIBE metrics.meters"}
+	if !reflect.DeepEqual(queries, wantQueries) {
+		t.Fatalf("unexpected query sequence: got=%v want=%v", queries, wantQueries)
+	}
+}
+
+func TestTDengineGetCreateStatementFallsBackToLegacySyntax(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openTDengineRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults["SHOW CREATE TABLE `metrics`.`meters`"] = tdengineQueryResult{
+		err: fmt.Errorf("[0x2600] syntax error near '`metrics`.`meters`'"),
+	}
+	state.queryResults["SHOW CREATE STABLE `metrics`.`meters`"] = tdengineQueryResult{
+		err: fmt.Errorf("[0x2600] syntax error near '`metrics`.`meters`'"),
+	}
+	state.queryResults["SHOW CREATE TABLE metrics.meters"] = tdengineQueryResult{
+		columns: []string{"SQL"},
+		rows: [][]driver.Value{
+			{"CREATE TABLE metrics.meters (ts TIMESTAMP, value DOUBLE)"},
+		},
+	}
+	state.mu.Unlock()
+
+	td := &TDengineDB{conn: dbConn}
+	ddl, err := td.GetCreateStatement("metrics", "meters")
+	if err != nil {
+		t.Fatalf("GetCreateStatement returned error: %v", err)
+	}
+	if ddl != "CREATE TABLE metrics.meters (ts TIMESTAMP, value DOUBLE)" {
+		t.Fatalf("unexpected DDL: %q", ddl)
+	}
+
+	queries := state.snapshotQueries()
+	wantQueries := []string{
+		"SHOW CREATE TABLE `metrics`.`meters`",
+		"SHOW CREATE STABLE `metrics`.`meters`",
+		"SHOW CREATE TABLE metrics.meters",
+	}
+	if !reflect.DeepEqual(queries, wantQueries) {
+		t.Fatalf("unexpected query sequence: got=%v want=%v", queries, wantQueries)
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	stdRuntime "runtime"
 	"sort"
 	"strings"
@@ -3656,6 +3657,15 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 	if rootErr != nil {
 		return "", rootErr
 	}
+	buildArgs := []string{"build", "-tags", tagName, "-trimpath", "-ldflags", "-s -w"}
+	cleanupModOverride := func() {}
+	if modOverride, modErr := prepareOptionalDriverBuildModOverride(projectRoot, driverType, selectedVersion); modErr != nil {
+		return "", modErr
+	} else if modOverride != nil {
+		buildArgs = append(buildArgs, "-modfile", modOverride.modFile)
+		cleanupModOverride = modOverride.cleanup
+	}
+	defer cleanupModOverride()
 	env := append([]string{}, os.Environ()...)
 	env = withEnvValue(env, "GOTOOLCHAIN", "auto")
 	var duckDBLibDir string
@@ -3679,7 +3689,8 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 		env = withEnvValue(env, "CGO_LDFLAGS", fmt.Sprintf("-L\"%s\" -lduckdb", filepath.ToSlash(duckDBLibDir)))
 		env = prependPathEnv(env, duckDBLibDir)
 	}
-	cmd := exec.Command(goPath, "build", "-tags", tagName, "-trimpath", "-ldflags", "-s -w", "-o", executablePath, "./cmd/optional-driver-agent")
+	buildArgs = append(buildArgs, "-o", executablePath, "./cmd/optional-driver-agent")
+	cmd := exec.Command(goPath, buildArgs...)
 	cmd.Dir = projectRoot
 	cmd.Env = env
 	output, buildErr := cmd.CombinedOutput()
@@ -3699,6 +3710,94 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 		return "", fmt.Errorf("计算 %s 驱动代理摘要失败：%w", displayName, hashErr)
 	}
 	return hash, nil
+}
+
+type optionalDriverBuildModOverride struct {
+	modFile string
+	cleanup func()
+}
+
+func prepareOptionalDriverBuildModOverride(projectRoot string, driverType string, selectedVersion string) (*optionalDriverBuildModOverride, error) {
+	modulePath := strings.TrimSpace(driverGoModulePathMap[normalizeDriverType(driverType)])
+	versionText := normalizeVersion(strings.TrimSpace(selectedVersion))
+	if strings.EqualFold(normalizeDriverType(driverType), "tdengine") && modulePath != "" && versionText != "" {
+		return buildVersionedDriverModOverride(projectRoot, modulePath, versionText)
+	}
+	return nil, nil
+}
+
+func buildVersionedDriverModOverride(projectRoot string, modulePath string, version string) (*optionalDriverBuildModOverride, error) {
+	goModPath := filepath.Join(projectRoot, "go.mod")
+	goSumPath := filepath.Join(projectRoot, "go.sum")
+	modBytes, err := os.ReadFile(goModPath)
+	if err != nil {
+		return nil, fmt.Errorf("读取 go.mod 失败：%w", err)
+	}
+
+	replaced, changed, err := rewriteRequiredModuleVersion(modBytes, modulePath, version)
+	if err != nil {
+		return nil, err
+	}
+	if !changed {
+		return nil, fmt.Errorf("未在 go.mod 中找到驱动依赖：%s", modulePath)
+	}
+
+	workDir, err := os.MkdirTemp("", "gonavi-driver-mod-*")
+	if err != nil {
+		return nil, fmt.Errorf("创建驱动构建临时目录失败：%w", err)
+	}
+	cleanup := func() {
+		_ = os.RemoveAll(workDir)
+	}
+
+	modFile := filepath.Join(workDir, "go.mod")
+	sumFile := filepath.Join(workDir, "go.sum")
+	if err := os.WriteFile(modFile, replaced, 0o644); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("写入临时 go.mod 失败：%w", err)
+	}
+	if sumBytes, readErr := os.ReadFile(goSumPath); readErr == nil {
+		if writeErr := os.WriteFile(sumFile, sumBytes, 0o644); writeErr != nil {
+			cleanup()
+			return nil, fmt.Errorf("写入临时 go.sum 失败：%w", writeErr)
+		}
+	}
+
+	return &optionalDriverBuildModOverride{
+		modFile: modFile,
+		cleanup: cleanup,
+	}, nil
+}
+
+func rewriteRequiredModuleVersion(goMod []byte, modulePath string, version string) ([]byte, bool, error) {
+	trimmedModule := strings.TrimSpace(modulePath)
+	trimmedVersion := normalizeVersion(strings.TrimSpace(version))
+	if trimmedModule == "" || trimmedVersion == "" {
+		return nil, false, fmt.Errorf("驱动模块或版本为空")
+	}
+
+	pattern := fmt.Sprintf(`(?m)^(?P<prefix>\s*%s\s+)v[^\s]+(?P<suffix>\s*(//.*)?)$`, regexp.QuoteMeta(trimmedModule))
+	re := regexp.MustCompile(pattern)
+	changed := false
+	replaced := re.ReplaceAllFunc(goMod, func(line []byte) []byte {
+		match := re.FindSubmatch(line)
+		if len(match) == 0 {
+			return line
+		}
+		changed = true
+		text := string(line)
+		submatches := re.FindStringSubmatch(text)
+		if len(submatches) == 0 {
+			return line
+		}
+		prefix := submatches[1]
+		suffix := ""
+		if len(submatches) > 2 {
+			suffix = submatches[2]
+		}
+		return []byte(prefix + "v" + trimmedVersion + suffix)
+	})
+	return replaced, changed, nil
 }
 
 func resolveMongoDriverMajorFromVersion(version string) int {
