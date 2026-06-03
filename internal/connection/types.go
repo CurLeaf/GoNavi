@@ -122,17 +122,20 @@ type ConnectionConfig struct {
 
 // ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。
 type ResultSetData struct {
-	Rows    []map[string]interface{} `json:"rows"`
-	Columns []string                 `json:"columns"`
+	Rows           []map[string]interface{} `json:"rows"`
+	Columns        []string                 `json:"columns"`
+	Messages       []string                 `json:"messages,omitempty"`
+	StatementIndex int                      `json:"statementIndex,omitempty"`
 }
 
 // QueryResult 是 Wails 绑定方法的统一响应格式，前端通过此结构体接收后端结果。
 type QueryResult struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-	Fields  []string    `json:"fields,omitempty"`
-	QueryID string      `json:"queryId,omitempty"` // Unique ID for query cancellation
+	Success  bool        `json:"success"`
+	Message  string      `json:"message"`
+	Data     interface{} `json:"data"`
+	Fields   []string    `json:"fields,omitempty"`
+	Messages []string    `json:"messages,omitempty"`
+	QueryID  string      `json:"queryId,omitempty"` // Unique ID for query cancellation
 }
 
 // ColumnDefinition 描述表的一个列定义。

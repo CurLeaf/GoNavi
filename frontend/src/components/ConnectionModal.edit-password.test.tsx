@@ -19,14 +19,20 @@ describe('ConnectionModal edit password behavior', () => {
 
 describe('ConnectionModal data source registry', () => {
   it('exposes Elasticsearch in the create-connection picker with HTTP defaults', () => {
-    expect(source).toContain('case "elasticsearch":\n      return 9200;');
+    expect(source).toContain('case "elasticsearch":');
+    expect(source).toContain('return 9200;');
     expect(source).toContain('elasticsearch: ["http", "https"]');
     expect(source).toContain('key: "elasticsearch"');
     expect(source).toContain('name: "Elasticsearch"');
     expect(source).toContain('getDbIcon("elasticsearch", undefined, 36)');
     expect(source).toContain('type === "elasticsearch"');
-    expect(source).toContain('"http://elastic:pass@127.0.0.1:9200/logs-*"');
-    expect(source).toContain('label="默认索引（可选）"');
-    expect(source).toContain('"显示索引 (留空显示全部)"');
+    expect(source).toContain('return "支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询";');
+    expect(source).toContain(
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";',
+    );
+    expect(source).toContain(
+      'placeholder={dbType === "elasticsearch" ? "未开启认证可留空" : undefined}',
+    );
+    expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
 });

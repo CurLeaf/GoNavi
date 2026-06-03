@@ -13,7 +13,9 @@ describe('DatabaseIcons', () => {
   it('includes Elasticsearch in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('elasticsearch');
     expect(getDbIconLabel('elasticsearch')).toBe('Elasticsearch');
-    expect(renderToStaticMarkup(<>{getDbIcon('elasticsearch', undefined, 22)}</>)).toContain('ES');
+    const markup = renderToStaticMarkup(<>{getDbIcon('elasticsearch', undefined, 22)}</>);
+    expect(markup).toContain('elasticsearch.svg');
+    expect(markup).toContain('alt="elasticsearch"');
   });
 
   it('wraps database icons in a consistent frame for sidebar sizing', () => {

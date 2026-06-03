@@ -1833,8 +1833,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       key: string;
       sql: string;
       exportSql?: string;
+      sourceStatementIndex?: number;
+      statementResultIndex?: number;
       rows: any[];
       columns: string[];
+      messages?: string[];
+      resultType?: 'grid' | 'message';
       tableName?: string;
       pkColumns: string[];
       editLocator?: EditRowLocator;
@@ -3924,6 +3928,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return selected;
   };
 
+  const buildResultSetMergeKey = (result: ResultSet): string => {
+      const sqlKey = normalizeExecutedSqlKey(result.exportSql || result.sql);
+      const sourceStatementIndex = Number(result.sourceStatementIndex || 1);
+      const statementResultIndex = Number(result.statementResultIndex || 1);
+      return `${sqlKey}::${sourceStatementIndex}::${statementResultIndex}`;
+  };
+
   const mergeResultSets = (previous: ResultSet[], next: ResultSet[], replaceAll: boolean): ResultSet[] => {
       if (replaceAll || previous.length === 0) {
           return next.map((result, index) => ({ ...result, key: `result-${index + 1}` }));
@@ -3931,8 +3942,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       const merged = [...previous];
       next.forEach((result) => {
-          const incomingKey = normalizeExecutedSqlKey(result.exportSql || result.sql);
-          const existingIndex = merged.findIndex((item) => normalizeExecutedSqlKey(item.exportSql || item.sql) === incomingKey);
+          const incomingKey = buildResultSetMergeKey(result);
+          const existingIndex = merged.findIndex((item) => buildResultSetMergeKey(item) === incomingKey);
           if (existingIndex >= 0) {
               merged[existingIndex] = { ...result, key: merged[existingIndex].key };
               return;
@@ -3947,8 +3958,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (!firstExecutedResult) {
           return '';
       }
-      const executedSqlKey = normalizeExecutedSqlKey(firstExecutedResult.exportSql || firstExecutedResult.sql);
-      return merged.find((item) => normalizeExecutedSqlKey(item.exportSql || item.sql) === executedSqlKey)?.key
+      const executedSqlKey = buildResultSetMergeKey(firstExecutedResult);
+      return merged.find((item) => buildResultSetMergeKey(item) === executedSqlKey)?.key
           || firstExecutedResult.key
           || merged[0]?.key
           || '';
@@ -4024,6 +4035,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (!sql?.trim() || !currentDb) return;
       const conn = connections.find(c => c.id === currentConnectionId);
       if (!conn) return;
+      const currentResult = resultSets.find((item) => item.key === resultKey);
+      const statementResultIndex = Math.max(1, Number(currentResult?.statementResultIndex || 1));
 
       const config = {
           ...conn.config,
@@ -4049,10 +4062,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
 
-          // 取第一个结果集（单条 SQL 只有一个结果集）
           const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
-          if (resultSetDataArray.length === 0) return;
-          const rsData = resultSetDataArray[0];
+          const rsData = resultSetDataArray[Math.max(0, statementResultIndex - 1)];
+          if (!rsData) return;
           const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
               && rsData.columns && rsData.columns.length === 1
               && rsData.columns[0] === 'affectedRows';
@@ -4075,7 +4087,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           // 只更新匹配的结果集的 rows 和 columns，保留 tableName/pkColumns/readOnly 等元数据
           setResultSets(prev => prev.map(rs =>
               rs.key === resultKey
-                  ? { ...rs, rows, columns: cols, truncated }
+                  ? {
+                      ...rs,
+                      rows,
+                      columns: cols,
+                      messages: Array.isArray(rsData.messages) ? rsData.messages : [],
+                      resultType: ((!Array.isArray(rsData.rows) || rsData.rows.length === 0) && (!Array.isArray(rsData.columns) || rsData.columns.length === 0) && Array.isArray(rsData.messages) && rsData.messages.length > 0)
+                          ? 'message'
+                          : 'grid',
+                      truncated,
+                  }
                   : rs
           ));
       } catch (err: any) {
@@ -4240,11 +4261,28 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         key: `result-${idx + 1}`,
                         sql: rawStatement,
                         exportSql: rawStatement,
+                        sourceStatementIndex: idx + 1,
+                        statementResultIndex: 1,
                         rows,
                         columns: cols,
+                        messages: Array.isArray(res.messages) ? res.messages : [],
                         pkColumns: [],
                         readOnly: true,
                         truncated
+                    });
+                } else if (Array.isArray(res.messages) && res.messages.length > 0) {
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: rawStatement,
+                        exportSql: rawStatement,
+                        sourceStatementIndex: idx + 1,
+                        statementResultIndex: 1,
+                        rows: [],
+                        columns: [],
+                        messages: res.messages,
+                        resultType: 'message',
+                        pkColumns: [],
+                        readOnly: true,
                     });
                 } else {
                     const affected = Number((res.data as any)?.affectedRows);
@@ -4255,8 +4293,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                             key: `result-${idx + 1}`,
                             sql: rawStatement,
                             exportSql: rawStatement,
+                            sourceStatementIndex: idx + 1,
+                            statementResultIndex: 1,
                             rows: [row],
                             columns: ['affectedRows'],
+                            messages: Array.isArray(res.messages) ? res.messages : [],
                             pkColumns: [],
                             readOnly: true
                         });
@@ -4373,12 +4414,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const nextResultSets: ResultSet[] = [];
             const maxRows = Number(queryOptions?.maxRows) || 0;
             let anyTruncated = false;
+            const statementResultCounts = new Map<number, number>();
 
             for (let idx = 0; idx < resultSetDataArray.length; idx++) {
                 const rsData = resultSetDataArray[idx];
-                const plan = executablePlans[idx];
+                const sourceStatementIndex = Number(rsData?.statementIndex || idx + 1);
+                const statementResultIndex = (statementResultCounts.get(sourceStatementIndex) || 0) + 1;
+                statementResultCounts.set(sourceStatementIndex, statementResultIndex);
+                const plan = executablePlans[Math.max(0, sourceStatementIndex - 1)];
                 const originalSql = plan?.originalSql || '';
                 const executedSql = plan?.executedSql || originalSql;
+                const resultMessages = Array.isArray(rsData?.messages) ? rsData.messages : [];
 
                 // 检查是否为 affectedRows 类结果集
                 const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
@@ -4393,10 +4439,27 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         key: `result-${idx + 1}`,
                         sql: executedSql,
                         exportSql: originalSql,
+                        sourceStatementIndex,
+                        statementResultIndex,
                         rows: [row],
                         columns: ['affectedRows'],
+                        messages: resultMessages,
                         pkColumns: [],
                         readOnly: true
+                    });
+                } else if ((!Array.isArray(rsData.rows) || rsData.rows.length === 0) && (!Array.isArray(rsData.columns) || rsData.columns.length === 0) && resultMessages.length > 0) {
+                    nextResultSets.push({
+                        key: `result-${idx + 1}`,
+                        sql: executedSql,
+                        exportSql: originalSql,
+                        sourceStatementIndex,
+                        statementResultIndex,
+                        rows: [],
+                        columns: [],
+                        messages: resultMessages,
+                        resultType: 'message',
+                        pkColumns: [],
+                        readOnly: true,
                     });
                 } else {
                     let rows = Array.isArray(rsData.rows) ? rsData.rows : [];
@@ -4421,8 +4484,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         key: `result-${idx + 1}`,
                         sql: executedSql,
                         exportSql: originalSql,
+                        sourceStatementIndex,
+                        statementResultIndex,
                         rows,
                         columns: cols,
+                        messages: resultMessages,
                         tableName: tableRef?.tableName,
                         pkColumns: plan?.pkColumns || [],
                         editLocator,
@@ -4430,6 +4496,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         truncated
                     });
                 }
+            }
+
+            if (resultSetDataArray.length === 0 && Array.isArray(res.messages) && res.messages.length > 0) {
+                nextResultSets.push({
+                    key: 'result-1',
+                    sql: fullSQL,
+                    exportSql: sourceStatements.join(';\n'),
+                    sourceStatementIndex: 1,
+                    statementResultIndex: 1,
+                    rows: [],
+                    columns: [],
+                    messages: res.messages,
+                    resultType: 'message',
+                    pkColumns: [],
+                    readOnly: true,
+                });
             }
 
             const shouldReplaceAllResults = didExecuteWholeEditor;
@@ -5316,9 +5398,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               }}
                           >
                               <Tooltip title={rs.sql}>
-                                  <span className="query-result-tab-text">结果 {idx + 1}</span>
+                                  <span className="query-result-tab-text">{rs.resultType === 'message' ? `消息 ${idx + 1}` : `结果 ${idx + 1}`}</span>
                               </Tooltip>
                               {(() => {
+                                  if (rs.resultType === 'message') {
+                                      return <span className="query-result-tab-count">i</span>;
+                                  }
                                   const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
                                   if (isAffected) {
                                       return <span className="query-result-tab-count">✓</span>;
@@ -5344,6 +5429,29 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       </Dropdown>
                   ),
                   children: (() => {
+                      if (rs.resultType === 'message') {
+                          return (
+                              <div className={isV2Ui ? 'gn-v2-query-success' : undefined} style={{
+                                  flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center',
+                                  flexDirection: 'column', gap: 12, padding: 24, color: '#666', userSelect: 'text',
+                                  overflow: 'auto',
+                              }}>
+                                  <span style={{ fontSize: 14, fontWeight: 600 }}>执行消息</span>
+                                  <div style={{
+                                      padding: 16,
+                                      borderRadius: 8,
+                                      border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+                                      background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-word',
+                                      fontFamily: 'var(--gn-font-mono)',
+                                      fontSize: 'var(--gn-font-size-mono, 13px)',
+                                  }}>
+                                      {(rs.messages || []).join('\n')}
+                                  </div>
+                              </div>
+                          );
+                      }
                       // affectedRows 类型结果集（UPDATE/INSERT/DELETE）：简洁提示
                       const isAffectedResult = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
                       if (isAffectedResult) {
@@ -5356,11 +5464,44 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                   <span style={{ fontSize: 36, color: '#52c41a' }}>✓</span>
                                   <span style={{ fontSize: 14, fontWeight: 500 }}>执行成功</span>
                                   <span style={{ fontSize: 13, color: '#999' }}>影响行数：{affected}</span>
+                                  {Array.isArray(rs.messages) && rs.messages.length > 0 && (
+                                      <div style={{
+                                          marginTop: 8,
+                                          maxWidth: 720,
+                                          padding: 12,
+                                          borderRadius: 8,
+                                          border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+                                          background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
+                                          whiteSpace: 'pre-wrap',
+                                          wordBreak: 'break-word',
+                                          fontFamily: 'var(--gn-font-mono)',
+                                          fontSize: 'var(--gn-font-size-mono, 12px)',
+                                      }}>
+                                          {rs.messages.join('\n')}
+                                      </div>
+                                  )}
                               </div>
                           );
                       }
                       return (
                           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                              {Array.isArray(rs.messages) && rs.messages.length > 0 && (
+                                  <div style={{
+                                      flex: '0 0 auto',
+                                      margin: '8px 8px 0',
+                                      padding: '10px 12px',
+                                      borderRadius: 8,
+                                      border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+                                      background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
+                                      whiteSpace: 'pre-wrap',
+                                      wordBreak: 'break-word',
+                                      fontFamily: 'var(--gn-font-mono)',
+                                      fontSize: 'var(--gn-font-size-mono, 12px)',
+                                      color: darkMode ? '#d4d4d4' : '#666',
+                                  }}>
+                                      {rs.messages.join('\n')}
+                                  </div>
+                              )}
                               <DataGrid
                                   data={rs.rows}
                                   columnNames={rs.columns}

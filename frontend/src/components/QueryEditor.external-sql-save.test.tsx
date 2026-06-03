@@ -80,6 +80,10 @@ const dataGridState = vi.hoisted(() => ({
   latestProps: null as any,
 }));
 
+const tabsState = vi.hoisted(() => ({
+  activeKey: undefined as string | undefined,
+}));
+
 const autoFetchState = vi.hoisted(() => ({
   visible: false,
 }));
@@ -345,11 +349,24 @@ vi.mock('antd', () => {
     ),
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
-    Tabs: ({ activeKey, items }: any) => {
-      const activeItem = items?.find((item: any) => item.key === activeKey) || items?.[0];
+    Tabs: ({ activeKey, items, onChange }: any) => {
+      const resolvedActiveKey = tabsState.activeKey ?? activeKey ?? items?.[0]?.key;
+      const activeItem = items?.find((item: any) => item.key === resolvedActiveKey) || items?.[0];
       return (
         <div>
-          <div>{items?.map((item: any) => <span key={item.key}>{item.label}</span>)}</div>
+          <div>{items?.map((item: any) => (
+            <button
+              key={item.key}
+              type="button"
+              data-tab-key={item.key}
+              onClick={() => {
+                tabsState.activeKey = item.key;
+                onChange?.(item.key);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}</div>
           <div>{activeItem?.children}</div>
         </div>
       );
@@ -423,6 +440,7 @@ describe('QueryEditor external SQL save', () => {
     storeState.appearance.uiVersion = 'legacy';
     autoFetchState.visible = false;
     dataGridState.latestProps = null;
+    tabsState.activeKey = undefined;
     editorState.value = '';
     editorState.position = { lineNumber: 1, column: 1 };
     editorState.selection = null;
@@ -1786,6 +1804,198 @@ describe('QueryEditor external SQL save', () => {
       status: 'success',
     }));
     renderer?.unmount();
+  });
+
+  it('renders result grid for sqlserver exec statements that return rows', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['SPID', 'STATUS'], rows: [{ SPID: 52, STATUS: 'RUNNABLE' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'EXEC sp_who2' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).not.toContain('影响行数：');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['SPID', 'STATUS']);
+    expect(Array.isArray(dataGridState.latestProps?.data)).toBe(true);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ SPID: 52, STATUS: 'RUNNABLE' });
+  });
+
+  it('renders standalone message result for sqlserver statistics statements', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: [],
+        rows: [],
+        messages: ["Table 'users'. Scan count 1, logical reads 3."],
+      }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'SET STATISTICS IO ON;' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
+    expect(textContent(renderer!.toJSON())).toContain("Table 'users'. Scan count 1, logical reads 3.");
+    expect(dataGridState.latestProps?.columnNames).not.toEqual([]);
+  });
+
+  it('keeps multiple result sets from a single sqlserver statement', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: ['name'], rows: [{ name: 'master' }] },
+        { statementIndex: 1, columns: ['owner'], rows: [{ owner: 'sa' }] },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'EXEC sp_helpdb' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).toContain('结果 2');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
+  });
+
+  it('keeps both tabs when rerunning the same single sqlserver statement with multiple result sets', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { statementIndex: 1, columns: ['name'], rows: [{ name: 'master' }] },
+          { statementIndex: 1, columns: ['owner'], rows: [{ owner: 'sa' }] },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { statementIndex: 1, columns: ['name'], rows: [{ name: 'tempdb' }] },
+          { statementIndex: 1, columns: ['owner'], rows: [{ owner: 'dbo' }] },
+        ],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'EXEC sp_helpdb' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const tabLabels = renderer!.root.findAll((node) => {
+      const className = String(node.props?.className || '');
+      return className.includes('query-result-tab-label');
+    });
+    expect(tabLabels).toHaveLength(2);
+    expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ name: 'tempdb' });
+  });
+
+  it('reloads the active secondary result set for a single sqlserver statement', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'master';
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { statementIndex: 1, columns: ['name'], rows: [{ name: 'master' }] },
+          { statementIndex: 1, columns: ['owner'], rows: [{ owner: 'sa' }] },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { statementIndex: 1, columns: ['name'], rows: [{ name: 'master' }] },
+          { statementIndex: 1, columns: ['owner'], rows: [{ owner: 'dbo' }] },
+        ],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'master', query: 'EXEC sp_helpdb' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const resultTabButtons = renderer!.root.findAll((node) => node.type === 'button' && node.props['data-tab-key']);
+    expect(resultTabButtons).toHaveLength(2);
+
+    await act(async () => {
+      resultTabButtons[1].props.onClick();
+    });
+
+    expect(dataGridState.latestProps?.columnNames).toEqual(['owner']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ owner: 'sa' });
+
+    await act(async () => {
+      await dataGridState.latestProps?.onReload?.();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(2);
+    expect(dataGridState.latestProps?.columnNames).toEqual(['owner']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ owner: 'dbo' });
+    expect(dataGridState.latestProps?.data).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'master' })]));
   });
 
   it('keeps non-Oracle query results read-only when no safe locator exists', async () => {

@@ -62,3 +62,42 @@ func TestSanitizeSQLForPgLike_DoesNotModifyOtherDBTypes(t *testing.T) {
 		t.Fatalf("non-PG-like db should not be sanitized:\nIN:  %s\nOUT: %s", in, out)
 	}
 }
+
+func TestIsReadOnlySQLQuery_DoesNotTreatExecAsReadOnly(t *testing.T) {
+	if isReadOnlySQLQuery("sqlserver", "EXEC sp_who2") {
+		t.Fatal("EXEC should not be treated as read-only SQL")
+	}
+}
+
+func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
+	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
+		t.Fatal("expected INSERT to be treated as batchable write")
+	}
+	if isBatchableWriteSQLStatement("sqlserver", "EXEC sp_who2") {
+		t.Fatal("EXEC should not be treated as batchable write")
+	}
+	if isBatchableWriteSQLStatement("sqlserver", "SET STATISTICS IO ON") {
+		t.Fatal("SET STATISTICS should not be treated as batchable write")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsSQLServerSetAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", "SET STATISTICS IO ON") {
+		t.Fatal("expected SQL Server SET STATISTICS to try query-first for notice capture")
+	}
+	if shouldTryQueryResultFirst("mysql", "SET sql_mode = ''") {
+		t.Fatal("non-SQLServer SET should not force query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsSQLServerSystemCommandsAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", "sp_who2") {
+		t.Fatal("expected bare SQL Server system procedure to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", "DBCC INPUTBUFFER(52)") {
+		t.Fatal("expected SQL Server DBCC command to try query-first")
+	}
+	if shouldTryQueryResultFirst("mysql", "sp_who2") {
+		t.Fatal("non-SQLServer system procedure name should not force query-first")
+	}
+}

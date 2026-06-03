@@ -806,6 +806,7 @@ export namespace connection {
 	    message: string;
 	    data: any;
 	    fields?: string[];
+	    messages?: string[];
 	    queryId?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -818,6 +819,7 @@ export namespace connection {
 	        this.message = source["message"];
 	        this.data = source["data"];
 	        this.fields = source["fields"];
+	        this.messages = source["messages"];
 	        this.queryId = source["queryId"];
 	    }
 	}

@@ -1,7 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import PerfDataGridHarness from './dev/PerfDataGridHarness'
 // import './index.css' // Optional global styles
 
 // 全局配置 dayjs 使用中文 locale，使 Ant Design 的 DatePicker/TimePicker 等组件
@@ -299,12 +298,18 @@ if (typeof window !== 'undefined' && !(window as any).go) {
 }
 const rootNode = document.getElementById('root')!;
 const devHarnessMode = import.meta.env.DEV ? resolveDevHarnessMode() : '';
-const rootComponent = devHarnessMode === 'datagrid-perf'
-    ? <PerfDataGridHarness />
-    : <App />;
+const renderRoot = async () => {
+    let rootComponent = <App />;
+    if (devHarnessMode === 'datagrid-perf') {
+        const { default: PerfDataGridHarness } = await import('./dev/PerfDataGridHarness');
+        rootComponent = <PerfDataGridHarness />;
+    }
 
-ReactDOM.createRoot(rootNode).render(
-  <React.StrictMode>
-    {rootComponent}
-  </React.StrictMode>,
-)
+    ReactDOM.createRoot(rootNode).render(
+      <React.StrictMode>
+        {rootComponent}
+      </React.StrictMode>,
+    );
+};
+
+void renderRoot();

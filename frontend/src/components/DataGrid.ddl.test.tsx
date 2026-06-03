@@ -234,9 +234,31 @@ vi.mock('antd', () => {
       </section>
     ) : null
   );
-  Modal.useModal = () => [{ info: vi.fn(() => ({ destroy: vi.fn() })) }, null];
+  Modal.useModal = () => {
+    const [infoConfig, setInfoConfig] = React.useState<any>(null);
+    return [{
+      info: vi.fn((config: any) => {
+        setInfoConfig(config);
+        return {
+          destroy: vi.fn(() => {
+            setInfoConfig(null);
+          }),
+        };
+      }),
+    }, infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null];
+  };
 
   const passthrough = ({ children }: any) => <>{children}</>;
+  const Dropdown = ({ children, menu, disabled }: any) => (
+    <>
+      {children}
+      {!disabled && menu?.items?.map((item: any) => (
+        item?.type === 'divider'
+          ? null
+          : <button key={item.key} type="button" disabled={item.disabled} onClick={item.onClick}>{item.label}</button>
+      ))}
+    </>
+  );
   const Space = ({ children }: any) => <div>{children}</div>;
   const Tabs = ({ items = [], activeKey, onChange }: any) => {
     const resolvedActiveKey = activeKey ?? items[0]?.key;
@@ -289,7 +311,7 @@ vi.mock('antd', () => {
     message: messageApi,
     Input,
     Button,
-    Dropdown: passthrough,
+    Dropdown,
     Form,
     Pagination: () => null,
     Select: ({ children }: any) => <div>{children}</div>,
@@ -804,6 +826,49 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain('复制为 INSERT');
     expect(textContent(renderer!.root)).toContain('导出');
     renderer!.unmount();
+  });
+
+  it('exports query-result rows from in-memory data without rerunning ExportQuery', async () => {
+    backendApp.ExportData.mockResolvedValue({ success: true });
+    backendApp.ExportQuery.mockResolvedValue({ success: true });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', owner: 'sa' },
+            { __gonavi_row_key__: 'row-2', owner: 'dbo' },
+          ]}
+          columnNames={['owner']}
+          loading={false}
+          exportScope="queryResult"
+          resultSql="EXEC sp_helpdb"
+          dbName="master"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      await findButton(renderer!, 'HTML').props.onClick();
+    });
+
+    const exportAllButton = findButton(renderer!, '全部导出');
+    await act(async () => {
+      await exportAllButton.props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportData).toHaveBeenCalledTimes(1);
+    expect(backendApp.ExportData).toHaveBeenCalledWith(
+      [{ owner: 'sa' }, { owner: 'dbo' }],
+      ['owner'],
+      'export',
+      'html',
+    );
+    expect(backendApp.ExportQuery).not.toHaveBeenCalled();
   });
 
   it('copies loaded column data from the v2 column header context menu', async () => {

@@ -67,6 +67,51 @@ type StatementExecer interface {
 	Close() error
 }
 
+// StatementQueryExecer can run queries on a pinned session/connection.
+// Drivers that return sqlConnStatementExecer automatically satisfy it.
+type StatementQueryExecer interface {
+	StatementExecer
+	Query(query string) ([]map[string]interface{}, []string, error)
+	QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error)
+}
+
+// StatementQueryMessageExecer can run queries on a pinned session and return
+// extra server messages/notices alongside rows.
+type StatementQueryMessageExecer interface {
+	StatementQueryExecer
+	QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error)
+	QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error)
+}
+
+// StatementMultiResultQueryExecer can run multi-result queries on a pinned session/connection.
+type StatementMultiResultQueryExecer interface {
+	StatementExecer
+	QueryMulti(query string) ([]connection.ResultSetData, error)
+	QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error)
+}
+
+// StatementMultiResultQueryMessageExecer can run multi-result queries on a
+// pinned session/connection and return server messages/notices.
+type StatementMultiResultQueryMessageExecer interface {
+	StatementMultiResultQueryExecer
+	QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error)
+	QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error)
+}
+
+// QueryMessageExecer is an optional database-level interface for returning
+// informational server messages alongside one result set.
+type QueryMessageExecer interface {
+	QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error)
+	QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error)
+}
+
+// MultiResultQueryMessageExecer is an optional database-level interface for
+// returning informational server messages alongside multi-result queries.
+type MultiResultQueryMessageExecer interface {
+	QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error)
+	QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error)
+}
+
 // SessionExecerProvider is implemented by database/sql based drivers that can
 // pin a long-running job to one physical connection.
 type SessionExecerProvider interface {
@@ -94,6 +139,38 @@ func (e *sqlConnStatementExecer) ExecContext(ctx context.Context, query string) 
 
 func (e *sqlConnStatementExecer) Exec(query string) (int64, error) {
 	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlConnStatementExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := e.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlConnStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	if e == nil || e.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := e.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlConnStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
 }
 
 func (e *sqlConnStatementExecer) ExecBatchContext(ctx context.Context, query string) (int64, error) {

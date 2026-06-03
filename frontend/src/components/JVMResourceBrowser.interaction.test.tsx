@@ -29,6 +29,13 @@ const storeState = vi.hoisted(() => ({
   aiPanelVisible: false,
   setAIPanelVisible: vi.fn(),
   theme: "light",
+  fontSize: 14,
+  appearance: {
+    uiVersion: "legacy",
+    dataTableFontSize: 14,
+    dataTableFontSizeFollowGlobal: true,
+    customMonoFontFamily: "",
+  },
 }));
 
 const backendApp = vi.hoisted(() => ({

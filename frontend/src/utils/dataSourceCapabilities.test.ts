@@ -63,12 +63,12 @@ describe('dataSourceCapabilities', () => {
       supportsCreateDatabase: false,
       supportsRenameDatabase: false,
       supportsDropDatabase: false,
-      forceReadOnlyQueryResult: true,
+      forceReadOnlyQueryResult: false,
     });
     expect(getDataSourceCapabilities({ type: 'custom', driver: 'elastic' })).toMatchObject({
       type: 'elasticsearch',
       supportsQueryEditor: true,
-      forceReadOnlyQueryResult: true,
+      forceReadOnlyQueryResult: false,
     });
   });
 

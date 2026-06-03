@@ -65,6 +65,19 @@ func isReadOnlySQLQuery(dbType string, query string) bool {
 	}
 }
 
+func isBatchableWriteSQLStatement(dbType string, query string) bool {
+	if isReadOnlySQLQuery(dbType, query) {
+		return false
+	}
+
+	switch leadingSQLKeyword(query) {
+	case "insert", "update", "delete", "replace", "merge", "upsert":
+		return true
+	default:
+		return false
+	}
+}
+
 func sanitizeSQLForPgLike(dbType string, query string) string {
 	normalizedType := strings.ToLower(strings.TrimSpace(dbType))
 	switch normalizedType {

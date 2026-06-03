@@ -28,6 +28,13 @@ const baseState = {
   ],
   jvmDiagnosticDrafts: {},
   jvmDiagnosticOutputs: {},
+  fontSize: 14,
+  appearance: {
+    uiVersion: "legacy",
+    dataTableFontSize: 14,
+    dataTableFontSizeFollowGlobal: true,
+    customMonoFontFamily: "",
+  },
   setJVMDiagnosticDraft: vi.fn(),
   appendJVMDiagnosticOutput: vi.fn(),
   clearJVMDiagnosticOutput: vi.fn(),
@@ -62,6 +69,7 @@ const mockMonaco = {
   KeyMod: { CtrlCmd: 2048 },
   KeyCode: { Enter: 3 },
   editor: {
+    defineTheme: vi.fn(),
     setTheme: vi.fn(),
   },
   languages: {
@@ -193,6 +201,7 @@ describe("JVMDiagnosticConsole", () => {
       removeEventListener: vi.fn(),
     };
     mockMonaco.editor.setTheme.mockClear();
+    mockMonaco.editor.defineTheme.mockClear();
     mockMonaco.languages.register.mockClear();
     mockMonaco.languages.registerCompletionItemProvider.mockClear();
     mockEditor.addCommand.mockClear();
