@@ -1676,6 +1676,42 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
+  it('keeps Oracle anonymous PL/SQL blocks intact when running from the editor', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const plsql = [
+      'BEGIN',
+      "    INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');",
+      "    UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';",
+      "    DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';",
+      'END;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'ORCLPDB1', plsql, 'query-1');
+    expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      sql: plsql,
+      status: 'success',
+    }));
+    renderer?.unmount();
+  });
+
   it('keeps non-Oracle query results read-only when no safe locator exists', async () => {
     backendApp.DBQueryMulti.mockResolvedValueOnce({
       success: true,
@@ -1708,6 +1744,46 @@ describe('QueryEditor external SQL save', () => {
     });
     expect(dataGridState.latestProps?.readOnly).toBe(true);
     expect(messageApi.warning).toHaveBeenCalledWith('查询结果保持只读：main.users 未检测到主键或可用唯一索引，无法安全提交修改。');
+  });
+
+  it('keeps MySQL information_schema routine results read-only without a locator warning', async () => {
+    const sql = [
+      'SELECT ROUTINE_SCHEMA, ROUTINE_NAME, DEFINER, SECURITY_TYPE',
+      'FROM information_schema.ROUTINES',
+      "WHERE ROUTINE_SCHEMA = 'mkefu_location_dev_local'",
+      "  AND ROUTINE_NAME = 'init_orgi'",
+    ].join('\n');
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['ROUTINE_SCHEMA', 'ROUTINE_NAME', 'DEFINER', 'SECURITY_TYPE'],
+        rows: [{
+          ROUTINE_SCHEMA: 'mkefu_location_dev_local',
+          ROUTINE_NAME: 'init_orgi',
+          DEFINER: 'root@%',
+          SECURITY_TYPE: 'DEFINER',
+        }],
+      }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'mkefu_location_dev_local', query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBe('ROUTINES');
+    expect(dataGridState.latestProps?.readOnly).toBe(true);
+    expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
+    expect(backendApp.DBGetIndexes).not.toHaveBeenCalled();
+    expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
   it('runs the SQL statement at the cursor instead of the whole editor when nothing is selected', async () => {

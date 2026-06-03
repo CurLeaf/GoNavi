@@ -770,13 +770,16 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// 适用于 MySQL/MariaDB/Doris/PostgreSQL/SQLite/DuckDB 等支持多语句 Exec 的驱动
 	if !allReadOnly {
 		allWrite := true
+		containsPLSQLBlock := false
 		for _, stmt := range statements {
 			if strings.TrimSpace(stmt) != "" && isReadOnlySQLQuery(runConfig.Type, stmt) {
 				allWrite = false
-				break
+			}
+			if isPLSQLBlockStatement(stmt) {
+				containsPLSQLBlock = true
 			}
 		}
-		if allWrite {
+		if allWrite && !containsPLSQLBlock {
 			if batcher, ok := dbInst.(db.BatchWriteExecer); ok {
 				affected, batchErr := batcher.ExecBatchContext(ctx, query)
 				if batchErr != nil && shouldRefreshCachedConnection(batchErr) {

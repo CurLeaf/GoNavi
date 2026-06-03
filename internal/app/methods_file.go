@@ -662,6 +662,9 @@ func isSQLFileBatchableWriteStatement(dbType string, stmt string) bool {
 	if isReadOnlySQLQuery(dbType, stmt) {
 		return false
 	}
+	if isPLSQLBlockStatement(stmt) {
+		return false
+	}
 	switch leadingSQLKeyword(stmt) {
 	case "insert", "update", "delete", "replace", "merge", "upsert":
 		return true

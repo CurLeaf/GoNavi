@@ -12,6 +12,7 @@ import (
 type fakeBatchWriteDB struct {
 	batchCalls int
 	execCalls  int
+	execQueries []string
 	lastQuery  string
 }
 
@@ -33,6 +34,7 @@ func (f *fakeBatchWriteDB) Query(query string) ([]map[string]interface{}, []stri
 
 func (f *fakeBatchWriteDB) Exec(query string) (int64, error) {
 	f.execCalls++
+	f.execQueries = append(f.execQueries, query)
 	return 1, nil
 }
 
@@ -70,6 +72,7 @@ func (f *fakeBatchWriteDB) GetTriggers(dbName, tableName string) ([]connection.T
 
 func (f *fakeBatchWriteDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	f.execCalls++
+	f.execQueries = append(f.execQueries, query)
 	return 1, nil
 }
 
@@ -77,6 +80,45 @@ func (f *fakeBatchWriteDB) ExecBatchContext(ctx context.Context, query string) (
 	f.batchCalls++
 	f.lastQuery = query
 	return 500, nil
+}
+
+func TestDBQueryMultiKeepsOracleAnonymousBlockAsSingleStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `BEGIN
+    INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');
+    UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';
+    DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-plsql-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected PL/SQL block to skip batch path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != query {
+		t.Fatalf("expected PL/SQL block to stay intact, got %q", fakeDB.execQueries[0])
+	}
 }
 
 var _ db.BatchWriteExecer = (*fakeBatchWriteDB)(nil)

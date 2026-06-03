@@ -111,3 +111,59 @@ func TestSplitSQLStatements_SQLEscapedQuoteMultiple(t *testing.T) {
 	}
 }
 
+func TestSplitSQLStatements_OracleAnonymousBlock(t *testing.T) {
+	input := `BEGIN
+    INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');
+    UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';
+    DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';
+END;
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`BEGIN
+    INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');
+    UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';
+    DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OracleDeclareBlock(t *testing.T) {
+	input := `DECLARE
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_memcard_reg;
+    UPDATE t_memcard_reg SET CARDLEVEL = v_count WHERE MEMCARDNO = '8032277312';
+END;
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`DECLARE
+    v_count NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_memcard_reg;
+    UPDATE t_memcard_reg SET CARDLEVEL = v_count WHERE MEMCARDNO = '8032277312';
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_TransactionBeginStillSplits(t *testing.T) {
+	input := "BEGIN; UPDATE accounts SET balance = balance - 1 WHERE id = 1; COMMIT;"
+	got := splitSQLStatements(input)
+	want := []string{
+		"BEGIN",
+		"UPDATE accounts SET balance = balance - 1 WHERE id = 1",
+		"COMMIT",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}

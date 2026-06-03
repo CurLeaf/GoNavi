@@ -262,6 +262,33 @@ const stripQueryIdentifierQuotes = (part: string): string => {
     return text;
 };
 
+const MYSQL_SYSTEM_METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys']);
+const POSTGRES_SYSTEM_METADATA_SCHEMAS = new Set(['information_schema', 'pg_catalog']);
+const SQLITE_SYSTEM_METADATA_TABLES = new Set(['sqlite_master', 'sqlite_schema', 'sqlite_temp_master', 'sqlite_temp_schema']);
+
+const isSystemMetadataQueryResult = (tableRef: QueryResultTableRef, dbType: string): boolean => {
+    const normalizedDbType = String(dbType || '').trim().toLowerCase();
+    const metadataDbName = stripQueryIdentifierQuotes(tableRef.metadataDbName).toLowerCase();
+    const metadataTableName = stripQueryIdentifierQuotes(tableRef.metadataTableName).toLowerCase();
+
+    if (['mysql', 'mariadb', 'oceanbase', 'diros', 'starrocks', 'sphinx', 'tidb'].includes(normalizedDbType)) {
+        return MYSQL_SYSTEM_METADATA_SCHEMAS.has(metadataDbName);
+    }
+    if (['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizedDbType)) {
+        return POSTGRES_SYSTEM_METADATA_SCHEMAS.has(metadataDbName);
+    }
+    if (normalizedDbType === 'sqlite' || normalizedDbType === 'duckdb') {
+        return SQLITE_SYSTEM_METADATA_TABLES.has(metadataTableName) || metadataDbName === 'information_schema';
+    }
+    if (normalizedDbType === 'sqlserver') {
+        return metadataDbName === 'information_schema' || metadataDbName === 'sys';
+    }
+    if (normalizedDbType === 'clickhouse') {
+        return metadataDbName === 'system' || metadataDbName === 'information_schema';
+    }
+    return false;
+};
+
 const splitTopLevelComma = (text: string): string[] => {
     const parts: string[] = [];
     let current = '';
@@ -656,6 +683,65 @@ const normalizeExecutedSqlKey = (sql: string): string => String(sql || '')
 const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => (
     left.length === right.length
     && left.every((statement, index) => normalizeExecutedSqlKey(statement) === normalizeExecutedSqlKey(right[index]))
+);
+
+const isSqlIdentifierStart = (ch: string): boolean => /^[A-Za-z_]$/.test(ch);
+
+const isSqlIdentifierPart = (ch: string): boolean => /^[A-Za-z0-9_$#]$/.test(ch);
+
+const skipSqlWhitespaceAndComments = (text: string, position: number): number => {
+    let index = position;
+    while (index < text.length) {
+        const ch = text[index];
+        const next = index + 1 < text.length ? text[index + 1] : '';
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f') {
+            index += 1;
+            continue;
+        }
+        if (ch === '-' && next === '-') {
+            index += 2;
+            while (index < text.length && text[index] !== '\n') index += 1;
+            continue;
+        }
+        if (ch === '/' && next === '*') {
+            index += 2;
+            while (index + 1 < text.length && !(text[index] === '*' && text[index + 1] === '/')) {
+                index += 1;
+            }
+            if (index + 1 < text.length) index += 2;
+            continue;
+        }
+        break;
+    }
+    return index;
+};
+
+const nextSqlSignificantToken = (text: string, position: number): string => {
+    const index = skipSqlWhitespaceAndComments(text, position);
+    if (index >= text.length || !isSqlIdentifierStart(text[index])) return '';
+    let end = index + 1;
+    while (end < text.length && isSqlIdentifierPart(text[end])) end += 1;
+    return text.slice(index, end).toLowerCase();
+};
+
+const nextSqlSignificantChar = (text: string, position: number): string => {
+    const index = skipSqlWhitespaceAndComments(text, position);
+    return index >= text.length ? '' : text[index];
+};
+
+const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => {
+    const nextChar = nextSqlSignificantChar(text, tokenEnd);
+    if (!nextChar || nextChar === ';') return false;
+    return !['transaction', 'work', 'isolation', 'read', 'write'].includes(nextSqlSignificantToken(text, tokenEnd));
+};
+
+const shouldEnterPlsqlDeclareBlock = (text: string, tokenEnd: number): boolean => {
+    const nextToken = nextSqlSignificantToken(text, tokenEnd);
+    return Boolean(nextToken);
+};
+
+const isPlsqlControlEnd = (text: string, tokenEnd: number): boolean => (
+    ['if', 'loop', 'case'].includes(nextSqlSignificantToken(text, tokenEnd))
 );
 
 const normalizeEditorPosition = (position: any): { lineNumber: number; column: number } | null => {
@@ -1563,6 +1649,10 @@ const resolveQueryLocatorPlan = async ({
     const tableRef = extractQueryResultTableRef(statement, dbType, currentDb);
     if (!tableRef) return plan;
     plan.tableRef = tableRef;
+    if (isSystemMetadataQueryResult(tableRef, dbType)) {
+        plan.editLocator = buildQueryReadOnlyLocator('系统元数据查询结果保持只读。');
+        return plan;
+    }
 
     const selectInfo = parseSimpleSelectInfo(statement);
     if (!selectInfo) {
@@ -3604,6 +3694,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     let inLineComment = false;
     let inBlockComment = false;
     let dollarTag: string | null = null; // postgres/kingbase: $$...$$ or $tag$...$tag$
+    let plsqlDepth = 0;
+    let plsqlDeclareBeginSkips = 0;
+    let justClosedPLSQLBlock = false;
 
     const push = () => {
         const s = cur.trim();
@@ -3705,7 +3798,45 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             continue;
         }
 
+        if (!inSingle && !inDouble && !inBacktick && !dollarTag && isSqlIdentifierStart(ch)) {
+            let end = i + 1;
+            while (end < text.length && isSqlIdentifierPart(text[end])) {
+                end += 1;
+            }
+            const token = text.slice(i, end).toLowerCase();
+            if (token === 'begin' && plsqlDeclareBeginSkips > 0) {
+                plsqlDeclareBeginSkips -= 1;
+                justClosedPLSQLBlock = false;
+            } else if (token === 'begin' && shouldEnterPlsqlBeginBlock(text, end)) {
+                plsqlDepth += 1;
+                justClosedPLSQLBlock = false;
+            } else if (token === 'declare' && shouldEnterPlsqlDeclareBlock(text, end)) {
+                plsqlDepth += 1;
+                plsqlDeclareBeginSkips += 1;
+                justClosedPLSQLBlock = false;
+            } else if (token === 'end' && plsqlDepth > 0 && !isPlsqlControlEnd(text, end)) {
+                plsqlDepth -= 1;
+                if (plsqlDeclareBeginSkips > plsqlDepth) {
+                    plsqlDeclareBeginSkips = plsqlDepth;
+                }
+                justClosedPLSQLBlock = plsqlDepth === 0;
+            }
+            cur += text.slice(i, end);
+            i = end - 1;
+            continue;
+        }
+
         if (!inSingle && !inDouble && !inBacktick && !dollarTag && (ch === ';' || ch === '；')) {
+            if (plsqlDepth > 0) {
+                cur += ch;
+                continue;
+            }
+            if (justClosedPLSQLBlock) {
+                cur += ch;
+                push();
+                justClosedPLSQLBlock = false;
+                continue;
+            }
             push();
             continue;
         }
