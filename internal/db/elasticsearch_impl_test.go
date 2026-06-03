@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+
+	"github.com/elastic/go-elasticsearch/v8"
 )
 
 // ---- 测试辅助函数 ----
@@ -27,21 +29,19 @@ func newMockESServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	return server
 }
 
-// newTestESClient 创建连接到测试服务器的 ES REST 客户端。
-func newTestESClient(t *testing.T, serverURL string) *esRESTClient {
-	t.Helper()
-	client, err := newESRESTClient(esHTTPClientConfig{BaseURL: serverURL})
-	if err != nil {
-		t.Fatalf("创建测试 ES 客户端失败: %v", err)
-	}
-	return client
-}
-
 // newTestESDB 创建连接到测试服务器的 ElasticsearchDB 实例。
 func newTestESDB(t *testing.T, serverURL, defaultIndex string) *ElasticsearchDB {
 	t.Helper()
+	cfg := elasticsearch.Config{
+		Addresses: []string{serverURL},
+		Transport: &esProductCheckBypassTransport{inner: http.DefaultTransport},
+	}
+	client, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		t.Fatalf("创建测试 ES 客户端失败: %v", err)
+	}
 	return &ElasticsearchDB{
-		client:   newTestESClient(t, serverURL),
+		client:   client,
 		database: defaultIndex,
 	}
 }
@@ -103,17 +103,17 @@ func TestElasticsearchPing(t *testing.T) {
 	})
 }
 
-// TestElasticsearchGetDatabases 测试获取索引列表，验证隐藏索引过滤。
+// TestElasticsearchGetDatabases 测试获取索引列表。
 func TestElasticsearchGetDatabases(t *testing.T) {
-	t.Run("正常获取并过滤隐藏索引", func(t *testing.T) {
+	t.Run("正常获取全部索引", func(t *testing.T) {
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/_cat/indices") && r.Method == http.MethodGet {
-				writeJSON(w, []map[string]string{
-					{"index": "logs-2024"},
-					{"index": "users"},
-					{"index": ".security"},
-					{"index": ".kibana_1"},
-					{"index": "products"},
+			if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/*") && !strings.Contains(r.URL.Path, "_") {
+				writeJSON(w, map[string]interface{}{
+					"logs-2024":  map[string]interface{}{},
+					"users":      map[string]interface{}{},
+					".security":  map[string]interface{}{},
+					".kibana_1":  map[string]interface{}{},
+					"products":   map[string]interface{}{},
 				})
 				return
 			}
@@ -127,7 +127,7 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 		}
 
 		slices.Sort(databases)
-		expected := []string{"logs-2024", "products", "users"}
+		expected := []string{".kibana_1", ".security", "logs-2024", "products", "users"}
 		if len(databases) != len(expected) {
 			t.Fatalf("期望 %d 个索引，实际 %d：%v", len(expected), len(databases), databases)
 		}
@@ -147,21 +147,53 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 	})
 }
 
-// TestElasticsearchGetTables 测试 GetTables 返回索引名。
+// TestElasticsearchGetTables 测试 GetTables 返回索引名及别名。
 func TestElasticsearchGetTables(t *testing.T) {
-	t.Run("指定索引名", func(t *testing.T) {
-		db := &ElasticsearchDB{database: "default-index"}
+	t.Run("指定索引名并返回别名", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/_alias") {
+				writeJSON(w, map[string]interface{}{
+					"my-index": map[string]interface{}{
+						"aliases": map[string]interface{}{
+							"my-alias": map[string]interface{}{},
+						},
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+
+		db := newTestESDB(t, server.URL, "default-index")
 		tables, err := db.GetTables("my-index")
 		if err != nil {
 			t.Fatalf("GetTables 失败：%v", err)
 		}
-		if len(tables) != 1 || tables[0] != "my-index" {
-			t.Fatalf("期望 [my-index]，实际：%v", tables)
+		if len(tables) < 1 || tables[0] != "my-index" {
+			t.Fatalf("期望第一个为 my-index，实际：%v", tables)
+		}
+		// 应包含别名
+		found := false
+		for _, tbl := range tables {
+			if tbl == "my-alias" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("期望包含别名 my-alias，实际：%v", tables)
 		}
 	})
 
 	t.Run("回退到默认索引", func(t *testing.T) {
-		db := &ElasticsearchDB{database: "default-index"}
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/_alias") {
+				writeJSON(w, map[string]interface{}{})
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+
+		db := newTestESDB(t, server.URL, "default-index")
 		tables, err := db.GetTables("")
 		if err != nil {
 			t.Fatalf("GetTables 失败：%v", err)
@@ -172,10 +204,21 @@ func TestElasticsearchGetTables(t *testing.T) {
 	})
 
 	t.Run("无索引名时报错", func(t *testing.T) {
-		db := &ElasticsearchDB{}
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		db := newTestESDB(t, server.URL, "")
 		_, err := db.GetTables("")
 		if err == nil || !strings.Contains(err.Error(), "未指定索引名") {
 			t.Fatalf("期望 '未指定索引名' 错误，实际：%v", err)
+		}
+	})
+
+	t.Run("连接未打开时返回错误", func(t *testing.T) {
+		db := &ElasticsearchDB{database: "test"}
+		_, err := db.GetTables("test")
+		if err == nil || !strings.Contains(err.Error(), "连接未打开") {
+			t.Fatalf("期望 '连接未打开' 错误，实际：%v", err)
 		}
 	})
 }
@@ -538,17 +581,18 @@ func TestElasticsearchGetCreateStatement(t *testing.T) {
 	}
 }
 
-// TestElasticsearchGetIndexes 测试获取索引统计信息。
+// TestElasticsearchGetIndexes 测试获取索引 settings 信息。
 func TestElasticsearchGetIndexes(t *testing.T) {
 	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/_cat/indices") && r.Method == http.MethodGet {
-			writeJSON(w, []map[string]string{
-				{
-					"index":      "test-index",
-					"health":     "green",
-					"status":     "open",
-					"docs.count": "1000",
-					"store.size": "5mb",
+		if strings.HasPrefix(r.URL.Path, "/test-index/_settings") && r.Method == http.MethodGet {
+			writeJSON(w, map[string]map[string]interface{}{
+				"test-index": {
+					"settings": map[string]interface{}{
+						"index": map[string]interface{}{
+							"number_of_shards":   "3",
+							"number_of_replicas": "1",
+						},
+					},
 				},
 			})
 			return
@@ -572,11 +616,11 @@ func TestElasticsearchGetIndexes(t *testing.T) {
 	if idx.IndexType != "INDEX" {
 		t.Fatalf("索引类型期望 INDEX，实际：%s", idx.IndexType)
 	}
-	if !strings.Contains(idx.ColumnName, "green") {
-		t.Fatalf("索引信息应包含 health=green，实际：%s", idx.ColumnName)
+	if !strings.Contains(idx.ColumnName, "shards=3") {
+		t.Fatalf("索引信息应包含 shards=3，实际：%s", idx.ColumnName)
 	}
-	if !strings.Contains(idx.ColumnName, "1000") {
-		t.Fatalf("索引信息应包含 docs=1000，实际：%s", idx.ColumnName)
+	if !strings.Contains(idx.ColumnName, "replicas=1") {
+		t.Fatalf("索引信息应包含 replicas=1，实际：%s", idx.ColumnName)
 	}
 }
 
@@ -793,29 +837,6 @@ func TestExtractColumnsFromMapping(t *testing.T) {
 	})
 }
 
-// TestIsHiddenIndex 测试隐藏索引判断。
-func TestIsHiddenIndex(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"隐藏索引 .security", ".security", true},
-		{"隐藏索引 .kibana_1", ".kibana_1", true},
-		{"普通索引 logs-2024", "logs-2024", false},
-		{"普通索引 users", "users", false},
-		{"空字符串", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isHiddenIndex(tt.input); got != tt.expected {
-				t.Fatalf("isHiddenIndex(%q) = %v，期望 %v", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
 // TestIsJSONDSL 测试 JSON DSL 检测。
 func TestIsJSONDSL(t *testing.T) {
 	tests := []struct {
@@ -826,7 +847,7 @@ func TestIsJSONDSL(t *testing.T) {
 		{"JSON DSL", `{"query":{"match_all":{}}}`, true},
 		{"简单字符串", "hello world", false},
 		{"空字符串", "", false},
-		{"JSON 对象以空格开头", `  {"query":{}}`, false},
+		{"JSON 对象以空格开头", `  {"query":{}}`, true},
 		{"非查询 JSON 前缀", `[1,2,3]`, false},
 	}
 
@@ -880,34 +901,6 @@ func TestExtractEsFieldType(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestBuildESClientConfig 测试 ES 客户端配置构建。
-func TestBuildESClientConfig(t *testing.T) {
-	t.Run("HTTP 配置", func(t *testing.T) {
-		cfg := buildESClientConfig(connection.ConnectionConfig{
-			Host: "localhost",
-			Port: 9200,
-			User: "elastic",
-		})
-		if cfg.BaseURL != "http://localhost:9200" {
-			t.Fatalf("HTTP 地址期望 http://localhost:9200，实际：%v", cfg.BaseURL)
-		}
-		if cfg.Username != "elastic" {
-			t.Fatalf("用户名期望 elastic，实际：%q", cfg.Username)
-		}
-	})
-
-	t.Run("HTTPS 配置", func(t *testing.T) {
-		cfg := buildESClientConfig(connection.ConnectionConfig{
-			Host:   "es.example.com",
-			Port:   9200,
-			UseSSL: true,
-		})
-		if cfg.BaseURL != "https://es.example.com:9200" {
-			t.Fatalf("HTTPS 地址期望 https://es.example.com:9200，实际：%v", cfg.BaseURL)
-		}
-	})
 }
 
 // TestResolveEsIndexName 测试索引名解析。
@@ -986,17 +979,40 @@ func TestESMockIntegration(t *testing.T) {
 		case r.Method == http.MethodHead && path == "/":
 			w.WriteHeader(http.StatusOK)
 
-		// Cat Indices
-		case strings.HasPrefix(path, "/_cat/indices") && r.Method == http.MethodGet:
-			writeJSON(w, []map[string]string{
-				{"index": "products"},
-				{"index": "orders"},
-				{"index": ".internal"},
+		// Indices.Get("*") — 返回所有索引
+		case r.Method == http.MethodGet && (path == "/" || path == "/*") && !strings.Contains(path, "_"):
+			writeJSON(w, map[string]interface{}{
+				"products":  map[string]interface{}{},
+				"orders":    map[string]interface{}{},
+				".internal": map[string]interface{}{},
+			})
+
+		// Indices.GetAlias — 返回别名映射
+		case strings.Contains(path, "/_alias") && r.Method == http.MethodGet:
+			writeJSON(w, map[string]interface{}{
+				"products": map[string]interface{}{
+					"aliases": map[string]interface{}{
+						"products-alias": map[string]interface{}{},
+					},
+				},
 			})
 
 		// Mapping
 		case strings.HasSuffix(path, "/_mapping"):
 			writeJSON(w, mappingData)
+
+		// Settings
+		case strings.HasSuffix(path, "/_settings"):
+			writeJSON(w, map[string]map[string]interface{}{
+				"products": {
+					"settings": map[string]interface{}{
+						"index": map[string]interface{}{
+							"number_of_shards":   "1",
+							"number_of_replicas": "1",
+						},
+					},
+				},
+			})
 
 		// GetCreateStatement
 		case r.Method == http.MethodGet && !strings.Contains(path, "_"):
@@ -1033,23 +1049,32 @@ func TestESMockIntegration(t *testing.T) {
 		t.Fatalf("Ping 失败：%v", err)
 	}
 
-	// 验证 GetDatabases（应过滤 .internal）
+	// 验证 GetDatabases（应返回全部索引包括系统索引）
 	databases, err := db.GetDatabases()
 	if err != nil {
 		t.Fatalf("GetDatabases 失败：%v", err)
 	}
 	slices.Sort(databases)
-	if len(databases) != 2 || databases[0] != "orders" || databases[1] != "products" {
-		t.Fatalf("GetDatabases 期望 [orders, products]，实际：%v", databases)
+	if len(databases) != 3 || databases[0] != ".internal" || databases[1] != "orders" || databases[2] != "products" {
+		t.Fatalf("GetDatabases 期望 [.internal, orders, products]，实际：%v", databases)
 	}
 
-	// 验证 GetTables
+	// 验证 GetTables（应返回索引名和别名）
 	tables, err := db.GetTables("")
 	if err != nil {
 		t.Fatalf("GetTables 失败：%v", err)
 	}
-	if len(tables) != 1 || tables[0] != "products" {
-		t.Fatalf("GetTables 期望 [products]，实际：%v", tables)
+	if len(tables) < 1 || tables[0] != "products" {
+		t.Fatalf("GetTables 第一个元素应为 products，实际：%v", tables)
+	}
+	hasAlias := false
+	for _, tbl := range tables {
+		if tbl == "products-alias" {
+			hasAlias = true
+		}
+	}
+	if !hasAlias {
+		t.Fatalf("GetTables 应包含别名 products-alias，实际：%v", tables)
 	}
 
 	// 验证 GetColumns
@@ -1057,8 +1082,8 @@ func TestESMockIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetColumns 失败：%v", err)
 	}
-	if len(columns) != 5 {
-		t.Fatalf("GetColumns 期望 5 个字段，实际 %d", len(columns))
+	if len(columns) != 6 { // _id + 5 个 mapping 字段
+		t.Fatalf("GetColumns 期望 6 个字段，实际 %d", len(columns))
 	}
 
 	// 验证 DSL 查询
@@ -1102,5 +1127,525 @@ func TestESMockIntegration(t *testing.T) {
 	triggers, _ := db.GetTriggers("products", "")
 	if len(triggers) != 0 {
 		t.Fatalf("GetTriggers 应返回空，实际：%d", len(triggers))
+	}
+}
+
+// ---- P1 功能测试 ----
+
+// TestParseESConsoleRequest 测试 DevTools 风格查询解析。
+func TestParseESConsoleRequest(t *testing.T) {
+	t.Run("带 body 的 GET 请求", func(t *testing.T) {
+		input := "GET /logs-*/_search\n{\"query\":{\"match_all\":{}}}"
+		req, ok := parseESConsoleRequest(input)
+		if !ok {
+			t.Fatal("解析应成功")
+		}
+		if req.Method != "GET" {
+			t.Fatalf("方法期望 GET，实际：%q", req.Method)
+		}
+		if req.Path != "/logs-*/_search" {
+			t.Fatalf("路径期望 /logs-*/_search，实际：%q", req.Path)
+		}
+		if len(req.Body) == 0 {
+			t.Fatal("body 不应为空")
+		}
+	})
+
+	t.Run("带 body 的 POST 请求", func(t *testing.T) {
+		input := "POST /orders/_search\n{\"size\":10}"
+		req, ok := parseESConsoleRequest(input)
+		if !ok {
+			t.Fatal("解析应成功")
+		}
+		if req.Method != "POST" {
+			t.Fatalf("方法期望 POST，实际：%q", req.Method)
+		}
+		if req.Path != "/orders/_search" {
+			t.Fatalf("路径期望 /orders/_search，实际：%q", req.Path)
+		}
+		if len(req.Body) == 0 {
+			t.Fatal("body 不应为空")
+		}
+	})
+
+	t.Run("无 body 的 GET 请求", func(t *testing.T) {
+		input := "GET /_cluster/health"
+		req, ok := parseESConsoleRequest(input)
+		if !ok {
+			t.Fatal("解析应成功")
+		}
+		if req.Method != "GET" {
+			t.Fatalf("方法期望 GET，实际：%q", req.Method)
+		}
+		if req.Path != "/_cluster/health" {
+			t.Fatalf("路径期望 /_cluster/health，实际：%q", req.Path)
+		}
+		if len(req.Body) != 0 {
+			t.Fatalf("无 body 时应为空，实际长度：%d", len(req.Body))
+		}
+	})
+
+	t.Run("DELETE 方法应被拒绝", func(t *testing.T) {
+		input := "DELETE /index"
+		_, ok := parseESConsoleRequest(input)
+		if ok {
+			t.Fatal("DELETE 请求应解析失败")
+		}
+	})
+
+	t.Run("纯 JSON 应被拒绝", func(t *testing.T) {
+		input := "{\"query\":{\"match_all\":{}}}"
+		_, ok := parseESConsoleRequest(input)
+		if ok {
+			t.Fatal("纯 JSON 不是 DevTools 格式，应解析失败")
+		}
+	})
+
+	t.Run("SQL 语句应被拒绝", func(t *testing.T) {
+		input := "select * from test"
+		_, ok := parseESConsoleRequest(input)
+		if ok {
+			t.Fatal("SQL 语句不是 DevTools 格式，应解析失败")
+		}
+	})
+}
+
+// TestFlattenESSource 测试嵌套对象展开为点分路径。
+func TestFlattenESSource(t *testing.T) {
+	t.Run("嵌套对象展开", func(t *testing.T) {
+		source := map[string]interface{}{
+			"user": map[string]interface{}{
+				"name": "张三",
+				"age":  18,
+			},
+		}
+		row := make(map[string]interface{})
+		flattenESSource("", source, row)
+
+		if row["user.name"] != "张三" {
+			t.Fatalf("user.name 期望 张三，实际：%v", row["user.name"])
+		}
+		if row["user.age"] != 18 {
+			t.Fatalf("user.age 期望 18，实际：%v", row["user.age"])
+		}
+		// 原始嵌套键不应保留
+		if _, ok := row["user"]; ok {
+			t.Fatal("展开后不应保留原始嵌套键 user")
+		}
+	})
+
+	t.Run("数组序列化为 JSON 字符串", func(t *testing.T) {
+		source := map[string]interface{}{
+			"tags": []interface{}{"a", "b"},
+		}
+		row := make(map[string]interface{})
+		flattenESSource("", source, row)
+
+		tags, ok := row["tags"].(string)
+		if !ok {
+			t.Fatalf("tags 应序列化为 JSON 字符串，实际类型：%T", row["tags"])
+		}
+		if tags != `["a","b"]` {
+			t.Fatalf("tags JSON 不匹配，实际：%v", tags)
+		}
+	})
+
+	t.Run("多层嵌套展开", func(t *testing.T) {
+		source := map[string]interface{}{
+			"a": map[string]interface{}{
+				"b": map[string]interface{}{
+					"c": 1,
+				},
+			},
+		}
+		row := make(map[string]interface{})
+		flattenESSource("", source, row)
+
+		if row["a.b.c"] != 1 {
+			t.Fatalf("a.b.c 期望 1，实际：%v", row["a.b.c"])
+		}
+		if _, ok := row["a"]; ok {
+			t.Fatal("展开后不应保留原始嵌套键 a")
+		}
+		if _, ok := row["a.b"]; ok {
+			t.Fatal("展开后不应保留中间嵌套键 a.b")
+		}
+	})
+
+	t.Run("空对象返回空", func(t *testing.T) {
+		source := map[string]interface{}{}
+		row := make(map[string]interface{})
+		flattenESSource("", source, row)
+
+		if len(row) != 0 {
+			t.Fatalf("空对象展开后应为空，实际长度：%d", len(row))
+		}
+	})
+}
+
+// TestElasticsearchQueryConsole 测试 DevTools 风格查询端到端。
+func TestElasticsearchQueryConsole(t *testing.T) {
+	t.Run("DevTools 格式查询能正确执行", func(t *testing.T) {
+		var capturedMethod, capturedPath string
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedPath = r.URL.Path
+
+			if r.Method == http.MethodGet && r.URL.Path == "/test-index/_search" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"hits": {
+						"total": {"value": 1},
+						"hits": [
+							{"_index": "test-index", "_id": "1", "_source": {"name": "测试文档"}}
+						]
+					}
+				}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		db := newTestESDB(t, server.URL, "test-index")
+
+		// 模拟 DevTools 格式查询
+		consoleQuery := "GET /test-index/_search\n{\"query\":{\"match_all\":{}}}"
+		rows, _, err := db.Query(consoleQuery)
+		if err != nil {
+			t.Fatalf("DevTools 查询失败：%v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("期望 1 条结果，实际 %d", len(rows))
+		}
+		if rows[0]["name"] != "测试文档" {
+			t.Fatalf("期望 name=测试文档，实际：%v", rows[0]["name"])
+		}
+
+		// 验证请求路径正确
+		if capturedMethod != "GET" {
+			t.Fatalf("请求方法期望 GET，实际：%q", capturedMethod)
+		}
+		if capturedPath != "/test-index/_search" {
+			t.Fatalf("请求路径期望 /test-index/_search，实际：%q", capturedPath)
+		}
+	})
+
+	t.Run("带 index 的 DevTools 查询", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && r.URL.Path == "/my-index/_search" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		})
+
+		db := newTestESDB(t, server.URL, "default-index")
+		query := "GET /my-index/_search\n{\"query\":{\"match_all\":{}}}"
+		rows, _, err := db.Query(query)
+		if err != nil {
+			t.Fatalf("查询失败：%v", err)
+		}
+		if len(rows) != 0 {
+			t.Fatalf("期望 0 条结果，实际 %d", len(rows))
+		}
+	})
+}
+
+// TestElasticsearchAggregations 测试 aggregation 结果展示。
+func TestElasticsearchAggregations(t *testing.T) {
+	t.Run("仅有 aggregations 无 hits", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"hits": {
+					"total": {"value": 0},
+					"hits": []
+				},
+				"aggregations": {
+					"status_count": {
+						"buckets": [
+							{"key": "active", "doc_count": 42},
+							{"key": "inactive", "doc_count": 8}
+						]
+					}
+				}
+			}`))
+		})
+
+		db := newTestESDB(t, server.URL, "test-index")
+		rows, columns, err := db.Query(`{"aggs":{"status_count":{"terms":{"field":"status"}}}}`)
+		if err != nil {
+			t.Fatalf("聚合查询失败：%v", err)
+		}
+
+		// hits 为空时应仍返回 _aggregations 行
+		if len(rows) < 1 {
+			t.Fatal("聚合结果不应为空，至少应包含 _aggregations 行")
+		}
+
+		// 验证列中包含 _aggregations 标识
+		hasAgg := false
+		for _, col := range columns {
+			if col == "_aggregations" {
+				hasAgg = true
+			}
+		}
+		if !hasAgg {
+			t.Fatalf("结果列应包含 _aggregations，实际：%v", columns)
+		}
+	})
+
+	t.Run("hits 和 aggregations 同时存在", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"hits": {
+					"total": {"value": 2},
+					"hits": [
+						{"_index": "test", "_id": "1", "_source": {"status": "active"}},
+						{"_index": "test", "_id": "2", "_source": {"status": "active"}}
+					]
+				},
+				"aggregations": {
+					"avg_score": {
+						"value": 85.5
+					}
+				}
+			}`))
+		})
+
+		db := newTestESDB(t, server.URL, "test-index")
+		rows, columns, err := db.Query(`{"aggs":{"avg_score":{"avg":{"field":"score"}}}}`)
+		if err != nil {
+			t.Fatalf("聚合查询失败：%v", err)
+		}
+
+		// 应包含 hits 数据
+		if len(rows) < 2 {
+			t.Fatalf("期望至少 2 条 hits 结果，实际 %d", len(rows))
+		}
+
+		// 验证列中包含 _aggregations
+		hasAgg := false
+		for _, col := range columns {
+			if col == "_aggregations" {
+				hasAgg = true
+			}
+		}
+		if !hasAgg {
+			t.Fatalf("结果列应包含 _aggregations，实际：%v", columns)
+		}
+	})
+}
+
+// TestESAPIKeyAuth 测试 API Key 认证配置。
+func TestESAPIKeyAuth(t *testing.T) {
+	t.Run("ConnectionParams 中的 apiKey 应设置到配置", func(t *testing.T) {
+		cfg := buildESClientConfig(connection.ConnectionConfig{
+			Host:             "localhost",
+			Port:             9200,
+			ConnectionParams: "apiKey=test-key-123",
+		})
+		if cfg.APIKey != "test-key-123" {
+			t.Fatalf("APIKey 期望 test-key-123，实际：%q", cfg.APIKey)
+		}
+	})
+
+	t.Run("使用 API Key 时 Basic Auth 应被清除", func(t *testing.T) {
+		cfg := buildESClientConfig(connection.ConnectionConfig{
+			Host:             "localhost",
+			Port:             9200,
+			User:             "elastic",
+			Password:         "pass",
+			ConnectionParams: "apiKey=test-key-123",
+		})
+		if cfg.APIKey != "test-key-123" {
+			t.Fatalf("APIKey 期望 test-key-123，实际：%q", cfg.APIKey)
+		}
+		if cfg.Username != "" {
+			t.Fatalf("使用 API Key 时 Username 应为空，实际：%q", cfg.Username)
+		}
+		if cfg.Password != "" {
+			t.Fatalf("使用 API Key 时 Password 应为空，实际：%q", cfg.Password)
+		}
+	})
+}
+
+// TestElasticsearchSourceFlatten 测试 _source 嵌套对象扁平化端到端。
+func TestElasticsearchSourceFlatten(t *testing.T) {
+	t.Run("嵌套对象在结果中扁平化", func(t *testing.T) {
+		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"hits": {
+					"total": {"value": 1},
+					"hits": [
+						{
+							"_index": "test-index",
+							"_id": "1",
+							"_source": {
+								"user": {"name": "张三", "age": 18},
+								"title": "测试"
+							}
+						}
+					]
+				}
+			}`))
+		})
+
+		db := newTestESDB(t, server.URL, "test-index")
+		rows, columns, err := db.Query(`{"query":{"match_all":{}}}`)
+		if err != nil {
+			t.Fatalf("查询失败：%v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("期望 1 条结果，实际 %d", len(rows))
+		}
+
+		// 验证扁平化字段存在
+		if rows[0]["user.name"] != "张三" {
+			t.Fatalf("user.name 期望 张三，实际：%v", rows[0]["user.name"])
+		}
+		// JSON 数字解析为 float64
+		if age, ok := rows[0]["user.age"].(float64); !ok || age != 18 {
+			t.Fatalf("user.age 期望 18，实际：%v (类型：%T)", rows[0]["user.age"], rows[0]["user.age"])
+		}
+		if rows[0]["title"] != "测试" {
+			t.Fatalf("title 期望 测试，实际：%v", rows[0]["title"])
+		}
+
+		// 验证列中包含扁平化字段
+		colSet := make(map[string]bool)
+		for _, col := range columns {
+			colSet[col] = true
+		}
+		if !colSet["user.name"] {
+			t.Fatalf("列应包含 user.name，实际：%v", columns)
+		}
+		if !colSet["user.age"] {
+			t.Fatalf("列应包含 user.age，实际：%v", columns)
+		}
+
+		// 验证 _source 原始 JSON 保留（序列化为 JSON 字符串）
+		sourceRaw, ok := rows[0]["_source"]
+		if !ok {
+			t.Fatal("结果应包含 _source 原始 JSON")
+		}
+		sourceStr, ok := sourceRaw.(string)
+		if !ok {
+			t.Fatalf("_source 应为 JSON 字符串类型，实际类型：%T", sourceRaw)
+		}
+		var sourceMap map[string]interface{}
+		if err := json.Unmarshal([]byte(sourceStr), &sourceMap); err != nil {
+			t.Fatalf("_source JSON 解析失败：%v", err)
+		}
+		if _, hasNested := sourceMap["user"]; !hasNested {
+			t.Fatal("_source 原始 JSON 中应保留嵌套结构 user")
+		}
+	})
+}
+
+// ---- extractESSQLFromTable 测试 ----
+
+func TestESExtractSQLFromTable(t *testing.T) {
+	tests := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{"简单表名", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 0`, "app_log_user"},
+		{"无引号表名", `SELECT * FROM my_index LIMIT 10`, "my_index"},
+		{"带点的表名", `SELECT * FROM "iot_pro_biz_operate_log.index.20240626" LIMIT 101`, "iot_pro_biz_operate_log.index.20240626"},
+		{"通配符表名", `SELECT * FROM "logs-*" LIMIT 10`, "logs-*"},
+		{"多段引号标识符", `SELECT * FROM "iot_pro_biz_operate_log"."index"."20250515" WHERE (("_score">45)) LIMIT 101 OFFSET 0`, "iot_pro_biz_operate_log.index.20250515"},
+		{"两段引号标识符", `SELECT * FROM "my_schema"."my_table" LIMIT 10`, "my_schema.my_table"},
+		{"非 SELECT 语句", `{"query": {"match_all": {}}}`, ""},
+		{"空语句", ``, ""},
+		{"FROM 语句片段", `FROM "test"`, "test"},
+		{"FROM 后无表名", `SELECT * FROM`, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractESSQLFromTable(tt.sql)
+			if got != tt.want {
+				t.Fatalf("extractESSQLFromTable(%q) = %q, want %q", tt.sql, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---- parseESSQL 测试 ----
+
+func TestESParseSQL(t *testing.T) {
+	tests := []struct {
+		name      string
+		sql       string
+		wantTable string
+		wantLimit int
+		wantOff   int
+		wantOK    bool
+	}{
+		{"基础SELECT", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 0`, "app_log_user", 101, 0, true},
+		{"带点索引名", `SELECT * FROM "iot.index.2024" LIMIT 200`, "iot.index.2024", 200, 0, true},
+		{"多段引号", `SELECT * FROM "schema"."table" LIMIT 50 OFFSET 10`, "schema.table", 50, 10, true},
+		{"无LIMIT", `SELECT * FROM "my_index"`, "my_index", 0, 0, true},
+		{"DSL JSON", `{"query": {"match_all": {}}}`, "", 0, 0, false},
+		{"分页_第1页", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 0`, "app_log_user", 101, 0, true},
+		{"分页_第2页", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 100`, "app_log_user", 101, 100, true},
+		{"分页_第3页", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 200`, "app_log_user", 101, 200, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, ok := parseESSQL(tt.sql)
+			if ok != tt.wantOK {
+				t.Fatalf("parseESSQL(%q) ok=%v want %v", tt.sql, ok, tt.wantOK)
+			}
+			if !tt.wantOK {
+				return
+			}
+			if parsed.Table != tt.wantTable {
+				t.Errorf("Table=%q want %q", parsed.Table, tt.wantTable)
+			}
+			if parsed.Limit != tt.wantLimit {
+				t.Errorf("Limit=%d want %d", parsed.Limit, tt.wantLimit)
+			}
+			if parsed.Offset != tt.wantOff {
+				t.Errorf("Offset=%d want %d", parsed.Offset, tt.wantOff)
+			}
+		})
+	}
+}
+
+func TestESConvertWhere(t *testing.T) {
+	tests := []struct {
+		name  string
+		where string
+		key   string
+	}{
+		{"等值", `"status" = 'active'`, "term"},
+		{"范围", `"age" > 18`, "range"},
+		{"score", `"_score" > 45`, "range"},
+		{"AND", `"a" = '1' AND "b" > 2`, "bool"},
+		{"OR", `"a" = '1' OR "b" = '2'`, "bool"},
+		{"IS NULL", `"name" IS NULL`, "bool"},
+		{"IS NOT NULL", `"name" IS NOT NULL`, "exists"},
+		{"LIKE", `"name" LIKE 'test%'`, "wildcard"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertSQLWhereToESQuery(tt.where)
+			if result == nil {
+				t.Fatal("convertSQLWhereToESQuery returned nil")
+			}
+			if _, ok := result[tt.key]; !ok {
+				keys := make([]string, 0, len(result))
+				for k := range result {
+					keys = append(keys, k)
+				}
+				t.Errorf("expected key %q, got %v", tt.key, keys)
+			}
+		})
 	}
 }

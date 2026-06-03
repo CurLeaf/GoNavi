@@ -35,7 +35,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     postgres:   '#336791',
     redis:      '#DC382D',
     mongodb:    '#47A248',
-    elasticsearch: '#005571',
+    elasticsearch: '#FEC514',
     jvm:        '#1677FF',
     kingbase:   '#1890FF',
     dameng:     '#E6002D',
@@ -62,7 +62,7 @@ export const getDbDefaultColor = (type: string): string =>
 
 const BRAND_SVG_TYPES = new Set([
     'mysql', 'mariadb', 'postgres', 'redis', 'mongodb', 'clickhouse', 'sqlite',
-    'diros', 'sphinx', 'duckdb', 'sqlserver',
+    'diros', 'sphinx', 'duckdb', 'sqlserver', 'elasticsearch',
 ]);
 
 /** 品牌 SVG 图标：用 <img> 加载 /db-icons/*.svg */
@@ -131,9 +131,6 @@ const RedisIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const MongoDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="mongodb" size={size} color={color} />
 );
-const ElasticsearchIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.elasticsearch} label="ES" />
-);
 const ClickHouseIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <BrandSvgIcon type="clickhouse" size={size} color={color} />
 );
@@ -184,6 +181,9 @@ const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const JVMIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.jvm} label="JVM" />
 );
+const ElasticsearchIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <BrandSvgIcon type="elasticsearch" size={size} color={color} />
+);
 
 /** Custom — 齿轮图标 */
 const CustomIcon: React.FC<DbIconProps> = ({ size = 16, color }) => {
@@ -218,7 +218,6 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     postgres: PostgresIcon,
     redis: RedisIcon,
     mongodb: MongoDBIcon,
-    elasticsearch: ElasticsearchIcon,
     jvm: JVMIcon,
     kingbase: KingBaseIcon,
     dameng: DamengIcon,
@@ -232,14 +231,15 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     highgo: HighGoIcon,
     iris: IrisIcon,
     tdengine: TDengineIcon,
+    elasticsearch: ElasticsearchIcon,
     custom: CustomIcon,
 };
 
 /** 可选图标类型列表（用于图标选择器 UI） */
 export const DB_ICON_TYPES: string[] = [
-    'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'elasticsearch', 'jvm',
+    'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
-    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'custom',
+    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'elasticsearch', 'custom',
 ];
 
 /** 该类型是否有品牌 SVG 文件 */
@@ -256,12 +256,13 @@ export const getDbIcon = (type: string, color?: string, size?: number): React.Re
 export const getDbIconLabel = (type: string): string => {
     const labels: Record<string, string> = {
         mysql: 'MySQL', mariadb: 'MariaDB', oceanbase: 'OceanBase', postgres: 'PostgreSQL',
-        redis: 'Redis', mongodb: 'MongoDB', elasticsearch: 'Elasticsearch', jvm: 'JVM',
+        redis: 'Redis', mongodb: 'MongoDB', jvm: 'JVM',
         oracle: 'Oracle',
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
         vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine',
+        elasticsearch: 'Elasticsearch',
         custom: '自定义',
     };
     return labels[type?.toLowerCase()] || type;

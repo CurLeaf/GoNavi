@@ -284,12 +284,12 @@ const singleHostUriSchemesByType: Record<string, string[]> = {
   sqlserver: ["sqlserver"],
   iris: ["iris", "intersystems"],
   redis: ["redis"],
-  elasticsearch: ["http", "https"],
   tdengine: ["tdengine"],
   dameng: ["dameng", "dm"],
   kingbase: ["kingbase"],
   highgo: ["highgo"],
   vastbase: ["vastbase"],
+  elasticsearch: ["http", "https"],
 };
 
 const sslSupportedTypes = new Set([
@@ -311,8 +311,8 @@ const sslSupportedTypes = new Set([
   "opengauss",
   "mongodb",
   "redis",
-  "elasticsearch",
   "tdengine",
+  "elasticsearch",
 ]);
 
 const supportsSSLForType = (type: string) =>
@@ -357,7 +357,6 @@ const sslClientCertificateSupportedTypes = new Set([
   "opengauss",
   "mongodb",
   "redis",
-  "elasticsearch",
 ]);
 
 const supportsSSLCAPathForType = (type: string) =>
@@ -411,9 +410,9 @@ const supportsConnectionParamsForType = (type: string) =>
   type === "iris" ||
   type === "clickhouse" ||
   type === "mongodb" ||
-  type === "elasticsearch" ||
   type === "dameng" ||
-  type === "tdengine";
+  type === "tdengine" ||
+  type === "elasticsearch";
 
 type DriverStatusSnapshot = {
   type: string;
@@ -431,6 +430,7 @@ const normalizeDriverType = (value: string): string => {
     .trim()
     .toLowerCase();
   if (normalized === "postgresql") return "postgres";
+  if (normalized === "elastic") return "elasticsearch";
   if (normalized === "doris") return "diros";
   if (
     normalized === "intersystems" ||
@@ -1974,15 +1974,6 @@ const ConnectionModal: React.FC<{
             parsedValues.useSSL = false;
             parsedValues.sslMode = "disable";
           }
-        } else if (type === "elasticsearch") {
-          const isHTTPS = trimmedUri.toLowerCase().startsWith("https://");
-          const skipVerify = normalizeBool(parsed.params.get("skip_verify"));
-          parsedValues.useSSL = isHTTPS;
-          parsedValues.sslMode = isHTTPS
-            ? skipVerify
-              ? "skip-verify"
-              : "required"
-            : "disable";
         }
       }
       return parsedValues;
@@ -2047,9 +2038,6 @@ const ConnectionModal: React.FC<{
     }
     if (dbType === "redis") {
       return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster";
-    }
-    if (dbType === "elasticsearch") {
-      return "http://elastic:pass@127.0.0.1:9200/logs-*";
     }
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
@@ -2270,10 +2258,6 @@ const ConnectionModal: React.FC<{
           ? values.useSSL
             ? "https"
             : "http"
-          : type === "elasticsearch"
-            ? values.useSSL
-              ? "https"
-              : "http"
           : type;
     const dbPath = database ? `/${encodeURIComponent(database)}` : "";
     const params = new URLSearchParams();
@@ -2320,11 +2304,6 @@ const ConnectionModal: React.FC<{
         if (mode === "skip-verify" || mode === "preferred") {
           params.set("skip_verify", "true");
         }
-      } else if (type === "elasticsearch") {
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
       }
     } else if (supportsSSLForType(type)) {
       if (isPostgresCompatibleSSLType(type)) {
@@ -3841,13 +3820,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse"
-          ? "default"
-          : type === "redis"
-            ? ""
-            : type === "elasticsearch"
-              ? "elastic"
-              : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -4085,7 +4058,7 @@ const ConnectionModal: React.FC<{
       case "mongodb":
         return "单机 / 副本集";
       case "elasticsearch":
-        return "索引 / JSON DSL";
+        return "支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询";
       case "oceanbase":
         return "MySQL / Oracle 租户";
       case "sqlite":
@@ -5128,25 +5101,6 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
-              {dbType === "elasticsearch" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认索引（可选）"
-                      help="留空时 JSON DSL 和 query_string 会默认查询所有可见索引；也可以填写 logs-* 这类索引通配符。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input
-                        {...noAutoCapInputProps}
-                        placeholder="例如：logs-*"
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
               {(dbType === "oracle" || isOceanBaseOracle) &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5677,13 +5631,13 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label="用户名"
                           rules={
-                            dbType === "mongodb"
+                            (dbType === "mongodb" || dbType === "elasticsearch")
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} />
+                          <Input {...noAutoCapInputProps} placeholder={dbType === "elasticsearch" ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"
@@ -5763,25 +5717,13 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="includeDatabases"
-                      label={
-                        dbType === "elasticsearch"
-                          ? "显示索引 (留空显示全部)"
-                          : "显示数据库 (留空显示全部)"
-                      }
-                      help={
-                        dbType === "elasticsearch"
-                          ? "连接测试成功后可选择需要展示的索引"
-                          : "连接测试成功后可选择"
-                      }
+                      label="显示数据库 (留空显示全部)"
+                      help="连接测试成功后可选择"
                       style={{ marginBottom: 0 }}
                     >
                       <Select
                         mode="multiple"
-                        placeholder={
-                          dbType === "elasticsearch"
-                            ? "选择显示的索引"
-                            : "选择显示的数据库"
-                        }
+                        placeholder="选择显示的数据库"
                         allowClear
                       >
                         {dbList.map((db) => (

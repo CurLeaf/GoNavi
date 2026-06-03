@@ -21,6 +21,6 @@ func init() {
 		"mongodb":       "src-57fdd8bfebdcd46e",
 		"tdengine":      "src-939715f94df1ec9c",
 		"clickhouse":    "src-482d62ed565b3e69",
-		"elasticsearch": "src-62e8aa80212bd2e4",
+		"elasticsearch": "src-2fb00b94d7067c56",
 	}
 }
