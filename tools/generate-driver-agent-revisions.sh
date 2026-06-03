@@ -27,7 +27,7 @@ normalize_driver() {
     doris|diros) echo "diros" ;;
     oceanbase) echo "oceanbase" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
-    elastic|elasticsearch) echo "elasticsearch" ;;
+    elasticsearch|elastic) echo "elasticsearch" ;;
     mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
@@ -132,8 +132,8 @@ mongodb:internal/db/mongodb_impl.go|\
 mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\
 clickhouse:internal/db/clickhouse_impl.go|\
-elasticsearch:internal/db/elasticsearch_helpers.go|\
-elasticsearch:internal/db/elasticsearch_impl.go)
+elasticsearch:internal/db/elasticsearch_impl.go|\
+elasticsearch:internal/db/elasticsearch_helpers.go)
       return 0
       ;;
   esac

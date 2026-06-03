@@ -62,7 +62,7 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
@@ -935,6 +935,7 @@ const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
 const normalizeDriverType = (value: string): string => {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
+  if (normalized === 'elastic') return 'elasticsearch';
   if (normalized === 'doris') return 'diros';
   if (
     normalized === 'open_gauss' ||
@@ -3279,17 +3280,25 @@ const Sidebar: React.FC<{
     }
   };
 
+  const isNonRelationalDbType = (connectionId: string): boolean => {
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) return false;
+      const dbType = resolveDataSourceType(conn.config);
+      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis';
+  };
+
   const openDesign = (node: any, initialTab: string, readOnly: boolean = false) => {
       const { tableName, dbName, id } = node.dataRef;
+      const forceReadOnly = readOnly || isNonRelationalDbType(id);
       addTab({
           id: `design-${id}-${dbName}-${tableName}`,
-          title: `${readOnly ? '表结构' : '设计表'} (${tableName})`,
+          title: `${forceReadOnly ? '表结构' : '设计表'} (${tableName})`,
           type: 'design',
           connectionId: id,
           dbName: dbName,
           tableName: tableName,
           initialTab: initialTab,
-          readOnly: readOnly
+          readOnly: forceReadOnly
       });
   };
 

@@ -1403,7 +1403,7 @@ ${selectedTrigger.statement}`;
   const isOracleLikeDialect = (dbType: string): boolean => isOracleLikeSqlDialect(dbType);
   const isSqlServerDialect = (dbType: string): boolean => isSqlServerSqlDialect(dbType);
   const isMysqlLikeDialect = (dbType: string): boolean => isMysqlFamilySqlDialect(dbType);
-  const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb';
+  const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb' || dbType === 'elasticsearch';
   const lacksAlterForeignKeySupport = (dbType: string): boolean => dbType === 'sqlite' || dbType === 'duckdb' || dbType === 'tdengine';
   const lacksTableCommentSupport = (dbType: string): boolean => dbType === 'sqlite';
 
@@ -2885,9 +2885,13 @@ END;`;
                                     >
                                         查看语句
                                     </Button>
-                                    <Button size="small" icon={<PlusOutlined />} onClick={handleCreateTrigger}>新增</Button>
-                                    <Button size="small" icon={<EditOutlined />} disabled={!selectedTrigger} onClick={handleEditTrigger}>修改</Button>
-                                    <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedTrigger} onClick={handleDeleteTrigger}>删除</Button>
+                                    {!readOnly && (
+                                        <>
+                                            <Button size="small" icon={<PlusOutlined />} onClick={handleCreateTrigger}>新增</Button>
+                                            <Button size="small" icon={<EditOutlined />} disabled={!selectedTrigger} onClick={handleEditTrigger}>修改</Button>
+                                            <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedTrigger} onClick={handleDeleteTrigger}>删除</Button>
+                                        </>
+                                    )}
                                     <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12, alignSelf: 'center' }}>
                                         {selectedTrigger ? `已选择: ${selectedTrigger.name}` : '请点击选择触发器'}
                                     </span>

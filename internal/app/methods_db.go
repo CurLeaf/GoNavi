@@ -290,6 +290,11 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
+	// Elasticsearch：索引名可能含多个点，不能按点分割
+	if dbType == "elasticsearch" {
+		return rawDB, rawTable
+	}
+
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(rawTable)
 		if schema != "" && table != "" {

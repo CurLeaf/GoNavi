@@ -48,6 +48,13 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 	}
 
 	dbType := resolveDDLDBType(config)
+
+	// Elasticsearch：索引名可能含多个点（如 iot_pro_biz_operate_log.index.20240626），
+	// 不能按点分割，直接返回原始数据库名和完整表名。
+	if dbType == "elasticsearch" {
+		return rawDB, rawTable
+	}
+
 	if dbType == "sqlserver" {
 		// SQL Server 的 DB 接口约定：第一个参数是数据库名，schema 由 tableName(如 dbo.users) 自行解析。
 		// 不能把 schema(dbo) 传到第一个参数，否则会拼出 dbo.sys.columns 等无效对象名。

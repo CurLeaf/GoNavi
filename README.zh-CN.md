@@ -50,6 +50,7 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 文档型 | MongoDB | 可选驱动代理 | 文档查询、集合浏览、连接管理 |
 | 时序 | TDengine | 可选驱动代理 | 时序库表浏览、查询分析 |
 | 列式分析 | ClickHouse | 可选驱动代理 | 分析查询、对象浏览、SQL 执行 |
+| 搜索 | Elasticsearch | 可选驱动代理 | 索引浏览、Mapping 检查、JSON DSL / query_string 查询 |
 | 扩展接入 | Custom Driver/DSN | 自定义 | 通过 Driver + DSN 接入更多数据源 |
 
 <h2 align="center">📸 项目截图</h2>
