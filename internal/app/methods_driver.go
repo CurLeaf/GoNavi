@@ -3374,14 +3374,11 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	if a != nil {
 		a.emitDriverDownloadProgress(driverType, "downloading", 10, 100, planMessage)
 	}
-	validateInstalledCandidateRevision := func(source string) error {
+	validateInstalledCandidateRevision := func() error {
 		if _, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion); revisionErr != nil {
 			_ = os.Remove(executablePath)
 			for _, supportName := range optionalDriverSupportFileNames(driverType) {
 				_ = os.Remove(filepath.Join(filepath.Dir(executablePath), supportName))
-			}
-			if strings.TrimSpace(source) != "" {
-				return fmt.Errorf("%s: %w", source, revisionErr)
 			}
 			return revisionErr
 		}
@@ -3400,8 +3397,8 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 			if hashErr != nil {
 				return "", "", fmt.Errorf("计算预置 %s 驱动代理摘要失败：%w", displayName, hashErr)
 			}
-			if revisionErr := validateInstalledCandidateRevision(sourcePath); revisionErr != nil {
-				return "", "", fmt.Errorf("预置 %s 驱动代理 revision 校验失败：%w", displayName, revisionErr)
+			if revisionErr := validateInstalledCandidateRevision(); revisionErr != nil {
+				return "", "", fmt.Errorf("预置 %s 驱动代理 revision 校验失败（来源：%s）：%w", displayName, sourcePath, revisionErr)
 			}
 			return "file://" + sourcePath, hash, nil
 		}
@@ -3437,15 +3434,15 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				}
 				hash, dlErr := downloadOptionalDriverAgentBinary(a, definition, candidateURL, executablePath)
 				if dlErr == nil {
-					if revisionErr := validateInstalledCandidateRevision(candidateURL); revisionErr != nil {
+					if revisionErr := validateInstalledCandidateRevision(); revisionErr != nil {
 						logger.Warnf("预编译 %s 驱动代理 revision 校验失败，url=%s err=%v", displayName, candidateURL, revisionErr)
-						downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", candidateURL, strings.TrimSpace(revisionErr.Error())))
+						downloadErrs = appendOptionalDriverAttemptError(downloadErrs, candidateURL, revisionErr)
 						continue
 					}
 					return candidateURL, hash, nil
 				}
 				logger.Warnf("下载预编译 %s 驱动代理失败，url=%s err=%v", displayName, candidateURL, dlErr)
-				downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", candidateURL, strings.TrimSpace(dlErr.Error())))
+				downloadErrs = appendOptionalDriverAttemptError(downloadErrs, candidateURL, dlErr)
 			}
 		}
 		if len(bundleURLs) > 0 {
@@ -3460,15 +3457,15 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				}
 				source, hash, bundleErr := downloadOptionalDriverAgentFromBundle(a, definition, bundleURL, executablePath)
 				if bundleErr == nil {
-					if revisionErr := validateInstalledCandidateRevision(source); revisionErr != nil {
+					if revisionErr := validateInstalledCandidateRevision(); revisionErr != nil {
 						logger.Warnf("驱动总包 %s 代理 revision 校验失败，source=%s err=%v", displayName, source, revisionErr)
-						downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", source, strings.TrimSpace(revisionErr.Error())))
+						downloadErrs = appendOptionalDriverAttemptError(downloadErrs, source, revisionErr)
 						continue
 					}
 					return source, hash, nil
 				}
 				logger.Warnf("从驱动总包提取 %s 驱动代理失败，url=%s err=%v", displayName, bundleURL, bundleErr)
-				downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", bundleURL, strings.TrimSpace(bundleErr.Error())))
+				downloadErrs = appendOptionalDriverAttemptError(downloadErrs, bundleURL, bundleErr)
 			}
 		} else if len(downloadURLs) > 0 || restrictToExplicitArtifact {
 			fallbackMessage := buildOptionalDriverFallbackProgressMessage(displayName, len(downloadURLs), 0, restrictToExplicitArtifact)
@@ -3499,6 +3496,38 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	}
 	parts = append(parts, "本地构建失败："+strings.TrimSpace(buildErr.Error()))
 	return "", "", errors.New(strings.Join(parts, "；"))
+}
+
+func appendOptionalDriverAttemptError(entries []string, source string, err error) []string {
+	text := formatOptionalDriverAttemptError(source, err)
+	if text == "" {
+		return entries
+	}
+	for _, existing := range entries {
+		if existing == text {
+			return entries
+		}
+	}
+	return append(entries, text)
+}
+
+func formatOptionalDriverAttemptError(source string, err error) string {
+	message := errorMessage(err)
+	if message == "" {
+		return ""
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return message
+	}
+	duplicatedPrefix := source + ":"
+	if strings.HasPrefix(message, duplicatedPrefix) {
+		message = strings.TrimSpace(strings.TrimPrefix(message, duplicatedPrefix))
+	}
+	if message == "" {
+		return source
+	}
+	return source + ": " + message
 }
 
 func shouldUseOptionalDriverBundleFallback(driverType string, restrictToExplicitArtifact bool, directURLCount int) bool {

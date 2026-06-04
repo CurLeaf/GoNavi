@@ -227,6 +227,30 @@ func TestShouldUseOptionalDriverBundleFallbackKeepsBundleWhenDirectAssetMissing(
 	}
 }
 
+func TestFormatOptionalDriverAttemptErrorRemovesDuplicatedSourcePrefix(t *testing.T) {
+	source := "https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/dev-latest/kingbase-driver-agent-darwin-arm64"
+	err := fmt.Errorf("%s: kingbase 驱动代理 revision 不匹配（已安装：src-old，当前需要：src-new），请安装当前版本对应的 driver-agent", source)
+
+	got := formatOptionalDriverAttemptError(source, err)
+	if strings.Count(got, source) != 1 {
+		t.Fatalf("expected source to appear once, got %q", got)
+	}
+	if !strings.Contains(got, "kingbase 驱动代理 revision 不匹配") {
+		t.Fatalf("expected revision mismatch detail, got %q", got)
+	}
+}
+
+func TestAppendOptionalDriverAttemptErrorDeduplicatesIdenticalEntries(t *testing.T) {
+	source := "https://github.com/Syngnat/GoNavi-DriverAgents/releases/latest/download/GoNavi-DriverAgents.zip#MacOS/kingbase-driver-agent-darwin-arm64"
+	err := fmt.Errorf("kingbase 驱动代理 revision 不匹配（已安装：src-old，当前需要：src-new），请安装当前版本对应的 driver-agent")
+
+	entries := appendOptionalDriverAttemptError(nil, source, err)
+	entries = appendOptionalDriverAttemptError(entries, source, err)
+	if len(entries) != 1 {
+		t.Fatalf("expected duplicate driver attempt error to be collapsed, got %d entries: %v", len(entries), entries)
+	}
+}
+
 func TestResolveDriverInstallVersionUsesPinnedVersionForBuiltinActivateURL(t *testing.T) {
 	definition, ok := resolveDriverDefinition("sqlserver")
 	if !ok {
