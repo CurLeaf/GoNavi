@@ -149,4 +149,43 @@ describe('DefinitionViewer object edit entry', () => {
       query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
     }));
   });
+
+  it('adds CREATE OR REPLACE for routine source snippets returned without ddl prefix', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [
+        { TEXT: 'PROCEDURE proc_tally2accept(p_id IN NUMBER) IS\n' },
+        { TEXT: '  v_count PLS_INTEGER;\n' },
+        { TEXT: 'BEGIN\n' },
+        { TEXT: '  SELECT COUNT(*) INTO v_count FROM dual;\n' },
+        { TEXT: 'END;\n' },
+      ],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab({
+        id: 'routine-def-conn-1-main-proc_tally2accept',
+        title: '存储过程: proc_tally2accept',
+        type: 'routine-def',
+        routineName: 'proc_tally2accept',
+        routineType: 'PROCEDURE',
+        viewName: undefined,
+        viewKind: undefined,
+      })} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE OR REPLACE PROCEDURE proc_tally2accept(p_id IN NUMBER)');
+    expect(query).toContain('v_count PLS_INTEGER;');
+    expect(query).toContain('SELECT COUNT(*) INTO v_count FROM dual;');
+  });
 });

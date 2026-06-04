@@ -51,6 +51,14 @@ const buildEditableDefinitionSql = (tab: TabData, definition: string, objectLabe
         return `${header}CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
     }
 
+    if (
+        tab.type === 'routine-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*(function|procedure)\b/i.test(normalizedDefinition)
+    ) {
+        return `${header}${ensureSqlStatementTerminator(`CREATE OR REPLACE ${normalizedDefinition}`)}`;
+    }
+
     return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
 };
 

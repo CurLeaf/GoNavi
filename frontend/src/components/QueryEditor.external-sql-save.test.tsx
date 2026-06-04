@@ -747,6 +747,59 @@ describe('QueryEditor external SQL save', () => {
     expect(stopPropagation).toHaveBeenCalled();
   });
 
+  it('does not read the full editor model when ctrl/cmd clicking objects in large SQL', async () => {
+    editorState.value = [
+      ...Array.from({ length: 4000 }, (_, index) => `-- filler ${index + 1}`),
+      'select * from analytics.events where id = 1',
+    ].join('\n');
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+    backendApp.DBGetTables
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] })
+      .mockResolvedValueOnce({ success: true, data: [{ Tables_in_analytics: 'events' }] });
+    backendApp.DBGetAllColumns
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    editorState.editor.getModel().getValue.mockClear();
+    editorState.editor.getModel().getValueLength.mockClear();
+    const lineNumber = editorState.value.split('\n').length;
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber, column: 27 } },
+        event: {
+          browserEvent: { button: 0, buttons: 1 },
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+    });
+
+    expect(editorState.editor.getModel().getValueLength).not.toHaveBeenCalled();
+    expect(editorState.editor.getModel().getValue).not.toHaveBeenCalled();
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'analytics',
+      tableName: 'events',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
   it('shows link-style hover feedback when ctrl/cmd is pressed over a navigable identifier', async () => {
     editorState.value = 'select * from analytics.events where id = 1';
     autoFetchState.visible = true;

@@ -1006,6 +1006,7 @@ const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
 const QUERY_EDITOR_HOVER_DELAY_MS = 1000;
 const QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH = 200_000;
 const QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS = 800;
+const QUERY_EDITOR_OBJECT_DECORATION_MAX_LINES = 1_000;
 const QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH = 50_000;
 const QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH = 50_000;
 
@@ -1035,6 +1036,33 @@ const getQueryEditorObjectResolveText = (
     lineContent: string,
     maxTextLength = QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH,
 ): string => getQueryEditorModelTextIfWithinLimit(model, maxTextLength) ?? lineContent;
+
+const getQueryEditorDecorationModelTextIfLightweight = (
+    model: any,
+    maxTextLength: number,
+): string | null => {
+    if (!model || typeof model.getLineCount !== 'function' || typeof model.getLineContent !== 'function') {
+        return getQueryEditorModelTextIfWithinLimit(model, maxTextLength);
+    }
+
+    const lineCount = Number(model.getLineCount());
+    if (!Number.isFinite(lineCount) || lineCount <= 0 || lineCount > QUERY_EDITOR_OBJECT_DECORATION_MAX_LINES) {
+        return null;
+    }
+
+    const lines: string[] = [];
+    let textLength = 0;
+    for (let lineNumber = 1; lineNumber <= lineCount; lineNumber += 1) {
+        const lineContent = String(model.getLineContent(lineNumber) || '');
+        textLength += lineContent.length + (lineNumber < lineCount ? 1 : 0);
+        if (textLength > maxTextLength) {
+            return null;
+        }
+        lines.push(lineContent);
+    }
+
+    return lines.join('\n');
+};
 
 const maskQueryEditorSqlLiteralsAndComments = (source: string): string => {
     const text = String(source || '').replace(/\r\n/g, '\n');
@@ -2099,7 +2127,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
 
-      const text = getQueryEditorModelTextIfWithinLimit(model, maxTextLength);
+      const text = getQueryEditorDecorationModelTextIfLightweight(model, maxTextLength);
       if (text === null) {
           objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, []);
           return;
@@ -2809,7 +2837,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.onMouseDown?.((event: any) => {
           const browserEvent = event?.event;
-          syncModifierState(browserEvent || null);
           const targetPosition = normalizeEditorPosition(event?.target?.position);
           if (!browserEvent || !targetPosition) {
               return;
