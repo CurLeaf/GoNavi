@@ -67,6 +67,49 @@ const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => 
 
 const shouldEnterPlsqlDeclareBlock = (text: string, tokenEnd: number): boolean => Boolean(nextSqlSignificantToken(text, tokenEnd));
 
+const nextSqlSignificantTokenSpan = (text: string, position: number): { token: string; end: number } => {
+  const index = skipSqlWhitespaceAndComments(text, position);
+  if (index >= text.length || !isSqlIdentifierStart(text[index])) {
+    return { token: '', end: index };
+  }
+  let end = index + 1;
+  while (end < text.length && isSqlIdentifierPart(text[end])) end += 1;
+  return { token: text.slice(index, end).toLowerCase(), end };
+};
+
+const isCreateRoutineHeaderPrefix = (text: string): boolean => {
+  let current = nextSqlSignificantTokenSpan(text, 0);
+  if (current.token !== 'create') return false;
+
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  if (current.token === 'or') {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+    if (current.token !== 'replace') return false;
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  while (['editionable', 'noneditionable'].includes(current.token)) {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  return current.token === 'procedure' || current.token === 'function';
+};
+
+const shouldEnterPlsqlCreateRoutineBlock = (
+  text: string,
+  statementStart: number,
+  token: string,
+  tokenEnd: number,
+): boolean => {
+  if (token !== 'is' && token !== 'as') return false;
+  const nextChar = nextSqlSignificantChar(text, tokenEnd);
+  if (!nextChar) return false;
+  if (token === 'as' && (nextChar === '$' || nextChar === "'" || nextChar === '"')) {
+    return false;
+  }
+  return isCreateRoutineHeaderPrefix(text.slice(statementStart, tokenEnd - token.length));
+};
+
 const isPlsqlControlEnd = (text: string, tokenEnd: number): boolean => (
   ['if', 'loop', 'case'].includes(nextSqlSignificantToken(text, tokenEnd))
 );
@@ -206,6 +249,10 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         plsqlDepth++;
         justClosedPLSQLBlock = false;
       } else if (token === 'declare' && shouldEnterPlsqlDeclareBlock(text, tokenEnd)) {
+        plsqlDepth++;
+        plsqlDeclareBeginSkips++;
+        justClosedPLSQLBlock = false;
+      } else if (plsqlDepth === 0 && shouldEnterPlsqlCreateRoutineBlock(text, statementStart, token, tokenEnd)) {
         plsqlDepth++;
         plsqlDeclareBeginSkips++;
         justClosedPLSQLBlock = false;

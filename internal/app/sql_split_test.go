@@ -66,6 +66,27 @@ func TestSplitSQLStatements_DollarQuoting(t *testing.T) {
 	}
 }
 
+func TestSplitSQLStatements_PostgresCreateFunctionDollarQuoting(t *testing.T) {
+	input := `CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$
+BEGIN
+    PERFORM refresh_now();
+END;
+$$ LANGUAGE plpgsql;
+SELECT 2;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$
+BEGIN
+    PERFORM refresh_now();
+END;
+$$ LANGUAGE plpgsql`,
+		"SELECT 2",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_FullWidthSemicolon(t *testing.T) {
 	input := "SELECT 1；SELECT 2"
 	got := splitSQLStatements(input)
@@ -147,6 +168,41 @@ SELECT 1 FROM dual;`
 BEGIN
     SELECT COUNT(*) INTO v_count FROM t_memcard_reg;
     UPDATE t_memcard_reg SET CARDLEVEL = v_count WHERE MEMCARDNO = '8032277312';
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OracleCreateProcedureBlock(t *testing.T) {
+	input := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,
+    out_acceptno OUT t_accept_h.acceptno%TYPE
+) IS
+    v_busno t_tally_accept_h.busno%TYPE;
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+    IF v_count > 0 THEN
+        out_acceptno := p_tallyacceptno;
+    END IF;
+END;
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,
+    out_acceptno OUT t_accept_h.acceptno%TYPE
+) IS
+    v_busno t_tally_accept_h.busno%TYPE;
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+    IF v_count > 0 THEN
+        out_acceptno := p_tallyacceptno;
+    END IF;
 END;`,
 		"SELECT 1 FROM dual",
 	}

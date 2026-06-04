@@ -6,7 +6,7 @@ import "strings"
 // 正确处理单引号/双引号/反引号字符串、行注释（-- / #）、块注释（/* */）、
 // PostgreSQL/Kingbase 的 $$...$$ dollar-quoting，以及 Oracle PL/SQL 匿名块，
 // 避免在这些上下文中错误拆分。
-// 同时支持 SQL 标准的转义单引号（两个连续单引号 '' 表示字面量引号）。
+// 同时支持 SQL 标准的转义单引号（两个连续单引号 ” 表示字面量引号）。
 func splitSQLStatements(sql string) []string {
 	text := strings.ReplaceAll(sql, "\r\n", "\n")
 	var statements []string
@@ -126,6 +126,10 @@ func splitSQLStatements(sql string) []string {
 				plsqlDepth++
 				justClosedPLSQLBlock = false
 			} else if token == "declare" && shouldEnterPLSQLDeclareBlock(text, tokenEnd) {
+				plsqlDepth++
+				plsqlDeclareBeginSkips++
+				justClosedPLSQLBlock = false
+			} else if plsqlDepth == 0 && shouldEnterPLSQLCreateRoutineBlock(text, cur.String(), token, tokenEnd) {
 				plsqlDepth++
 				plsqlDeclareBeginSkips++
 				justClosedPLSQLBlock = false
@@ -297,10 +301,10 @@ func isPLSQLBlockStatement(stmt string) bool {
 	if token == "declare" {
 		return shouldEnterPLSQLDeclareBlock(text, len("declare"))
 	}
-	if token != "begin" {
-		return false
+	if token == "begin" {
+		return shouldEnterPLSQLBlock(text, len("begin"))
 	}
-	return shouldEnterPLSQLBlock(text, len("begin"))
+	return isCreateRoutineHeaderPrefix(text)
 }
 
 func shouldEnterPLSQLDeclareBlock(text string, tokenEnd int) bool {
@@ -314,6 +318,54 @@ func isPLSQLControlEnd(text string, tokenEnd int) bool {
 	default:
 		return false
 	}
+}
+
+func isCreateRoutineHeaderPrefix(text string) bool {
+	currentToken, currentEnd := nextSQLSignificantTokenSpan(text, 0)
+	if currentToken != "create" {
+		return false
+	}
+
+	currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	if currentToken == "or" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+		if currentToken != "replace" {
+			return false
+		}
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	for currentToken == "editionable" || currentToken == "noneditionable" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	return currentToken == "procedure" || currentToken == "function"
+}
+
+func nextSQLSignificantTokenSpan(text string, pos int) (string, int) {
+	i := skipSQLWhitespaceAndComments(text, pos)
+	if i >= len(text) || !isSQLIdentifierStart(text[i]) {
+		return "", i
+	}
+	end := i + 1
+	for end < len(text) && isSQLIdentifierPart(text[end]) {
+		end++
+	}
+	return strings.ToLower(text[i:end]), end
+}
+
+func shouldEnterPLSQLCreateRoutineBlock(text string, currentStatementPrefix string, token string, tokenEnd int) bool {
+	if token != "is" && token != "as" {
+		return false
+	}
+	nextChar := nextSQLSignificantByte(text, tokenEnd)
+	if nextChar == 0 {
+		return false
+	}
+	if token == "as" && (nextChar == '$' || nextChar == '\'' || nextChar == '"') {
+		return false
+	}
+	return isCreateRoutineHeaderPrefix(currentStatementPrefix)
 }
 
 // parseSQLDollarTag 解析 PostgreSQL/Kingbase 的 dollar-quoting 标签。

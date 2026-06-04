@@ -146,6 +146,10 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 				s.plsqlDepth++
 				s.declareSkips++
 				s.closedPLSQL = false
+			} else if s.plsqlDepth == 0 && shouldEnterPLSQLCreateRoutineBlock(text, s.cur.String(), token, tokenEnd) {
+				s.plsqlDepth++
+				s.declareSkips++
+				s.closedPLSQL = false
 			} else if token == "end" && s.plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
 				s.plsqlDepth--
 				if s.declareSkips > s.plsqlDepth {
@@ -289,7 +293,7 @@ func isIncompleteSQLDollarTag(s string) bool {
 
 func shouldDeferPLSQLKeywordInStream(text string, tokenStart int, tokenEnd int, token string) bool {
 	switch token {
-	case "begin", "declare", "end":
+	case "begin", "declare", "end", "create", "or", "replace", "editionable", "noneditionable", "procedure", "function", "is", "as":
 	default:
 		return false
 	}
@@ -314,7 +318,7 @@ func shouldDeferPLSQLKeywordPrefixInStream(text string, tokenStart int, tokenEnd
 	if tokenEnd < len(text) {
 		return false
 	}
-	for _, keyword := range []string{"begin", "declare", "end"} {
+	for _, keyword := range []string{"begin", "declare", "end", "create", "or", "replace", "editionable", "noneditionable", "procedure", "function", "is", "as"} {
 		if strings.HasPrefix(keyword, token) && token != keyword {
 			if tokenStart > 0 && isSQLIdentifierPart(text[tokenStart-1]) {
 				return false

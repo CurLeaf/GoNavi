@@ -268,6 +268,52 @@ END;`
 	}
 }
 
+func TestDBQueryMultiKeepsOracleCreateProcedureAsSingleStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,
+    out_acceptno OUT t_accept_h.acceptno%TYPE
+) IS
+    v_busno t_tally_accept_h.busno%TYPE;
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+    IF v_count > 0 THEN
+        out_acceptno := p_tallyacceptno;
+    END IF;
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-create-procedure-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected CREATE PROCEDURE to skip batch path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != query {
+		t.Fatalf("expected CREATE PROCEDURE to stay intact, got %q", fakeDB.execQueries[0])
+	}
+}
+
 var _ db.BatchWriteExecer = (*fakeBatchWriteDB)(nil)
 var _ db.SessionExecerProvider = (*fakeBatchWriteDB)(nil)
 var _ db.QueryMessageExecer = (*fakeBatchWriteDB)(nil)
