@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor from './MonacoEditor';
 import { Button, Spin, Alert } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
@@ -42,12 +42,23 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [triggerDefinition, setTriggerDefinition] = useState<string>('');
+    const [openingObjectEdit, setOpeningObjectEdit] = useState(false);
+    const isMountedRef = useRef(true);
+    const loadedDefinitionKeyRef = useRef('');
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
     const addTab = useStore(state => state.addTab);
     const setActiveContext = useStore(state => state.setActiveContext);
     const darkMode = theme === 'dark';
+    const objectIdentityKey = [
+        tab.connectionId,
+        tab.dbName,
+        tab.type,
+        tab.triggerName,
+        tab.triggerTableName,
+        tab.schemaName,
+    ].map((item) => String(item || '')).join('||');
 
     // 透明 Monaco Editor 主题由 MonacoEditor 包装组件按需注册（含 stickyScroll 不透明背景）
 
@@ -242,79 +253,98 @@ LIMIT 1`];
         }
     };
 
-    useEffect(() => {
-        const loadTriggerDefinition = async () => {
-            setLoading(true);
-            setError(null);
+    const loadTriggerDefinition = async (): Promise<{ success: boolean; definition?: string; error?: string }> => {
+        const conn = connections.find(c => c.id === tab.connectionId);
+        if (!conn) {
+            return { success: false, error: '未找到数据库连接' };
+        }
 
-            const conn = connections.find(c => c.id === tab.connectionId);
-            if (!conn) {
-                setError('未找到数据库连接');
-                setLoading(false);
-                return;
+        const triggerName = tab.triggerName || '';
+        const dbName = tab.dbName || '';
+
+        if (!triggerName) {
+            return { success: false, error: '触发器名称为空' };
+        }
+
+        const dialect = getMetadataDialect(conn);
+        const queries = buildShowTriggerQueries(dialect, triggerName, dbName);
+        const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
+
+        if (!queries.length || String(queries[0] || '').startsWith('--')) {
+            return { success: true, definition: String(queries[0] || '-- 暂不支持该数据库类型的触发器定义查看') };
+        }
+
+        try {
+            const config = {
+                ...conn.config,
+                port: Number(conn.config.port),
+                password: conn.config.password || '',
+                database: conn.config.database || '',
+                useSSH: conn.config.useSSH || false,
+                ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
+            };
+
+            const result = await runQueryCandidates(config, dbName, queries);
+
+            if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                return { success: true, definition: extractTriggerDefinition(dialect, result.data) };
             }
 
-            const triggerName = tab.triggerName || '';
-            const dbName = tab.dbName || '';
-
-            if (!triggerName) {
-                setError('触发器名称为空');
-                setLoading(false);
-                return;
-            }
-
-            const dialect = getMetadataDialect(conn);
-            const queries = buildShowTriggerQueries(dialect, triggerName, dbName);
-            const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
-
-            if (!queries.length || String(queries[0] || '').startsWith('--')) {
-                setTriggerDefinition(String(queries[0] || '-- 暂不支持该数据库类型的触发器定义查看'));
-                setLoading(false);
-                return;
-            }
-
-            try {
-                const config = {
-                    ...conn.config,
-                    port: Number(conn.config.port),
-                    password: conn.config.password || '',
-                    database: conn.config.database || '',
-                    useSSH: conn.config.useSSH || false,
-                    ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
-                };
-
-                const result = await runQueryCandidates(config, dbName, queries);
-
-                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                    const definition = extractTriggerDefinition(dialect, result.data);
-                    setTriggerDefinition(definition);
-                    return;
-                }
-
-                if (result.success) {
-                    if (sphinxLike) {
-                        const version = await getVersionHint(config, dbName);
-                        const versionText = version ? `（版本: ${version}）` : '';
-                        setTriggerDefinition(`-- 当前 Sphinx 实例${versionText}未返回触发器定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`);
-                        return;
-                    }
-                    setTriggerDefinition('-- 未找到触发器定义');
-                } else if (sphinxLike) {
+            if (result.success) {
+                if (sphinxLike) {
                     const version = await getVersionHint(config, dbName);
                     const versionText = version ? `（版本: ${version}）` : '';
-                    setTriggerDefinition(`-- 当前 Sphinx 实例${versionText}不支持触发器定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`);
-                } else {
-                    setError(result.message || '查询触发器定义失败');
+                    return {
+                        success: true,
+                        definition: `-- 当前 Sphinx 实例${versionText}未返回触发器定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`
+                    };
                 }
-            } catch (e: any) {
-                setError('查询触发器定义失败: ' + (e?.message || String(e)));
-            } finally {
-                setLoading(false);
+                return { success: true, definition: '-- 未找到触发器定义' };
             }
+
+            if (sphinxLike) {
+                const version = await getVersionHint(config, dbName);
+                const versionText = version ? `（版本: ${version}）` : '';
+                return {
+                    success: true,
+                    definition: `-- 当前 Sphinx 实例${versionText}不支持触发器定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`
+                };
+            }
+
+            return { success: false, error: result.message || '查询触发器定义失败' };
+        } catch (e: any) {
+            return { success: false, error: '查询触发器定义失败: ' + (e?.message || String(e)) };
+        }
+    };
+
+    useEffect(() => {
+        let cancelled = false;
+        const syncTriggerDefinition = async () => {
+            setLoading(true);
+            setError(null);
+            const result = await loadTriggerDefinition();
+            if (cancelled) {
+                return;
+            }
+            if (result.success) {
+                loadedDefinitionKeyRef.current = objectIdentityKey;
+                setTriggerDefinition(String(result.definition || ''));
+            } else {
+                setError(result.error || '查询触发器定义失败');
+            }
+            setLoading(false);
         };
 
-        loadTriggerDefinition();
-    }, [tab.connectionId, tab.dbName, tab.triggerName, connections]);
+        syncTriggerDefinition();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [tab.connectionId, tab.dbName, tab.triggerName, connections, objectIdentityKey]);
+
+    useEffect(() => () => {
+        isMountedRef.current = false;
+    }, []);
 
     if (loading) {
         return (
@@ -324,7 +354,10 @@ LIMIT 1`];
         );
     }
 
-    if (error) {
+    const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? triggerDefinition : '';
+    const hasDefinition = String(displayedDefinition || '').trim() !== '';
+
+    if (error && !hasDefinition) {
         return (
             <div style={{ padding: 16 }}>
                 <Alert type="error" message="加载失败" description={error} showIcon />
@@ -334,17 +367,36 @@ LIMIT 1`];
 
     const triggerName = String(tab.triggerName || '').trim();
     const dbName = String(tab.dbName || '').trim();
-    const openObjectEditQuery = () => {
-        if (!triggerName) return;
-        setActiveContext({ connectionId: tab.connectionId, dbName });
-        addTab({
-            id: `query-edit-trigger-${tab.connectionId}-${dbName}-${Date.now()}`,
-            title: `修改触发器: ${triggerName}`,
-            type: 'query',
-            connectionId: tab.connectionId,
-            dbName,
-            query: buildEditableTriggerSql(triggerName, triggerDefinition),
-        });
+    const openObjectEditQuery = async () => {
+        if (!triggerName || openingObjectEdit) return;
+        setOpeningObjectEdit(true);
+        setError(null);
+        try {
+            const result = await loadTriggerDefinition();
+            if (!isMountedRef.current) {
+                return;
+            }
+            if (!result.success) {
+                setError(result.error || '查询触发器定义失败');
+                return;
+            }
+            const latestDefinition = String(result.definition || '');
+            loadedDefinitionKeyRef.current = objectIdentityKey;
+            setTriggerDefinition(latestDefinition);
+            setActiveContext({ connectionId: tab.connectionId, dbName });
+            addTab({
+                id: `query-edit-trigger-${tab.connectionId}-${dbName}-${Date.now()}`,
+                title: `修改触发器: ${triggerName}`,
+                type: 'query',
+                connectionId: tab.connectionId,
+                dbName,
+                query: buildEditableTriggerSql(triggerName, latestDefinition),
+            });
+        } finally {
+            if (isMountedRef.current) {
+                setOpeningObjectEdit(false);
+            }
+        }
     };
 
     return (
@@ -354,16 +406,21 @@ LIMIT 1`];
                     <strong>触发器: </strong>{tab.triggerName}
                     {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
                 </div>
-                <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!triggerName}>
+                <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!triggerName} loading={openingObjectEdit}>
                     对象修改
                 </Button>
             </div>
+            {error && hasDefinition && (
+                <div style={{ padding: '8px 16px 0' }}>
+                    <Alert type="warning" message="刷新最新定义失败" description={error} showIcon />
+                </div>
+            )}
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
                     height="100%"
                     language="sql"
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
-                    value={triggerDefinition}
+                    value={displayedDefinition}
                     options={{
                         readOnly: true,
                         minimap: { enabled: false },

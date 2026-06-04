@@ -3320,6 +3320,49 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('keeps DuckDB qualified table query results writable when primary key metadata arrives', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_locator_1_id'], rows: [{ NAME: 'launch', __gonavi_locator_1_id: 7 }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'name', key: '' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'SELECT NAME FROM main.events' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'main', 'main.events');
+    expect(dataGridState.latestProps?.tableName).toBe('main.events');
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['id']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['id'],
+      valueColumns: ['__gonavi_locator_1_id'],
+      hiddenColumns: ['__gonavi_locator_1_id'],
+      writableColumns: {
+        NAME: 'name',
+      },
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('"id" AS "__gonavi_locator_1_id"');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it.each([
     'mysql',
     'mariadb',

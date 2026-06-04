@@ -317,6 +317,28 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('keeps DuckDB table preview writable when primary key metadata arrives for a qualified table name', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'name', key: '' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-pri', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['id']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['id'],
+      valueColumns: ['id'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
   it('invalidates a stale known total when table data grows after a manual refresh', async () => {
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';

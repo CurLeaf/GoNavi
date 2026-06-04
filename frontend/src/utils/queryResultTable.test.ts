@@ -48,6 +48,15 @@ describe('extractQueryResultTableRef', () => {
       });
   });
 
+  it('keeps DuckDB schema-qualified table names for metadata lookups', () => {
+    expect(extractQueryResultTableRef('SELECT * FROM main.events LIMIT 500', 'duckdb', 'main'))
+      .toEqual({
+        tableName: 'main.events',
+        metadataDbName: 'main',
+        metadataTableName: 'main.events',
+      });
+  });
+
   it('does not mark join results as editable table refs', () => {
     expect(extractQueryResultTableRef('SELECT * FROM users u JOIN orders o ON u.id = o.user_id', 'oracle', 'APP'))
       .toBeUndefined();

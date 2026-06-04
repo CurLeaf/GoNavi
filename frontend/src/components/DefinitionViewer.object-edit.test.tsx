@@ -88,6 +88,7 @@ describe('DefinitionViewer object edit entry', () => {
     storeState.setActiveContext.mockReset();
     storeState.theme = 'light';
     storeState.connections[0].config.type = 'postgres';
+    backendApp.DBQuery.mockReset();
     backendApp.DBQuery.mockResolvedValue({
       success: true,
       data: [{ view_definition: 'SELECT id, name FROM users' }],
@@ -212,5 +213,102 @@ describe('DefinitionViewer object edit entry', () => {
     expect(query).toContain('CREATE OR REPLACE PROCEDURE proc_tally2accept(p_id IN NUMBER)');
     expect(query).toContain('v_count PLS_INTEGER;');
     expect(query).toContain('SELECT COUNT(*) INTO v_count FROM dual;');
+  });
+
+  it('reloads the latest object definition before opening object edit', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ view_definition: 'SELECT id FROM users' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ view_definition: 'SELECT id, name, updated_at FROM users' }],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab()} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(backendApp.DBQuery).toHaveBeenCalledTimes(2);
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('SELECT id, name, updated_at FROM users;');
+    expect(query).not.toContain('SELECT id FROM users;');
+
+    const editor = renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0];
+    expect(String(editor.children.join(''))).toContain('SELECT id, name, updated_at FROM users');
+  });
+
+  it('keeps the current definition visible when refresh for object edit fails', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ view_definition: 'SELECT id, name FROM users' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        message: 'network down',
+        data: [],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab()} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(storeState.addTab).not.toHaveBeenCalled();
+    expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('SELECT id, name FROM users');
+    expect(findButtonText(renderer.root)).toContain('刷新最新定义失败');
+    expect(findButtonText(renderer.root)).toContain('network down');
+  });
+
+  it('does not keep the previous object definition when switching objects and the new load fails', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ view_definition: 'SELECT id, name FROM users' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        message: 'load failed',
+        data: [],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab()} />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      renderer.update(<DefinitionViewer tab={createTab({
+        id: 'view-def-conn-1-main-reporting.archived_users',
+        title: '视图: reporting.archived_users',
+        viewName: 'reporting.archived_users',
+      })} />);
+      await flushPromises();
+    });
+
+    expect(findButtonText(renderer.root)).toContain('加载失败');
+    expect(findButtonText(renderer.root)).toContain('load failed');
+    expect(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')).toHaveLength(0);
+    expect(findButtonText(renderer.root)).not.toContain('SELECT id, name FROM users');
   });
 });

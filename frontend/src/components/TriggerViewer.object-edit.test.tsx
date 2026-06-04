@@ -86,6 +86,7 @@ describe('TriggerViewer object edit entry', () => {
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.connections[0].config.type = 'postgres';
+    backendApp.DBQuery.mockReset();
     backendApp.DBQuery.mockResolvedValue({
       success: true,
       data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT ON audit.users EXECUTE FUNCTION audit.audit_users();' }],
@@ -169,5 +170,103 @@ describe('TriggerViewer object edit entry', () => {
     expect(query).toContain('BEFORE UPDATE ON audit.users');
     expect(query).toContain(':NEW.updated_at := SYSDATE;');
     expect(query).not.toContain('请补全 CREATE TRIGGER 语句');
+  });
+
+  it('reloads the latest trigger definition before opening object edit', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT ON audit.users EXECUTE FUNCTION audit.audit_users();' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT OR UPDATE ON audit.users EXECUTE FUNCTION audit.audit_users_v2();' }],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(backendApp.DBQuery).toHaveBeenCalledTimes(2);
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE TRIGGER users_bi BEFORE INSERT OR UPDATE ON audit.users');
+    expect(query).toContain('audit.audit_users_v2()');
+
+    const editor = renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0];
+    expect(String(editor.children.join(''))).toContain('CREATE TRIGGER users_bi BEFORE INSERT OR UPDATE ON audit.users');
+  });
+
+  it('keeps the current trigger definition visible when refresh for object edit fails', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT ON audit.users EXECUTE FUNCTION audit.audit_users();' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        message: 'refresh failed',
+        data: [],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(storeState.addTab).not.toHaveBeenCalled();
+    expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('CREATE TRIGGER users_bi BEFORE INSERT ON audit.users');
+    expect(findButtonText(renderer.root)).toContain('刷新最新定义失败');
+    expect(findButtonText(renderer.root)).toContain('refresh failed');
+  });
+
+  it('does not keep the previous trigger definition when switching objects and the new load fails', async () => {
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT ON audit.users EXECUTE FUNCTION audit.audit_users();' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        message: 'load failed',
+        data: [],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      renderer.update(<TriggerViewer tab={{
+        ...tab,
+        id: 'trigger-conn-1-main-audit.users_bu',
+        title: '触发器: audit.users_bu',
+        triggerName: 'audit.users_bu',
+      }} />);
+      await flushPromises();
+    });
+
+    expect(findButtonText(renderer.root)).toContain('加载失败');
+    expect(findButtonText(renderer.root)).toContain('load failed');
+    expect(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')).toHaveLength(0);
+    expect(findButtonText(renderer.root)).not.toContain('CREATE TRIGGER users_bi BEFORE INSERT');
   });
 });
