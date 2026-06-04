@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Editor from './MonacoEditor';
-import { Spin, Alert } from 'antd';
+import { Button, Spin, Alert } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
@@ -29,6 +30,30 @@ const normalizeMySQLViewDDL = (rawDefinition: unknown): string => {
     return `${normalized};`;
 };
 
+const ensureSqlStatementTerminator = (sql: string): string => {
+    const normalized = String(sql || '').trim();
+    if (!normalized) return '';
+    return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
+};
+
+const buildEditableDefinitionSql = (tab: TabData, definition: string, objectLabel: string, objectName: string): string => {
+    const normalizedDefinition = String(definition || '').trim();
+    const header = `-- 修改${objectLabel}: ${objectName}\n-- 请确认语法兼容当前数据库后执行\n`;
+    if (!normalizedDefinition) {
+        return `${header}-- 当前对象定义为空，请补全 ${objectName} 的 DDL 后执行\n`;
+    }
+
+    if (/^\s*--\s*(未找到|暂不支持|当前)/.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (tab.type === 'view-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        return `${header}CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+};
+
 const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -36,6 +61,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
+    const addTab = useStore(state => state.addTab);
+    const setActiveContext = useStore(state => state.setActiveContext);
     const darkMode = theme === 'dark';
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
@@ -516,6 +543,22 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const objectName = tab.type === 'view-def'
         ? tab.viewName
         : (tab.type === 'event-def' ? tab.eventName : tab.routineName);
+    const normalizedObjectName = String(objectName || '').trim();
+
+    const openObjectEditQuery = () => {
+        if (!normalizedObjectName) return;
+        const dbName = String(tab.dbName || '').trim();
+        const query = buildEditableDefinitionSql(tab, definition, objectLabel, normalizedObjectName);
+        setActiveContext({ connectionId: tab.connectionId, dbName });
+        addTab({
+            id: `query-edit-object-${tab.connectionId}-${dbName}-${Date.now()}`,
+            title: `修改${objectLabel}: ${normalizedObjectName}`,
+            type: 'query',
+            connectionId: tab.connectionId,
+            dbName,
+            query,
+        });
+    };
 
     if (loading) {
         return (
@@ -535,10 +578,15 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0' }}>
-                <strong>{objectLabel}: </strong>{objectName}
-                {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
-                {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>类型: {tab.routineType}</span>}
+            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <strong>{objectLabel}: </strong>{objectName}
+                    {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
+                    {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>类型: {tab.routineType}</span>}
+                </div>
+                <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!normalizedObjectName}>
+                    对象修改
+                </Button>
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Editor from './MonacoEditor';
-import { Spin, Alert } from 'antd';
+import { Button, Spin, Alert } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
@@ -12,6 +13,25 @@ interface TriggerViewerProps {
     tab: TabData;
 }
 
+const ensureSqlStatementTerminator = (sql: string): string => {
+    const normalized = String(sql || '').trim();
+    if (!normalized) return '';
+    return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
+};
+
+const buildEditableTriggerSql = (triggerName: string, triggerDefinition: string): string => {
+    const normalizedName = String(triggerName || '').trim();
+    const normalizedDefinition = String(triggerDefinition || '').trim();
+    const header = `-- 修改触发器: ${normalizedName}\n-- 请确认语法兼容当前数据库后执行\n`;
+    if (!normalizedDefinition) {
+        return `${header}-- 当前触发器定义为空，请补全 CREATE TRIGGER 语句后执行\n`;
+    }
+    if (/^\s*create\s+(?:or\s+replace\s+)?trigger\b/i.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+    return `${header}-- 当前数据源仅返回触发器定义片段，请补全 CREATE TRIGGER 语句后执行\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+};
+
 const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -19,6 +39,8 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
+    const addTab = useStore(state => state.addTab);
+    const setActiveContext = useStore(state => state.setActiveContext);
     const darkMode = theme === 'dark';
 
     // 透明 Monaco Editor 主题由 MonacoEditor 包装组件按需注册（含 stickyScroll 不透明背景）
@@ -304,11 +326,31 @@ LIMIT 1`];
         );
     }
 
+    const triggerName = String(tab.triggerName || '').trim();
+    const dbName = String(tab.dbName || '').trim();
+    const openObjectEditQuery = () => {
+        if (!triggerName) return;
+        setActiveContext({ connectionId: tab.connectionId, dbName });
+        addTab({
+            id: `query-edit-trigger-${tab.connectionId}-${dbName}-${Date.now()}`,
+            title: `修改触发器: ${triggerName}`,
+            type: 'query',
+            connectionId: tab.connectionId,
+            dbName,
+            query: buildEditableTriggerSql(triggerName, triggerDefinition),
+        });
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0' }}>
-                <strong>触发器: </strong>{tab.triggerName}
-                {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
+            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <strong>触发器: </strong>{tab.triggerName}
+                    {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
+                </div>
+                <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!triggerName}>
+                    对象修改
+                </Button>
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
