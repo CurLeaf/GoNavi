@@ -3346,7 +3346,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	bundleURLs := []string{}
 	if !forceSourceBuild {
 		downloadURLs = resolveOptionalDriverAgentDownloadURLs(definition, downloadURL, selectedVersion)
-		if !restrictToExplicitArtifact {
+		if shouldUseOptionalDriverBundleFallback(driverType, restrictToExplicitArtifact, len(downloadURLs)) {
 			bundleURLs = resolveOptionalDriverBundleDownloadURLs()
 		}
 	}
@@ -3499,6 +3499,16 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	}
 	parts = append(parts, "本地构建失败："+strings.TrimSpace(buildErr.Error()))
 	return "", "", errors.New(strings.Join(parts, "；"))
+}
+
+func shouldUseOptionalDriverBundleFallback(driverType string, restrictToExplicitArtifact bool, directURLCount int) bool {
+	if restrictToExplicitArtifact {
+		return false
+	}
+	if shouldSkipDirectOptionalDriverDownloads(driverType) {
+		return true
+	}
+	return directURLCount == 0
 }
 
 func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlText string, executablePath string) (string, error) {

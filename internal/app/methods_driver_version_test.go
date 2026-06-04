@@ -212,6 +212,21 @@ func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *tes
 	}
 }
 
+func TestShouldUseOptionalDriverBundleFallbackSkipsWhenDirectAssetExists(t *testing.T) {
+	if shouldUseOptionalDriverBundleFallback("sqlserver", false, 1) {
+		t.Fatal("expected published single-file driver asset to avoid 497MB bundle fallback")
+	}
+}
+
+func TestShouldUseOptionalDriverBundleFallbackKeepsBundleWhenDirectAssetMissing(t *testing.T) {
+	if !shouldUseOptionalDriverBundleFallback("dameng", false, 0) {
+		t.Fatal("expected missing single-file driver asset to keep bundle fallback")
+	}
+	if shouldUseOptionalDriverBundleFallback("dameng", true, 0) {
+		t.Fatal("expected explicit version artifact installs to skip bundle fallback")
+	}
+}
+
 func TestResolveDriverInstallVersionUsesPinnedVersionForBuiltinActivateURL(t *testing.T) {
 	definition, ok := resolveDriverDefinition("sqlserver")
 	if !ok {
