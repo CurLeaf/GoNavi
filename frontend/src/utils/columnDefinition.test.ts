@@ -28,4 +28,11 @@ describe('columnDefinition metadata normalization', () => {
       comment: '更新时间',
     });
   });
+
+  it('maps boolean primary and unique metadata aliases to GoNavi keys', () => {
+    expect(getColumnDefinitionKey({ column_name: 'id', isPrimary: true })).toBe('PRI');
+    expect(getColumnDefinitionKey({ column_name: 'id', primary_key: 't' })).toBe('PRI');
+    expect(getColumnDefinitionKey({ column_name: 'email', is_unique: 'yes' })).toBe('UNI');
+    expect(getColumnDefinitionKey({ column_name: 'id', column_key: 'primary key' })).toBe('PRI');
+  });
 });

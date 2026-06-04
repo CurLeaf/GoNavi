@@ -137,6 +137,26 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('enables table preview editing when primary key metadata uses boolean aliases', async () => {
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ column_name: 'ID', isPrimary: true }, { column_name: 'NAME' }],
+    });
+
+    const renderer = await renderAndReload();
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['ID']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['ID'],
+      valueColumns: ['ID'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
   it('uses a unique index when the table has no primary key', async () => {
     backendApp.DBGetColumns.mockResolvedValue({
       success: true,

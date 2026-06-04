@@ -75,7 +75,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 			return schema, table
 		}
 		if table != "" {
-			return "public", table
+			return "", table
 		}
 	}
 
@@ -99,10 +99,34 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 
 	switch dbType {
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
-		// PG/金仓/瀚高/海量：dbName 在 UI 里是"数据库"，schema 需从 tableName 或使用默认 public。
+		// PG/金仓/瀚高/海量：dbName 在 UI 里是"数据库"，未限定 schema 的普通导出/DDL 路径沿用 public。
 		return "public", rawTable
 	default:
 		// MySQL：dbName 表示数据库；Oracle/达梦：dbName 表示 schema/owner。
 		return rawDB, rawTable
+	}
+}
+
+func normalizeMetadataSchemaAndTable(config connection.ConnectionConfig, dbName string, tableName string) (string, string) {
+	schema, table := normalizeSchemaAndTable(config, dbName, tableName)
+	switch resolveDDLDBType(config) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+		rawTable := strings.TrimSpace(tableName)
+		if rawTable == "" {
+			return schema, table
+		}
+		parsedSchema, parsedTable := db.SplitSQLQualifiedName(rawTable)
+		if parsedTable != "" {
+			if parsedSchema != "" {
+				return parsedSchema, parsedTable
+			}
+			return "", parsedTable
+		}
+		if strings.Contains(rawTable, ".") {
+			return schema, table
+		}
+		return "", table
+	default:
+		return schema, table
 	}
 }

@@ -10,12 +10,16 @@ import (
 )
 
 type fakeMetadataRetryDB struct {
-	columns     []connection.ColumnDefinition
-	indexes     []connection.IndexDefinition
-	columnsErr  error
-	indexesErr  error
-	columnCalls int
-	indexCalls  int
+	columns      []connection.ColumnDefinition
+	indexes      []connection.IndexDefinition
+	columnsErr   error
+	indexesErr   error
+	columnCalls  int
+	indexCalls   int
+	columnSchema string
+	columnTable  string
+	indexSchema  string
+	indexTable   string
 }
 
 func (f *fakeMetadataRetryDB) Connect(config connection.ConnectionConfig) error { return nil }
@@ -34,6 +38,8 @@ func (f *fakeMetadataRetryDB) GetCreateStatement(dbName, tableName string) (stri
 }
 func (f *fakeMetadataRetryDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	f.columnCalls++
+	f.columnSchema = dbName
+	f.columnTable = tableName
 	if f.columnsErr != nil {
 		return nil, f.columnsErr
 	}
@@ -44,6 +50,8 @@ func (f *fakeMetadataRetryDB) GetAllColumns(dbName string) ([]connection.ColumnD
 }
 func (f *fakeMetadataRetryDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	f.indexCalls++
+	f.indexSchema = dbName
+	f.indexTable = tableName
 	if f.indexesErr != nil {
 		return nil, f.indexesErr
 	}
@@ -109,6 +117,110 @@ func TestDBGetColumnsRetriesAfterCachedConnectionRefresh(t *testing.T) {
 	}
 	if len(columns) != 2 || columns[0].Key != "PRI" {
 		t.Fatalf("unexpected columns after retry: %#v", columns)
+	}
+}
+
+func TestDBGetColumnsUsesSearchPathForPostgresPureTableMetadata(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{{Name: "id", Key: "PRI"}},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetColumns(connection.ConnectionConfig{
+		Type:     "postgres",
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Database: "demo_db",
+	}, "demo_db", "users")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetColumns success, got failure: %s", result.Message)
+	}
+	if dbInst.columnSchema != "" || dbInst.columnTable != "users" {
+		t.Fatalf("expected postgres pure table metadata to pass empty schema/users, got %q.%q", dbInst.columnSchema, dbInst.columnTable)
+	}
+}
+
+func TestDBGetIndexesUsesSearchPathForPostgresPureTableMetadata(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		indexes: []connection.IndexDefinition{{Name: "users_email_key", ColumnName: "email", NonUnique: 0}},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetIndexes(connection.ConnectionConfig{
+		Type:     "postgres",
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Database: "demo_db",
+	}, "demo_db", "users")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetIndexes success, got failure: %s", result.Message)
+	}
+	if dbInst.indexSchema != "" || dbInst.indexTable != "users" {
+		t.Fatalf("expected postgres pure table index metadata to pass empty schema/users, got %q.%q", dbInst.indexSchema, dbInst.indexTable)
+	}
+}
+
+func TestDBGetColumnsKeepsDatabaseForMySQLMetadata(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{{Name: "id", Key: "PRI"}},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetColumns(connection.ConnectionConfig{
+		Type: "mysql",
+		Host: "127.0.0.1",
+		Port: 3306,
+		User: "root",
+	}, "demo_db", "users")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetColumns success, got failure: %s", result.Message)
+	}
+	if dbInst.columnSchema != "demo_db" || dbInst.columnTable != "users" {
+		t.Fatalf("expected mysql metadata to pass database/table, got %q.%q", dbInst.columnSchema, dbInst.columnTable)
 	}
 }
 

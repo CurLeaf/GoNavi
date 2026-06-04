@@ -1723,6 +1723,46 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('uses snake_case unique index metadata for query result row locators', async () => {
+    storeState.connections[0].config.type = 'kingbase';
+    storeState.connections[0].config.database = 'KINGBASE';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_locator_1_EMAIL'], rows: [{ NAME: 'old-name', __gonavi_locator_1_EMAIL: 'a@example.com' }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ column_name: 'EMAIL' }, { column_name: 'NAME' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValueOnce({
+      success: true,
+      data: [{ index_name: 'users_email_key', column_name: 'EMAIL', is_unique: 't', seq_in_index: '1', index_type: 'btree' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'KINGBASE', query: 'SELECT NAME FROM users' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'unique-key',
+      columns: ['EMAIL'],
+      valueColumns: ['__gonavi_locator_1_EMAIL'],
+      hiddenColumns: ['__gonavi_locator_1_EMAIL'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it('uses hidden Oracle ROWID for query results without primary or unique keys', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';

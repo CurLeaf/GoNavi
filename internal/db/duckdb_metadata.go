@@ -200,6 +200,12 @@ func normalizeDuckDBObjectPath(dbName string, tableName string) duckDBObjectPath
 	case 2:
 		if rawDB != "" {
 			dbParts := splitDuckDBQualifiedName(rawDB)
+			if len(dbParts) == 1 && (strings.EqualFold(dbParts[0], "main") || strings.EqualFold(dbParts[0], "memory")) {
+				return duckDBObjectPath{
+					Schema: normalizeDuckDBIdentifier(parts[0]),
+					Object: normalizeDuckDBIdentifier(parts[1]),
+				}
+			}
 			if len(dbParts) == 1 {
 				return duckDBObjectPath{
 					Catalog: normalizeDuckDBIdentifier(dbParts[0]),

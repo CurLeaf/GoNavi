@@ -1444,7 +1444,7 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	columns, err := dbInst.GetColumns(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
@@ -1473,7 +1473,7 @@ func (a *App) DBGetIndexes(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	indexes, err := dbInst.GetIndexes(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {

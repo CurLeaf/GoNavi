@@ -108,6 +108,20 @@ describe('buildCopyInsertSQL', () => {
     ]);
   });
 
+  it('accepts non-MySQL index metadata aliases when resolving safe unique locators', () => {
+    expect(resolveUniqueKeyGroupsFromIndexes([
+      { index_name: 'events_slug_key', column_name: 'slug', is_unique: 't', seq_in_index: '1', index_type: 'BTREE' } as any,
+      { INDEX_NAME: 'events_tenant_code_key', COLUMN_NAME: 'code', UNIQUE: true, COLUMN_POSITION: 2 } as any,
+      { INDEX_NAME: 'events_tenant_code_key', COLUMN_NAME: 'tenant_id', UNIQUE: true, COLUMN_POSITION: 1 } as any,
+      { indexName: 'events_ext_key', columnName: 'external_id', indexType: 'UNIQUE' } as any,
+      { index_name: 'idx_note', column_name: 'note', non_unique: '1' } as any,
+    ])).toEqual([
+      ['slug'],
+      ['tenant_id', 'code'],
+      ['external_id'],
+    ]);
+  });
+
   it('builds UPDATE SQL with a primary-key WHERE clause and keeps literal formatting aligned with INSERT', () => {
     const result = buildCopyUpdateSQL({
       dbType: 'mysql',

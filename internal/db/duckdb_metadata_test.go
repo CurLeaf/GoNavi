@@ -226,6 +226,20 @@ func TestNormalizeDuckDBObjectPath_PreservesCatalogSchemaAndQuotedDots(t *testin
 	}
 }
 
+func TestNormalizeDuckDBObjectPath_DoesNotTreatMainDatabaseAsExternalCatalog(t *testing.T) {
+	t.Parallel()
+
+	path := normalizeDuckDBObjectPath("main", "main.events")
+	if path.Catalog != "" || path.Schema != "main" || path.Object != "events" {
+		t.Fatalf("unexpected duckdb main path: %+v", path)
+	}
+
+	memoryPath := normalizeDuckDBObjectPath("memory", "main.events")
+	if memoryPath.Catalog != "" || memoryPath.Schema != "main" || memoryPath.Object != "events" {
+		t.Fatalf("unexpected duckdb memory path: %+v", memoryPath)
+	}
+}
+
 func TestParseDuckDBExpressionList_KeepsQuotedExpressionsIntact(t *testing.T) {
 	t.Parallel()
 

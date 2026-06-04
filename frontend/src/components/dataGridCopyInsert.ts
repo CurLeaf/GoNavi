@@ -407,13 +407,59 @@ export const resolveUniqueKeyGroupsFromIndexes = (indexes: IndexDefinition[] | u
     columns: Array<{ columnName: string; seqInIndex: number; order: number }>;
   };
 
+  const readIndexProp = (index: unknown, keys: string[]): unknown => {
+    const source = index as Record<string, unknown> | null | undefined;
+    if (!source || typeof source !== 'object') return undefined;
+    for (const key of keys) {
+      if (source[key] !== undefined && source[key] !== null) return source[key];
+    }
+    for (const [sourceKey, raw] of Object.entries(source)) {
+      if (keys.some((key) => sourceKey.toLowerCase() === key.toLowerCase())) {
+        return raw;
+      }
+    }
+    return undefined;
+  };
+
+  const readIndexText = (index: unknown, keys: string[]): string => {
+    const raw = readIndexProp(index, keys);
+    return raw === undefined || raw === null ? '' : String(raw).trim();
+  };
+
+  const readIndexBool = (index: unknown, keys: string[]): boolean | undefined => {
+    const raw = readIndexProp(index, keys);
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'number') return raw !== 0;
+    const text = String(raw).trim().toLowerCase();
+    if (['1', 't', 'true', 'y', 'yes', 'unique'].includes(text)) return true;
+    if (['0', 'f', 'false', 'n', 'no', 'nonunique', 'non-unique'].includes(text)) return false;
+    return undefined;
+  };
+
+  const isUniqueIndex = (index: unknown): boolean => {
+    const nonUniqueRaw = readIndexProp(index, ['nonUnique', 'NonUnique', 'non_unique', 'NON_UNIQUE', 'Non_unique']);
+    if (nonUniqueRaw !== undefined && nonUniqueRaw !== null) {
+      if (typeof nonUniqueRaw === 'number') return nonUniqueRaw === 0;
+      const text = String(nonUniqueRaw).trim().toLowerCase();
+      if (['0', 'false', 'f', 'no', 'n'].includes(text)) return true;
+      if (['1', 'true', 't', 'yes', 'y'].includes(text)) return false;
+    }
+    const unique = readIndexBool(index, ['isUnique', 'is_unique', 'IS_UNIQUE', 'unique', 'UNIQUE']);
+    if (unique !== undefined) return unique;
+    const uniqueness = readIndexText(index, ['uniqueness', 'UNIQUENESS']);
+    if (uniqueness.toLowerCase() === 'unique') return true;
+    const indexType = readIndexText(index, ['indexType', 'IndexType', 'index_type', 'INDEX_TYPE']);
+    return indexType.toLowerCase() === 'unique';
+  };
+
   const buckets = new Map<string, IndexBucket>();
   (indexes || []).forEach((index, order) => {
-    if (index?.nonUnique !== 0) {
+    if (!isUniqueIndex(index)) {
       return;
     }
-    const name = String(index?.name || '').trim();
-    const columnName = String(index?.columnName || '').trim();
+    const name = readIndexText(index, ['name', 'Name', 'indexName', 'index_name', 'INDEX_NAME']);
+    const columnName = readIndexText(index, ['columnName', 'ColumnName', 'column_name', 'COLUMN_NAME']);
     if (!name || !columnName) {
       return;
     }
@@ -426,7 +472,9 @@ export const resolveUniqueKeyGroupsFromIndexes = (indexes: IndexDefinition[] | u
     }
     bucket.columns.push({
       columnName,
-      seqInIndex: Number.isFinite(Number(index?.seqInIndex)) ? Number(index.seqInIndex) : 0,
+      seqInIndex: Number.isFinite(Number(readIndexProp(index, ['seqInIndex', 'SeqInIndex', 'seq_in_index', 'SEQ_IN_INDEX', 'columnPosition', 'column_position'])))
+        ? Number(readIndexProp(index, ['seqInIndex', 'SeqInIndex', 'seq_in_index', 'SEQ_IN_INDEX', 'columnPosition', 'column_position']))
+        : 0,
       order,
     });
   });
