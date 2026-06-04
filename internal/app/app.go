@@ -36,6 +36,8 @@ const (
 var (
 	newDatabaseFunc                = db.NewDatabase
 	resolveDialConfigWithProxyFunc = resolveDialConfigWithProxy
+	driverRuntimeSupportStatusFunc = db.DriverRuntimeSupportStatus
+	verifyDriverAgentRevisionFunc  = verifyRuntimeOptionalDriverAgentRevision
 )
 
 type cachedDatabase struct {
@@ -556,13 +558,13 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		return nil, wrapConnectError(config, err)
 	}
 	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
-	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
+	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
 		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
-	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+	if revisionErr := verifyDriverAgentRevisionFunc(effectiveConfig); revisionErr != nil {
 		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
 	}
 
@@ -600,7 +602,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			strings.TrimSpace(effectiveConfig.Type), rawDSN, normalizedDSN, effectiveConfig.Timeout, forcePing, shortKey)
 	}
 
-	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
+	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
 		}
@@ -677,7 +679,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
 		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
 	}
-	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+	if revisionErr := verifyDriverAgentRevisionFunc(effectiveConfig); revisionErr != nil {
 		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
 	}
 

@@ -2,7 +2,9 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -239,9 +241,13 @@ func TestDBGetColumnsKeepsDatabaseForMySQLMetadata(t *testing.T) {
 func TestDBGetColumnsKeepsDuckDBQualifiedTableMetadata(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	originalDriverRuntimeSupportStatusFunc := driverRuntimeSupportStatusFunc
+	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc
 	t.Cleanup(func() {
 		newDatabaseFunc = originalNewDatabaseFunc
 		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		driverRuntimeSupportStatusFunc = originalDriverRuntimeSupportStatusFunc
+		verifyDriverAgentRevisionFunc = originalVerifyDriverAgentRevisionFunc
 	})
 
 	dbInst := &fakeMetadataRetryDB{
@@ -252,6 +258,12 @@ func TestDBGetColumnsKeepsDuckDBQualifiedTableMetadata(t *testing.T) {
 	}
 	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
 		return raw, nil
+	}
+	driverRuntimeSupportStatusFunc = func(driverType string) (bool, string) {
+		return true, ""
+	}
+	verifyDriverAgentRevisionFunc = func(config connection.ConnectionConfig) error {
+		return nil
 	}
 
 	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
@@ -324,9 +336,13 @@ func TestDBGetIndexesRetriesAfterCachedConnectionRefresh(t *testing.T) {
 func TestDBGetIndexesKeepsDuckDBQualifiedTableMetadata(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	originalDriverRuntimeSupportStatusFunc := driverRuntimeSupportStatusFunc
+	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc
 	t.Cleanup(func() {
 		newDatabaseFunc = originalNewDatabaseFunc
 		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		driverRuntimeSupportStatusFunc = originalDriverRuntimeSupportStatusFunc
+		verifyDriverAgentRevisionFunc = originalVerifyDriverAgentRevisionFunc
 	})
 
 	dbInst := &fakeMetadataRetryDB{
@@ -337,6 +353,12 @@ func TestDBGetIndexesKeepsDuckDBQualifiedTableMetadata(t *testing.T) {
 	}
 	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
 		return raw, nil
+	}
+	driverRuntimeSupportStatusFunc = func(driverType string) (bool, string) {
+		return true, ""
+	}
+	verifyDriverAgentRevisionFunc = func(config connection.ConnectionConfig) error {
+		return nil
 	}
 
 	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
@@ -354,7 +376,6 @@ func TestDBGetIndexesKeepsDuckDBQualifiedTableMetadata(t *testing.T) {
 }
 
 func TestDuckDBMetadataEndpointsReturnPrimaryKeyForQualifiedTableName(t *testing.T) {
-	t.Parallel()
 	requireDuckDBOptionalDriverRuntime(t)
 
 	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
@@ -421,5 +442,150 @@ CREATE UNIQUE INDEX idx_events_name ON main.events(name);
 	}
 	if !foundPrimary {
 		t.Fatalf("expected DuckDB primary key index metadata, got %#v", indexes)
+	}
+}
+
+func TestDuckDBDefinitionQueriesReloadLatestDDLForObjectEditFlow(t *testing.T) {
+	requireDuckDBOptionalDriverRuntime(t)
+
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "duckdb-definition-reload.duckdb")
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "duckdb",
+		Host: dbPath,
+	}
+	t.Cleanup(func() {
+		app.invalidateCachedDatabase(config, nil)
+	})
+
+	createResult := app.DBQuery(config, "main", `
+CREATE VIEW main.active_users AS
+SELECT id FROM (VALUES (1), (2)) AS users(id);
+
+CREATE OR REPLACE MACRO main.add_one(x) AS x + 1;
+`)
+	if !createResult.Success {
+		t.Fatalf("expected DuckDB setup success, got failure: %s", createResult.Message)
+	}
+
+	viewDefinitionBefore := app.DBQuery(config, "main", `
+SELECT view_definition
+FROM information_schema.views
+WHERE table_schema = 'main' AND table_name = 'active_users'
+LIMIT 1`)
+	if !viewDefinitionBefore.Success {
+		t.Fatalf("expected initial view definition query success, got failure: %s", viewDefinitionBefore.Message)
+	}
+	viewRowsBefore, ok := viewDefinitionBefore.Data.([]map[string]interface{})
+	if !ok || len(viewRowsBefore) != 1 {
+		t.Fatalf("expected one initial view definition row, got %#v", viewDefinitionBefore.Data)
+	}
+	viewTextBefore := strings.TrimSpace(stringValueIgnoreCase(viewRowsBefore[0], "view_definition"))
+	if !strings.Contains(viewTextBefore, "SELECT id FROM") || !strings.Contains(viewTextBefore, "VALUES (1), (2)") {
+		t.Fatalf("unexpected initial view definition: %q", viewTextBefore)
+	}
+
+	routineDefinitionBefore := app.DBQuery(config, "main", `
+SELECT schema_name, function_name, parameters, macro_definition
+FROM duckdb_functions()
+WHERE internal = false
+  AND lower(function_type) = 'macro'
+  AND schema_name = 'main'
+  AND function_name = 'add_one'
+LIMIT 1`)
+	if !routineDefinitionBefore.Success {
+		t.Fatalf("expected initial routine definition query success, got failure: %s", routineDefinitionBefore.Message)
+	}
+	routineRowsBefore, ok := routineDefinitionBefore.Data.([]map[string]interface{})
+	if !ok || len(routineRowsBefore) != 1 {
+		t.Fatalf("expected one initial routine definition row, got %#v", routineDefinitionBefore.Data)
+	}
+	routineTextBefore := strings.TrimSpace(stringValueIgnoreCase(routineRowsBefore[0], "macro_definition"))
+	if !strings.Contains(routineTextBefore, "x + 1") {
+		t.Fatalf("unexpected initial routine definition: %q", routineTextBefore)
+	}
+
+	replaceResult := app.DBQuery(config, "main", `
+CREATE OR REPLACE VIEW main.active_users AS
+SELECT id, id * 10 AS score FROM (VALUES (1), (2)) AS users(id);
+
+CREATE OR REPLACE MACRO main.add_one(x) AS x + 2;
+`)
+	if !replaceResult.Success {
+		t.Fatalf("expected DuckDB replace success, got failure: %s", replaceResult.Message)
+	}
+
+	viewDefinitionAfter := app.DBQuery(config, "main", `
+SELECT view_definition
+FROM information_schema.views
+WHERE table_schema = 'main' AND table_name = 'active_users'
+LIMIT 1`)
+	if !viewDefinitionAfter.Success {
+		t.Fatalf("expected latest view definition query success, got failure: %s", viewDefinitionAfter.Message)
+	}
+	viewRowsAfter, ok := viewDefinitionAfter.Data.([]map[string]interface{})
+	if !ok || len(viewRowsAfter) != 1 {
+		t.Fatalf("expected one latest view definition row, got %#v", viewDefinitionAfter.Data)
+	}
+	viewTextAfter := strings.TrimSpace(stringValueIgnoreCase(viewRowsAfter[0], "view_definition"))
+	if !strings.Contains(viewTextAfter, "score") || !strings.Contains(viewTextAfter, "10") {
+		t.Fatalf("expected latest view definition, got %q", viewTextAfter)
+	}
+	if viewTextAfter == viewTextBefore {
+		t.Fatalf("expected latest view definition to differ from initial definition, got %q", viewTextAfter)
+	}
+
+	routineDefinitionAfter := app.DBQuery(config, "main", `
+SELECT schema_name, function_name, parameters, macro_definition
+FROM duckdb_functions()
+WHERE internal = false
+  AND lower(function_type) = 'macro'
+  AND schema_name = 'main'
+  AND function_name = 'add_one'
+LIMIT 1`)
+	if !routineDefinitionAfter.Success {
+		t.Fatalf("expected latest routine definition query success, got failure: %s", routineDefinitionAfter.Message)
+	}
+	routineRowsAfter, ok := routineDefinitionAfter.Data.([]map[string]interface{})
+	if !ok || len(routineRowsAfter) != 1 {
+		t.Fatalf("expected one latest routine definition row, got %#v", routineDefinitionAfter.Data)
+	}
+	routineTextAfter := strings.TrimSpace(stringValueIgnoreCase(routineRowsAfter[0], "macro_definition"))
+	if !strings.Contains(routineTextAfter, "x + 2") {
+		t.Fatalf("expected latest routine definition, got %q", routineTextAfter)
+	}
+	if routineTextAfter == routineTextBefore {
+		t.Fatalf("expected latest routine definition to differ from initial definition, got %q", routineTextAfter)
+	}
+}
+
+func stringValueIgnoreCase(row map[string]interface{}, key string) string {
+	for candidate, value := range row {
+		if strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(key)) {
+			return toStringValue(value)
+		}
+	}
+	return ""
+}
+
+func toStringValue(value interface{}) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		if value == nil {
+			return ""
+		}
+		return fmt.Sprint(value)
 	}
 }
