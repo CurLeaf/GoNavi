@@ -436,6 +436,11 @@ jobs:
             bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
           done
 
+          bash ./tools/verify-driver-agent-revisions.sh \
+            --assets-dir drivers \
+            --platform "$TARGET_PLATFORM" \
+            --drivers "$CHANGED_DRIVER_AGENTS"
+
       # macOS Packaging
       - name: Package macOS DMG
         if: contains(matrix.platform, 'darwin')

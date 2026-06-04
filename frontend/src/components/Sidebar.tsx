@@ -491,7 +491,7 @@ export const filterV2ExplorerTreeByKind = (
 
   const visit = (node: TreeNode): TreeNode | null => {
     if (node.type === 'external-sql-root') {
-      return node;
+      return null;
     }
     const groupKey = String(node?.dataRef?.groupKey || '');
     if (node.type === 'object-group') {

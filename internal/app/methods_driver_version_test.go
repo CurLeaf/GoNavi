@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"GoNavi-Wails/internal/db"
 )
 
 func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
@@ -724,6 +726,95 @@ func TestDownloadOptionalDriverAgentFromBundleSharesConcurrentDownload(t *testin
 	}
 	if got := atomic.LoadInt32(&requestCount); got != 1 {
 		t.Fatalf("expected one shared bundle download, got %d requests", got)
+	}
+}
+
+func TestEnsureOptionalDriverAgentBinaryFallsBackAfterStaleDownloadRevision(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	originalGoBinaryLookPath := goBinaryLookPath
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+		goBinaryLookPath = originalGoBinaryLookPath
+	})
+
+	tmpDir := t.TempDir()
+	staleAgent := filepath.Join(tmpDir, "stale-driver-agent")
+	if runtime.GOOS == "windows" {
+		staleAgent += ".exe"
+	}
+	writeSelfExecutable(t, staleAgent)
+
+	staleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, staleAgent)
+	}))
+	defer staleServer.Close()
+
+	projectRoot := filepath.Join(tmpDir, "project")
+	if err := os.MkdirAll(filepath.Join(projectRoot, "cmd", "optional-driver-agent"), 0o755); err != nil {
+		t.Fatalf("create project root failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte("module GoNavi-Wails\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "cmd", "optional-driver-agent", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write optional agent main failed: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd failed: %v", err)
+	}
+	if err := os.Chdir(projectRoot); err != nil {
+		t.Fatalf("chdir project root failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatalf("restore cwd failed: %v", err)
+		}
+	})
+	goScript := filepath.Join(tmpDir, "fake-go")
+	if runtime.GOOS == "windows" {
+		goScript += ".bat"
+	}
+	if runtime.GOOS == "windows" {
+		if err := os.WriteFile(goScript, []byte("@echo off\r\nset out=\r\n:loop\r\nif \"%1\"==\"\" goto done\r\nif \"%1\"==\"-o\" (set out=%2& shift& shift& goto loop)\r\nshift\r\ngoto loop\r\n:done\r\ncopy /Y \"%GONAVI_TEST_BUILT_AGENT%\" \"%out%\" >nul\r\n"), 0o755); err != nil {
+			t.Fatalf("write fake go script failed: %v", err)
+		}
+	} else {
+		if err := os.WriteFile(goScript, []byte("#!/usr/bin/env sh\nout=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=\"$2\"; shift 2; continue; fi\n  shift\ndone\ncp \"$GONAVI_TEST_BUILT_AGENT\" \"$out\"\n"), 0o755); err != nil {
+			t.Fatalf("write fake go script failed: %v", err)
+		}
+	}
+	goBinaryLookPath = func(file string) (string, error) {
+		return goScript, nil
+	}
+	t.Setenv("GONAVI_TEST_BUILT_AGENT", staleAgent)
+
+	probeCount := 0
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		probeCount++
+		revision := "src-stale-agent"
+		if probeCount > 1 {
+			revision = db.OptionalDriverAgentRevision(driverType)
+		}
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: revision,
+		}, nil
+	}
+
+	targetPath := filepath.Join(tmpDir, optionalDriverExecutableBaseName("sqlserver"))
+	source, _, err := ensureOptionalDriverAgentBinary(
+		nil,
+		driverDefinition{Type: "sqlserver", Name: "SQL Server"},
+		targetPath,
+		staleServer.URL,
+		"1.9.6",
+	)
+	if err != nil {
+		t.Fatalf("expected stale direct download to fall back to source build, got %v", err)
+	}
+	if source != "local://go-build/sqlserver-driver-agent" {
+		t.Fatalf("expected source build fallback, got %q", source)
 	}
 }
 

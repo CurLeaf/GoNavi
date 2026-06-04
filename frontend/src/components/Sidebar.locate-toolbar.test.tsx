@@ -1096,6 +1096,43 @@ describe('Sidebar locate toolbar', () => {
     expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node) => node.key)).toEqual(['conn-main-events']);
   });
 
+  it('hides external SQL roots from v2 object kind filters', () => {
+    const tree = [
+      {
+        title: 'front_end_sys',
+        key: 'conn-main',
+        type: 'database' as const,
+        children: [
+          {
+            title: '表',
+            key: 'conn-main-tables',
+            type: 'object-group' as const,
+            dataRef: { groupKey: 'tables' },
+            children: [{ title: 'users', key: 'users', type: 'table' as const }],
+          },
+        ],
+      },
+      {
+        title: '外部 SQL 目录',
+        key: 'external-sql-root',
+        type: 'external-sql-root' as const,
+        children: [
+          {
+            title: 'scripts',
+            key: 'external-sql-folder:scripts',
+            type: 'external-sql-folder' as const,
+          },
+        ],
+      },
+    ];
+
+    expect(filterV2ExplorerTreeByKind(tree, 'all').map((node) => node.key)).toEqual([
+      'conn-main',
+      'external-sql-root',
+    ]);
+    expect(filterV2ExplorerTreeByKind(tree, 'tables').map((node) => node.key)).toEqual(['conn-main']);
+  });
+
   it('adds rename to the saved query context menu', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 

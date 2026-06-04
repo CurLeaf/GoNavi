@@ -3374,6 +3374,19 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 	if a != nil {
 		a.emitDriverDownloadProgress(driverType, "downloading", 10, 100, planMessage)
 	}
+	validateInstalledCandidateRevision := func(source string) error {
+		if _, revisionErr := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion); revisionErr != nil {
+			_ = os.Remove(executablePath)
+			for _, supportName := range optionalDriverSupportFileNames(driverType) {
+				_ = os.Remove(filepath.Join(filepath.Dir(executablePath), supportName))
+			}
+			if strings.TrimSpace(source) != "" {
+				return fmt.Errorf("%s: %w", source, revisionErr)
+			}
+			return revisionErr
+		}
+		return nil
+	}
 	if !skipReuseCandidate {
 		if sourcePath, ok := findExistingOptionalDriverAgentCandidate(definition, executablePath); ok {
 			if copyErr := copyAgentBinary(sourcePath, executablePath); copyErr != nil {
@@ -3386,6 +3399,9 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 			hash, hashErr := hashFileSHA256(executablePath)
 			if hashErr != nil {
 				return "", "", fmt.Errorf("计算预置 %s 驱动代理摘要失败：%w", displayName, hashErr)
+			}
+			if revisionErr := validateInstalledCandidateRevision(sourcePath); revisionErr != nil {
+				return "", "", fmt.Errorf("预置 %s 驱动代理 revision 校验失败：%w", displayName, revisionErr)
 			}
 			return "file://" + sourcePath, hash, nil
 		}
@@ -3421,6 +3437,11 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				}
 				hash, dlErr := downloadOptionalDriverAgentBinary(a, definition, candidateURL, executablePath)
 				if dlErr == nil {
+					if revisionErr := validateInstalledCandidateRevision(candidateURL); revisionErr != nil {
+						logger.Warnf("预编译 %s 驱动代理 revision 校验失败，url=%s err=%v", displayName, candidateURL, revisionErr)
+						downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", candidateURL, strings.TrimSpace(revisionErr.Error())))
+						continue
+					}
 					return candidateURL, hash, nil
 				}
 				logger.Warnf("下载预编译 %s 驱动代理失败，url=%s err=%v", displayName, candidateURL, dlErr)
@@ -3439,6 +3460,11 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 				}
 				source, hash, bundleErr := downloadOptionalDriverAgentFromBundle(a, definition, bundleURL, executablePath)
 				if bundleErr == nil {
+					if revisionErr := validateInstalledCandidateRevision(source); revisionErr != nil {
+						logger.Warnf("驱动总包 %s 代理 revision 校验失败，source=%s err=%v", displayName, source, revisionErr)
+						downloadErrs = append(downloadErrs, fmt.Sprintf("%s: %s", source, strings.TrimSpace(revisionErr.Error())))
+						continue
+					}
 					return source, hash, nil
 				}
 				logger.Warnf("从驱动总包提取 %s 驱动代理失败，url=%s err=%v", displayName, bundleURL, bundleErr)
@@ -3847,7 +3873,7 @@ func shouldPreferSourceBuildBeforeDownloadForBuildType(buildType string, driverT
 
 func shouldRequireSourceBuildBeforeDownloadForBuildType(buildType string, driverType string, selectedVersion string) bool {
 	_ = selectedVersion
-	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+	if normalizeDriverType(driverType) == "duckdb" {
 		return false
 	}
 	return shouldPreferDevelopmentDriverAgentSourceBuild(buildType, driverType)
