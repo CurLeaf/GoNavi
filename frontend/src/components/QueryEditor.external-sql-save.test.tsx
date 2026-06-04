@@ -1575,6 +1575,32 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.success).toHaveBeenCalledWith('SQL 文件已导出！');
   });
 
+  it('shows Chinese semantic meaning for SQL execution errors', async () => {
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: false,
+      message: 'pq: syntax error at or near "from"',
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * from' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const pageText = textContent(renderer!.root);
+    expect(pageText).toContain('执行失败');
+    expect(pageText).toContain('中文语义：SQL 语法错误');
+    expect(pageText).toContain('处理建议：');
+    expect(pageText).toContain('原始错误：pq: syntax error at or near "from"');
+  });
+
   it('automatically appends hidden primary key locator columns for editable query results', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';

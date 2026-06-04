@@ -17,6 +17,7 @@ import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSql
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart } from '../utils/sql';
+import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
 import { resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
@@ -4031,7 +4032,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, sql, queryId);
           if (!res?.success) {
-              message.error('刷新失败: ' + (res?.message || '未知错误'));
+              message.error('刷新失败: ' + formatSqlExecutionError(res?.message || '未知错误'));
               return;
           }
 
@@ -4073,7 +4074,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : rs
           ));
       } catch (err: any) {
-          message.error('刷新失败: ' + (err?.message || '未知错误'));
+          message.error('刷新失败: ' + formatSqlExecutionError(err?.message || err || '未知错误'));
       } finally {
           setLoading(false);
       }
@@ -4172,7 +4173,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
                         const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                        setExecutionError(prefix + shellConvert.error);
+                        setExecutionError(formatSqlExecutionError(shellConvert.error, { prefix }));
                         setResultSets([]);
                         setActiveResultKey('');
                         return;
@@ -4211,7 +4212,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 });
                 if (!res.success) {
                     const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
-                    setExecutionError(prefix + res.message);
+                    setExecutionError(formatSqlExecutionError(res.message, { prefix }));
                     setResultSets([]);
                     setActiveResultKey('');
                     return;
@@ -4376,7 +4377,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     return;
                 }
 
-                setExecutionError(res.message);
+                setExecutionError(formatSqlExecutionError(res.message));
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -4513,7 +4514,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
         }
     } catch (e: any) {
-        message.error("Error executing query: " + e.message);
+        const formattedError = formatSqlExecutionError(e?.message || e);
+        message.error("执行失败: " + formattedError);
         addSqlLog({
             id: `log-${Date.now()}-error`,
             timestamp: Date.now(),
@@ -4523,6 +4525,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             message: e.message,
             dbName: currentDb
         });
+        setExecutionError(formattedError);
         setResultSets([]);
         setActiveResultKey('');
     } finally {
