@@ -309,6 +309,111 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds schema objects when tree nodes use unqualified names or different case', () => {
+    const viewTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-view-reporting.active_users',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'reporting.active_users',
+      schemaName: 'reporting',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const routineTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-routine-reporting.refresh_stats',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'reporting.refresh_stats',
+      schemaName: 'reporting',
+      objectGroup: 'routines',
+    }, { groupBySchema: true });
+
+    const triggerTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-trigger-audit.users_bi-audit.users',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'audit.users_bi',
+      schemaName: 'audit',
+      objectGroup: 'triggers',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-main',
+            dataRef: { id: 'conn-1', dbName: 'main' },
+            children: [
+              {
+                key: 'conn-1-main-schema-REPORTING',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-REPORTING-views',
+                    children: [
+                      {
+                        key: 'conn-1-main-view-ACTIVE_USERS',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'main', viewName: 'ACTIVE_USERS', schemaName: 'REPORTING' },
+                      },
+                    ],
+                  },
+                  {
+                    key: 'conn-1-main-schema-REPORTING-routines',
+                    children: [
+                      {
+                        key: 'conn-1-main-routine-REFRESH_STATS',
+                        type: 'routine',
+                        dataRef: { id: 'conn-1', dbName: 'main', routineName: 'REFRESH_STATS', schemaName: 'REPORTING' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-main-schema-AUDIT',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-AUDIT-triggers',
+                    children: [
+                      {
+                        key: 'conn-1-main-trigger-USERS_BI-AUDIT.USERS',
+                        type: 'db-trigger',
+                        dataRef: { id: 'conn-1', dbName: 'main', triggerName: 'USERS_BI', tableName: 'AUDIT.USERS', schemaName: 'AUDIT' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, viewTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-REPORTING',
+      'conn-1-main-schema-REPORTING-views',
+      'conn-1-main-view-ACTIVE_USERS',
+    ]);
+    expect(findSidebarNodePathForLocate(tree, routineTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-REPORTING',
+      'conn-1-main-schema-REPORTING-routines',
+      'conn-1-main-routine-REFRESH_STATS',
+    ]);
+    expect(findSidebarNodePathForLocate(tree, triggerTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-AUDIT',
+      'conn-1-main-schema-AUDIT-triggers',
+      'conn-1-main-trigger-USERS_BI-AUDIT.USERS',
+    ]);
+  });
+
   it('finds external SQL file paths from loaded tree data', () => {
     const target = resolveSidebarLocateTarget({
       filePath: 'C:\\Users\\me\\sql\\report.sql',

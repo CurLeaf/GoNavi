@@ -1,3 +1,5 @@
+import { splitQualifiedNameLast } from './qualifiedName';
+
 export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines' | 'externalSqlFiles';
 export type SidebarLocateDatabaseObjectGroup = Exclude<SidebarLocateObjectGroup, 'externalSqlFiles'>;
 
@@ -66,11 +68,10 @@ const normalizeExternalSQLLocatePath = (value: unknown): string => toTrimmedStri
 export const splitSidebarQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
   const raw = toTrimmedString(qualifiedName);
   if (!raw) return { schemaName: '', objectName: '' };
-  const idx = raw.lastIndexOf('.');
-  if (idx <= 0 || idx >= raw.length - 1) return { schemaName: '', objectName: raw };
+  const parsed = splitQualifiedNameLast(raw);
   return {
-    schemaName: raw.substring(0, idx).trim(),
-    objectName: raw.substring(idx + 1).trim(),
+    schemaName: parsed.parentPath,
+    objectName: parsed.objectName,
   };
 };
 
@@ -251,16 +252,23 @@ export const findSidebarNodePathByKey = (
 const matchesLocateObjectName = (target: SidebarLocateTarget, nodeObjectName: string, nodeSchemaName: string): boolean => {
   const normalizedNodeName = toTrimmedString(nodeObjectName);
   if (!normalizedNodeName) return false;
-  if (normalizedNodeName === target.tableName) return true;
-
-  if (!target.schemaName) return false;
 
   const nodeParsed = splitSidebarQualifiedName(normalizedNodeName);
   const targetParsed = splitSidebarQualifiedName(target.tableName);
   const nodeObject = nodeParsed.objectName || normalizedNodeName;
   const targetObject = targetParsed.objectName || target.tableName;
   const resolvedNodeSchema = toTrimmedString(nodeSchemaName) || nodeParsed.schemaName;
-  return resolvedNodeSchema === target.schemaName && nodeObject === targetObject;
+  const resolvedTargetSchema = toTrimmedString(target.schemaName) || targetParsed.schemaName;
+  const normalize = (value: string): string => toTrimmedString(value).toLowerCase();
+
+  if (normalize(normalizedNodeName) === normalize(target.tableName)) return true;
+
+  if (!resolvedTargetSchema) {
+    return !resolvedNodeSchema && normalize(nodeObject) === normalize(targetObject);
+  }
+
+  return normalize(resolvedNodeSchema) === normalize(resolvedTargetSchema)
+    && normalize(nodeObject) === normalize(targetObject);
 };
 
 const matchesLocateObjectNode = (node: SidebarLocateTreeNodeLike, target: SidebarLocateTarget): boolean => {

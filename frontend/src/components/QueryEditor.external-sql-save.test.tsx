@@ -1079,6 +1079,13 @@ describe('QueryEditor external SQL save', () => {
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
   });
 
+  it('keeps query editor hyperlink decorations blue with a solid underline', () => {
+    const css = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
+
+    expect(css).toMatch(/\.gonavi-query-editor-link-hint\s*\{[^}]*color:\s*#1677ff\s*!important;[^}]*text-decoration:\s*underline;[^}]*text-decoration-style:\s*solid;[^}]*text-decoration-color:\s*currentColor;/s);
+    expect(css).toMatch(/body\[data-theme='dark'\]\s+\.gonavi-query-editor-link-hint\s*\{[^}]*color:\s*#69b1ff\s*!important;/s);
+  });
+
   it('opens a view tab on ctrl left click inside the editor', async () => {
     editorState.value = 'select * from reporting.active_users';
     autoFetchState.visible = true;
@@ -1209,6 +1216,24 @@ describe('QueryEditor external SQL save', () => {
       schemaName: 'reporting',
       sidebarLocateKey: 'conn-1-main-routine-reporting.refresh_stats',
     });
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+      detail: expect.objectContaining({
+        tabId: 'conn-1-main-trigger-audit.users_bi-audit.users',
+        triggerName: 'audit.users_bi',
+        schemaName: 'audit',
+        objectGroup: 'triggers',
+      }),
+    }));
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+      detail: expect.objectContaining({
+        tabId: 'conn-1-main-routine-reporting.refresh_stats',
+        routineName: 'reporting.refresh_stats',
+        schemaName: 'reporting',
+        objectGroup: 'routines',
+      }),
+    }));
   });
 
   it('switches current database on cmd left click for database identifiers', async () => {

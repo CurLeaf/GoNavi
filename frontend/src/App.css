@@ -649,9 +649,11 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
     }
 }
 .gonavi-query-editor-link-hint {
+  color: #1677ff !important;
   cursor: pointer;
   text-decoration: underline;
-  text-decoration-style: dashed;
+  text-decoration-style: solid;
+  text-decoration-color: currentColor;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
@@ -670,6 +672,10 @@ body[data-theme='light'] .redis-viewer-workbench .ant-radio-button-wrapper-check
 
 body[data-theme='dark'] .gonavi-query-editor-object-token {
   color: #7dd3fc;
+}
+
+body[data-theme='dark'] .gonavi-query-editor-link-hint {
+  color: #69b1ff !important;
 }
 
 body[data-theme='dark'] .gonavi-query-editor-column-token {
