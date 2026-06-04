@@ -116,6 +116,7 @@ sphinx:internal/db/mysql_impl.go|\
 sqlserver:internal/db/sqlserver_impl.go|\
 sqlite:internal/db/sqlite_impl.go|\
 duckdb:internal/db/duckdb_impl.go|\
+duckdb:internal/db/duckdb_metadata.go|\
 duckdb:internal/db/duckdb_driver_import.go|\
 duckdb:internal/db/duckdb_platform_supported.go|\
 duckdb:internal/db/duckdb_platform_unsupported.go|\

@@ -350,11 +350,19 @@ func parseDuckDBListValue(raw interface{}, normalize bool) []string {
 
 	rv := reflect.ValueOf(raw)
 	if rv.IsValid() && rv.Kind() != reflect.String && rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
-		return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+		values := parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+		if !normalize {
+			return normalizeDuckDBExpressionList(values)
+		}
+		return values
 	}
 	if rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) {
 		if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
-			return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+			values := parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+			if !normalize {
+				return normalizeDuckDBExpressionList(values)
+			}
+			return values
 		}
 		values := make([]string, 0, rv.Len())
 		for i := 0; i < rv.Len(); i++ {
@@ -366,7 +374,11 @@ func parseDuckDBListValue(raw interface{}, normalize bool) []string {
 		return normalizeDuckDBExpressionList(values)
 	}
 
-	return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+	values := parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+	if !normalize {
+		return normalizeDuckDBExpressionList(values)
+	}
+	return values
 }
 
 func normalizeDuckDBIdentifierEntries(values []string) []string {
@@ -388,6 +400,7 @@ func normalizeDuckDBExpressionList(values []string) []string {
 	normalized := make([]string, 0, len(values))
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
+		trimmed = normalizeDuckDBExpressionIdentifierLiteral(trimmed)
 		switch {
 		case trimmed == "":
 			continue
@@ -398,6 +411,34 @@ func normalizeDuckDBExpressionList(values []string) []string {
 		}
 	}
 	return normalized
+}
+
+func normalizeDuckDBExpressionIdentifierLiteral(raw string) string {
+	text := strings.TrimSpace(raw)
+	if len(text) < 2 || text[0] != '\'' || text[len(text)-1] != '\'' {
+		return text
+	}
+
+	inner := strings.TrimSpace(text[1 : len(text)-1])
+	inner = strings.ReplaceAll(inner, `''`, `'`)
+	inner = normalizeSQLIdentifierEscapes(inner)
+	if inner == "" {
+		return text
+	}
+	if strings.ContainsAny(inner, "() +-/*%") {
+		return text
+	}
+	if len(inner) >= 2 {
+		first := inner[0]
+		last := inner[len(inner)-1]
+		if (first == '"' && last == '"') || (first == '`' && last == '`') {
+			return inner
+		}
+	}
+	if strings.ContainsAny(inner, `"'`) {
+		return text
+	}
+	return inner
 }
 
 func parseDuckDBList(raw string, normalize bool) []string {

@@ -249,6 +249,20 @@ func TestParseDuckDBExpressionList_KeepsQuotedExpressionsIntact(t *testing.T) {
 	}
 }
 
+func TestParseDuckDBExpressionList_UnwrapsIdentifierLiterals(t *testing.T) {
+	t.Parallel()
+
+	parts := parseDuckDBExpressionList(`['"name"', '"tenant.id"', 'slug']`)
+	if len(parts) != 3 || parts[0] != "name" || parts[1] != "tenant.id" || parts[2] != "slug" {
+		t.Fatalf("unexpected expression list: %#v", parts)
+	}
+
+	exprParts := parseDuckDBExpressionList(`['lower("name")']`)
+	if len(exprParts) != 1 || exprParts[0] != `'lower("name")'` {
+		t.Fatalf("expression literal should be preserved: %#v", exprParts)
+	}
+}
+
 func containsAll(source string, needles ...string) bool {
 	for _, needle := range needles {
 		if !strings.Contains(source, needle) {

@@ -11,7 +11,7 @@ func init() {
 		"sphinx":        "src-a70c2cd4d223dac2",
 		"sqlserver":     "src-84553484c72e7253",
 		"sqlite":        "src-762863d48f653b89",
-		"duckdb":        "src-3e551d777ae96d8d",
+		"duckdb":        "src-df5d60ebb175bbbc",
 		"dameng":        "src-596bebeaa016fc74",
 		"kingbase":      "src-2e5a1337b0405c57",
 		"highgo":        "src-5a29a1d3685eb6b4",
