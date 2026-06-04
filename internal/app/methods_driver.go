@@ -3847,6 +3847,9 @@ func shouldPreferSourceBuildBeforeDownloadForBuildType(buildType string, driverT
 
 func shouldRequireSourceBuildBeforeDownloadForBuildType(buildType string, driverType string, selectedVersion string) bool {
 	_ = selectedVersion
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		return false
+	}
 	return shouldPreferDevelopmentDriverAgentSourceBuild(buildType, driverType)
 }
 

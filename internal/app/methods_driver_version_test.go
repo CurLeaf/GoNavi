@@ -515,8 +515,11 @@ func TestShouldPreferSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) 
 }
 
 func TestShouldRequireSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
-	if !shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
-		t.Fatal("expected development build to require local DuckDB driver-agent source build")
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build to allow DuckDB release bundle fallback after local build failure")
+	}
+	if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build to still prefer local DuckDB driver-agent source build before bundle fallback")
 	}
 	if !shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
 		t.Fatal("expected development build alias to require local driver-agent source build")

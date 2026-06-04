@@ -90,6 +90,52 @@ func TestBuildDuckDBColumnDefinitions_MarksPrimaryAndUniqueColumns(t *testing.T)
 	}
 }
 
+func TestBuildDuckDBColumnDefinitions_SupportsArrayConstraintColumns(t *testing.T) {
+	t.Parallel()
+
+	columns := buildDuckDBColumnDefinitions(
+		[]map[string]interface{}{
+			{
+				"column_name": "id",
+				"data_type":   "BIGINT",
+				"is_nullable": "NO",
+			},
+			{
+				"column_name": "tenant_id",
+				"data_type":   "BIGINT",
+				"is_nullable": "NO",
+			},
+			{
+				"column_name": "slug",
+				"data_type":   "VARCHAR",
+				"is_nullable": "NO",
+			},
+		},
+		[]map[string]interface{}{
+			{
+				"constraint_name":         "events_pkey",
+				"constraint_type":         "PRIMARY KEY",
+				"constraint_column_names": []interface{}{"id", "tenant_id"},
+			},
+			{
+				"constraint_name":         "events_slug_key",
+				"constraint_type":         "UNIQUE",
+				"constraint_column_names": []string{"slug"},
+			},
+		},
+	)
+
+	if len(columns) != 3 {
+		t.Fatalf("unexpected column count: %d", len(columns))
+	}
+	if columns[0].Key != "PRI" || columns[1].Key != "PRI" {
+		t.Fatalf("复合主键列未正确标记: %+v", columns)
+	}
+	if columns[2].Key != "UNI" {
+		t.Fatalf("唯一键列未正确标记: %+v", columns[2])
+	}
+}
+
 func TestBuildDuckDBIndexDefinitions_MergesConstraintsAndUniqueIndexes(t *testing.T) {
 	t.Parallel()
 
@@ -129,6 +175,40 @@ func TestBuildDuckDBIndexDefinitions_MergesConstraintsAndUniqueIndexes(t *testin
 	}
 	if indexes[3].Name != "idx_events_slug" || indexes[3].ColumnName != "slug" || indexes[3].NonUnique != 0 || indexes[3].IndexType != "INDEX" {
 		t.Fatalf("显式唯一索引映射异常: %+v", indexes[3])
+	}
+}
+
+func TestBuildDuckDBIndexDefinitions_SupportsArrayMetadataRows(t *testing.T) {
+	t.Parallel()
+
+	indexes := buildDuckDBIndexDefinitions(
+		[]map[string]interface{}{
+			{
+				"constraint_name":         "events_business_key",
+				"constraint_type":         "UNIQUE",
+				"constraint_column_names": []interface{}{"tenant_id", "slug"},
+			},
+		},
+		[]map[string]interface{}{
+			{
+				"index_name":  "idx_events_expr",
+				"is_unique":   true,
+				"expressions": []string{`lower("slug")`},
+			},
+		},
+	)
+
+	if len(indexes) != 3 {
+		t.Fatalf("unexpected index row count: %d", len(indexes))
+	}
+	if indexes[0].Name != "events_business_key" || indexes[0].ColumnName != "tenant_id" || indexes[0].SeqInIndex != 1 {
+		t.Fatalf("约束唯一索引首列映射异常: %+v", indexes[0])
+	}
+	if indexes[1].Name != "events_business_key" || indexes[1].ColumnName != "slug" || indexes[1].SeqInIndex != 2 {
+		t.Fatalf("约束唯一索引次列映射异常: %+v", indexes[1])
+	}
+	if indexes[2].Name != "idx_events_expr" || indexes[2].ColumnName != `lower("slug")` || indexes[2].NonUnique != 0 {
+		t.Fatalf("表达式唯一索引映射异常: %+v", indexes[2])
 	}
 }
 

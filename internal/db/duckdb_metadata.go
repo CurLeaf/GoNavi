@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"GoNavi-Wails/internal/connection"
@@ -67,7 +68,7 @@ func buildDuckDBColumnDefinitions(rows []map[string]interface{}, constraintRows 
 	uniqueColumns := make(map[string]struct{})
 
 	for _, row := range constraintRows {
-		columnNames := parseDuckDBIdentifierList(duckDBRowString(row, "constraint_column_names"))
+		columnNames := duckDBRowIdentifierList(row, "constraint_column_names")
 		switch strings.ToUpper(strings.TrimSpace(duckDBRowString(row, "constraint_type"))) {
 		case "PRIMARY KEY":
 			for _, columnName := range columnNames {
@@ -115,7 +116,7 @@ func buildDuckDBIndexDefinitions(constraintRows []map[string]interface{}, indexR
 	for _, row := range constraintRows {
 		name := strings.TrimSpace(duckDBRowString(row, "constraint_name"))
 		constraintType := strings.ToUpper(strings.TrimSpace(duckDBRowString(row, "constraint_type")))
-		columnNames := parseDuckDBIdentifierList(duckDBRowString(row, "constraint_column_names"))
+		columnNames := duckDBRowIdentifierList(row, "constraint_column_names")
 		if name == "" || len(columnNames) == 0 {
 			continue
 		}
@@ -132,7 +133,7 @@ func buildDuckDBIndexDefinitions(constraintRows []map[string]interface{}, indexR
 
 	for _, row := range indexRows {
 		name := strings.TrimSpace(duckDBRowString(row, "index_name"))
-		columnNames := parseDuckDBExpressionList(duckDBRowString(row, "expressions"))
+		columnNames := duckDBRowExpressionList(row, "expressions")
 		if name == "" || len(columnNames) == 0 {
 			continue
 		}
@@ -274,6 +275,18 @@ func duckDBRowString(row map[string]interface{}, keys ...string) string {
 	return ""
 }
 
+func duckDBRowValue(row map[string]interface{}, keys ...string) interface{} {
+	for _, key := range keys {
+		for rowKey, value := range row {
+			if !strings.EqualFold(rowKey, key) {
+				continue
+			}
+			return value
+		}
+	}
+	return nil
+}
+
 func duckDBRowBool(row map[string]interface{}, keys ...string) bool {
 	value := strings.TrimSpace(strings.ToLower(duckDBRowString(row, keys...)))
 	return value == "true" || value == "1" || value == "yes"
@@ -289,12 +302,80 @@ func duckDBRowInt(row map[string]interface{}, keys ...string) int {
 	return value
 }
 
+func duckDBRowIdentifierList(row map[string]interface{}, keys ...string) []string {
+	return parseDuckDBListValue(duckDBRowValue(row, keys...), true)
+}
+
+func duckDBRowExpressionList(row map[string]interface{}, keys ...string) []string {
+	return parseDuckDBListValue(duckDBRowValue(row, keys...), false)
+}
+
 func parseDuckDBIdentifierList(raw string) []string {
 	return parseDuckDBList(raw, true)
 }
 
 func parseDuckDBExpressionList(raw string) []string {
 	values := parseDuckDBList(raw, false)
+	return normalizeDuckDBExpressionList(values)
+}
+
+func parseDuckDBListValue(raw interface{}, normalize bool) []string {
+	if raw == nil {
+		return nil
+	}
+
+	switch typed := raw.(type) {
+	case []string:
+		values := append([]string(nil), typed...)
+		if normalize {
+			return normalizeDuckDBIdentifierEntries(values)
+		}
+		return normalizeDuckDBExpressionList(values)
+	case []interface{}:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			values = append(values, strings.TrimSpace(fmt.Sprintf("%v", item)))
+		}
+		if normalize {
+			return normalizeDuckDBIdentifierEntries(values)
+		}
+		return normalizeDuckDBExpressionList(values)
+	}
+
+	rv := reflect.ValueOf(raw)
+	if rv.IsValid() && rv.Kind() != reflect.String && rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+	}
+	if rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) {
+		if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+			return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+		}
+		values := make([]string, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			values = append(values, strings.TrimSpace(fmt.Sprintf("%v", rv.Index(i).Interface())))
+		}
+		if normalize {
+			return normalizeDuckDBIdentifierEntries(values)
+		}
+		return normalizeDuckDBExpressionList(values)
+	}
+
+	return parseDuckDBList(strings.TrimSpace(fmt.Sprintf("%v", raw)), normalize)
+}
+
+func normalizeDuckDBIdentifierEntries(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, normalizeDuckDBIdentifier(trimmed))
+	}
+	return normalized
+}
+
+func normalizeDuckDBExpressionList(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}

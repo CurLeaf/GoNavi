@@ -161,6 +161,32 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('keeps DuckDB table preview writable when unique index metadata arrives as a safe locator', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'slug', key: '' }, { name: 'name', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValue({
+      success: true,
+      data: [{ name: 'events_slug_key', columnName: 'slug', nonUnique: 0, seqInIndex: 1, indexType: 'UNIQUE' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-unique', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'unique-key',
+      columns: ['slug'],
+      valueColumns: ['slug'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
   it('enables MongoDB table preview editing through the _id locator', async () => {
     storeState.connections[0].config.type = 'mongodb';
     storeState.connections[0].config.database = 'app';
