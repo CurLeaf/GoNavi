@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
-import QueryEditor, { resolveQueryEditorNavigationTarget } from './QueryEditor';
+import QueryEditor, {
+  collectQueryEditorObjectDecorationCandidates,
+  resolveQueryEditorNavigationTarget,
+} from './QueryEditor';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -1409,6 +1412,57 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValue).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValueLength).not.toHaveBeenCalled();
+  });
+
+  it('skips SQL literals when collecting object decoration candidates for insert scripts', () => {
+    const insertValues = Array.from({ length: 120 }, (_, index) => {
+      const suffix = String(index + 1).padStart(3, '0');
+      return `('legacy-seed-L${suffix}', '旧版企业-L${suffix}', '深圳市南山区 ${suffix} 号', 'legacy${suffix}@demo.test')`;
+    }).join(',\n');
+    const sql = [
+      '-- 字符串里的 fs_org_auth_file 不应参与对象装饰扫描',
+      'INSERT INTO mkefu_location_dev_local.uk_corp (id, corp_name, address, email) VALUES',
+      `${insertValues};`,
+      'SELECT uk_corp.id FROM uk_corp;',
+    ].join('\n');
+
+    const candidates = collectQueryEditorObjectDecorationCandidates(sql, 1000);
+    const candidateTexts = candidates.map((candidate) => candidate.lineContent.slice(candidate.positionColumn - 1, candidate.positionColumn + 30));
+
+    expect(candidateTexts.some((text) => text.includes('legacy-seed'))).toBe(false);
+    expect(candidateTexts.some((text) => text.includes('旧版企业'))).toBe(false);
+    expect(candidateTexts.some((text) => text.includes('demo.test'))).toBe(false);
+    expect(candidateTexts.some((text) => text.includes('mkefu_location_dev_local'))).toBe(true);
+    expect(candidateTexts.some((text) => text.includes('uk_corp'))).toBe(true);
+  });
+
+  it('does not provide metadata hover inside SQL string literals', async () => {
+    editorState.value = "insert into users(name) values ('users.id should stay plain');";
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ tableName: 'users', name: 'id', type: 'bigint', comment: '主键ID' }],
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const hoverProvider = editorState.hoverProviders[0];
+    expect(hoverProvider).toBeTruthy();
+    const literalColumn = editorState.value.indexOf('users.id should') + 3;
+    const hover = hoverProvider.provideHover(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: literalColumn },
+    );
+
+    expect(hover).toBeNull();
   });
 
   it('registers Ctrl/Cmd+S to quick-save the active query', async () => {

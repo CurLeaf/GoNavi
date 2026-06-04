@@ -1095,20 +1095,144 @@ const getQueryEditorObjectResolveText = (
     maxTextLength = QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH,
 ): string => getQueryEditorModelTextIfWithinLimit(model, maxTextLength) ?? lineContent;
 
+const maskQueryEditorSqlLiteralsAndComments = (source: string): string => {
+    const text = String(source || '').replace(/\r\n/g, '\n');
+    if (!text) return '';
+
+    const chars = text.split('');
+    let inSingle = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let escaped = false;
+
+    const maskAt = (index: number) => {
+        if (chars[index] !== '\n') {
+            chars[index] = ' ';
+        }
+    };
+
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        const next = i + 1 < text.length ? text[i + 1] : '';
+        const prev = i > 0 ? text[i - 1] : '';
+
+        if (inLineComment) {
+            if (ch === '\n') {
+                inLineComment = false;
+            } else {
+                maskAt(i);
+            }
+            continue;
+        }
+
+        if (inBlockComment) {
+            maskAt(i);
+            if (ch === '*' && next === '/') {
+                maskAt(i + 1);
+                i += 1;
+                inBlockComment = false;
+            }
+            continue;
+        }
+
+        if (inSingle) {
+            maskAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (ch === '\'' && next === '\'') {
+                maskAt(i + 1);
+                i += 1;
+                continue;
+            }
+            if (ch === '\'') {
+                inSingle = false;
+            }
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            maskAt(i);
+            maskAt(i + 1);
+            i += 1;
+            inBlockComment = true;
+            continue;
+        }
+
+        if (ch === '#') {
+            maskAt(i);
+            inLineComment = true;
+            continue;
+        }
+
+        if (ch === '-' && next === '-' && (i === 0 || /\s/.test(prev))) {
+            maskAt(i);
+            maskAt(i + 1);
+            i += 1;
+            inLineComment = true;
+            continue;
+        }
+
+        if (ch === '\'') {
+            maskAt(i);
+            inSingle = true;
+        }
+    }
+
+    return chars.join('');
+};
+
+export const collectQueryEditorObjectDecorationCandidates = (
+    source: string,
+    maxIdentifiers = QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS,
+): Array<{ lineNumber: number; lineContent: string; positionColumn: number }> => {
+    const text = String(source || '').replace(/\r\n/g, '\n');
+    if (!text) return [];
+
+    const maskedText = maskQueryEditorSqlLiteralsAndComments(text);
+    const lines = text.split('\n');
+    const maskedLines = maskedText.split('\n');
+    const candidates: Array<{ lineNumber: number; lineContent: string; positionColumn: number }> = [];
+    const identifierRegex = /[`"\[]?[A-Za-z_][A-Za-z0-9_$]*(?:[`"\]]?\s*\.\s*[`"\[]?[A-Za-z_][A-Za-z0-9_$]*){0,2}[`"\]]?/g;
+
+    for (const [lineIndex, maskedLine] of maskedLines.entries()) {
+        let match: RegExpExecArray | null;
+        identifierRegex.lastIndex = 0;
+        while ((match = identifierRegex.exec(maskedLine)) !== null) {
+            candidates.push({
+                lineNumber: lineIndex + 1,
+                lineContent: lines[lineIndex] || '',
+                positionColumn: match.index + 2,
+            });
+            if (candidates.length >= maxIdentifiers) {
+                return candidates;
+            }
+        }
+    }
+
+    return candidates;
+};
+
 const findIdentifierWindowAtOffset = (
     lineContent: string,
     rawOffset: number,
 ): { start: number; end: number } | null => {
     const text = String(lineContent || '');
     if (!text) return null;
+    const searchableText = maskQueryEditorSqlLiteralsAndComments(text);
     const maxIndex = text.length - 1;
     if (maxIndex < 0) return null;
     let offset = Math.max(0, Math.min(maxIndex, Number.isFinite(rawOffset) ? rawOffset : 0));
 
-    if (!QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset] || '')) {
-        if (offset > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset - 1] || '')) {
+    if (!QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(searchableText[offset] || '')) {
+        if (offset > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(searchableText[offset - 1] || '')) {
             offset -= 1;
-        } else if (offset < maxIndex && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[offset + 1] || '')) {
+        } else if (offset < maxIndex && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(searchableText[offset + 1] || '')) {
             offset += 1;
         } else {
             return null;
@@ -1116,12 +1240,12 @@ const findIdentifierWindowAtOffset = (
     }
 
     let start = offset;
-    while (start > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[start - 1] || '')) {
+    while (start > 0 && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(searchableText[start - 1] || '')) {
         start -= 1;
     }
 
     let end = offset + 1;
-    while (end < text.length && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(text[end] || '')) {
+    while (end < text.length && QUERY_EDITOR_IDENTIFIER_CHAR_REGEX.test(searchableText[end] || '')) {
         end += 1;
     }
 
@@ -2042,55 +2166,41 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       const decorations: any[] = [];
       const seen = new Set<string>();
-      let scannedIdentifiers = 0;
-      const identifierRegex = /[`"\[]?[A-Za-z_][A-Za-z0-9_$]*(?:[`"\]]?\s*\.\s*[`"\[]?[A-Za-z_][A-Za-z0-9_$]*){0,2}[`"\]]?/g;
-      const lines = text.replace(/\r\n/g, '\n').split('\n');
+      const candidates = collectQueryEditorObjectDecorationCandidates(text);
 
-      for (const [lineIndex, lineContent] of lines.entries()) {
-          let match: RegExpExecArray | null;
-          identifierRegex.lastIndex = 0;
-          while ((match = identifierRegex.exec(lineContent)) !== null) {
-              scannedIdentifiers += 1;
-              if (scannedIdentifiers > QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS) {
-                  break;
-              }
-              const positionColumn = match.index + 2;
-              const hoverTarget = resolveQueryEditorHoverTarget(
-                  text,
-                  lineContent,
-                  positionColumn,
-                  currentDbRef.current,
-                  visibleDbsRef.current,
-                  tablesRef.current,
-                  allColumnsRef.current,
-                  viewsRef.current,
-                  materializedViewsRef.current,
-                  triggersRef.current,
-                  routinesRef.current,
-              );
-              if (!hoverTarget) continue;
+      for (const candidate of candidates) {
+          const hoverTarget = resolveQueryEditorHoverTarget(
+              text,
+              candidate.lineContent,
+              candidate.positionColumn,
+              currentDbRef.current,
+              visibleDbsRef.current,
+              tablesRef.current,
+              allColumnsRef.current,
+              viewsRef.current,
+              materializedViewsRef.current,
+              triggersRef.current,
+              routinesRef.current,
+          );
+          if (!hoverTarget) continue;
 
-              const inlineClassName = hoverTarget.kind === 'column'
-                  ? 'gonavi-query-editor-column-token'
-                  : hoverTarget.kind === 'database'
-                      ? 'gonavi-query-editor-db-token'
-                      : 'gonavi-query-editor-object-token';
-              const key = `${lineIndex + 1}:${hoverTarget.range.startColumn}:${hoverTarget.range.endColumn}:${inlineClassName}`;
-              if (seen.has(key)) continue;
-              seen.add(key);
-              decorations.push({
-                  range: new monaco.Range(
-                      lineIndex + 1,
-                      hoverTarget.range.startColumn,
-                      lineIndex + 1,
-                      hoverTarget.range.endColumn,
-                  ),
-                  options: { inlineClassName },
-              });
-          }
-          if (scannedIdentifiers > QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS) {
-              break;
-          }
+          const inlineClassName = hoverTarget.kind === 'column'
+              ? 'gonavi-query-editor-column-token'
+              : hoverTarget.kind === 'database'
+                  ? 'gonavi-query-editor-db-token'
+                  : 'gonavi-query-editor-object-token';
+          const key = `${candidate.lineNumber}:${hoverTarget.range.startColumn}:${hoverTarget.range.endColumn}:${inlineClassName}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          decorations.push({
+              range: new monaco.Range(
+                  candidate.lineNumber,
+                  hoverTarget.range.startColumn,
+                  candidate.lineNumber,
+                  hoverTarget.range.endColumn,
+              ),
+              options: { inlineClassName },
+          });
       }
 
       objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, decorations);
