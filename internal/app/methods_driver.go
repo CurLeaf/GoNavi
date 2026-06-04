@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	stdRuntime "runtime"
@@ -298,6 +299,7 @@ const (
 	driverReleaseLatestAPIURL           = "https://api.github.com/repos/" + driverReleaseRepo + "/releases/latest"
 	driverReleaseDevTag                 = "dev-latest"
 	optionalDriverBundleAssetName       = "GoNavi-DriverAgents.zip"
+	duckDBWindowsDriverZipAssetName     = "duckdb-driver.zip"
 	optionalDriverBundleIndexAssetName  = "GoNavi-DriverAgents-Index.json"
 	optionalDriverBundleDownloadTimeout = 45 * time.Minute
 	optionalDriverBundleCacheMaxAge     = 7 * 24 * time.Hour
@@ -370,6 +372,8 @@ var (
 	driverVersionWarmup        = driverVersionWarmupState{}
 	errLocalDriverDirScanLimit = errors.New("local_driver_directory_scan_limit_exceeded")
 )
+
+var validateOptionalDriverAgentExecutableFunc = db.ValidateOptionalDriverAgentExecutable
 
 type driverVersionWarmupState struct {
 	Running     bool
@@ -1914,6 +1918,27 @@ func resolvePublishedDriverDownloadURLForTag(definition driverDefinition, select
 }
 
 func resolvePublishedDriverReleaseAssetName(driverType string, version string, tag string) (string, bool) {
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		cacheKey := "tag:" + strings.TrimSpace(tag)
+		if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache(cacheKey); ok {
+			if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+				return duckDBWindowsDriverZipAssetName, true
+			}
+			return "", false
+		}
+
+		sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached(cacheKey, func() (*githubRelease, error) {
+			return fetchReleaseByTag(tag)
+		})
+		if err != nil {
+			return "", false
+		}
+		if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+			return duckDBWindowsDriverZipAssetName, true
+		}
+		return "", false
+	}
+
 	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, version)
 	if len(assetNames) == 0 {
 		return "", false
@@ -3006,7 +3031,7 @@ func installOptionalDriverAgentFromLocalPath(definition driverDefinition, filePa
 			return installedDriverPackage{}, fmt.Errorf("导入本地驱动代理运行时依赖失败：%w", supportErr)
 		}
 	}
-	if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
+	if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
 		return installedDriverPackage{}, validateErr
 	}
 
@@ -3355,7 +3380,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 
 	info, err := os.Stat(executablePath)
 	if err == nil && !info.IsDir() {
-		if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
+		if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
 			_ = os.Remove(executablePath)
 		} else {
 			// 用户点击“安装/重装”时应强制刷新驱动代理，避免沿用旧二进制导致修复不生效。
@@ -3389,7 +3414,7 @@ func ensureOptionalDriverAgentBinary(a *App, definition driverDefinition, execut
 			if copyErr := copyAgentBinary(sourcePath, executablePath); copyErr != nil {
 				return "", "", fmt.Errorf("复制预置 %s 驱动代理失败：%w", displayName, copyErr)
 			}
-			if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
+			if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
 				_ = os.Remove(executablePath)
 				return "", "", validateErr
 			}
@@ -3540,6 +3565,17 @@ func shouldUseOptionalDriverBundleFallback(driverType string, restrictToExplicit
 	return directURLCount == 0
 }
 
+func isOptionalDriverDownloadZipURL(urlText string) bool {
+	trimmedURL := strings.TrimSpace(urlText)
+	if trimmedURL == "" {
+		return false
+	}
+	if parsed, err := url.Parse(trimmedURL); err == nil && strings.TrimSpace(parsed.Path) != "" {
+		return strings.EqualFold(path.Ext(parsed.Path), ".zip")
+	}
+	return strings.EqualFold(filepath.Ext(trimmedURL), ".zip")
+}
+
 func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlText string, executablePath string) (string, error) {
 	driverType := normalizeDriverType(definition.Type)
 	displayName := resolveDriverDisplayName(definition)
@@ -3547,8 +3583,46 @@ func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlT
 	if trimmedURL == "" {
 		return "", fmt.Errorf("下载地址为空")
 	}
+	if isOptionalDriverDownloadZipURL(trimmedURL) {
+		tempPath := executablePath + ".download.zip"
+		_ = os.Remove(tempPath)
+
+		if _, err := downloadFileWithHash(trimmedURL, tempPath, func(downloaded, total int64) {
+			if a == nil {
+				return
+			}
+			scaledDownloaded, scaledTotal := scaleProgress(downloaded, total, 20, 90)
+			a.emitDriverDownloadProgress(driverType, "downloading", scaledDownloaded, scaledTotal, fmt.Sprintf("下载预编译 %s 驱动包", displayName))
+		}); err != nil {
+			_ = os.Remove(tempPath)
+			return "", fmt.Errorf("下载失败：%w", err)
+		}
+
+		if _, err := installOptionalDriverAgentFromLocalZip(tempPath, definition, executablePath, ""); err != nil {
+			_ = os.Remove(tempPath)
+			_ = os.Remove(executablePath)
+			for _, supportName := range optionalDriverSupportFileNames(driverType) {
+				_ = os.Remove(filepath.Join(filepath.Dir(executablePath), supportName))
+			}
+			return "", fmt.Errorf("安装预编译驱动包失败：%w", err)
+		}
+		_ = os.Remove(tempPath)
+
+		if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
+			_ = os.Remove(executablePath)
+			for _, supportName := range optionalDriverSupportFileNames(driverType) {
+				_ = os.Remove(filepath.Join(filepath.Dir(executablePath), supportName))
+			}
+			return "", validateErr
+		}
+		hash, hashErr := hashFileSHA256(executablePath)
+		if hashErr != nil {
+			return "", fmt.Errorf("计算驱动代理摘要失败：%w", hashErr)
+		}
+		return hash, nil
+	}
 	if len(optionalDriverSupportFileNames(driverType)) > 0 {
-		return "", fmt.Errorf("%s 当前平台需要随包提供运行时依赖（%s），不能安装单文件代理；请使用驱动总包或本地源码构建", displayName, strings.Join(optionalDriverSupportFileNames(driverType), ", "))
+		return "", fmt.Errorf("%s 当前平台需要随包提供运行时依赖（%s），不能安装单文件代理；请使用驱动总包、驱动专属 zip 或本地源码构建", displayName, strings.Join(optionalDriverSupportFileNames(driverType), ", "))
 	}
 	tempPath := executablePath + ".tmp"
 	_ = os.Remove(tempPath)
@@ -3576,7 +3650,7 @@ func downloadOptionalDriverAgentBinary(a *App, definition driverDefinition, urlT
 	if chmodErr := os.Chmod(executablePath, 0o755); chmodErr != nil && stdRuntime.GOOS != "windows" {
 		return "", fmt.Errorf("设置代理权限失败：%w", chmodErr)
 	}
-	if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
+	if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
 		_ = os.Remove(executablePath)
 		return "", validateErr
 	}
@@ -3693,7 +3767,7 @@ func downloadOptionalDriverAgentFromBundle(a *App, definition driverDefinition, 
 		_ = os.Remove(executablePath)
 		return "", "", supportErr
 	}
-	if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, executablePath); validateErr != nil {
+	if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, executablePath); validateErr != nil {
 		_ = os.Remove(executablePath)
 		return "", "", validateErr
 	}
@@ -3938,6 +4012,10 @@ func shouldSkipReusableAgentCandidate(driverType string, selectedVersion string)
 
 func shouldUseDuckDBWindowsDynamicLibrary(driverType string) bool {
 	return normalizeDriverType(driverType) == "duckdb" && stdRuntime.GOOS == "windows" && stdRuntime.GOARCH == "amd64"
+}
+
+func shouldPreferPublishedOptionalDriverDownloads(driverType string) bool {
+	return shouldUseDuckDBWindowsDynamicLibrary(driverType)
 }
 
 func shouldSkipDirectOptionalDriverDownloads(driverType string) bool {
@@ -4698,6 +4776,7 @@ func acquireOptionalDriverBundlePath(bundleURL string, onProgress func(downloade
 func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL string, selectedVersion string) []string {
 	candidates := make([]string, 0, 3)
 	seen := make(map[string]struct{}, 3)
+	driverType := normalizeDriverType(definition.Type)
 	appendURL := func(value string) {
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
@@ -4710,8 +4789,20 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 		candidates = append(candidates, trimmed)
 	}
 
-	if shouldSkipDirectOptionalDriverDownloads(definition.Type) {
-		return candidates
+	restrictToExplicitArtifact := shouldRestrictToExplicitVersionArtifact(definition, selectedVersion)
+	appendPublishedURLs := func() {
+		if tag := currentDriverReleaseTag(); tag != "" {
+			if publishedURL, ok := resolvePublishedDriverDownloadURLForTag(definition, selectedVersion, tag); ok {
+				appendURL(publishedURL)
+			}
+		}
+		if publishedURL, ok := resolveLatestPublishedDriverDownloadURL(definition); ok {
+			appendURL(publishedURL)
+		}
+	}
+
+	if !restrictToExplicitArtifact && shouldPreferPublishedOptionalDriverDownloads(driverType) {
+		appendPublishedURLs()
 	}
 
 	if parsed, err := url.Parse(strings.TrimSpace(rawURL)); err == nil {
@@ -4720,17 +4811,12 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 			appendURL(parsed.String())
 		}
 	}
-	if shouldRestrictToExplicitVersionArtifact(definition, selectedVersion) {
+	if restrictToExplicitArtifact {
 		return candidates
 	}
 
-	if tag := currentDriverReleaseTag(); tag != "" {
-		if publishedURL, ok := resolvePublishedDriverDownloadURLForTag(definition, selectedVersion, tag); ok {
-			appendURL(publishedURL)
-		}
-	}
-	if publishedURL, ok := resolveLatestPublishedDriverDownloadURL(definition); ok {
-		appendURL(publishedURL)
+	if !shouldPreferPublishedOptionalDriverDownloads(driverType) {
+		appendPublishedURLs()
 	}
 	return candidates
 }
@@ -4755,7 +4841,7 @@ func findExistingOptionalDriverAgentCandidate(definition driverDefinition, targe
 		if statErr != nil || info.IsDir() {
 			continue
 		}
-		if validateErr := db.ValidateOptionalDriverAgentExecutable(driverType, absPath); validateErr != nil {
+		if validateErr := validateOptionalDriverAgentExecutableFunc(driverType, absPath); validateErr != nil {
 			continue
 		}
 		if !isReusableOptionalDriverAgentRevisionCurrent(driverType, absPath) {
@@ -5342,6 +5428,24 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	if driverType == "" {
 		return "", false
 	}
+	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
+		if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
+			if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+				return driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName), true
+			}
+			return "", false
+		}
+
+		sizeByAsset, publishedAssets, err := loadReleaseAssetSizesCached("latest", fetchLatestReleaseForDriverAssets)
+		if err != nil {
+			return "", false
+		}
+		if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+			return driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName), true
+		}
+		return "", false
+	}
+
 	assetNames := optionalDriverReleaseAssetNames(driverType)
 	if len(assetNames) == 0 {
 		return "", false

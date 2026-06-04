@@ -380,9 +380,21 @@ func TestDuckDBWindowsBuildUsesDynamicLibraryTag(t *testing.T) {
 	if !shouldSkipReusableAgentCandidate("duckdb", "") {
 		t.Fatal("expected DuckDB Windows install to skip reusable static agent candidates")
 	}
-	urls := resolveOptionalDriverAgentDownloadURLs(driverDefinition{Type: "duckdb"}, "https://example.com/duckdb-driver-agent-windows-amd64.exe", "")
-	if len(urls) != 0 {
-		t.Fatalf("expected DuckDB Windows install to skip single-file direct downloads, got %v", urls)
+	seedReleaseAssetCacheEntry(t, "latest", map[string]int64{
+		duckDBWindowsDriverZipAssetName: 19 << 20,
+	}, map[string]int64{
+		duckDBWindowsDriverZipAssetName: 19 << 20,
+	})
+	legacyDirectURL := "https://example.com/duckdb-driver-agent-windows-amd64.exe"
+	urls := resolveOptionalDriverAgentDownloadURLs(driverDefinition{Type: "duckdb"}, legacyDirectURL, "")
+	if len(urls) < 2 {
+		t.Fatalf("expected DuckDB Windows install to keep dedicated zip ahead of legacy direct candidate, got %v", urls)
+	}
+	if urls[0] != driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName) {
+		t.Fatalf("expected DuckDB Windows dedicated zip candidate first, got %v", urls)
+	}
+	if urls[1] != legacyDirectURL {
+		t.Fatalf("expected DuckDB Windows to keep legacy direct candidate after dedicated zip, got %v", urls)
 	}
 }
 
@@ -434,6 +446,83 @@ func TestInstallOptionalDriverAgentFromLocalZipExtractsDuckDBDLL(t *testing.T) {
 	}
 	if string(dllBytes) != "dll" {
 		t.Fatalf("unexpected duckdb.dll content: %q", string(dllBytes))
+	}
+}
+
+func TestDownloadOptionalDriverAgentBinaryInstallsDuckDBDedicatedZip(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("DuckDB dedicated zip flow only applies on windows/amd64")
+	}
+
+	originalValidateFunc := validateOptionalDriverAgentExecutableFunc
+	validateOptionalDriverAgentExecutableFunc = func(driverType string, executablePath string) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		validateOptionalDriverAgentExecutableFunc = originalValidateFunc
+	})
+
+	tmpDir := t.TempDir()
+	zipPath := filepath.Join(tmpDir, duckDBWindowsDriverZipAssetName)
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip failed: %v", err)
+	}
+	zw := zip.NewWriter(zipFile)
+	for name, content := range map[string]string{
+		"Windows/duckdb-driver-agent-windows-amd64.exe": "agent",
+		"Windows/duckdb.dll":                            "dll",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s failed: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %s failed: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer failed: %v", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		t.Fatalf("close zip file failed: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, zipPath)
+	}))
+	defer server.Close()
+
+	target := filepath.Join(tmpDir, "install", "duckdb-driver-agent.exe")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create install dir failed: %v", err)
+	}
+
+	hash, err := downloadOptionalDriverAgentBinary(nil, driverDefinition{Type: "duckdb", Name: "DuckDB"}, server.URL+"/"+duckDBWindowsDriverZipAssetName+"?source=release", target)
+	if err != nil {
+		t.Fatalf("download dedicated zip failed: %v", err)
+	}
+	if strings.TrimSpace(hash) == "" {
+		t.Fatal("expected hash for installed duckdb agent")
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected duckdb agent to be installed: %v", err)
+	}
+	dllBytes, err := os.ReadFile(filepath.Join(filepath.Dir(target), "duckdb.dll"))
+	if err != nil {
+		t.Fatalf("expected duckdb.dll to be installed: %v", err)
+	}
+	if string(dllBytes) != "dll" {
+		t.Fatalf("unexpected duckdb.dll content: %q", string(dllBytes))
+	}
+}
+
+func TestOptionalDriverDownloadZipURLAcceptsQueryString(t *testing.T) {
+	if !isOptionalDriverDownloadZipURL("https://example.com/duckdb-driver.zip?token=abc") {
+		t.Fatal("expected signed zip URL to be treated as zip download")
+	}
+	if isOptionalDriverDownloadZipURL("https://example.com/duckdb-driver-agent.exe?token=abc") {
+		t.Fatal("expected exe URL with query to remain non-zip download")
 	}
 }
 

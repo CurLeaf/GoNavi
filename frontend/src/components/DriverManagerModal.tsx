@@ -234,7 +234,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const [versionSizeLoadingMap, setVersionSizeLoadingMap] = useState<Record<string, boolean>>({});
   const downloadDirRef = useRef(downloadDir);
   const progressMapRef = useRef<Record<string, DriverProgressState>>({});
-  const batchBusy = batchDirectoryImporting || batchAction !== '' || actionState.kind !== '';
+  const batchBusy = batchDirectoryImporting || batchAction !== '';
+  const installMutatingBusy = batchBusy || actionState.kind !== '';
 
   useEffect(() => {
     downloadDirRef.current = downloadDir;
@@ -1436,7 +1437,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             网络检测
           </Button>
           <Button key="close" type="primary" onClick={onClose}>
-            {batchBusy ? '后台运行' : '关闭'}
+            {installMutatingBusy ? '后台运行' : '关闭'}
           </Button>
         </Space>
       )}
@@ -1584,12 +1585,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Switch
               checked={forceOverwriteInstalled}
               onChange={(checked) => setForceOverwriteInstalled(checked)}
-              disabled={batchBusy}
+              disabled={batchDirectoryImporting}
             />
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              disabled={batchBusy || installableRows.length === 0}
+              disabled={installMutatingBusy || installableRows.length === 0}
               loading={batchAction === 'install-all'}
               onClick={() => void installAllDrivers()}
             >
@@ -1598,7 +1599,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              disabled={batchBusy || reinstallableRows.length === 0}
+              disabled={installMutatingBusy || reinstallableRows.length === 0}
               loading={batchAction === 'reinstall-updates'}
               onClick={() => void reinstallNeededDrivers()}
             >
@@ -1607,7 +1608,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={batchBusy || removableRows.length === 0}
+              disabled={installMutatingBusy || removableRows.length === 0}
               loading={batchAction === 'remove-all'}
               onClick={() => void removeAllDrivers()}
             >
@@ -1615,7 +1616,6 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             </Button>
             <Button
               icon={<FolderOpenOutlined />}
-              disabled={batchBusy}
               onClick={() => void openDriverDirectory()}
             >
               打开驱动目录
@@ -1623,7 +1623,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               icon={<FolderOpenOutlined />}
               loading={batchDirectoryImporting}
-              disabled={batchBusy && !batchDirectoryImporting}
+              disabled={batchDirectoryImporting}
               onClick={() => void installDriversFromDirectory()}
             >
               导入驱动目录

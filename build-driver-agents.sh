@@ -145,6 +145,40 @@ PY
   fi
 }
 
+zip_duckdb_windows_package() {
+  local bundle_stage_dir="$1"
+  local zip_path="$2"
+
+  rm -f "$zip_path"
+  if command -v python3 >/dev/null 2>&1; then
+    BUNDLE_STAGE_DIR="$bundle_stage_dir" BUNDLE_ZIP_PATH="$zip_path" python3 - <<'PY'
+import os
+import zipfile
+
+stage_dir = os.environ["BUNDLE_STAGE_DIR"]
+zip_path = os.environ["BUNDLE_ZIP_PATH"]
+entries = [
+    ("Windows/duckdb-driver-agent-windows-amd64.exe", os.path.join(stage_dir, "Windows", "duckdb-driver-agent-windows-amd64.exe")),
+    ("Windows/duckdb.dll", os.path.join(stage_dir, "Windows", "duckdb.dll")),
+]
+
+with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    for arcname, src in entries:
+        if not os.path.isfile(src):
+            raise FileNotFoundError(src)
+        zf.write(src, arcname)
+PY
+  elif command -v zip >/dev/null 2>&1; then
+    (
+      cd "$bundle_stage_dir"
+      zip -qry "$zip_path" "Windows/duckdb-driver-agent-windows-amd64.exe" "Windows/duckdb.dll"
+    )
+  else
+    echo "❌ 未找到 python3 或 zip，无法生成 DuckDB Windows 专属驱动包。"
+    exit 1
+  fi
+}
+
 prepare_duckdb_windows_library() {
   local cache_root="$1"
   local lib_dir="$cache_root/duckdb-windows-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
@@ -202,6 +236,7 @@ driver_csv=""
 target_platform=""
 out_root="dist/driver-agents"
 bundle_name="GoNavi-DriverAgents.zip"
+duckdb_windows_zip_name="duckdb-driver.zip"
 strict_mode="false"
 upx_mode="${GONAVI_DRIVER_AGENT_UPX:-auto}"
 
@@ -402,6 +437,14 @@ if [[ ${#built_assets[@]} -eq 0 ]]; then
 fi
 
 zip_bundle "$bundle_zip_path" "$bundle_stage_dir"
+
+duckdb_asset_path="$out_root_abs/windows-amd64/duckdb-driver-agent-windows-amd64.exe"
+duckdb_dll_path="$out_root_abs/windows-amd64/$DUCKDB_WINDOWS_SUPPORT_DLL"
+if [[ -f "$duckdb_asset_path" && -f "$duckdb_dll_path" ]]; then
+  duckdb_zip_path="$out_root_abs/windows-amd64/$duckdb_windows_zip_name"
+  zip_duckdb_windows_package "$bundle_stage_dir" "$duckdb_zip_path"
+  built_assets+=("Windows/$duckdb_windows_zip_name")
+fi
 
 echo ""
 echo "✅ 构建完成"
