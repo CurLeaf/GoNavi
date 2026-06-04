@@ -87,6 +87,7 @@ describe('DefinitionViewer object edit entry', () => {
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.theme = 'light';
+    storeState.connections[0].config.type = 'postgres';
     backendApp.DBQuery.mockResolvedValue({
       success: true,
       data: [{ view_definition: 'SELECT id, name FROM users' }],
@@ -115,6 +116,30 @@ describe('DefinitionViewer object edit entry', () => {
       query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
     }));
     expect(storeState.addTab.mock.calls[0][0].query).toContain('SELECT id, name FROM users;');
+  });
+
+  it('adds CREATE OR REPLACE without duplicating view fragments returned without ddl prefix', async () => {
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{ view_definition: 'VIEW reporting.active_users AS\nSELECT id, name FROM users' }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab()} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE OR REPLACE VIEW reporting.active_users AS');
+    expect(query).toContain('SELECT id, name FROM users;');
+    expect(query).not.toContain('AS\nVIEW reporting.active_users AS');
   });
 
   it('opens an editable query tab for routine definitions', async () => {

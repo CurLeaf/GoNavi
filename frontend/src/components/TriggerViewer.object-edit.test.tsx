@@ -85,6 +85,7 @@ describe('TriggerViewer object edit entry', () => {
   beforeEach(() => {
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
+    storeState.connections[0].config.type = 'postgres';
     backendApp.DBQuery.mockResolvedValue({
       success: true,
       data: [{ trigger_definition: 'CREATE TRIGGER users_bi BEFORE INSERT ON audit.users EXECUTE FUNCTION audit.audit_users();' }],
@@ -112,5 +113,61 @@ describe('TriggerViewer object edit entry', () => {
       dbName: 'main',
       query: expect.stringContaining('CREATE TRIGGER users_bi BEFORE INSERT'),
     }));
+  });
+
+  it('adds CREATE OR REPLACE for trigger source snippets returned without ddl prefix', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        TRIGGER_BODY: 'TRIGGER users_bi\nBEFORE INSERT ON audit.users\nFOR EACH ROW\nBEGIN\n  :NEW.created_at := SYSDATE;\nEND;',
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE OR REPLACE TRIGGER users_bi');
+    expect(query).toContain('BEFORE INSERT ON audit.users');
+    expect(query).toContain(':NEW.created_at := SYSDATE;');
+    expect(query).not.toContain('请补全 CREATE TRIGGER 语句');
+  });
+
+  it('adds trigger name for trigger body snippets returned without ddl header', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        TRIGGER_BODY: 'BEFORE UPDATE ON audit.users\nFOR EACH ROW\nBEGIN\n  :NEW.updated_at := SYSDATE;\nEND;',
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE OR REPLACE TRIGGER audit.users_bi');
+    expect(query).toContain('BEFORE UPDATE ON audit.users');
+    expect(query).toContain(':NEW.updated_at := SYSDATE;');
+    expect(query).not.toContain('请补全 CREATE TRIGGER 语句');
   });
 });

@@ -29,6 +29,12 @@ const buildEditableTriggerSql = (triggerName: string, triggerDefinition: string)
     if (/^\s*create\s+(?:or\s+replace\s+)?trigger\b/i.test(normalizedDefinition)) {
         return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
     }
+    if (/^\s*trigger\b/i.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*trigger\b/i, 'CREATE OR REPLACE TRIGGER'))}`;
+    }
+    if (/^\s*(?:before|after|instead\s+of)\b/i.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(`CREATE OR REPLACE TRIGGER ${normalizedName}\n${normalizedDefinition}`)}`;
+    }
     return `${header}-- 当前数据源仅返回触发器定义片段，请补全 CREATE TRIGGER 语句后执行\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
 };
 
