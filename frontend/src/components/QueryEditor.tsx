@@ -1630,16 +1630,6 @@ export const resolveQueryEditorNavigationDecorations = (
     }];
 };
 
-const buildQueryEditorNavigationHoverMarkdown = (
-    hoverTarget: QueryEditorHoverTarget | null,
-    actionHint: string,
-): string => {
-    const hoverContent = hoverTarget ? buildQueryEditorHoverMarkdown(hoverTarget) : '';
-    return hoverContent
-        ? `${hoverContent}\n\n---\n\n${actionHint}`
-        : actionHint;
-};
-
 const dispatchQueryEditorSidebarLocate = (detail: Record<string, unknown>) => {
     if (typeof window === 'undefined') {
         return;
@@ -2652,20 +2642,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               setQueryEditorMouseCursor(editor, '');
               return;
           }
-          const hoverTarget = resolveQueryEditorHoverTarget(
-              getQueryEditorObjectResolveText(model, lineContent),
-              lineContent,
-              targetPosition.column,
-              currentDbRef.current,
-              visibleDbsRef.current,
-              tablesRef.current,
-              allColumnsRef.current,
-              viewsRef.current,
-              materializedViewsRef.current,
-              triggersRef.current,
-              routinesRef.current,
-          );
-
           linkDecorationIdsRef.current = editor.deltaDecorations(
               linkDecorationIdsRef.current,
               decorations.map((item) => ({
@@ -2677,9 +2653,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ),
                   options: {
                       inlineClassName: 'gonavi-query-editor-link-hint',
-                      hoverMessage: {
-                          value: buildQueryEditorNavigationHoverMarkdown(hoverTarget, item.hoverMessage),
-                      },
                   },
               })),
           );

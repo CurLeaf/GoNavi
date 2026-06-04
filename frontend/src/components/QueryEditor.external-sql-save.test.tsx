@@ -777,8 +777,15 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.domNode.style.cursor).toBe('pointer');
     const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
-    expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage?.value).toMatch(/(?:Ctrl|⌘) \+ 点击打开该表/);
-    expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage?.value).toContain('**表** `events`');
+    expect(lastDecorationCall?.[1]?.[0]?.options?.hoverMessage).toBeUndefined();
+
+    const hover = editorState.hoverProviders[0]?.provideHover(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: 27 },
+    );
+    const hoverText = String(hover?.contents?.[0]?.value || '');
+    expect(hoverText.match(/\*\*表\*\*/g)).toHaveLength(1);
+    expect(hoverText).toContain('**表** `events`');
 
     await act(async () => {
       editorState.mouseLeaveListeners[0]?.();
