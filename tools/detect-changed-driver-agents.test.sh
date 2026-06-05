@@ -114,4 +114,29 @@ YAMLEOF
   fi
 )
 
+tmpdir_workflow="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-workflow-change.XXXXXX")"
+git init -q "$tmpdir_workflow"
+mkdir -p "$tmpdir_workflow/tools" "$tmpdir_workflow/.github/workflows"
+cp tools/detect-changed-driver-agents.sh "$tmpdir_workflow/tools/detect-changed-driver-agents.sh"
+cat >"$tmpdir_workflow/.github/workflows/dev-build.yml" <<'YAMLEOF'
+name: Dev Build
+YAMLEOF
+
+(
+  cd "$tmpdir_workflow"
+  git add .
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m initial
+  base="$(git rev-parse HEAD)"
+
+  printf '\n# workflow logic changed\n' >> .github/workflows/dev-build.yml
+  git add .github/workflows/dev-build.yml
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'update workflow'
+
+  actual="$(bash ./tools/detect-changed-driver-agents.sh --base "$base" --head HEAD 2>/dev/null)"
+  if [[ "$actual" != *"mariadb"* || "$actual" != *"clickhouse"* || "$actual" != *"duckdb"* || "$actual" != *"elasticsearch"* ]]; then
+    echo "expected workflow change to trigger all driver builds, got: ${actual:-<empty>}" >&2
+    exit 1
+  fi
+)
+
 echo "detect-changed-driver-agents revision test passed"

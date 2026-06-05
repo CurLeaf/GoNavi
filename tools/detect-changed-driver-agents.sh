@@ -21,6 +21,8 @@ usage() {
 说明：
   通过 go list -deps 计算每个 driver-agent 的真实源码依赖，再与 git diff 文件求交集。
   如果无法解析基准或依赖分析失败，会保守输出全部 driver。
+  如果 driver 构建 / 发布工作流本身发生变化，也会保守输出全部 driver，
+  避免新应用 revision 与旧 driver-assets 再次错配。
 EOF
 }
 
@@ -514,6 +516,11 @@ for file in "${!changed_file_set[@]}"; do
       ;;
     tools/compress-driver-artifact.sh)
       echo "检测到 driver-agent 压缩脚本变更；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      echo "检测到 driver-agent 构建/发布工作流变更；保守构建全部 driver-agent：$file" >&2
       all_drivers_csv
       exit 0
       ;;
