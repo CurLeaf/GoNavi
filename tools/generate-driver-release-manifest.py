@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -26,47 +27,100 @@ def infer_driver_and_platform(file_name: str):
     for suffix in suffixes:
         if file_name.endswith(suffix):
             driver = file_name[: -len(suffix)]
-            if suffix.endswith(".exe"):
-                platform = suffix.replace("-driver-agent-", "").removesuffix(".exe")
-            else:
-                platform = suffix.replace("-driver-agent-", "")
+            platform_name = suffix.replace("-driver-agent-", "")
+            if platform_name.endswith(".exe"):
+                platform_name = platform_name.removesuffix(".exe")
+            platform = platform_name.replace("-", "/", 1)
             return driver, platform
     return None, None
 
 
-def probe_revision(path: Path):
-    request = b'{"id":1,"method":"metadata"}\n'
+def normalize_driver(driver: str):
+    value = str(driver or "").strip().lower()
+    if value == "doris":
+        return "diros"
+    return value
+
+
+def repo_root():
+    return Path(__file__).resolve().parent.parent
+
+
+def resolve_head_commit(root: Path):
     proc = subprocess.run(
-        [str(path)],
-        input=request,
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=10,
+        text=True,
         check=True,
     )
-    line = proc.stdout.decode("utf-8", errors="replace").strip().splitlines()
-    if not line:
-        raise RuntimeError(f"{path.name}: metadata response is empty")
-    payload = json.loads(line[0])
-    data = payload.get("data") or {}
-    revision = str(data.get("agentRevision") or "").strip()
-    driver_type = str(data.get("driverType") or "").strip()
-    if not revision:
-        raise RuntimeError(f"{path.name}: metadata agentRevision is empty")
-    return driver_type, revision
+    return proc.stdout.strip()
+
+
+def parse_revision_file(path: Path):
+    revisions = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith('"'):
+            continue
+        try:
+            driver, revision = stripped.rstrip(",").split(":", 1)
+        except ValueError:
+            continue
+        revisions[driver.strip().strip('"')] = revision.strip().strip('"')
+    return revisions
+
+
+def generate_platform_revisions(root: Path, drivers_by_platform):
+    if not drivers_by_platform:
+        return {}
+
+    with tempfile.TemporaryDirectory(prefix="gonavi-driver-release-manifest-") as tmp:
+        worktree = Path(tmp) / "worktree"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
+            cwd=root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        try:
+            revision_file = worktree / "internal/db/driver_agent_revisions_gen.go"
+            result = {}
+            for platform in sorted(drivers_by_platform):
+                drivers = sorted({normalize_driver(driver) for driver in drivers_by_platform[platform] if normalize_driver(driver)})
+                command = ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform]
+                if drivers:
+                    command.extend(["--drivers", ",".join(drivers)])
+                subprocess.run(
+                    command,
+                    cwd=worktree,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True,
+                )
+                result[platform] = parse_revision_file(revision_file)
+            return result
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", str(worktree)],
+                cwd=root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
 
 
 def main():
     args = parse_args()
     assets_dir = Path(args.assets_dir).resolve()
     output_path = Path(args.output).resolve()
+    root = repo_root()
 
-    manifest = {
-        "schemaVersion": 1,
-        "generatedFrom": os.environ.get("GITHUB_SHA", "").strip(),
-        "assets": {},
-    }
-
+    asset_entries = []
+    drivers_by_platform = {}
     for child in sorted(assets_dir.rglob("*")):
         if not child.is_file():
             continue
@@ -75,10 +129,25 @@ def main():
             continue
         if child.stat().st_size == 0:
             raise RuntimeError(f"{child.name}: asset is empty")
-        driver_type, revision = probe_revision(child)
+        asset_entries.append((child, driver, platform))
+        drivers_by_platform.setdefault(platform, set()).add(driver)
+
+    revisions_by_platform = generate_platform_revisions(root, drivers_by_platform)
+
+    manifest = {
+        "schemaVersion": 1,
+        "generatedFrom": os.environ.get("GITHUB_SHA", "").strip() or resolve_head_commit(root),
+        "assets": {},
+    }
+
+    for child, driver, platform in asset_entries:
+        normalized_driver = normalize_driver(driver)
+        revision = str((revisions_by_platform.get(platform) or {}).get(normalized_driver) or "").strip()
+        if not revision:
+            raise RuntimeError(f"{child.name}: missing revision for {platform}/{normalized_driver}")
         manifest["assets"][child.name] = {
             "driver": driver,
-            "driverType": driver_type or driver,
+            "driverType": driver,
             "platform": platform,
             "revision": revision,
             "size": child.stat().st_size,
@@ -94,6 +163,10 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except subprocess.TimeoutExpired as exc:
-        print(f"error: probe timed out for {exc.cmd}", file=sys.stderr)
+    except subprocess.CalledProcessError as exc:
+        command = exc.cmd if isinstance(exc.cmd, str) else " ".join(exc.cmd)
+        stderr = (exc.stderr or "").strip()
+        if stderr:
+            print(stderr, file=sys.stderr)
+        print(f"error: command failed: {command}", file=sys.stderr)
         raise

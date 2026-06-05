@@ -893,58 +893,14 @@ jobs:
             exit 0
           fi
 
-          python3 tools/generate-driver-release-manifest.py \
-            --assets-dir . \
-            --output ../driver-release-assets/GoNavi-DriverAgents-Manifest.json
-
           echo "📦 打包驱动总包：GoNavi-DriverAgents.zip"
-          python3 - <<'PY'
-          import json
-          import os
-          import shutil
-          import zipfile
-          from pathlib import Path
+          python3 ../tools/package-driver-release-assets.py \
+            drivers \
+            ../driver-release-assets
 
-          out_name = "GoNavi-DriverAgents.zip"
-          index_name = "GoNavi-DriverAgents-Index.json"
-          base = Path("drivers")
-          driver_release_dir = Path("../driver-release-assets")
-          if driver_release_dir.exists():
-              shutil.rmtree(driver_release_dir)
-          driver_release_dir.mkdir(parents=True, exist_ok=True)
-          out_path = driver_release_dir / out_name
-          index_path = driver_release_dir / index_name
-          if out_path.exists():
-              out_path.unlink()
-          if index_path.exists():
-              index_path.unlink()
-
-          size_index = {}
-          standalone_assets = []
-          with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-              for p in sorted(base.rglob("*")):
-                  if not p.is_file():
-                      continue
-                  arcname = p.relative_to(base).as_posix()
-                  if p.name in size_index:
-                      raise RuntimeError(f"driver asset name conflict: {p.name}")
-                  zf.write(p, arcname)
-                  size_index[p.name] = p.stat().st_size
-                  standalone_path = driver_release_dir / p.name
-                  if standalone_path.exists():
-                      raise RuntimeError(f"release asset already exists: {standalone_path}")
-                  shutil.copy2(p, standalone_path)
-                  standalone_assets.append(standalone_path.name)
-
-          index_path.write_text(
-              json.dumps({"assets": size_index}, ensure_ascii=False, indent=2),
-              encoding="utf-8",
-          )
-
-          print(f"created {out_name} size={out_path.stat().st_size} bytes")
-          print(f"created {index_name} entries={len(size_index)}")
-          print(f"published standalone driver assets={len(standalone_assets)}")
-          PY
+          python3 ../tools/generate-driver-release-manifest.py \
+            --assets-dir drivers \
+            --output ../driver-release-assets/GoNavi-DriverAgents-Manifest.json
 
           # GoNavi 主仓库只保留主程序包；驱动资产发布到独立仓库。
           rm -rf drivers
