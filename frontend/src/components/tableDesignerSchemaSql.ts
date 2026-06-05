@@ -79,6 +79,12 @@ export interface BuildStarRocksMaterializedViewPreviewInput {
   properties?: string;
 }
 
+const collectPrimaryKeyColumnKeys = (columns: EditableColumnSnapshot[]): string[] => (
+  columns
+    .filter((col) => col.key === 'PRI')
+    .map((col) => col._key)
+);
+
 const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
 
 const stripIdentifierQuotes = unquoteSqlIdentifierPart;
@@ -606,6 +612,21 @@ const buildDuckDbAlterPreviewSql = (input: BuildAlterTablePreviewInput): string 
       statements.push(`-- DuckDB 不支持通过 COMMENT ON COLUMN 持久化字段备注，字段 ${currentName} 的备注仅保留在设计器预览中。`);
     }
   });
+
+  const origPKKeys = collectPrimaryKeyColumnKeys(input.originalColumns);
+  const newPKKeys = collectPrimaryKeyColumnKeys(input.columns);
+  const keysChanged = origPKKeys.length !== newPKKeys.length || !origPKKeys.every((key) => newPKKeys.includes(key));
+  if (keysChanged) {
+    if (origPKKeys.length === 0 && newPKKeys.length > 0) {
+      const pkNames = input.columns
+        .filter((col) => col.key === 'PRI')
+        .map((col) => quoteIdentifierPart(col.name, dbType))
+        .join(', ');
+      statements.push(`ALTER TABLE ${tableRef}\nADD PRIMARY KEY (${pkNames});`);
+    } else {
+      statements.push('-- DuckDB 当前仅支持为无主键表新增 PRIMARY KEY；已有主键的修改或删除需要通过重建表完成。');
+    }
+  }
 
   return statements.join('\n');
 };

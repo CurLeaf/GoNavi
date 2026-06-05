@@ -163,6 +163,43 @@ describe('tableDesignerSchemaSql', () => {
     expect(sql).not.toContain('MODIFY COLUMN');
   });
 
+  it('builds duckdb alter preview with add primary key when adding first primary key', () => {
+    const sql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'duckdb',
+      tableName: 'main.events',
+      originalColumns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'YES', key: '' }),
+        baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'YES', key: '' }),
+      ],
+      columns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'NO', key: 'PRI' }),
+        baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'YES', key: '' }),
+      ],
+    }));
+
+    expect(sql).toContain('ALTER TABLE "main"."events"\nALTER COLUMN "id" SET NOT NULL;');
+    expect(sql).toContain('ALTER TABLE "main"."events"\nADD PRIMARY KEY ("id");');
+  });
+
+  it('marks unsupported duckdb primary key replacement with explicit warning comment', () => {
+    const sql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'duckdb',
+      tableName: 'main.events',
+      originalColumns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'NO', key: 'PRI' }),
+        baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'YES', key: '' }),
+      ],
+      columns: [
+        baseColumn({ _key: 'id', name: 'id', type: 'BIGINT', nullable: 'NO', key: '' }),
+        baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'NO', key: 'PRI' }),
+      ],
+    }));
+
+    expect(sql).toContain('-- DuckDB 当前仅支持为无主键表新增 PRIMARY KEY；已有主键的修改或删除需要通过重建表完成。');
+    expect(sql).not.toContain('DROP CONSTRAINT');
+    expect(sql).not.toContain('DROP PRIMARY KEY');
+  });
+
   it('builds doris alter preview without mysql-only syntax or metadata extra', () => {
     const sql = buildAlterTablePreviewSql(buildInput({
       dbType: 'doris',

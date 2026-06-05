@@ -11,6 +11,7 @@ import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, D
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
+import { summarizeDuckDbPrimaryKeyChange } from './tableDesignerDuckDbPrimaryKey';
 import { normalizeSchemaStatementForExecution, parseTableCommentFromDDL, splitSchemaExecutionStatements } from './tableDesignerExecutionSql';
 import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -2211,6 +2212,13 @@ END;`;
           setIsPreviewOpen(true);
       } else {
           const tableInfo = resolveTableInfo();
+          if (tableInfo.dbType === 'duckdb') {
+              const pkChange = summarizeDuckDbPrimaryKeyChange(originalColumns, columns);
+              if (pkChange.isUnsupportedChange) {
+                  message.warning('DuckDB 当前仅支持为无主键表新增主键；已有主键的修改或删除需要通过重建表完成。');
+                  return;
+              }
+          }
           const sql = buildAlterTablePreviewSql({
               dbType: tableInfo.dbType,
               tableName: tableInfo.qualifiedName,
