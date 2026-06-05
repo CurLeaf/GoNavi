@@ -71,6 +71,7 @@ jobs:
       has_changes: ${{ steps.detect.outputs.has_changes }}
       release_source: ${{ steps.detect.outputs.release_source }}
       compare_base: ${{ steps.detect.outputs.compare_base }}
+      force_global_driver_builds: ${{ steps.detect.outputs.force_global_driver_builds }}
       source_commit: ${{ steps.published_source.outputs.source_commit }}
       has_manifest: ${{ steps.published_source.outputs.has_manifest }}
     steps:
@@ -184,14 +185,19 @@ jobs:
               DRIVERS="$(merge_csv "$DRIVERS" "$REVISION_DRIVERS")"
             fi
           fi
+          FORCE_GLOBAL_DRIVER_BUILDS="$(bash ./tools/should-force-global-driver-builds.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
           echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
           echo "compare_base=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          echo "force_global_driver_builds=${FORCE_GLOBAL_DRIVER_BUILDS}" >> "$GITHUB_OUTPUT"
           if [ -n "$DRIVERS" ]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             echo "🧭 Changed driver agents: $DRIVERS"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "🧭 No driver-agent changes detected"
+          fi
+          if [[ "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" ]]; then
+            echo "🧭 Driver build/release plumbing changed; preserve global driver rebuild set on every platform"
           fi
           echo "release_source=dev-latest" >> "$GITHUB_OUTPUT"
 
@@ -452,9 +458,14 @@ jobs:
           set -euo pipefail
           BASE_REF="${{ needs.driver_agents.outputs.compare_base }}"
           FALLBACK_DRIVERS="${{ needs.driver_agents.outputs.drivers }}"
+          FORCE_GLOBAL_DRIVER_BUILDS="${{ needs.driver_agents.outputs.force_global_driver_builds }}"
 
-          if [[ -z "$BASE_REF" || "$BASE_REF" == "all" ]]; then
-            echo "⚠️ 当前 driver 检测基线不可做平台 diff，回退使用全局检测结果：${FALLBACK_DRIVERS}"
+          if [[ -z "$BASE_REF" || "$BASE_REF" == "all" || "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" ]]; then
+            if [[ "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" && -n "$BASE_REF" && "$BASE_REF" != "all" ]]; then
+              echo "⚠️ 当前提交涉及 driver 构建/发布链路，保留全局驱动重建结果：${FALLBACK_DRIVERS}"
+            else
+              echo "⚠️ 当前 driver 检测基线不可做平台 diff，回退使用全局检测结果：${FALLBACK_DRIVERS}"
+            fi
             echo "drivers=${FALLBACK_DRIVERS}" >> "$GITHUB_OUTPUT"
           else
             echo "🧭 对比当前平台 revision：base=${BASE_REF} head=${GITHUB_SHA} platform=${{ matrix.platform }}"

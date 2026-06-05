@@ -139,4 +139,29 @@ YAMLEOF
   fi
 )
 
+tmpdir_packaging="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-packaging-change.XXXXXX")"
+git init -q "$tmpdir_packaging"
+mkdir -p "$tmpdir_packaging/tools"
+cp tools/detect-changed-driver-agents.sh "$tmpdir_packaging/tools/detect-changed-driver-agents.sh"
+cat >"$tmpdir_packaging/tools/package-driver-release-assets.py" <<'PYEOF'
+print("package")
+PYEOF
+
+(
+  cd "$tmpdir_packaging"
+  git add .
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m initial
+  base="$(git rev-parse HEAD)"
+
+  printf '\nprint("changed")\n' >> tools/package-driver-release-assets.py
+  git add tools/package-driver-release-assets.py
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'update packaging script'
+
+  actual="$(bash ./tools/detect-changed-driver-agents.sh --base "$base" --head HEAD 2>/dev/null)"
+  if [[ "$actual" != *"mariadb"* || "$actual" != *"clickhouse"* || "$actual" != *"duckdb"* || "$actual" != *"elasticsearch"* ]]; then
+    echo "expected packaging script change to trigger all driver builds, got: ${actual:-<empty>}" >&2
+    exit 1
+  fi
+)
+
 echo "detect-changed-driver-agents revision test passed"
