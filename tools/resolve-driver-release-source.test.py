@@ -37,6 +37,21 @@ class ResolveDriverReleaseSourceTests(unittest.TestCase):
         release = {"body": "", "target_commitish": "main"}
         self.assertIsNone(MODULE.extract_source_commit(release))
 
+    def test_finds_manifest_asset(self):
+        release = {
+            "assets": [
+                {"name": "foo.txt"},
+                {"name": "GoNavi-DriverAgents-Manifest.json", "url": "https://example.test/manifest"},
+            ]
+        }
+        asset = MODULE.find_manifest_asset(release)
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset["url"], "https://example.test/manifest")
+
+    def test_returns_none_when_manifest_asset_missing(self):
+        release = {"assets": [{"name": "GoNavi-DriverAgents.zip"}]}
+        self.assertIsNone(MODULE.find_manifest_asset(release))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,7 @@ jobs:
       has_changes: ${{ steps.detect.outputs.has_changes }}
       release_source: ${{ steps.detect.outputs.release_source }}
       source_commit: ${{ steps.published_source.outputs.source_commit }}
+      has_manifest: ${{ steps.published_source.outputs.has_manifest }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -84,8 +85,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_COMMIT="$(python3 tools/resolve-driver-release-source.py --repo Syngnat/GoNavi-DriverAgents --tag dev-latest)"
+          manifest_path="$RUNNER_TEMP/published-driver-manifest.json"
+          SOURCE_COMMIT="$(python3 tools/resolve-driver-release-source.py --repo Syngnat/GoNavi-DriverAgents --tag dev-latest --manifest-output "$manifest_path")"
           echo "source_commit=${SOURCE_COMMIT}" >> "$GITHUB_OUTPUT"
+          if [[ -s "$manifest_path" ]]; then
+            echo "has_manifest=true" >> "$GITHUB_OUTPUT"
+            echo "🧭 Published dev driver release exposes revision manifest"
+          else
+            echo "has_manifest=false" >> "$GITHUB_OUTPUT"
+            echo "🧭 Published dev driver release has no revision manifest"
+          fi
+          if [[ -n "$SOURCE_COMMIT" && -s "$manifest_path" ]]; then
+            if bash ./tools/validate-driver-release-manifest.sh --commit "$SOURCE_COMMIT" --manifest "$manifest_path"; then
+              echo "manifest_valid=true" >> "$GITHUB_OUTPUT"
+              echo "🧭 Published dev driver release manifest is consistent with its source commit"
+            else
+              echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+              echo "⚠️ Published dev driver release manifest is stale; forcing full rebuild"
+            fi
+          else
+            echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+          fi
           if [[ -n "$SOURCE_COMMIT" ]]; then
             echo "🧭 Last published dev driver release source commit: $SOURCE_COMMIT"
           else
@@ -123,6 +143,15 @@ jobs:
           }
 
           BASE_REF="${{ steps.published_source.outputs.source_commit }}"
+          HAS_MANIFEST="${{ steps.published_source.outputs.has_manifest }}"
+          MANIFEST_VALID="${{ steps.published_source.outputs.manifest_valid }}"
+          if [[ "$HAS_MANIFEST" != "true" ]]; then
+            echo "⚠️ Published driver release lacks revision manifest; forcing full rebuild to self-heal old assets"
+            BASE_REF="all"
+          elif [[ "$MANIFEST_VALID" != "true" ]]; then
+            echo "⚠️ Published driver release manifest is stale; forcing full rebuild to self-heal old assets"
+            BASE_REF="all"
+          fi
           if [[ -n "$BASE_REF" ]]; then
             if git rev-parse --verify "${BASE_REF}^{commit}" >/dev/null 2>&1 && git merge-base --is-ancestor "$BASE_REF" "$GITHUB_SHA"; then
               echo "🧭 Using last published driver release source commit as detection base: $BASE_REF"
@@ -806,6 +835,10 @@ jobs:
             echo "has_driver_assets=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          python3 tools/generate-driver-release-manifest.py \
+            --assets-dir . \
+            --output ../driver-release-assets/GoNavi-DriverAgents-Manifest.json
 
           echo "📦 打包驱动总包：GoNavi-DriverAgents.zip"
           python3 - <<'PY'

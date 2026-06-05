@@ -12,6 +12,7 @@ import urllib.request
 
 COMMIT_LINK_RE = re.compile(r"/commit/([0-9a-f]{40})(?:\b|/)")
 FULL_SHA_RE = re.compile(r"\b([0-9a-f]{40})\b")
+MANIFEST_ASSET_NAME = "GoNavi-DriverAgents-Manifest.json"
 
 
 def github_headers():
@@ -29,6 +30,15 @@ def fetch_json(url):
     request = urllib.request.Request(url, headers=github_headers())
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def download_asset(asset, destination):
+    headers = github_headers()
+    headers["Accept"] = "application/octet-stream"
+    request = urllib.request.Request(asset["url"], headers=headers)
+    with urllib.request.urlopen(request, timeout=120) as response:
+        with open(destination, "wb") as output:
+            output.write(response.read())
 
 
 def load_release(repo, tag):
@@ -77,15 +87,40 @@ def extract_source_commit(release):
     return None
 
 
+def find_manifest_asset(release):
+    if not isinstance(release, dict):
+        return None
+
+    for asset in release.get("assets", []):
+        if str(asset.get("name") or "").strip() == MANIFEST_ASSET_NAME:
+            return asset
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default="Syngnat/GoNavi-DriverAgents")
     parser.add_argument("--tag", required=True, help="release tag name such as dev-latest or v1.0.0")
+    parser.add_argument("--manifest-output", help="optional path to download the published revision manifest asset")
     args = parser.parse_args()
 
     release = load_release(args.repo, args.tag)
     if release is None:
         return 0
+
+    if args.manifest_output:
+        manifest_path = os.path.abspath(args.manifest_output)
+        manifest_asset = find_manifest_asset(release)
+        if manifest_asset is None:
+            if os.path.exists(manifest_path):
+                os.remove(manifest_path)
+            print(
+                f"warning: release {args.repo}@{args.tag} does not expose {MANIFEST_ASSET_NAME}",
+                file=sys.stderr,
+            )
+        else:
+            os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+            download_asset(manifest_asset, manifest_path)
 
     source_commit = extract_source_commit(release)
     if not source_commit:
