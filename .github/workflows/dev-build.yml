@@ -274,7 +274,7 @@ jobs:
 
       - name: Setup MSYS2 Toolchain For DuckDB (Windows AMD64)
         id: msys2_duckdb
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         continue-on-error: true
         uses: msys2/setup-msys2@v2
         with:
@@ -284,7 +284,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
 
       - name: Configure DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         shell: pwsh
         run: |
           function Find-MingwBin([string[]]$candidates) {
@@ -342,7 +342,7 @@ jobs:
           Write-Host "✅ 已配置 DuckDB cgo 编译器: gcc=$gcc g++=$gxx"
 
       - name: Verify DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         shell: pwsh
         run: |
           & "$env:CC" --version
@@ -360,16 +360,11 @@ jobs:
 
       - name: Build
         shell: bash
-        env:
-          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
         run: |
           set -euo pipefail
           DEV_VERSION="${{ steps.version.outputs.version }}"
-          if [ -n "$CHANGED_DRIVER_AGENTS" ]; then
-            ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}" --drivers "$CHANGED_DRIVER_AGENTS"
-          else
-            echo "🧭 No driver-agent changes; keeping committed driver revisions"
-          fi
+          echo "🧭 为 ${{ matrix.platform }} 全量生成 driver-agent revision 指纹，避免跨平台沿用旧 revision"
+          ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}"
           if [ -n "${{ matrix.wails_tags }}" ]; then
             wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -tags "${{ matrix.wails_tags }}" -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${DEV_VERSION}"
           else
