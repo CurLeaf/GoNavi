@@ -442,7 +442,13 @@ jobs:
           set -euo pipefail
           echo "🧭 为 ${{ matrix.platform }} 全量生成 driver-agent revision 指纹，避免跨平台沿用旧 revision"
           ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}"
-          REVISION_HASH="$(shasum -a 256 internal/db/driver_agent_revisions_gen.go | awk '{print $1}')"
+          REVISION_HASH="$(python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          print(hashlib.sha256(Path("internal/db/driver_agent_revisions_gen.go").read_bytes()).hexdigest())
+          PY
+          )"
           export GOCACHE="${RUNNER_TEMP}/go-build-${{ matrix.os_name }}-${{ matrix.arch_name }}-${REVISION_HASH}"
           mkdir -p "$GOCACHE"
           echo "🧭 使用隔离 GOCACHE：$GOCACHE"
@@ -498,7 +504,13 @@ jobs:
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
-          REVISION_HASH="$(shasum -a 256 internal/db/driver_agent_revisions_gen.go | awk '{print $1}')"
+          REVISION_HASH="$(python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          print(hashlib.sha256(Path("internal/db/driver_agent_revisions_gen.go").read_bytes()).hexdigest())
+          PY
+          )"
           export GOCACHE="${RUNNER_TEMP}/go-build-${{ matrix.os_name }}-${{ matrix.arch_name }}-${REVISION_HASH}"
           mkdir -p "$GOCACHE"
           echo "🧭 可选驱动使用隔离 GOCACHE：$GOCACHE"
