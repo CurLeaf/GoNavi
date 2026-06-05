@@ -23,7 +23,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.24.3'
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -70,6 +70,7 @@ jobs:
       drivers: ${{ steps.detect.outputs.drivers }}
       has_changes: ${{ steps.detect.outputs.has_changes }}
       release_source: ${{ steps.detect.outputs.release_source }}
+      source_commit: ${{ steps.published_source.outputs.source_commit }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -96,6 +97,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          merge_csv() {
+            local current="$1"
+            local incoming="$2"
+            local merged="$current"
+            local seen=",${current},"
+            local item
+            IFS=',' read -r -a items <<< "$incoming"
+            for item in "${items[@]}"; do
+              item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+              if [[ -z "$item" ]]; then
+                continue
+              fi
+              if [[ "$seen" == *",$item,"* ]]; then
+                continue
+              fi
+              if [[ -n "$merged" ]]; then
+                merged="${merged},${item}"
+              else
+                merged="$item"
+              fi
+              seen="${seen}${item},"
+            done
+            printf '%s\n' "$merged"
+          }
+
           BASE_REF="${{ steps.published_source.outputs.source_commit }}"
           if [[ -n "$BASE_REF" ]]; then
             if git rev-parse --verify "${BASE_REF}^{commit}" >/dev/null 2>&1 && git merge-base --is-ancestor "$BASE_REF" "$GITHUB_SHA"; then
@@ -112,6 +138,22 @@ jobs:
           fi
           echo "🧭 Final driver detection base: $BASE_REF"
           DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
+          if [[ "$BASE_REF" != "all" ]]; then
+            REVISION_DRIVERS=""
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+              PLATFORM_DRIVERS="$(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "$PLATFORM")" || {
+                echo "⚠️ 平台 revision 差异对比失败（${PLATFORM}），保守回退为全量驱动重建"
+                DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base all --head "$GITHUB_SHA")"
+                REVISION_DRIVERS=""
+                break
+              }
+              REVISION_DRIVERS="$(merge_csv "$REVISION_DRIVERS" "$PLATFORM_DRIVERS")"
+            done
+            if [[ -n "$REVISION_DRIVERS" ]]; then
+              echo "🧭 Revision diff union drivers: $REVISION_DRIVERS"
+              DRIVERS="$(merge_csv "$DRIVERS" "$REVISION_DRIVERS")"
+            fi
+          fi
           echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
           if [ -n "$DRIVERS" ]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -194,7 +236,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.24.3'
 
       - name: Download frontend dist
         uses: actions/download-artifact@v7
@@ -371,11 +413,42 @@ jobs:
             wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${DEV_VERSION}"
           fi
 
-      - name: Build Optional Driver Agents
+      - name: Resolve Platform Driver Revision Diff
+        id: revision_diff
         if: ${{ matrix.build_optional_agents && needs.driver_agents.outputs.has_changes == 'true' }}
         shell: bash
+        run: |
+          set -euo pipefail
+          BASE_REF="${{ needs.driver_agents.outputs.source_commit }}"
+          FALLBACK_DRIVERS="${{ needs.driver_agents.outputs.drivers }}"
+
+          if [[ -z "$BASE_REF" ]]; then
+            echo "⚠️ 未拿到已发布 driver release 源码提交，回退使用全局检测结果：${FALLBACK_DRIVERS}"
+            echo "drivers=${FALLBACK_DRIVERS}" >> "$GITHUB_OUTPUT"
+          else
+            echo "🧭 对比当前平台 revision：base=${BASE_REF} head=${GITHUB_SHA} platform=${{ matrix.platform }}"
+            if DRIVERS="$(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "${{ matrix.platform }}")"; then
+              echo "🧭 当前平台实际需要重建的 driver agents: ${DRIVERS:-<empty>}"
+              echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
+            else
+              echo "⚠️ revision 差异对比失败，保守回退为全量重建"
+              ALL_DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base all --head "$GITHUB_SHA")"
+              echo "drivers=${ALL_DRIVERS}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          DRIVERS="$(sed -n 's/^drivers=//p' "$GITHUB_OUTPUT" | tail -n 1)"
+          if [[ -n "$DRIVERS" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Optional Driver Agents
+        if: ${{ matrix.build_optional_agents && steps.revision_diff.outputs.has_changes == 'true' }}
+        shell: bash
         env:
-          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
+          CHANGED_DRIVER_AGENTS: ${{ steps.revision_diff.outputs.drivers }}
         run: |
           set -euo pipefail
           TARGET_PLATFORM="${{ matrix.platform }}"
