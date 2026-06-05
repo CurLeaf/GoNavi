@@ -423,13 +423,24 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		qualifiedTable = fmt.Sprintf("%s.%s", quoteIdent(schema), quoteIdent(table))
 	}
 
-	for _, pk := range changes.Deletes {
+	isDuckDBRowIDLocator := strings.EqualFold(strings.TrimSpace(changes.LocatorStrategy), "duckdb-rowid")
+	buildWhere := func(keys map[string]interface{}) ([]string, []interface{}) {
 		var wheres []string
 		var args []interface{}
-		for k, v := range pk {
+		for k, v := range keys {
+			if isDuckDBRowIDLocator && strings.EqualFold(strings.TrimSpace(k), "rowid") {
+				wheres = append(wheres, "rowid = ?")
+				args = append(args, v)
+				continue
+			}
 			wheres = append(wheres, fmt.Sprintf("%s = ?", quoteIdent(k)))
 			args = append(args, v)
 		}
+		return wheres, args
+	}
+
+	for _, pk := range changes.Deletes {
+		wheres, args := buildWhere(pk)
 		if len(wheres) == 0 {
 			continue
 		}
@@ -450,11 +461,8 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 			continue
 		}
 
-		var wheres []string
-		for k, v := range update.Keys {
-			wheres = append(wheres, fmt.Sprintf("%s = ?", quoteIdent(k)))
-			args = append(args, v)
-		}
+		wheres, whereArgs := buildWhere(update.Keys)
+		args = append(args, whereArgs...)
 		if len(wheres) == 0 {
 			return fmt.Errorf("更新操作需要主键条件")
 		}

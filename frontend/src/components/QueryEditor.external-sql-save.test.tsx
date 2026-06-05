@@ -3387,6 +3387,52 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('uses hidden DuckDB rowid when query results have no primary or unique key', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME', '__gonavi_duckdb_rowid__'], rows: [{ NAME: 'launch', __gonavi_duckdb_rowid__: 17 }] }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'name', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValueOnce({
+      success: true,
+      data: [],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'SELECT NAME FROM main.events' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.tableName).toBe('main.events');
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'duckdb-rowid',
+      columns: ['rowid'],
+      valueColumns: ['__gonavi_duckdb_rowid__'],
+      hiddenColumns: ['__gonavi_duckdb_rowid__'],
+      writableColumns: {
+        NAME: 'name',
+      },
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('rowid AS "__gonavi_duckdb_rowid__"');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it.each([
     'mysql',
     'mariadb',

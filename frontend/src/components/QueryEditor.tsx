@@ -24,7 +24,11 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
-import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
+import {
+    DUCKDB_ROWID_LOCATOR_COLUMN,
+    ORACLE_ROWID_LOCATOR_COLUMN,
+    type EditRowLocator,
+} from '../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import {
     getColumnDefinitionKey,
@@ -577,6 +581,10 @@ const buildQueryLocatorColumnExpression = (dbType: string, column: string, alias
 
 const buildQueryRowIDExpression = (dbType: string, sourceAlias?: string): string => (
     `${sourceAlias ? `${sourceAlias}.` : ''}ROWID AS ${quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN)}`
+);
+
+const buildDuckDBRowIDExpression = (dbType: string, sourceAlias?: string): string => (
+    `${sourceAlias ? `${sourceAlias}.` : ''}rowid AS ${quoteIdentPart(dbType, DUCKDB_ROWID_LOCATOR_COLUMN)}`
 );
 
 const escapeMetadataSqlLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
@@ -1834,6 +1842,7 @@ const resolveQueryLocatorPlan = async ({
         const appendExpressions: string[] = [];
         const hiddenColumns: string[] = [];
         let needsOracleRowIDExpression = false;
+        let needsDuckDBRowIDExpression = false;
 
         const buildColumnLocator = (strategy: 'primary-key' | 'unique-key', locatorColumns: string[]): EditRowLocator => {
             const valueColumns = locatorColumns.map((column, index) => {
@@ -1872,6 +1881,16 @@ const resolveQueryLocatorPlan = async ({
                     writableColumns,
                     readOnly: false,
                 };
+            } else if (String(dbType || '').trim().toLowerCase() === 'duckdb') {
+                needsDuckDBRowIDExpression = true;
+                plan.editLocator = {
+                    strategy: 'duckdb-rowid',
+                    columns: ['rowid'],
+                    valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+                    hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+                    writableColumns,
+                    readOnly: false,
+                };
             } else {
                 const reason = !resIndexes?.success
                     ? '无法加载唯一索引元数据，无法安全提交修改。'
@@ -1883,6 +1902,7 @@ const resolveQueryLocatorPlan = async ({
 
         const executableAppendExpressions = [
             ...(needsOracleRowIDExpression ? [buildQueryRowIDExpression(dbType)] : []),
+            ...(needsDuckDBRowIDExpression ? [buildDuckDBRowIDExpression(dbType)] : []),
             ...appendExpressions,
         ];
 

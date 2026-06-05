@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DUCKDB_ROWID_LOCATOR_COLUMN,
   ORACLE_ROWID_LOCATOR_COLUMN,
   filterHiddenLocatorColumns,
   resolveEditRowLocator,
@@ -103,6 +104,20 @@ describe('resolveEditRowLocator', () => {
       readOnly: false,
     });
   });
+
+  it('uses DuckDB rowid when no primary or unique key is available', () => {
+    expect(resolveEditRowLocator({
+      dbType: 'duckdb',
+      resultColumns: ['name', DUCKDB_ROWID_LOCATOR_COLUMN],
+      allowDuckDBRowID: true,
+    })).toEqual({
+      strategy: 'duckdb-rowid',
+      columns: ['rowid'],
+      valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+  });
 });
 
 describe('resolveRowLocatorValues', () => {
@@ -131,6 +146,19 @@ describe('resolveRowLocatorValues', () => {
       error: '定位列 EMAIL 的值为空，无法安全提交修改。',
     });
   });
+
+  it('extracts DuckDB rowid locator values from the original row', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'duckdb',
+      resultColumns: ['name', DUCKDB_ROWID_LOCATOR_COLUMN],
+      allowDuckDBRowID: true,
+    });
+
+    expect(resolveRowLocatorValues(locator, { name: 'launch', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 })).toEqual({
+      ok: true,
+      values: { rowid: 17 },
+    });
+  });
 });
 
 describe('filterHiddenLocatorColumns', () => {
@@ -142,5 +170,15 @@ describe('filterHiddenLocatorColumns', () => {
     });
 
     expect(filterHiddenLocatorColumns(['NAME', ORACLE_ROWID_LOCATOR_COLUMN], locator)).toEqual(['NAME']);
+  });
+
+  it('removes hidden DuckDB rowid columns from displayed columns', () => {
+    const locator = resolveEditRowLocator({
+      dbType: 'duckdb',
+      resultColumns: ['name', DUCKDB_ROWID_LOCATOR_COLUMN],
+      allowDuckDBRowID: true,
+    });
+
+    expect(filterHiddenLocatorColumns(['name', DUCKDB_ROWID_LOCATOR_COLUMN], locator)).toEqual(['name']);
   });
 });

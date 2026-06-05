@@ -16,6 +16,7 @@ import {
   validateQuickWhereCondition,
 } from '../utils/dataGridWhereFilter';
 import {
+  DUCKDB_ROWID_LOCATOR_COLUMN,
   ORACLE_ROWID_LOCATOR_COLUMN,
   resolveEditRowLocator,
   type EditRowLocator,
@@ -163,13 +164,18 @@ const buildDataViewerBaseSelectSQL = (
   locator?: EditRowLocator,
 ): string => {
   const quotedTableName = quoteQualifiedIdent(dbType, tableName);
-  if (locator?.strategy !== 'oracle-rowid') {
+  if (locator?.strategy !== 'oracle-rowid' && locator?.strategy !== 'duckdb-rowid') {
     return `SELECT * FROM ${quotedTableName} ${whereSQL}`;
   }
 
   const alias = 'gonavi_row_source';
-  const rowIDAlias = quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN);
-  return `SELECT ${alias}.*, ${alias}.ROWID AS ${rowIDAlias} FROM ${quotedTableName} ${alias} ${whereSQL}`;
+  if (locator?.strategy === 'duckdb-rowid') {
+    const duckdbRowIDAlias = quoteIdentPart(dbType, DUCKDB_ROWID_LOCATOR_COLUMN);
+    return `SELECT ${alias}.*, ${alias}.rowid AS ${duckdbRowIDAlias} FROM ${quotedTableName} ${alias} ${whereSQL}`;
+  }
+
+  const oracleRowIDAlias = quoteIdentPart(dbType, ORACLE_ROWID_LOCATOR_COLUMN);
+  return `SELECT ${alias}.*, ${alias}.ROWID AS ${oracleRowIDAlias} FROM ${quotedTableName} ${alias} ${whereSQL}`;
 };
 
 const resolveDuckDBSchemaAndTable = (dbName: string, tableName: string) => {
@@ -575,13 +581,16 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     const resultColumns = getTableColumnNames(columnDefs);
                     const locatorColumns = isOracleLikeDialect(dbType)
                         ? [...resultColumns, ORACLE_ROWID_LOCATOR_COLUMN]
-                        : resultColumns;
+                        : (String(dbType || '').trim().toLowerCase() === 'duckdb'
+                            ? [...resultColumns, DUCKDB_ROWID_LOCATOR_COLUMN]
+                            : resultColumns);
                     let nextLocator = resolveEditRowLocator({
                         dbType,
                         resultColumns: locatorColumns,
                         primaryKeys,
                         indexes,
                         allowOracleRowID: true,
+                        allowDuckDBRowID: String(dbType || '').trim().toLowerCase() === 'duckdb',
                     });
 
                     if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {

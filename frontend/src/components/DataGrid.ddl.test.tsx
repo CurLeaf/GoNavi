@@ -8,7 +8,7 @@ import DataGrid, {
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
 } from './DataGrid';
-import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -410,6 +410,37 @@ describe('DataGrid commit change set', () => {
       changes: {
         inserts: [],
         updates: [{ keys: { ROWID: 'AAAA' }, values: { NAME: 'new-name' } }],
+        deletes: [],
+      },
+    });
+  });
+
+  it('uses hidden DuckDB rowid only as locator and excludes it from update values', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': { [GONAVI_ROW_KEY]: 'row-1', NAME: 'new-name', [DUCKDB_ROWID_LOCATOR_COLUMN]: 18 },
+      },
+      deletedRowKeys: new Set(),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', NAME: 'old-name', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 }],
+      editLocator: {
+        strategy: 'duckdb-rowid',
+        columns: ['rowid'],
+        valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+        hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+        readOnly: false,
+      },
+      visibleColumnNames: ['NAME'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [],
+        updates: [{ keys: { rowid: 17 }, values: { NAME: 'new-name' } }],
         deletes: [],
       },
     });

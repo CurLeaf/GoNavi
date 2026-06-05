@@ -4,7 +4,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
-import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import DataViewer from './DataViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -204,6 +204,39 @@ describe('DataViewer safe editing locator', () => {
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
     expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it('uses hidden DuckDB rowid when no primary or unique key is available', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'name', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValue({
+      success: true,
+      data: [],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['name', DUCKDB_ROWID_LOCATOR_COLUMN],
+      data: [{ name: 'launch', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-rowid', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'duckdb-rowid',
+      columns: ['rowid'],
+      valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`rowid AS "${DUCKDB_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
     renderer.unmount();
   });
 
