@@ -14,6 +14,7 @@ type fakeBatchWriteDB struct {
 	execCalls   int
 	execQueries []string
 	lastQuery   string
+	lastCtx     context.Context
 	queryCalls  int
 	queryMap    map[string][]map[string]interface{}
 	fieldMap    map[string][]string
@@ -87,12 +88,14 @@ func (f *fakeBatchWriteDB) GetTriggers(dbName, tableName string) ([]connection.T
 }
 
 func (f *fakeBatchWriteDB) ExecContext(ctx context.Context, query string) (int64, error) {
+	f.lastCtx = ctx
 	f.execCalls++
 	f.execQueries = append(f.execQueries, query)
 	return 1, nil
 }
 
 func (f *fakeBatchWriteDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	f.lastCtx = ctx
 	f.queryCalls++
 	if err := f.queryErr[query]; err != nil {
 		return nil, nil, err
@@ -392,6 +395,48 @@ func TestDBQueryWithCancelReturnsMessagesForSQLServerQuery(t *testing.T) {
 	}
 	if len(result.Messages) != 1 || result.Messages[0] == "" {
 		t.Fatalf("expected SQL Server messages to be returned, got %#v", result.Messages)
+	}
+}
+
+func TestDBQueryWithCancel_DuckDBQueriesDoNotInheritConnectTimeout(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		verifyDriverAgentRevisionFunc = originalVerifyDriverAgentRevisionFunc
+	})
+
+	query := "SELECT 1"
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"value": 1},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"value"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	verifyDriverAgentRevisionFunc = func(config connection.ConnectionConfig) error {
+		return nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "duckdb", Host: ":memory:", Timeout: 1}
+
+	result := app.DBQueryWithCancel(config, "main", query, "duckdb-no-deadline-test")
+	if !result.Success {
+		t.Fatalf("expected DuckDB DBQueryWithCancel success, got failure: %s", result.Message)
+	}
+	if fakeDB.lastCtx == nil {
+		t.Fatal("expected DuckDB query path to receive a context")
+	}
+	if _, ok := fakeDB.lastCtx.Deadline(); ok {
+		t.Fatal("expected DuckDB query context to avoid connection-timeout deadline")
 	}
 }
 

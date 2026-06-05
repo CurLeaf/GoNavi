@@ -23,6 +23,17 @@ func normalizeTestConnectionConfig(config connection.ConnectionConfig) connectio
 	return normalized
 }
 
+func newQueryExecutionContext(config connection.ConnectionConfig) (context.Context, context.CancelFunc) {
+	if strings.EqualFold(strings.TrimSpace(config.Type), "duckdb") {
+		return context.WithCancel(context.Background())
+	}
+	timeoutSeconds := config.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	return utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+}
+
 func validateTestConnectionInput(config connection.ConnectionConfig) error {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "" {
@@ -600,11 +611,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	// Store cancel function for potential manual cancellation
@@ -707,11 +714,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	a.queryMu.Lock()
@@ -1033,11 +1036,7 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 	}()
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	isReadQuery := isReadOnlySQLQuery(runConfig.Type, query)
