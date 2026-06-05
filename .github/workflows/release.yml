@@ -431,21 +431,21 @@ jobs:
               DUCKDB_AGENT_PATH="${OUTPUT_PATH}" \
               DUCKDB_DLL_PATH="${OUTDIR}/duckdb.dll" \
               python3 - <<'PY'
-import os
-import zipfile
+          import os
+          import zipfile
 
-zip_path = os.environ["DUCKDB_ZIP_PATH"]
-entries = [
-    ("Windows/duckdb-driver-agent-windows-amd64.exe", os.environ["DUCKDB_AGENT_PATH"]),
-    ("Windows/duckdb.dll", os.environ["DUCKDB_DLL_PATH"]),
-]
+          zip_path = os.environ["DUCKDB_ZIP_PATH"]
+          entries = [
+              ("Windows/duckdb-driver-agent-windows-amd64.exe", os.environ["DUCKDB_AGENT_PATH"]),
+              ("Windows/duckdb.dll", os.environ["DUCKDB_DLL_PATH"]),
+          ]
 
-with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    for arcname, src in entries:
-        if not os.path.isfile(src):
-            raise FileNotFoundError(src)
-        zf.write(src, arcname)
-PY
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for arcname, src in entries:
+                  if not os.path.isfile(src):
+                      raise FileNotFoundError(src)
+                  zf.write(src, arcname)
+          PY
               echo "📦 已生成 DuckDB Windows 专属驱动包: ${DUCKDB_ZIP_PATH}"
             fi
           done
