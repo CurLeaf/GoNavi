@@ -427,9 +427,10 @@ jobs:
             fi
             bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
             if [ "$DRIVER" = "duckdb" ] && [ -n "$DUCKDB_LIB_DIR" ]; then
-              DUCKDB_ZIP_PATH="${OUTDIR}/duckdb-driver.zip" \
-              DUCKDB_AGENT_PATH="${OUTPUT_PATH}" \
-              DUCKDB_DLL_PATH="${OUTDIR}/duckdb.dll" \
+              DUCKDB_ZIP_PATH="${OUTDIR}/duckdb-driver.zip"
+              export DUCKDB_ZIP_PATH
+              export DUCKDB_AGENT_PATH="${OUTPUT_PATH}"
+              export DUCKDB_DLL_PATH="${OUTDIR}/duckdb.dll"
               python3 - <<'PY'
           import os
           import zipfile
