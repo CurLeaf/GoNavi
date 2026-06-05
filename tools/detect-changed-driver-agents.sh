@@ -320,9 +320,31 @@ add_all_forced_drivers() {
   done
 }
 
+revision_file_changed_drivers() {
+  local line driver emitted_seen
+  emitted_seen="|"
+  while IFS= read -r line; do
+    case "$line" in
+      +++*|---*|@@*)
+        continue
+        ;;
+      +*|-*)
+        if [[ "$line" =~ \"([^\"]+)\"[[:space:]]*:[[:space:]]*\"src-[^\"]+\" ]]; then
+          driver="$(normalize_driver "${BASH_REMATCH[1]}")" || continue
+          if [[ "$emitted_seen" == *"|$driver|"* ]]; then
+            continue
+          fi
+          printf '%s\n' "$driver"
+          emitted_seen="${emitted_seen}${driver}|"
+        fi
+        ;;
+    esac
+  done < <(git diff --unified=0 "$base_commit" "$head_commit" -- internal/db/driver_agent_revisions_gen.go)
+}
+
 is_ignored_driver_agent_source_file() {
   case "$1" in
-    *_test.go|frontend/*|internal/app/*|internal/db/driver_agent_revisions_gen.go)
+    *_test.go|frontend/*|internal/app/*)
       return 0
       ;;
   esac
@@ -469,6 +491,15 @@ declare -a forced_changed_drivers=()
 forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
   case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      revision_delta="$(revision_file_changed_drivers)"
+      if [[ -z "$revision_delta" ]]; then
+        echo "检测到 driver-agent revision 文件存在无法归因的变更；保守构建全部 driver-agent：$file" >&2
+        all_drivers_csv
+        exit 0
+      fi
+      add_forced_drivers_from_tokens "$revision_delta"
+      ;;
     go.mod|go.sum|build-driver-agents.sh|tools/generate-driver-agent-revisions.sh)
       set +e
       shared_delta="$(shared_file_driver_delta "$file")"
@@ -487,7 +518,9 @@ for file in "${!changed_file_set[@]}"; do
       exit 0
       ;;
     tools/detect-changed-driver-agents.sh)
-      # This script only selects CI work; it is not embedded in driver-agent binaries.
+      echo "检测到 driver-agent 变更检测脚本更新；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
       ;;
   esac
 done

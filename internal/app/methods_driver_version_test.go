@@ -630,11 +630,11 @@ func TestShouldPreferSourceBuildBeforeDownloadDoesNotPreferKingbase(t *testing.T
 }
 
 func TestShouldPreferSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
-	if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mariadb", "1.9.3") {
-		t.Fatal("expected development build to prefer local driver-agent source build")
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mariadb", "1.9.3") {
+		t.Fatal("expected development release build to prefer published MariaDB driver-agent before source fallback")
 	}
-	if !shouldPreferSourceBuildBeforeDownloadForBuildType("development", "clickhouse", "2.43.1") {
-		t.Fatal("expected development build alias to prefer local driver-agent source build")
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("development", "clickhouse", "2.43.1") && !shouldUseDuckDBWindowsDynamicLibrary("clickhouse") {
+		t.Fatal("expected development build alias not to prefer source build for ClickHouse")
 	}
 	if shouldPreferSourceBuildBeforeDownloadForBuildType("production", "mariadb", "1.9.3") {
 		t.Fatal("expected production build not to prefer source build for MariaDB")
@@ -648,17 +648,30 @@ func TestShouldRequireSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T)
 	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
 		t.Fatal("expected development build to allow DuckDB release bundle fallback after local build failure")
 	}
-	if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
-		t.Fatal("expected development build to still prefer local DuckDB driver-agent source build before bundle fallback")
+	if shouldUseDuckDBWindowsDynamicLibrary("duckdb") {
+		if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+			t.Fatal("expected DuckDB Windows dynamic-library install to prefer local source build before bundle fallback")
+		}
+	} else if shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build not to prefer DuckDB source build on non-Windows dynamic-library platforms")
 	}
-	if !shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
-		t.Fatal("expected development build alias to require local driver-agent source build")
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
+		t.Fatal("expected development build alias to allow published MariaDB driver-agent fallback")
 	}
 	if shouldRequireSourceBuildBeforeDownloadForBuildType("production", "duckdb", "2.5.6") {
 		t.Fatal("expected production build to allow DuckDB release bundle fallback")
 	}
 	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "mysql", "") {
 		t.Fatal("expected built-in drivers not to require optional driver-agent source build")
+	}
+}
+
+func TestOptionalDriverInstallTimeoutsStayBounded(t *testing.T) {
+	if optionalDriverBundleDownloadTimeout > 15*time.Minute {
+		t.Fatalf("driver bundle download timeout should stay bounded, got %s", optionalDriverBundleDownloadTimeout)
+	}
+	if optionalDriverSourceBuildTimeout > 8*time.Minute {
+		t.Fatalf("driver source build timeout should stay bounded, got %s", optionalDriverSourceBuildTimeout)
 	}
 }
 

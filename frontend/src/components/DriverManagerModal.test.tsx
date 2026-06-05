@@ -201,4 +201,33 @@ describe('DriverManagerModal toolbar actions', () => {
     expect(importDirButtonAfter.props.disabled).toBeFalsy();
     expect(installAllButtonAfter.props.disabled).toBe(true);
   });
+
+  it('releases install action when the driver install watchdog expires', async () => {
+    vi.useFakeTimers();
+    try {
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<DriverManagerModal open onClose={vi.fn()} />);
+      });
+      await flushPromises();
+
+      const installButton = findButton(renderer!, '安装启用');
+      await act(async () => {
+        installButton.props.onClick();
+        await Promise.resolve();
+      });
+
+      expect(findButton(renderer!, '安装启用').props.disabled).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(12 * 60 * 1000);
+        await Promise.resolve();
+      });
+
+      expect(findButton(renderer!, '安装启用').props.disabled).toBeFalsy();
+      expect(messageApi.error).toHaveBeenCalledWith(expect.stringContaining('超过 12 分钟仍未完成'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

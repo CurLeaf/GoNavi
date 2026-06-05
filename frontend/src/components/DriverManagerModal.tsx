@@ -123,6 +123,7 @@ const buildVersionOptionKey = (option: DriverVersionOption) => `${option.version
 const buildVersionSizeLoadingKey = (driverType: string, optionKey: string) => `${driverType}@@${optionKey}`;
 const DRIVER_STATUS_CACHE_TTL_MS = 60 * 1000;
 const DRIVER_NETWORK_CACHE_TTL_MS = 5 * 60 * 1000;
+const DRIVER_INSTALL_WATCHDOG_MS = 12 * 60 * 1000;
 const normalizeDriverSearchText = (value: string) => String(value || '').trim().toLowerCase();
 const isSlimBuildInstallUnavailable = (row: DriverStatusRow) => (row.message || '').includes('精简构建') && !row.packageInstalled;
 const resolveDriverBatchActionLabel = (actionKind: DriverBatchActionKind) => {
@@ -703,6 +704,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       percent: 0,
     });
     appendOperationLog(row.type, '[START] 开始自动安装');
+    let watchdogId: ReturnType<typeof setTimeout> | undefined;
     try {
       let versionOptions = versionMap[row.type] || [];
       if (versionOptions.length === 0) {
@@ -716,7 +718,18 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       const selectedVersion = selectedOption?.version || row.pinnedVersion || '';
       const selectedDownloadURL = selectedOption?.downloadUrl || row.defaultDownloadUrl || '';
 
-      const result = await DownloadDriverPackage(row.type, selectedVersion, selectedDownloadURL, downloadDir);
+      const installWatchdog = new Promise<never>((_, reject) => {
+        watchdogId = setTimeout(() => {
+          reject(new Error(`安装 ${row.name} 超过 ${Math.round(DRIVER_INSTALL_WATCHDOG_MS / 60000)} 分钟仍未完成。后台任务可能仍在下载或构建，请稍后刷新状态；如多次出现，请检查代理或改用本地驱动包导入。`));
+        }, DRIVER_INSTALL_WATCHDOG_MS);
+      });
+      const result = await Promise.race([
+        DownloadDriverPackage(row.type, selectedVersion, selectedDownloadURL, downloadDir),
+        installWatchdog,
+      ]);
+      if (watchdogId) {
+        clearTimeout(watchdogId);
+      }
       if (!result?.success) {
         const errText = result?.message || `安装 ${row.name} 失败`;
         appendOperationLog(row.type, `[ERROR] ${errText}`);
@@ -734,7 +747,22 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         await refreshStatus(false);
       }
       return true;
+    } catch (error) {
+      const errText = error instanceof Error ? error.message : String(error || `安装 ${row.name} 失败`);
+      appendOperationLog(row.type, `[ERROR] ${errText}`);
+      updateDriverProgress(row.type, {
+        status: 'error',
+        message: errText,
+        percent: 0,
+      });
+      if (!actionOptions?.silentToast) {
+        message.error(errText);
+      }
+      return false;
     } finally {
+      if (watchdogId) {
+        clearTimeout(watchdogId);
+      }
       setActionState({ driverType: '', kind: '' });
     }
   }, [appendOperationLog, downloadDir, loadVersionOptions, refreshStatus, selectedVersionMap, updateDriverProgress, versionMap]);

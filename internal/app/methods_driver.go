@@ -3,6 +3,7 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -301,7 +302,7 @@ const (
 	optionalDriverBundleAssetName       = "GoNavi-DriverAgents.zip"
 	duckDBWindowsDriverZipAssetName     = "duckdb-driver.zip"
 	optionalDriverBundleIndexAssetName  = "GoNavi-DriverAgents-Index.json"
-	optionalDriverBundleDownloadTimeout = 45 * time.Minute
+	optionalDriverBundleDownloadTimeout = 15 * time.Minute
 	optionalDriverBundleCacheMaxAge     = 7 * 24 * time.Hour
 	optionalDriverBundleCacheMaxFiles   = 4
 	driverManifestCacheTTL              = 5 * time.Minute
@@ -372,6 +373,8 @@ var (
 	driverVersionWarmup        = driverVersionWarmupState{}
 	errLocalDriverDirScanLimit = errors.New("local_driver_directory_scan_limit_exceeded")
 )
+
+var optionalDriverSourceBuildTimeout = 8 * time.Minute
 
 var validateOptionalDriverAgentExecutableFunc = db.ValidateOptionalDriverAgentExecutable
 
@@ -3829,10 +3832,15 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 		env = prependPathEnv(env, duckDBLibDir)
 	}
 	buildArgs = append(buildArgs, "-o", executablePath, "./cmd/optional-driver-agent")
-	cmd := exec.Command(goPath, buildArgs...)
+	ctx, cancel := context.WithTimeout(context.Background(), optionalDriverSourceBuildTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, goPath, buildArgs...)
 	cmd.Dir = projectRoot
 	cmd.Env = env
 	output, buildErr := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return "", fmt.Errorf("构建 %s 驱动代理超时（超过 %s），请优先使用预编译驱动包或本地驱动包导入", displayName, optionalDriverSourceBuildTimeout)
+	}
 	if buildErr != nil {
 		return "", fmt.Errorf("构建 %s 驱动代理失败：%v，输出：%s", displayName, buildErr, strings.TrimSpace(string(output)))
 	}
@@ -3978,26 +3986,15 @@ func shouldPreferSourceBuildBeforeDownload(driverType string, selectedVersion st
 
 func shouldPreferSourceBuildBeforeDownloadForBuildType(buildType string, driverType string, selectedVersion string) bool {
 	_ = selectedVersion
-	if shouldPreferDevelopmentDriverAgentSourceBuild(buildType, driverType) {
-		return true
-	}
+	_ = buildType
 	return shouldUseDuckDBWindowsDynamicLibrary(driverType)
 }
 
 func shouldRequireSourceBuildBeforeDownloadForBuildType(buildType string, driverType string, selectedVersion string) bool {
 	_ = selectedVersion
-	if normalizeDriverType(driverType) == "duckdb" {
-		return false
-	}
-	return shouldPreferDevelopmentDriverAgentSourceBuild(buildType, driverType)
-}
-
-func shouldPreferDevelopmentDriverAgentSourceBuild(buildType string, driverType string) bool {
-	normalizedBuildType := strings.ToLower(strings.TrimSpace(buildType))
-	if normalizedBuildType != "dev" && normalizedBuildType != "development" {
-		return false
-	}
-	return db.IsOptionalGoDriver(driverType)
+	_ = buildType
+	_ = driverType
+	return false
 }
 
 func shouldSkipReusableAgentCandidate(driverType string, selectedVersion string) bool {
