@@ -3214,6 +3214,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       canViewDdl,
       currentConnConfig,
       dbName,
+      dbType,
       tableName,
       isV2Ui,
       cellEditMode,

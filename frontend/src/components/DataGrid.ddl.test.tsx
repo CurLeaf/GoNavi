@@ -1246,8 +1246,46 @@ describe('DataGrid DDL interactions', () => {
     expect(editors).toHaveLength(1);
     expect(editors[0].props['data-language']).toBe('sql');
     expect(editors[0].props['data-read-only']).toBe('true');
-    expect(textContent(editors[0])).toContain('CREATE TABLE users');
+    expect(textContent(editors[0])).toContain('CREATE TABLE');
+    expect(textContent(editors[0])).toContain('users');
     expect(renderer!.root.findAll((node) => node.type === 'pre' && textContent(node).includes('CREATE TABLE users'))).toHaveLength(0);
+  });
+
+  it('formats DuckDB DDL into readable multiline SQL in the v2 view', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.connections[0].config.type = 'duckdb';
+    backendApp.DBShowCreateTable.mockResolvedValueOnce({
+      success: true,
+      data: 'CREATE TABLE customers(customer_id BIGINT, customer_code VARCHAR, city VARCHAR, tier VARCHAR, signup_date DATE, lifetime_value DECIMAL(12,2), PRIMARY KEY(customer_id));',
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', customer_id: 1 }]}
+          columnNames={['customer_id']}
+          loading={false}
+          tableName="example.main.customers"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+
+    const editors = renderer!.root.findAll((node) => node.props['data-monaco-editor'] === 'true');
+    expect(editors).toHaveLength(1);
+    const ddlText = textContent(editors[0]);
+    expect(ddlText).toContain('CREATE TABLE customers (');
+    expect(ddlText).toContain('customer_id BIGINT,');
+    expect(ddlText).toContain('PRIMARY KEY (customer_id)');
+    expect(ddlText).toContain('\n');
   });
 
   it('opens the v2 DDL view as a right sidebar while keeping the table visible', async () => {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { DBShowCreateTable } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { formatDdlForDisplay } from '../utils/ddlFormat';
 
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
 type DdlViewLayoutMode = 'bottom' | 'side';
@@ -20,6 +21,7 @@ interface UseDataGridDdlViewParams {
   messageApi: {
     error: (content: string) => void;
   };
+  dbType?: string;
 }
 
 export interface UseDataGridDdlViewResult {
@@ -54,6 +56,7 @@ export const useDataGridDdlView = ({
   closeCellEditModeRef,
   setTextRecordIndex,
   messageApi,
+  dbType,
 }: UseDataGridDdlViewParams): UseDataGridDdlViewResult => {
   const [viewMode, setViewMode] = React.useState<GridViewMode>('table');
   const [ddlModalOpen, setDdlModalOpen] = React.useState(false);
@@ -92,7 +95,7 @@ export const useDataGridDdlView = ({
       const res = await DBShowCreateTable(buildRpcConnectionConfig(currentConnConfig as any) as any, dbName || '', tableName);
       if (requestSeq !== ddlRequestSeqRef.current) return;
       if (res.success) {
-        setDdlText(String(res.data ?? ''));
+        setDdlText(formatDdlForDisplay(res.data, dbType || String((currentConnConfig as any)?.type || '')));
         return;
       }
       messageApi.error(res.message || '获取 DDL 失败');
@@ -104,7 +107,7 @@ export const useDataGridDdlView = ({
         setDdlLoading(false);
       }
     }
-  }, [canViewDdl, currentConnConfig, dbName, isV2Ui, messageApi, tableName]);
+  }, [canViewDdl, currentConnConfig, dbName, dbType, isV2Ui, messageApi, tableName]);
 
   React.useEffect(() => {
     if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er')) return;
