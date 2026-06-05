@@ -412,6 +412,7 @@ export interface TabData {
   dbName?: string;
   tableName?: string;
   query?: string;
+  queryMode?: "standard" | "object-edit";
   filePath?: string;
   initialTab?: string;
   readOnly?: boolean;

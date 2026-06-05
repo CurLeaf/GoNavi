@@ -99,6 +99,15 @@ expected_revision_for() {
   ' internal/db/driver_agent_revisions_gen.go
 }
 
+build_tags_for_driver() {
+  local driver="$1"
+  local tags="gonavi_${driver}_driver"
+  if [[ "$driver" == "duckdb" && "$host_goos" == "windows" && "$host_goarch" == "amd64" ]]; then
+    tags="${tags} duckdb_use_lib"
+  fi
+  printf '%s\n' "$tags"
+}
+
 agent_path_for() {
   local driver="$1"
   local public_name asset
@@ -125,8 +134,96 @@ print(data.get("agentRevision", ""))
 '
 }
 
+probe_host_agent_revision() {
+  local driver="$1"
+  local build_tags probe_dir probe_path revision
+  build_tags="$(build_tags_for_driver "$driver")"
+  probe_dir="$(mktemp -d)"
+  probe_path="${probe_dir}/probe-agent"
+  if [[ "$host_goos" == "windows" ]]; then
+    probe_path="${probe_path}.exe"
+  fi
+
+  CGO_ENABLED=0 go build \
+    -tags "${build_tags}" \
+    -trimpath \
+    -ldflags "-s -w" \
+    -o "${probe_path}" \
+    ./cmd/optional-driver-agent >/dev/null
+
+  chmod +x "$probe_path" 2>/dev/null || true
+  revision="$(probe_agent_revision "$probe_path")"
+  rm -rf "$probe_dir"
+  printf '%s\n' "$revision"
+}
+
+can_execute_target_binary() {
+  [[ "$target_platform" == "$host_platform" ]]
+}
+
+validate_windows_pe_machine() {
+  local agent_path="$1"
+  local expected_goarch="$2"
+  python3 - "$agent_path" "$expected_goarch" <<'PY'
+import os
+import struct
+import sys
+
+path = sys.argv[1]
+goarch = sys.argv[2].strip().lower()
+expected = {
+    "386": 0x014C,
+    "amd64": 0x8664,
+    "arm64": 0xAA64,
+}
+labels = {
+    0x014C: "windows-386",
+    0x8664: "windows-amd64",
+    0xAA64: "windows-arm64",
+}
+
+if goarch not in expected:
+    sys.exit(0)
+
+with open(path, "rb") as fh:
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    if size < 0x40:
+        raise SystemExit("文件头不完整")
+
+    fh.seek(0)
+    if fh.read(2) != b"MZ":
+        raise SystemExit("缺少 MZ 头")
+
+    fh.seek(0x3C)
+    pe_offset_raw = fh.read(4)
+    if len(pe_offset_raw) != 4:
+        raise SystemExit("读取 PE 头偏移失败")
+    pe_offset = struct.unpack("<I", pe_offset_raw)[0]
+    if pe_offset < 0x40 or pe_offset + 24 > size:
+        raise SystemExit("PE 头不完整")
+
+    fh.seek(pe_offset)
+    if fh.read(4) != b"PE\0\0":
+        raise SystemExit("缺少 PE 签名")
+
+    machine_raw = fh.read(2)
+    if len(machine_raw) != 2:
+        raise SystemExit("读取 PE 架构失败")
+    machine = struct.unpack("<H", machine_raw)[0]
+
+expected_machine = expected[goarch]
+if machine != expected_machine:
+    raise SystemExit(f"可执行文件架构不兼容（文件={labels.get(machine, hex(machine))}，期望={labels[expected_machine]})")
+PY
+}
+
 declare -a raw_drivers=()
 IFS=',' read -r -a raw_drivers <<<"$driver_csv"
+
+host_goos="$(go env GOOS)"
+host_goarch="$(go env GOARCH)"
+host_platform="${host_goos}/${host_goarch}"
 
 failed=0
 for raw_driver in "${raw_drivers[@]}"; do
@@ -152,7 +249,22 @@ for raw_driver in "${raw_drivers[@]}"; do
   fi
   chmod +x "$agent_path" 2>/dev/null || true
 
-  actual="$(probe_agent_revision "$agent_path" || true)"
+  if [[ "$goos" == "windows" ]]; then
+    if ! validate_windows_pe_machine "$agent_path" "$goarch"; then
+      echo "❌ $driver Windows driver-agent 架构校验失败：asset=$agent_path target=$target_platform"
+      failed=1
+      continue
+    fi
+  fi
+
+  actual=""
+  if can_execute_target_binary; then
+    actual="$(probe_agent_revision "$agent_path" || true)"
+  else
+    echo "ℹ️  runner 平台 ${host_platform} 无法直接执行目标二进制 ${target_platform}，已先完成目标资产架构校验，再用 host-native probe 校验相同 build tags 的 revision"
+    actual="$(probe_host_agent_revision "$driver" || true)"
+  fi
+
   if [[ "$actual" != "$expected" ]]; then
     echo "❌ $driver driver-agent revision 不匹配：asset=$agent_path actual=${actual:-空} expected=$expected"
     failed=1

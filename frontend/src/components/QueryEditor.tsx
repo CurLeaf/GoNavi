@@ -1912,6 +1912,7 @@ const resolveQueryLocatorPlan = async ({
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
   const [query, setQuery] = useState(getInitialEditorQuery(tab));
   const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
+  const isObjectEditQueryTab = tab.type === 'query' && tab.queryMode === 'object-edit';
   
   type ResultSet = {
       key: string;
@@ -2127,6 +2128,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
 
+      if (isObjectEditQueryTab) {
+          objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, []);
+          return;
+      }
+
       const text = getQueryEditorDecorationModelTextIfLightweight(model, maxTextLength);
       if (text === null) {
           objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, []);
@@ -2173,7 +2179,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
 
       objectDecorationIdsRef.current = editor.deltaDecorations(objectDecorationIdsRef.current, decorations);
-  }, []);
+  }, [isObjectEditQueryTab]);
 
   const showObjectInfoAtPosition = useCallback((position?: { lineNumber: number; column: number } | null) => {
       const editor = editorRef.current;
@@ -2380,7 +2386,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   // Fetch Metadata for Autocomplete (Cross-database)
   useEffect(() => {
-      if (!autoFetchVisible) {
+      if (!autoFetchVisible || isObjectEditQueryTab) {
           return;
       }
 
@@ -2584,7 +2590,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           refreshObjectDecorations();
       };
       void fetchMetadata();
-  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive, refreshObjectDecorations]); // dbList 变化时触发重新加载
+  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive, isObjectEditQueryTab, refreshObjectDecorations]); // dbList 变化时触发重新加载
 
   // Query ID management helpers
   const setQueryId = (id: string) => {

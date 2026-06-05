@@ -1331,6 +1331,30 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
+  it('skips heavy autocomplete metadata fetch for object edit query tabs', async () => {
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'CREATE OR REPLACE VIEW reporting.active_users AS SELECT * FROM users;',
+        dbName: 'main',
+        queryMode: 'object-edit',
+      })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(backendApp.DBGetDatabases).toHaveBeenCalledTimes(1);
+    expect(backendApp.DBGetTables).not.toHaveBeenCalled();
+    expect(backendApp.DBGetAllColumns).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery).not.toHaveBeenCalled();
+    expect(editorState.editor.deltaDecorations).toHaveBeenCalledWith([], []);
+  });
+
   it('keeps the editor empty when a tab draft is externally synced to an empty query', async () => {
     let renderer!: ReactTestRenderer;
 

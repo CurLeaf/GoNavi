@@ -112,6 +112,7 @@ describe('TriggerViewer object edit entry', () => {
       type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
+      queryMode: 'object-edit',
       query: expect.stringContaining('CREATE TRIGGER users_bi BEFORE INSERT'),
     }));
   });
@@ -170,6 +171,99 @@ describe('TriggerViewer object edit entry', () => {
     expect(query).toContain('BEFORE UPDATE ON audit.users');
     expect(query).toContain(':NEW.updated_at := SYSDATE;');
     expect(query).not.toContain('请补全 CREATE TRIGGER 语句');
+  });
+
+  it('rebuilds mysql trigger ddl from metadata rows when only action statement is available', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        TRIGGER_NAME: 'users_bi',
+        TRIGGER_SCHEMA: 'main',
+        EVENT_OBJECT_SCHEMA: 'audit',
+        EVENT_OBJECT_TABLE: 'users',
+        ACTION_TIMING: 'BEFORE',
+        EVENT_MANIPULATION: 'INSERT',
+        ACTION_ORIENTATION: 'ROW',
+        ACTION_STATEMENT: 'SET NEW.created_at = NOW()',
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE TRIGGER `main`.`users_bi`');
+    expect(query).toContain('BEFORE INSERT ON `audit`.`users`');
+    expect(query).toContain('FOR EACH ROW');
+    expect(query).toContain('SET NEW.created_at = NOW();');
+    expect(query).not.toContain('请补全 CREATE TRIGGER 语句');
+  });
+
+  it('rebuilds oracle trigger ddl from metadata rows when body query returns fragments only', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          OWNER: 'AUDIT',
+          TABLE_OWNER: 'AUDIT',
+          TABLE_NAME: 'USERS',
+          TRIGGER_NAME: 'USERS_BU',
+          TRIGGER_TYPE: 'BEFORE EACH ROW',
+          TRIGGERING_EVENT: 'UPDATE',
+          WHEN_CLAUSE: 'NEW.UPDATED_AT IS NULL',
+          TRIGGER_BODY: 'BEGIN\n  :NEW.UPDATED_AT := SYSDATE;\nEND;',
+        }],
+      })
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{
+          OWNER: 'AUDIT',
+          TABLE_OWNER: 'AUDIT',
+          TABLE_NAME: 'USERS',
+          TRIGGER_NAME: 'USERS_BU',
+          TRIGGER_TYPE: 'BEFORE EACH ROW',
+          TRIGGERING_EVENT: 'UPDATE',
+          WHEN_CLAUSE: 'NEW.UPDATED_AT IS NULL',
+          TRIGGER_BODY: 'BEGIN\n  :NEW.UPDATED_AT := SYSDATE;\nEND;',
+        }],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={{
+        ...tab,
+        id: 'trigger-conn-1-main-audit.users_bu',
+        title: '触发器: audit.users_bu',
+        triggerName: 'audit.users_bu',
+      }} />);
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(query).toContain('CREATE OR REPLACE TRIGGER AUDIT.USERS_BU');
+    expect(query).toContain('BEFORE UPDATE ON AUDIT.USERS');
+    expect(query).toContain('FOR EACH ROW');
+    expect(query).toContain('WHEN (NEW.UPDATED_AT IS NULL)');
+    expect(query).toContain(':NEW.UPDATED_AT := SYSDATE;');
   });
 
   it('reloads the latest trigger definition before opening object edit', async () => {

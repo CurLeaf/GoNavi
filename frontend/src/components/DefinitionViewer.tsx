@@ -612,6 +612,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 connectionId: tab.connectionId,
                 dbName,
                 query,
+                queryMode: 'object-edit',
             });
         } finally {
             if (isMountedRef.current) {

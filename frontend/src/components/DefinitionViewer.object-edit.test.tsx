@@ -114,6 +114,7 @@ describe('DefinitionViewer object edit entry', () => {
       type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
+      queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
     }));
     expect(storeState.addTab.mock.calls[0][0].query).toContain('SELECT id, name FROM users;');
@@ -172,6 +173,7 @@ describe('DefinitionViewer object edit entry', () => {
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       title: '修改函数/存储过程: reporting.refresh_stats',
       type: 'query',
+      queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
     }));
   });

@@ -19,6 +19,92 @@ const ensureSqlStatementTerminator = (sql: string): string => {
     return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
 };
 
+const getCaseInsensitiveRawValue = (row: Record<string, any>, keys: string[]): any => {
+    const normalizedKeyMap = new Map<string, string>();
+    Object.keys(row || {}).forEach((key) => normalizedKeyMap.set(key.toLowerCase(), key));
+    for (const key of keys) {
+        const matchedKey = normalizedKeyMap.get(String(key || '').toLowerCase());
+        if (!matchedKey) continue;
+        const value = row[matchedKey];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            return value;
+        }
+    }
+    return undefined;
+};
+
+const buildMySQLTriggerDDLFromMetadata = (
+    row: Record<string, any>,
+    fallbackTriggerName: string,
+    fallbackTableName: string,
+): string => {
+    const triggerName = String(
+        getCaseInsensitiveRawValue(row, ['trigger_name', 'Trigger', 'TRIGGER_NAME'])
+        || splitQualifiedNameLast(fallbackTriggerName).objectName
+        || fallbackTriggerName,
+    ).trim();
+    const triggerSchema = String(getCaseInsensitiveRawValue(row, ['trigger_schema', 'TRIGGER_SCHEMA']) || '').trim();
+    const eventSchema = String(getCaseInsensitiveRawValue(row, ['event_object_schema', 'EVENT_OBJECT_SCHEMA']) || '').trim();
+    const eventTable = String(
+        getCaseInsensitiveRawValue(row, ['event_object_table', 'EVENT_OBJECT_TABLE', 'table_name', 'TABLE_NAME'])
+        || splitQualifiedNameLast(fallbackTableName).objectName
+        || fallbackTableName,
+    ).trim();
+    const actionTiming = String(getCaseInsensitiveRawValue(row, ['action_timing', 'ACTION_TIMING']) || '').trim().toUpperCase();
+    const eventManipulation = String(getCaseInsensitiveRawValue(row, ['event_manipulation', 'EVENT_MANIPULATION']) || '').trim().toUpperCase();
+    const actionOrientation = String(getCaseInsensitiveRawValue(row, ['action_orientation', 'ACTION_ORIENTATION']) || '').trim().toUpperCase();
+    const actionStatement = String(getCaseInsensitiveRawValue(row, ['action_statement', 'ACTION_STATEMENT']) || '').trim();
+
+    if (!triggerName || !eventTable || !actionTiming || !eventManipulation || !actionStatement) {
+        return '';
+    }
+
+    const qualifiedTriggerName = triggerSchema ? `\`${triggerSchema.replace(/`/g, '``')}\`.\`${triggerName.replace(/`/g, '``')}\`` : `\`${triggerName.replace(/`/g, '``')}\``;
+    const qualifiedTableName = eventSchema ? `\`${eventSchema.replace(/`/g, '``')}\`.\`${eventTable.replace(/`/g, '``')}\`` : `\`${eventTable.replace(/`/g, '``')}\``;
+    const orientationClause = actionOrientation === 'ROW' ? '\nFOR EACH ROW' : '';
+    return `CREATE TRIGGER ${qualifiedTriggerName}\n${actionTiming} ${eventManipulation} ON ${qualifiedTableName}${orientationClause}\n${actionStatement}`;
+};
+
+const buildOracleLikeTriggerDDLFromMetadata = (
+    row: Record<string, any>,
+    fallbackTriggerName: string,
+    fallbackTableName: string,
+): string => {
+    const triggerName = String(
+        getCaseInsensitiveRawValue(row, ['trigger_name', 'TRIGGER_NAME'])
+        || splitQualifiedNameLast(fallbackTriggerName).objectName
+        || fallbackTriggerName,
+    ).trim();
+    const owner = String(getCaseInsensitiveRawValue(row, ['owner', 'OWNER']) || splitQualifiedNameLast(fallbackTriggerName).parentPath || '').trim();
+    const tableOwner = String(getCaseInsensitiveRawValue(row, ['table_owner', 'TABLE_OWNER']) || splitQualifiedNameLast(fallbackTableName).parentPath || '').trim();
+    const tableName = String(
+        getCaseInsensitiveRawValue(row, ['table_name', 'TABLE_NAME'])
+        || splitQualifiedNameLast(fallbackTableName).objectName
+        || fallbackTableName,
+    ).trim();
+    const triggerType = String(getCaseInsensitiveRawValue(row, ['trigger_type', 'TRIGGER_TYPE']) || '').trim();
+    const triggeringEvent = String(getCaseInsensitiveRawValue(row, ['triggering_event', 'TRIGGERING_EVENT']) || '').trim();
+    const whenClause = String(getCaseInsensitiveRawValue(row, ['when_clause', 'WHEN_CLAUSE']) || '').trim();
+    const triggerBody = String(getCaseInsensitiveRawValue(row, ['trigger_body', 'TRIGGER_BODY']) || '').trim();
+
+    if (!triggerName || !tableName || !triggerType || !triggeringEvent || !triggerBody) {
+        return '';
+    }
+
+    const qualifiedTriggerName = owner ? `${owner}.${triggerName}` : triggerName;
+    const qualifiedTableName = tableOwner ? `${tableOwner}.${tableName}` : tableName;
+    const normalizedWhenClause = whenClause ? `\nWHEN (${whenClause.replace(/^\((.*)\)$/s, '$1')})` : '';
+    const normalizedTriggerType = triggerType.replace(/\s+/g, ' ').trim();
+    const triggerTypeMatch = normalizedTriggerType.match(/^(BEFORE|AFTER|INSTEAD OF)(?:\s+(EACH ROW|STATEMENT))?$/i);
+    if (triggerTypeMatch) {
+        const timing = String(triggerTypeMatch[1] || '').toUpperCase();
+        const firingLevel = String(triggerTypeMatch[2] || '').toUpperCase();
+        const forEachRowClause = firingLevel === 'EACH ROW' ? '\nFOR EACH ROW' : '';
+        return `CREATE OR REPLACE TRIGGER ${qualifiedTriggerName}\n${timing} ${triggeringEvent} ON ${qualifiedTableName}${forEachRowClause}${normalizedWhenClause}\n${triggerBody}`;
+    }
+    return `CREATE OR REPLACE TRIGGER ${qualifiedTriggerName}\n${triggerType} ${triggeringEvent} ON ${qualifiedTableName}${normalizedWhenClause}\n${triggerBody}`;
+};
+
 const buildEditableTriggerSql = (triggerName: string, triggerDefinition: string): string => {
     const normalizedName = String(triggerName || '').trim();
     const normalizedDefinition = String(triggerDefinition || '').trim();
@@ -102,7 +188,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
                 return [
                     `SHOW CREATE TRIGGER \`${name.replace(/`/g, '``')}\``,
                     safeDbName
-                        ? `SELECT ACTION_STATEMENT AS trigger_definition FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' AND trigger_name = '${safeTriggerName}' LIMIT 1`
+                        ? `SELECT TRIGGER_NAME, TRIGGER_SCHEMA, EVENT_OBJECT_SCHEMA, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION, ACTION_STATEMENT FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' AND trigger_name = '${safeTriggerName}' LIMIT 1`
                         : '',
                     safeDbName
                         ? `SHOW TRIGGERS FROM \`${dbName.replace(/`/g, '``')}\` LIKE '${safeTriggerName}'`
@@ -125,12 +211,21 @@ LIMIT 1`];
             case 'oracle':
             case 'dm':
                 if (schema) {
-                    return [`SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${escapeSQLLiteral(schema).toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
+                    return [
+                        `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeTriggerName.toUpperCase()}', '${escapeSQLLiteral(schema).toUpperCase()}') AS trigger_definition FROM DUAL`,
+                        `SELECT OWNER, TABLE_OWNER, TABLE_NAME, TRIGGER_NAME, TRIGGER_TYPE, TRIGGERING_EVENT, WHEN_CLAUSE, TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${escapeSQLLiteral(schema).toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`,
+                    ];
                 }
                 if (!safeDbName) {
-                    return [`SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
+                    return [
+                        `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeTriggerName.toUpperCase()}') AS trigger_definition FROM DUAL`,
+                        `SELECT TABLE_NAME, TRIGGER_NAME, TRIGGER_TYPE, TRIGGERING_EVENT, WHEN_CLAUSE, TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`,
+                    ];
                 }
-                return [`SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`];
+                return [
+                    `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeTriggerName.toUpperCase()}', '${safeDbName.toUpperCase()}') AS trigger_definition FROM DUAL`,
+                    `SELECT OWNER, TABLE_OWNER, TABLE_NAME, TRIGGER_NAME, TRIGGER_TYPE, TRIGGERING_EVENT, WHEN_CLAUSE, TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' AND TRIGGER_NAME = '${safeTriggerName.toUpperCase()}'`,
+                ];
             case 'sqlite':
                 return [`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${safeTriggerName}'`];
             case 'duckdb':
@@ -202,20 +297,24 @@ LIMIT 1`];
         return '';
     };
 
-    const extractTriggerDefinition = (dialect: string, data: any[]): string => {
+    const extractTriggerDefinition = (dialect: string, data: any[], fallbackTriggerName: string, fallbackTableName: string): string => {
         if (!data || data.length === 0) {
             return '-- 未找到触发器定义';
         }
 
-        const row = data[0];
+        const row = data[0] as Record<string, any>;
 
         switch (dialect) {
             case 'mysql':
             case 'starrocks': {
                 // MySQL SHOW CREATE TRIGGER returns: Trigger, sql_mode, SQL Original Statement, ...
                 const keys = Object.keys(row);
+                const metadataDDL = buildMySQLTriggerDDLFromMetadata(row, fallbackTriggerName, fallbackTableName);
                 if (row.trigger_definition || row.TRIGGER_DEFINITION) {
                     return String(row.trigger_definition || row.TRIGGER_DEFINITION);
+                }
+                if (metadataDDL) {
+                    return metadataDDL;
                 }
                 if (row.ACTION_STATEMENT || row.action_statement) {
                     return String(row.ACTION_STATEMENT || row.action_statement);
@@ -243,6 +342,14 @@ LIMIT 1`];
             }
             case 'oracle':
             case 'dm': {
+                const ddl = String(row.trigger_definition || row.TRIGGER_DEFINITION || '').trim();
+                if (ddl) {
+                    return ddl;
+                }
+                const metadataDDL = buildOracleLikeTriggerDDLFromMetadata(row, fallbackTriggerName, fallbackTableName);
+                if (metadataDDL) {
+                    return metadataDDL;
+                }
                 return row.trigger_body || row.TRIGGER_BODY || Object.values(row)[0] || '';
             }
             case 'sqlite': {
@@ -287,7 +394,10 @@ LIMIT 1`];
             const result = await runQueryCandidates(config, dbName, queries);
 
             if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                return { success: true, definition: extractTriggerDefinition(dialect, result.data) };
+                return {
+                    success: true,
+                    definition: extractTriggerDefinition(dialect, result.data, triggerName, String(tab.triggerTableName || '')),
+                };
             }
 
             if (result.success) {
@@ -391,6 +501,7 @@ LIMIT 1`];
                 connectionId: tab.connectionId,
                 dbName,
                 query: buildEditableTriggerSql(triggerName, latestDefinition),
+                queryMode: 'object-edit',
             });
         } finally {
             if (isMountedRef.current) {
