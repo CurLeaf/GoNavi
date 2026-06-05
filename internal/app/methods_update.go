@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,6 +103,8 @@ type githubRelease struct {
 type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	URL                string `json:"url"`
+	Digest             string `json:"digest"`
 	Size               int64  `json:"size"`
 }
 
@@ -655,6 +658,9 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		return "", err
 	}
 	req.Header.Set("User-Agent", "GoNavi-Updater")
+	if isGitHubReleaseAssetAPIURL(url) {
+		req.Header.Set("Accept", "application/octet-stream")
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -711,6 +717,17 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func isGitHubReleaseAssetAPIURL(urlText string) bool {
+	parsed, err := urlpkg.Parse(strings.TrimSpace(urlText))
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(parsed.Host, "api.github.com") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(parsed.Path)), "/releases/assets/")
 }
 
 func buildUpdateDownloadResult(info UpdateInfo, staged *stagedUpdate) updateDownloadResult {

@@ -20,6 +20,9 @@ YAMLEOF
 cat >"$tmpdir/tools/package-driver-release-assets.py" <<'PYEOF'
 print("package")
 PYEOF
+cat >"$tmpdir/tools/validate-driver-release-assets.py" <<'PYEOF'
+print("validate")
+PYEOF
 cat >"$tmpdir/internal/db/duckdb_impl.go" <<'GOEOF'
 package db
 GOEOF
@@ -51,6 +54,19 @@ base_ref="$(git rev-parse HEAD)"
   actual="$(bash ./tools/should-force-global-driver-builds.sh --base "$base_ref" --head HEAD)"
   if [[ "$actual" != "true" ]]; then
     echo "expected packaging change to force global driver builds, got: ${actual:-<empty>}" >&2
+    exit 1
+  fi
+)
+
+(
+  cd "$tmpdir"
+  git reset --hard -q "$base_ref"
+  printf '\nprint("changed")\n' >> tools/validate-driver-release-assets.py
+  git add tools/validate-driver-release-assets.py
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'release asset validation change'
+  actual="$(bash ./tools/should-force-global-driver-builds.sh --base "$base_ref" --head HEAD)"
+  if [[ "$actual" != "true" ]]; then
+    echo "expected release asset validation change to force global driver builds, got: ${actual:-<empty>}" >&2
     exit 1
   fi
 )

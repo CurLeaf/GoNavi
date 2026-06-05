@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -151,6 +152,7 @@ def main():
             "platform": platform,
             "revision": revision,
             "size": child.stat().st_size,
+            "sha256": hashlib.sha256(child.read_bytes()).hexdigest(),
         }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

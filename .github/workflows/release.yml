@@ -104,8 +104,13 @@ jobs:
           fi
           if [[ -n "$SOURCE_COMMIT" && -s "$manifest_path" ]]; then
             if bash ./tools/validate-driver-release-manifest.sh --commit "$SOURCE_COMMIT" --manifest "$manifest_path"; then
-              echo "manifest_valid=true" >> "$GITHUB_OUTPUT"
-              echo "🧭 Published driver release manifest is consistent with its source commit"
+              if python3 tools/validate-driver-release-assets.py --repo Syngnat/GoNavi-DriverAgents --tag "$PREV_TAG"; then
+                echo "manifest_valid=true" >> "$GITHUB_OUTPUT"
+                echo "🧭 Published driver release manifest and actual assets are consistent with its source commit"
+              else
+                echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+                echo "⚠️ Published driver release assets do not match manifest; forcing full rebuild"
+              fi
             else
               echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
               echo "⚠️ Published driver release manifest is stale; forcing full rebuild"

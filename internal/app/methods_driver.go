@@ -3573,8 +3573,14 @@ func isOptionalDriverDownloadZipURL(urlText string) bool {
 	if trimmedURL == "" {
 		return false
 	}
-	if parsed, err := url.Parse(trimmedURL); err == nil && strings.TrimSpace(parsed.Path) != "" {
-		return strings.EqualFold(path.Ext(parsed.Path), ".zip")
+	if parsed, err := url.Parse(trimmedURL); err == nil {
+		if strings.TrimSpace(parsed.Path) != "" && strings.EqualFold(path.Ext(parsed.Path), ".zip") {
+			return true
+		}
+		if strings.TrimSpace(parsed.Fragment) != "" && strings.EqualFold(path.Ext(parsed.Fragment), ".zip") {
+			return true
+		}
+		return false
 	}
 	return strings.EqualFold(filepath.Ext(trimmedURL), ".zip")
 }
@@ -4492,6 +4498,45 @@ func driverReleaseLatestDownloadURL(assetName string) string {
 	return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", driverReleaseRepo, url.PathEscape(asset))
 }
 
+func findReleaseAssetByName(release *githubRelease, assetNames []string) (githubAsset, bool) {
+	if release == nil || len(release.Assets) == 0 || len(assetNames) == 0 {
+		return githubAsset{}, false
+	}
+	for _, expected := range assetNames {
+		trimmed := strings.TrimSpace(expected)
+		if trimmed == "" {
+			continue
+		}
+		for _, asset := range release.Assets {
+			if strings.EqualFold(strings.TrimSpace(asset.Name), trimmed) {
+				return asset, true
+			}
+		}
+	}
+	return githubAsset{}, false
+}
+
+func driverReleaseAssetAPIURL(asset githubAsset) string {
+	urlText := strings.TrimSpace(asset.URL)
+	if urlText != "" {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" {
+			return urlText
+		}
+		parsed, err := url.Parse(urlText)
+		if err != nil {
+			return urlText
+		}
+		parsed.Fragment = name
+		return parsed.String()
+	}
+	urlText = strings.TrimSpace(asset.BrowserDownloadURL)
+	if urlText == "" {
+		return ""
+	}
+	return urlText
+}
+
 func optionalDriverBundlePlatformDir(goos string) string {
 	switch strings.ToLower(strings.TrimSpace(goos)) {
 	case "windows":
@@ -4579,7 +4624,17 @@ func resolveOptionalDriverBundleDownloadURLs() []string {
 	}
 
 	if tag := currentDriverReleaseTag(); tag != "" {
+		if release, err := fetchReleaseByTag(tag); err == nil {
+			if asset, ok := findReleaseAssetByName(release, []string{optionalDriverBundleAssetName}); ok {
+				appendURL(driverReleaseAssetAPIURL(asset))
+			}
+		}
 		appendURL(driverReleaseDownloadURL(tag, optionalDriverBundleAssetName))
+	}
+	if release, err := fetchLatestReleaseForDriverAssets(); err == nil {
+		if asset, ok := findReleaseAssetByName(release, []string{optionalDriverBundleAssetName}); ok {
+			appendURL(driverReleaseAssetAPIURL(asset))
+		}
 	}
 	appendURL(driverReleaseLatestDownloadURL(optionalDriverBundleAssetName))
 	return candidates
@@ -5428,6 +5483,11 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	if shouldUseDuckDBWindowsDynamicLibrary(driverType) {
 		if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
 			if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+				if release, err := fetchLatestReleaseForDriverAssets(); err == nil {
+					if asset, found := findReleaseAssetByName(release, []string{duckDBWindowsDriverZipAssetName}); found {
+						return driverReleaseAssetAPIURL(asset), true
+					}
+				}
 				return driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName), true
 			}
 			return "", false
@@ -5438,6 +5498,11 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 			return "", false
 		}
 		if publishedAssets[duckDBWindowsDriverZipAssetName] && sizeByAsset[duckDBWindowsDriverZipAssetName] > 0 {
+			if release, relErr := fetchLatestReleaseForDriverAssets(); relErr == nil {
+				if asset, found := findReleaseAssetByName(release, []string{duckDBWindowsDriverZipAssetName}); found {
+					return driverReleaseAssetAPIURL(asset), true
+				}
+			}
 			return driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName), true
 		}
 		return "", false
@@ -5451,6 +5516,11 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	if sizeByAsset, publishedAssets, ok := readReleaseAssetSizesFromCache("latest"); ok {
 		for _, assetName := range assetNames {
 			if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+				if release, err := fetchLatestReleaseForDriverAssets(); err == nil {
+					if asset, found := findReleaseAssetByName(release, []string{assetName}); found {
+						return driverReleaseAssetAPIURL(asset), true
+					}
+				}
 				return driverReleaseLatestDownloadURL(assetName), true
 			}
 		}
@@ -5463,6 +5533,11 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 	}
 	for _, assetName := range assetNames {
 		if publishedAssets[assetName] && sizeByAsset[assetName] > 0 {
+			if release, relErr := fetchLatestReleaseForDriverAssets(); relErr == nil {
+				if asset, found := findReleaseAssetByName(release, []string{assetName}); found {
+					return driverReleaseAssetAPIURL(asset), true
+				}
+			}
 			return driverReleaseLatestDownloadURL(assetName), true
 		}
 	}

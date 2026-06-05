@@ -92,11 +92,40 @@ func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing
 	urls := resolveOptionalDriverBundleDownloadURLs()
 	wantTagged := driverReleaseDownloadURL("v0.7.4", optionalDriverBundleAssetName)
 	wantLatest := driverReleaseLatestDownloadURL(optionalDriverBundleAssetName)
-	if len(urls) != 2 {
-		t.Fatalf("expected tagged and latest bundle URLs, got %v", urls)
+	if len(urls) < 2 {
+		t.Fatalf("expected at least tagged and latest bundle URLs, got %v", urls)
 	}
-	if urls[0] != wantTagged || urls[1] != wantLatest {
-		t.Fatalf("unexpected driver bundle URLs: got %v want [%q %q]", urls, wantTagged, wantLatest)
+	foundTagged := false
+	foundLatest := false
+	for _, candidate := range urls {
+		if candidate == wantTagged {
+			foundTagged = true
+		}
+		if candidate == wantLatest {
+			foundLatest = true
+		}
+	}
+	if !foundTagged || !foundLatest {
+		t.Fatalf("expected bundle URLs to include tagged=%q and latest=%q, got %v", wantTagged, wantLatest, urls)
+	}
+}
+
+func TestDriverReleaseAssetAPIURLUsesReleaseAssetEndpoint(t *testing.T) {
+	asset := githubAsset{
+		Name:               "kingbase-driver-agent-darwin-arm64",
+		BrowserDownloadURL: "https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/dev-latest/kingbase-driver-agent-darwin-arm64",
+		URL:                "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456",
+		Size:               18 << 20,
+	}
+	if got := driverReleaseAssetAPIURL(asset); got != "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456#kingbase-driver-agent-darwin-arm64" {
+		t.Fatalf("expected release asset API URL, got %q", got)
+	}
+}
+
+func TestOptionalDriverDownloadZipURLAcceptsAssetAPIFragment(t *testing.T) {
+	urlText := "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456#duckdb-driver.zip"
+	if !isOptionalDriverDownloadZipURL(urlText) {
+		t.Fatalf("expected asset API URL with zip fragment to be treated as zip download: %q", urlText)
 	}
 }
 

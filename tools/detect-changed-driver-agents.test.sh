@@ -164,4 +164,29 @@ PYEOF
   fi
 )
 
+tmpdir_release_validation="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-release-validation-change.XXXXXX")"
+git init -q "$tmpdir_release_validation"
+mkdir -p "$tmpdir_release_validation/tools"
+cp tools/detect-changed-driver-agents.sh "$tmpdir_release_validation/tools/detect-changed-driver-agents.sh"
+cat >"$tmpdir_release_validation/tools/validate-driver-release-assets.py" <<'PYEOF'
+print("validate")
+PYEOF
+
+(
+  cd "$tmpdir_release_validation"
+  git add .
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m initial
+  base="$(git rev-parse HEAD)"
+
+  printf '\nprint("changed")\n' >> tools/validate-driver-release-assets.py
+  git add tools/validate-driver-release-assets.py
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'update release validation script'
+
+  actual="$(bash ./tools/detect-changed-driver-agents.sh --base "$base" --head HEAD 2>/dev/null)"
+  if [[ "$actual" != *"mariadb"* || "$actual" != *"clickhouse"* || "$actual" != *"duckdb"* || "$actual" != *"elasticsearch"* ]]; then
+    echo "expected release validation script change to trigger all driver builds, got: ${actual:-<empty>}" >&2
+    exit 1
+  fi
+)
+
 echo "detect-changed-driver-agents revision test passed"

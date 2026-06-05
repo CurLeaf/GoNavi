@@ -70,6 +70,7 @@ while IFS= read -r file; do
     tools/diff-driver-agent-revisions.sh|\
     tools/package-driver-release-assets.py|\
     tools/generate-driver-release-manifest.py|\
+    tools/validate-driver-release-assets.py|\
     tools/complete-driver-release-assets.py|\
     tools/resolve-driver-release-source.py|\
     tools/validate-driver-release-manifest.sh|\
