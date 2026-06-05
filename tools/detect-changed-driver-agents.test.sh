@@ -69,4 +69,49 @@ cp tools/detect-changed-driver-agents.sh "$tmpdir_script/tools/detect-changed-dr
   fi
 )
 
+tmpdir_compensation="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-compensation.XXXXXX")"
+git init -q "$tmpdir_compensation"
+mkdir -p "$tmpdir_compensation/tools" "$tmpdir_compensation/internal/db" "$tmpdir_compensation/.github/workflows"
+cp tools/detect-changed-driver-agents.sh "$tmpdir_compensation/tools/detect-changed-driver-agents.sh"
+cat >"$tmpdir_compensation/internal/db/driver_agent_revisions_gen.go" <<'GOEOF'
+package db
+
+func init() {
+	optionalDriverAgentRevisions = map[string]string{
+		"clickhouse": "src-old-clickhouse",
+	}
+}
+GOEOF
+cat >"$tmpdir_compensation/.github/workflows/dev-build.yml" <<'YAMLEOF'
+name: Dev Build
+YAMLEOF
+
+(
+  cd "$tmpdir_compensation"
+  git add .
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m initial
+  published_base="$(git rev-parse HEAD)"
+
+  perl -0pi -e 's/src-old-clickhouse/src-new-clickhouse/' internal/db/driver_agent_revisions_gen.go
+  git add internal/db/driver_agent_revisions_gen.go
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'update clickhouse revision'
+  push_base="$(git rev-parse HEAD)"
+
+  printf '\n# workflow fix\n' >> .github/workflows/dev-build.yml
+  git add .github/workflows/dev-build.yml
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'fix workflow'
+
+  actual_push_base="$(bash ./tools/detect-changed-driver-agents.sh --base "$push_base" --head HEAD)"
+  if [[ -n "$actual_push_base" ]]; then
+    echo "expected workflow-only fix commit to be empty when using push diff base, got: ${actual_push_base:-<empty>}" >&2
+    exit 1
+  fi
+
+  actual_published_base="$(bash ./tools/detect-changed-driver-agents.sh --base "$published_base" --head HEAD)"
+  if [[ "$actual_published_base" != "clickhouse" ]]; then
+    echo "expected published release base to recover clickhouse rebuild, got: ${actual_published_base:-<empty>}" >&2
+    exit 1
+  fi
+)
+
 echo "detect-changed-driver-agents revision test passed"

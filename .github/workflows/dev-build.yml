@@ -76,19 +76,41 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve published driver release source
+        id: published_source
+        env:
+          DRIVER_RELEASE_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_COMMIT="$(python3 tools/resolve-driver-release-source.py --repo Syngnat/GoNavi-DriverAgents --tag dev-latest)"
+          echo "source_commit=${SOURCE_COMMIT}" >> "$GITHUB_OUTPUT"
+          if [[ -n "$SOURCE_COMMIT" ]]; then
+            echo "🧭 Last published dev driver release source commit: $SOURCE_COMMIT"
+          else
+            echo "🧭 Unable to resolve published dev driver release source commit; fallback to push diff base"
+          fi
+
       - name: Detect changed driver agents
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          BASE_REF="${{ github.event.before }}"
-          if [[ -z "$BASE_REF" || "$BASE_REF" =~ ^0+$ ]]; then
-            if BASE_REF="$(git rev-parse HEAD^ 2>/dev/null)"; then
-              :
+          BASE_REF="${{ steps.published_source.outputs.source_commit }}"
+          if [[ -n "$BASE_REF" ]]; then
+            if git rev-parse --verify "${BASE_REF}^{commit}" >/dev/null 2>&1 && git merge-base --is-ancestor "$BASE_REF" "$GITHUB_SHA"; then
+              echo "🧭 Using last published driver release source commit as detection base: $BASE_REF"
             else
-              BASE_REF="all"
+              echo "⚠️ Published driver release source commit is unavailable or not an ancestor of $GITHUB_SHA: $BASE_REF"
+              BASE_REF=""
             fi
           fi
+
+          if [[ -z "$BASE_REF" ]]; then
+            echo "⚠️ Falling back to full driver rebuild because published driver release source commit is unavailable"
+            BASE_REF="all"
+          fi
+          echo "🧭 Final driver detection base: $BASE_REF"
           DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
           echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
           if [ -n "$DRIVERS" ]; then
