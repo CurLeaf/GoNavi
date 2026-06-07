@@ -1,6 +1,6 @@
 import React from 'react';
-import { Input, Select, Tooltip, Modal, Checkbox, Spin, message, Button, Tag } from 'antd';
-import { CodeOutlined, DatabaseOutlined, DownOutlined, PlusOutlined, SendOutlined, StopOutlined, TableOutlined, SearchOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
+import { Input, Select, Tooltip, message, Button, Tag } from 'antd';
+import { CodeOutlined, DatabaseOutlined, DownOutlined, PlusOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
 import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
@@ -9,6 +9,8 @@ import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
 import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shortcuts';
+import AIContextSelectorModal from './AIContextSelectorModal';
+import AISlashCommandMenu, { type AISlashCommandDefinition } from './AISlashCommandMenu';
 
 interface AIChatInputProps {
     input: string;
@@ -110,7 +112,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     // Slash commands
     const [showSlashMenu, setShowSlashMenu] = React.useState(false);
     const [slashFilter, setSlashFilter] = React.useState('');
-    const slashCommands = React.useMemo(() => [
+    const slashCommands = React.useMemo<AISlashCommandDefinition[]>(() => [
         { cmd: '/query',    label: '🔍 自然语言查询', desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
         { cmd: '/sql',      label: '📝 生成 SQL',     desc: '描述需求自动生成语句', prompt: '请根据以下需求生成 SQL：' },
         { cmd: '/explain',  label: '💡 解释 SQL',     desc: '解释选中 SQL 的逻辑',  prompt: '请解释以下 SQL 的执行逻辑和每一步的作用：\n```sql\n\n```' },
@@ -249,6 +251,51 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         }
     };
 
+    const handlePasteImages = React.useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        const items = event.clipboardData?.items;
+        if (!items) return;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                event.preventDefault();
+                const blob = items[i].getAsFile();
+                if (blob) {
+                    const reader = new FileReader();
+                    reader.onload = (loadEvent) => {
+                        if (loadEvent.target?.result) {
+                            setDraftImages(prev => [...prev, loadEvent.target!.result as string]);
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            }
+        }
+    }, [setDraftImages]);
+
+    const handleComposerInputChange = React.useCallback((value: string) => {
+        setInput(value);
+        if (value.startsWith('/')) {
+            setSlashFilter(value.split(/\s/)[0]);
+            setShowSlashMenu(true);
+        } else {
+            setShowSlashMenu(false);
+            setSlashFilter('');
+        }
+    }, [setInput]);
+
+    const handleSelectSlashCommand = React.useCallback((command: AISlashCommandDefinition) => {
+        setInput(command.prompt);
+        setShowSlashMenu(false);
+        setSlashFilter('');
+        textareaRef.current?.focus();
+    }, [setInput, textareaRef]);
+
+    const handleOpenSlashMenu = React.useCallback(() => {
+        setInput('/');
+        setSlashFilter('/');
+        setShowSlashMenu(true);
+        textareaRef.current?.focus();
+    }, [setInput, textareaRef]);
+
     if (!isV2Ui) {
         return (
             <div className="ai-chat-input-area" style={{ borderTop: 'none', padding: '12px 16px 20px' }}>
@@ -330,71 +377,26 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         </div>
                     )}
                     <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
-                        {showSlashMenu && filteredSlashCmds.length > 0 && (
-                            <div style={{
+                        <AISlashCommandMenu
+                            visible={showSlashMenu}
+                            commands={filteredSlashCmds}
+                            darkMode={darkMode}
+                            textColor={textColor}
+                            mutedColor={mutedColor}
+                            onSelect={handleSelectSlashCommand}
+                            style={{
                                 position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
                                 background: darkMode ? '#2a2a2a' : '#fff',
                                 border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
                                 borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.15)', zIndex: 100,
                                 maxHeight: 220, overflowY: 'auto', padding: 4
-                            }}>
-                                {filteredSlashCmds.map(cmd => (
-                                    <div
-                                        key={cmd.cmd}
-                                        style={{
-                                            padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
-                                            display: 'flex', alignItems: 'center', gap: 10,
-                                            transition: 'background 0.15s'
-                                        }}
-                                        onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'}
-                                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                        onClick={() => {
-                                            setInput(cmd.prompt);
-                                            setShowSlashMenu(false);
-                                            setSlashFilter('');
-                                            textareaRef.current?.focus();
-                                        }}
-                                    >
-                                        <span style={{ fontSize: 14, fontWeight: 600, color: textColor, minWidth: 80 }}>{cmd.cmd}</span>
-                                        <span style={{ fontSize: 13, fontWeight: 500, color: textColor }}>{cmd.label}</span>
-                                        <span style={{ fontSize: 11, color: mutedColor, marginLeft: 'auto' }}>{cmd.desc}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        <Input.TextArea
-                            onPaste={(e) => {
-                                const items = e.clipboardData?.items;
-                                if (!items) return;
-                                for (let i = 0; i < items.length; i++) {
-                                    if (items[i].type.indexOf('image') !== -1) {
-                                        e.preventDefault();
-                                        const blob = items[i].getAsFile();
-                                        if (blob) {
-                                            const reader = new FileReader();
-                                            reader.onload = (event) => {
-                                                if (event.target?.result) {
-                                                    setDraftImages(prev => [...prev, event.target!.result as string]);
-                                                }
-                                            };
-                                            reader.readAsDataURL(blob);
-                                        }
-                                    }
-                                }
                             }}
+                        />
+                        <Input.TextArea
+                            onPaste={handlePasteImages}
                             ref={textareaRef as any}
                             value={input}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setInput(val);
-                                if (val.startsWith('/')) {
-                                    setSlashFilter(val.split(/\s/)[0]);
-                                    setShowSlashMenu(true);
-                                } else {
-                                    setShowSlashMenu(false);
-                                    setSlashFilter('');
-                                }
-                            }}
+                            onChange={(e) => handleComposerInputChange(e.target.value)}
                             onKeyDown={handleKeyDown as any}
                             placeholder={`输入消息... (${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)}，Shift+Enter 换行，/ 快捷命令)`}
                             variant="borderless"
@@ -519,129 +521,27 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     </div>
                 </div>
 
-                <Modal
-                    title={<span style={{ color: textColor }}>关联数据库表结构上下文</span>}
+                <AIContextSelectorModal
                     open={contextOpen}
-                    onCancel={() => setContextOpen(false)}
-                    onOk={handleAppendContext}
+                    loading={contextLoading}
                     confirmLoading={appendingContext}
-                    okText="同步所选表至上下文"
-                    cancelText="取消"
-                    centered
-                    styles={{
-                        content: { background: darkMode ? '#1e1e1e' : '#ffffff', border: overlayTheme.shellBorder },
-                        header: { background: darkMode ? '#1e1e1e' : '#ffffff', borderBottom: overlayTheme.shellBorder },
-                        body: { padding: '20px 24px' }
+                    darkMode={darkMode}
+                    textColor={textColor}
+                    overlayTheme={overlayTheme}
+                    dbList={dbList}
+                    selectedDbName={selectedDbName}
+                    searchText={searchText}
+                    filteredTables={filteredTables}
+                    selectedTableKeys={selectedTableKeys}
+                    onCancel={() => setContextOpen(false)}
+                    onConfirm={handleAppendContext}
+                    onDbChange={(value) => {
+                        const connection = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
+                        if (connection) fetchTablesForDb(value, connection.config);
                     }}
-                >
-                    <Spin spinning={contextLoading}>
-                        <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
-                            {dbList.length > 0 && (
-                                <Select
-                                    value={selectedDbName}
-                                    onChange={val => {
-                                        const c = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
-                                        if (c) fetchTablesForDb(val, c.config);
-                                    }}
-                                    options={dbList.map(d => ({ label: d, value: d }))}
-                                    style={{ width: 160, flexShrink: 0 }}
-                                    placeholder="切换数据库"
-                                    showSearch
-                                />
-                            )}
-                            <Input
-                                placeholder="在当前库搜索表名..."
-                                prefix={<SearchOutlined style={{ color: overlayTheme.mutedText }} />}
-                                value={searchText}
-                                onChange={e => setSearchText(e.target.value)}
-                                style={{ background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: 'none', flexGrow: 1 }}
-                            />
-                        </div>
-                        {filteredTables.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, paddingBottom: 12, marginBottom: 8 }}>
-                                    <Checkbox
-                                        indeterminate={
-                                            filteredTables.length > 0 &&
-                                            filteredTables.some(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`)) &&
-                                            !filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))
-                                        }
-                                        checked={filteredTables.length > 0 && filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))}
-                                        onChange={(e) => {
-                                            if (e.target.checked) {
-                                                const newSelected = new Set([...selectedTableKeys, ...filteredTables.map(t => `${selectedDbName}::${t.name}`)]);
-                                                setSelectedTableKeys(Array.from(newSelected));
-                                            } else {
-                                                const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
-                                                setSelectedTableKeys(selectedTableKeys.filter(key => !filteredKeys.includes(key)));
-                                            }
-                                        }}
-                                        style={{ color: textColor, fontWeight: 'bold' }}
-                                    >
-                                        全选匹配的表 ({filteredTables.length})
-                                    </Checkbox>
-                                    <Button
-                                        type="link"
-                                        size="small"
-                                        style={{ padding: 0, height: 'auto', fontSize: 13 }}
-                                        onClick={() => {
-                                            const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
-                                            const remainingSelected = selectedTableKeys.filter(key => !filteredKeys.includes(key));
-                                            const toAdd = filteredKeys.filter(key => !selectedTableKeys.includes(key));
-                                            setSelectedTableKeys([...remainingSelected, ...toAdd]);
-                                        }}
-                                    >
-                                        反选匹配结果
-                                    </Button>
-                                </div>
-                                <div style={{ maxHeight: 300, overflowY: 'auto', margin: '0 -24px', padding: '0 24px' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                        {filteredTables.map(t => {
-                                            const key = `${selectedDbName}::${t.name}`;
-                                            const isSelected = selectedTableKeys.includes(key);
-                                            return (
-                                                <div
-                                                    key={key}
-                                                    style={{
-                                                        padding: '6px 10px',
-                                                        borderRadius: 6,
-                                                        transition: 'background 0.2s',
-                                                        cursor: 'pointer'
-                                                    }}
-                                                    onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)'}
-                                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                                    onClick={(e) => {
-                                                        if ((e.target as HTMLElement).tagName.toLowerCase() === 'input') return;
-                                                        if (isSelected) {
-                                                            setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
-                                                        } else {
-                                                            setSelectedTableKeys([...selectedTableKeys, key]);
-                                                        }
-                                                    }}
-                                                >
-                                                    <Checkbox
-                                                        checked={isSelected}
-                                                        onChange={(e) => {
-                                                            if (e.target.checked) setSelectedTableKeys([...selectedTableKeys, key]);
-                                                            else setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
-                                                        }}
-                                                        style={{ color: textColor, width: '100%' }}
-                                                    >
-                                                        <span style={{ fontSize: 13, userSelect: 'none' }}>{t.name}</span>
-                                                    </Checkbox>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div style={{ padding: '40px 0', textAlign: 'center', color: overlayTheme.mutedText }}>
-                                没有找到匹配 '{searchText}' 的表
-                            </div>
-                        )}
-                    </Spin>
-                </Modal>
+                    onSearchTextChange={setSearchText}
+                    onSelectedTableKeysChange={setSelectedTableKeys}
+                />
             </div>
         );
     }
@@ -748,70 +648,25 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     </div>
                 )}
                 <div className="gn-v2-ai-input-box" data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
-                    {showSlashMenu && filteredSlashCmds.length > 0 && (
-                        <div className="gn-v2-ai-slash-menu" style={{
+                    <AISlashCommandMenu
+                        visible={showSlashMenu}
+                        commands={filteredSlashCmds}
+                        darkMode={darkMode}
+                        textColor={textColor}
+                        mutedColor={mutedColor}
+                        className="gn-v2-ai-slash-menu"
+                        style={{
                             background: darkMode ? '#2a2a2a' : '#fff',
                             border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'}`,
-                        }}>
-                            {filteredSlashCmds.map(cmd => (
-                                <div
-                                    key={cmd.cmd}
-                                    style={{
-                                        padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
-                                        display: 'flex', alignItems: 'center', gap: 10,
-                                        transition: 'background 0.15s'
-                                    }}
-                                    onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                    onClick={() => {
-                                        setInput(cmd.prompt);
-                                        setShowSlashMenu(false);
-                                        setSlashFilter('');
-                                        textareaRef.current?.focus();
-                                    }}
-                                >
-                                    <span style={{ fontSize: 14, fontWeight: 600, color: textColor, minWidth: 80 }}>{cmd.cmd}</span>
-                                    <span style={{ fontSize: 13, fontWeight: 500, color: textColor }}>{cmd.label}</span>
-                                    <span style={{ fontSize: 11, color: mutedColor, marginLeft: 'auto' }}>{cmd.desc}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                        }}
+                        onSelect={handleSelectSlashCommand}
+                    />
                     <div className="gn-v2-ai-input-surface">
                         <Input.TextArea
-                            onPaste={(e) => {
-                                const items = e.clipboardData?.items;
-                                if (!items) return;
-                                for (let i = 0; i < items.length; i++) {
-                                    if (items[i].type.indexOf('image') !== -1) {
-                                        e.preventDefault();
-                                        const blob = items[i].getAsFile();
-                                        if (blob) {
-                                            const reader = new FileReader();
-                                            reader.onload = (event) => {
-                                                if (event.target?.result) {
-                                                    setDraftImages(prev => [...prev, event.target!.result as string]);
-                                                }
-                                            };
-                                            reader.readAsDataURL(blob);
-                                        }
-                                    }
-                                }
-                            }}
+                            onPaste={handlePasteImages}
                             ref={textareaRef as any}
                             value={input}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                setInput(val);
-                                // Slash command detection
-                                if (val.startsWith('/')) {
-                                    setSlashFilter(val.split(/\s/)[0]);
-                                    setShowSlashMenu(true);
-                                } else {
-                                    setShowSlashMenu(false);
-                                    setSlashFilter('');
-                                }
-                            }}
+                            onChange={(e) => handleComposerInputChange(e.target.value)}
                             onKeyDown={handleKeyDown as any}
                             placeholder={`输入消息... ${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)} · / 命令`}
                             variant="borderless"
@@ -847,12 +702,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                 <Button
                                     type="text"
                                     icon={<CodeOutlined />}
-                                    onClick={() => {
-                                        setInput('/');
-                                        setSlashFilter('/');
-                                        setShowSlashMenu(true);
-                                        textareaRef.current?.focus();
-                                    }}
+                                    onClick={handleOpenSlashMenu}
                                     style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
                                 />
                             </Tooltip>
@@ -924,130 +774,27 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 </div>
             </div>
 
-            <Modal
-                title={<span style={{ color: textColor }}>关联数据库表结构上下文</span>}
+            <AIContextSelectorModal
                 open={contextOpen}
-                onCancel={() => setContextOpen(false)}
-                onOk={handleAppendContext}
+                loading={contextLoading}
                 confirmLoading={appendingContext}
-                okText="同步所选表至上下文"
-                cancelText="取消"
-                centered
-                styles={{
-                    content: { background: darkMode ? '#1e1e1e' : '#ffffff', border: overlayTheme.shellBorder },
-                    header: { background: darkMode ? '#1e1e1e' : '#ffffff', borderBottom: overlayTheme.shellBorder },
-                    body: { padding: '20px 24px' }
+                darkMode={darkMode}
+                textColor={textColor}
+                overlayTheme={overlayTheme}
+                dbList={dbList}
+                selectedDbName={selectedDbName}
+                searchText={searchText}
+                filteredTables={filteredTables}
+                selectedTableKeys={selectedTableKeys}
+                onCancel={() => setContextOpen(false)}
+                onConfirm={handleAppendContext}
+                onDbChange={(value) => {
+                    const connection = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
+                    if (connection) fetchTablesForDb(value, connection.config);
                 }}
-            >
-                <Spin spinning={contextLoading}>
-                    <div style={{ marginBottom: 16, display: 'flex', gap: 12 }}>
-                        {dbList.length > 0 && (
-                            <Select 
-                                value={selectedDbName}
-                                onChange={val => {
-                                    const c = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
-                                    if (c) fetchTablesForDb(val, c.config);
-                                }}
-                                options={dbList.map(d => ({ label: d, value: d }))}
-                                style={{ width: 160, flexShrink: 0 }}
-                                placeholder="切换数据库"
-                                showSearch
-                            />
-                        )}
-                        <Input 
-                            placeholder="在当前库搜索表名..." 
-                            prefix={<SearchOutlined style={{ color: overlayTheme.mutedText }} />} 
-                            value={searchText}
-                            onChange={e => setSearchText(e.target.value)}
-                            style={{ background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: 'none', flexGrow: 1 }}
-                        />
-                    </div>
-                    {filteredTables.length > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, paddingBottom: 12, marginBottom: 8 }}>
-                                <Checkbox
-                                    indeterminate={
-                                        filteredTables.length > 0 &&
-                                        filteredTables.some(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`)) && 
-                                        !filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))
-                                    }
-                                    checked={filteredTables.length > 0 && filteredTables.every(t => selectedTableKeys.includes(`${selectedDbName}::${t.name}`))}
-                                    onChange={(e) => {
-                                        if (e.target.checked) {
-                                            const newSelected = new Set([...selectedTableKeys, ...filteredTables.map(t => `${selectedDbName}::${t.name}`)]);
-                                            setSelectedTableKeys(Array.from(newSelected));
-                                        } else {
-                                            const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
-                                            setSelectedTableKeys(selectedTableKeys.filter(key => !filteredKeys.includes(key)));
-                                        }
-                                    }}
-                                    style={{ color: textColor, fontWeight: 'bold' }}
-                                >
-                                    全选匹配的表 ({filteredTables.length})
-                                </Checkbox>
-                                <Button 
-                                    type="link" 
-                                    size="small" 
-                                    style={{ padding: 0, height: 'auto', fontSize: 13 }}
-                                    onClick={() => {
-                                        const filteredKeys = filteredTables.map(t => `${selectedDbName}::${t.name}`);
-                                        const remainingSelected = selectedTableKeys.filter(key => !filteredKeys.includes(key));
-                                        const toAdd = filteredKeys.filter(key => !selectedTableKeys.includes(key));
-                                        setSelectedTableKeys([...remainingSelected, ...toAdd]);
-                                    }}
-                                >
-                                    反选匹配结果
-                                </Button>
-                            </div>
-                            <div style={{ maxHeight: 300, overflowY: 'auto', margin: '0 -24px', padding: '0 24px' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    {filteredTables.map(t => {
-                                        const key = `${selectedDbName}::${t.name}`;
-                                        const isSelected = selectedTableKeys.includes(key);
-                                        return (
-                                        <div 
-                                            key={key}
-                                            style={{ 
-                                                padding: '6px 10px', 
-                                                borderRadius: 6, 
-                                                transition: 'background 0.2s',
-                                                cursor: 'pointer'
-                                            }}
-                                            onMouseEnter={e => e.currentTarget.style.background = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                            onClick={(e) => {
-                                                // If click originated from the checkbox input itself, let its onChange handle it to avoid duplicate toggle
-                                                if ((e.target as HTMLElement).tagName.toLowerCase() === 'input') return;
-                                                if (isSelected) {
-                                                    setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
-                                                } else {
-                                                    setSelectedTableKeys([...selectedTableKeys, key]);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox 
-                                                checked={isSelected}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setSelectedTableKeys([...selectedTableKeys, key]);
-                                                    else setSelectedTableKeys(selectedTableKeys.filter(k => k !== key));
-                                                }}
-                                                style={{ color: textColor, width: '100%' }}
-                                            >
-                                                <span style={{ fontSize: 13, userSelect: 'none' }}>{t.name}</span>
-                                            </Checkbox>
-                                        </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div style={{ padding: '40px 0', textAlign: 'center', color: overlayTheme.mutedText }}>
-                            没有找到匹配 '{searchText}' 的表
-                        </div>
-                    )}
-                </Spin>
-            </Modal>
+                onSearchTextChange={setSearchText}
+                onSelectedTableKeysChange={setSelectedTableKeys}
+            />
         </div>
     );
 };
