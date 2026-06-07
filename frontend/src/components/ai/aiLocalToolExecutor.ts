@@ -1,4 +1,4 @@
-import { DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
+import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
 
 import type { AIChatMessage, AIMCPToolDescriptor, AIToolCall, SavedConnection } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
@@ -14,6 +14,7 @@ export interface AIToolContextEntry {
 interface AILocalToolRuntime {
   getDatabases: (config: any) => Promise<any>;
   getTables: (config: any, dbName: string) => Promise<any>;
+  getAllColumns: (config: any, dbName: string) => Promise<any>;
   getColumns: (config: any, dbName: string, tableName: string) => Promise<any>;
   getIndexes: (config: any, dbName: string, tableName: string) => Promise<any>;
   getForeignKeys: (config: any, dbName: string, tableName: string) => Promise<any>;
@@ -41,6 +42,7 @@ export interface ExecuteLocalAIToolCallResult {
 const buildDefaultRuntime = (): AILocalToolRuntime => ({
   getDatabases: DBGetDatabases,
   getTables: DBGetTables,
+  getAllColumns: DBGetAllColumns,
   getColumns: async (config, dbName, tableName) => {
     const mod = await import('../../../wailsjs/go/app/App');
     return mod.DBGetColumns(config, dbName, tableName);
@@ -93,6 +95,17 @@ const normalizeColumns = (rows: any[]) =>
       nullable: column.Null || column.null || column.IS_NULLABLE || column.is_nullable || column.Nullable || column.nullable || '',
       default: column.Default || column.default || column.COLUMN_DEFAULT || column.column_default || column.DefaultValue || '',
       comment: column.Comment || column.comment || column.COLUMN_COMMENT || column.column_comment || column.Description || '',
+    };
+  });
+
+const normalizeColumnsWithTable = (rows: any[]) =>
+  rows.map((column) => {
+    const keys = Object.keys(column);
+    return {
+      tableName: column.TableName || column.tableName || column.TABLE_NAME || column.table_name || (keys.length > 0 ? column[keys[0]] : ''),
+      name: column.Name || column.name || column.COLUMN_NAME || column.column_name || (keys.length > 1 ? column[keys[1]] : ''),
+      type: column.Type || column.type || column.DATA_TYPE || column.data_type || (keys.length > 2 ? column[keys[2]] : ''),
+      comment: column.Comment || column.comment || column.COLUMN_COMMENT || column.column_comment || '',
     };
   });
 
@@ -178,6 +191,35 @@ export async function executeLocalAIToolCall({
           }
         } catch (error: any) {
           content = `获取表列表失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'get_all_columns': {
+        const connection = findConnection(connections, args.connectionId);
+        if (!connection) {
+          content = 'Connection not found';
+          break;
+        }
+        try {
+          const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+          const result = await mergedRuntime.getAllColumns(buildRpcConnectionConfig(connection.config) as any, safeDbName);
+          if (result?.success && Array.isArray(result.data)) {
+            const allColumns = normalizeColumnsWithTable(result.data);
+            const tableNames = Array.from(new Set(allColumns.map((column) => column.tableName).filter(Boolean)));
+            const limitedColumns = allColumns.slice(0, 400);
+            content = JSON.stringify({
+              dbName: safeDbName,
+              tableCount: tableNames.length,
+              totalColumns: allColumns.length,
+              truncated: allColumns.length > limitedColumns.length,
+              columns: limitedColumns,
+            });
+            success = true;
+          } else {
+            content = result?.message || 'Failed to fetch all columns';
+          }
+        } catch (error: any) {
+          content = `获取全库字段摘要失败: ${error?.message || error}`;
         }
         break;
       }

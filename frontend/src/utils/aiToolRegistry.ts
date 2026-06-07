@@ -82,6 +82,30 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "get_all_columns",
+    icon: "🧱",
+    desc: "获取指定数据库下所有表的字段摘要",
+    detail:
+      "传入 connectionId 和 dbName，返回跨表字段列表（表名、字段名、类型、注释）。适合用户只知道业务字段、不知道具体在哪张表时快速定位目标表。",
+    params: "connectionId, dbName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_all_columns",
+        description:
+          "获取指定数据库下全部表的字段摘要，返回表名、字段名、类型和注释。适用于按字段反查表、跨表梳理相同字段、做数据地图探索。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+          },
+          required: ["connectionId", "dbName"],
+        },
+      },
+    },
+  },
+  {
     name: "get_columns",
     icon: "🔍",
     desc: "获取指定表的字段结构",

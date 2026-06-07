@@ -18,6 +18,7 @@ type fakeBackend struct {
 	editableErr         error
 	databasesResult     connection.QueryResult
 	tablesResult        connection.QueryResult
+	allColumnsResult    connection.QueryResult
 	columnsResult       connection.QueryResult
 	indexesResult       connection.QueryResult
 	foreignKeysResult   connection.QueryResult
@@ -47,6 +48,10 @@ func (f *fakeBackend) DBGetDatabases(config connection.ConnectionConfig) connect
 
 func (f *fakeBackend) DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	return f.tablesResult
+}
+
+func (f *fakeBackend) DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	return f.allColumnsResult
 }
 
 func (f *fakeBackend) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
@@ -126,6 +131,40 @@ func TestGetConnectionsReturnsSavedConnectionSummaries(t *testing.T) {
 	}
 	if out.Connections[1].Target != `C:\data\example.duckdb` {
 		t.Fatalf("unexpected duckdb target: %q", out.Connections[1].Target)
+	}
+}
+
+func TestGetAllColumnsReturnsCrossTableColumnSummaries(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		allColumnsResult: connection.QueryResult{
+			Success: true,
+			Data: []connection.ColumnDefinitionWithTable{
+				{TableName: "users", Name: "email", Type: "varchar(255)", Comment: "用户邮箱"},
+				{TableName: "orders", Name: "user_id", Type: "bigint", Comment: "关联用户"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetAllColumns(context.Background(), nil, databaseArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+	})
+	if err != nil {
+		t.Fatalf("GetAllColumns returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Columns) != 2 || out.Columns[0].TableName != "users" || out.Columns[1].Name != "user_id" {
+		t.Fatalf("unexpected all columns output: %#v", out)
 	}
 }
 

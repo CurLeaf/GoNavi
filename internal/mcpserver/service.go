@@ -81,6 +81,12 @@ type getTablesResult struct {
 	Tables       []string `json:"tables"`
 }
 
+type getAllColumnsResult struct {
+	ConnectionID string                                 `json:"connectionId"`
+	DBName       string                                 `json:"dbName,omitempty"`
+	Columns      []connection.ColumnDefinitionWithTable `json:"columns"`
+}
+
 type getColumnsResult struct {
 	ConnectionID string                        `json:"connectionId"`
 	DBName       string                        `json:"dbName,omitempty"`
@@ -226,6 +232,37 @@ func (s *Service) GetTables(ctx context.Context, req *mcp.CallToolRequest, args 
 		ConnectionID: view.ID,
 		DBName:       dbName,
 		Tables:       ensureNonNilStrings(tables),
+	}, nil
+}
+
+func (s *Service) GetAllColumns(ctx context.Context, req *mcp.CallToolRequest, args databaseArgs) (*mcp.CallToolResult, getAllColumnsResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getAllColumnsResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	if strings.TrimSpace(dbName) == "" {
+		return toolError("dbName 不能为空"), getAllColumnsResult{}, nil
+	}
+
+	queryResult := s.backend.DBGetAllColumns(view.Config, dbName)
+	if !queryResult.Success {
+		return toolError("获取全库字段摘要失败: %s", strings.TrimSpace(queryResult.Message)), getAllColumnsResult{}, nil
+	}
+
+	columns, err := decodeColumnsWithTable(queryResult.Data)
+	if err != nil {
+		return toolError("解析全库字段摘要失败: %v", err), getAllColumnsResult{}, nil
+	}
+
+	return successResult(), getAllColumnsResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		Columns:      ensureNonNilColumnsWithTable(columns),
 	}, nil
 }
 
@@ -577,6 +614,21 @@ func decodeColumns(data interface{}) ([]connection.ColumnDefinition, error) {
 	}
 }
 
+func decodeColumnsWithTable(data interface{}) ([]connection.ColumnDefinitionWithTable, error) {
+	switch cols := data.(type) {
+	case nil:
+		return []connection.ColumnDefinitionWithTable{}, nil
+	case []connection.ColumnDefinitionWithTable:
+		return ensureNonNilColumnsWithTable(append([]connection.ColumnDefinitionWithTable(nil), cols...)), nil
+	default:
+		var decoded []connection.ColumnDefinitionWithTable
+		if err := remarshal(data, &decoded); err != nil {
+			return nil, err
+		}
+		return ensureNonNilColumnsWithTable(decoded), nil
+	}
+}
+
 func decodeIndexes(data interface{}) ([]connection.IndexDefinition, error) {
 	switch indexes := data.(type) {
 	case nil:
@@ -712,6 +764,13 @@ func ensureNonNilStrings(items []string) []string {
 func ensureNonNilColumns(items []connection.ColumnDefinition) []connection.ColumnDefinition {
 	if items == nil {
 		return []connection.ColumnDefinition{}
+	}
+	return items
+}
+
+func ensureNonNilColumnsWithTable(items []connection.ColumnDefinitionWithTable) []connection.ColumnDefinitionWithTable {
+	if items == nil {
+		return []connection.ColumnDefinitionWithTable{}
 	}
 	return items
 }

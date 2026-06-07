@@ -22,26 +22,23 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('Service.AIGetMCPServers?.()');
     expect(source).toContain('Service.AIListMCPTools?.()');
     expect(source).toContain('Service.AIGetSkills?.()');
-    expect(source).toContain('新增 MCP 服务');
     expect(source).toContain('新增 Skill');
   });
 
   it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
     expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
-    expect(source).toContain("import AIMCPClientInstallPanel from './ai/AIMCPClientInstallPanel';");
-    expect(source).toContain("import AIMCPServerCard from './ai/AIMCPServerCard';");
-    expect(source).toContain('<AIMCPClientInstallPanel');
-    expect(source).toContain('<AIMCPServerCard');
+    expect(source).toContain("import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';");
+    expect(source).toContain('<AISettingsMCPSection');
     expect(source).toContain('<AIBuiltinToolsCatalog');
   });
 
   it('wires the external MCP client install panel actions back to the modal handlers', () => {
-    expect(source).toContain('statuses={mcpClientStatuses}');
-    expect(source).toContain('selectedClient={selectedMCPClient}');
+    expect(source).toContain('mcpClientStatuses={mcpClientStatuses}');
+    expect(source).toContain('selectedMCPClient={selectedMCPClient}');
     expect(source).toContain('onRefreshStatus={() => void loadMCPClientStatuses()}');
     expect(source).toContain('onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}');
     expect(source).toContain('onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}');
-    expect(source).toContain('handleInstallSelectedMCPClient');
+    expect(source).toContain('onInstallSelectedClient={handleInstallSelectedMCPClient}');
   });
 
   it('waits briefly for the AI service bridge before warning and removes noisy provider debug logs', () => {

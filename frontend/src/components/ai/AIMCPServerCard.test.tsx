@@ -6,15 +6,15 @@ import AIMCPServerCard from './AIMCPServerCard';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 describe('AIMCPServerCard', () => {
-  it('renders explicit MCP parameter hints for command, args, and env', () => {
+  it('renders explicit MCP parameter hints and the actual launch preview for command, args, and env', () => {
     const markup = renderToStaticMarkup(
       <AIMCPServerCard
         server={{
           id: 'mcp-1',
           name: '',
           transport: 'stdio',
-          command: '',
-          args: [],
+          command: 'node',
+          args: ['server.js', '--stdio'],
           env: {},
           enabled: true,
           timeoutSeconds: 20,
@@ -37,5 +37,7 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('每个参数单独录入一个标签');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('当前阶段只支持 stdio');
+    expect(markup).toContain('实际启动命令预览');
+    expect(markup).toContain('node server.js --stdio');
   });
 });

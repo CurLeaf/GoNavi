@@ -18,6 +18,7 @@ type Backend interface {
 	GetEditableSavedConnection(id string) (connection.SavedConnectionView, error)
 	DBGetDatabases(config connection.ConnectionConfig) connection.QueryResult
 	DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult
+	DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult
 	DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
 	DBGetIndexes(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
 	DBGetForeignKeys(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
@@ -67,6 +68,10 @@ func (b *AppBackend) DBGetDatabases(config connection.ConnectionConfig) connecti
 
 func (b *AppBackend) DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	return b.app.DBGetTables(config, dbName)
+}
+
+func (b *AppBackend) DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	return b.app.DBGetAllColumns(config, dbName)
 }
 
 func (b *AppBackend) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {

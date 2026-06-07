@@ -81,6 +81,34 @@ describe('aiLocalToolExecutor', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it('returns a cross-table column summary for get_all_columns', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('get_all_columns', {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAllColumns: vi.fn().mockResolvedValue({
+          success: true,
+          data: [
+            { TableName: 'users', Name: 'email', Type: 'varchar(255)', Comment: '用户邮箱' },
+            { TableName: 'orders', Name: 'user_id', Type: 'bigint', Comment: '关联用户' },
+          ],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"tableCount":2');
+    expect(result.content).toContain('"tableName":"users"');
+    expect(result.content).toContain('"name":"email"');
+  });
+
   it('returns index definitions and resolves the tool label for MCP descriptors', async () => {
     const mcpTools: AIMCPToolDescriptor[] = [{
       alias: 'custom_tool',

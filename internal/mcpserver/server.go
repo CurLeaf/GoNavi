@@ -31,6 +31,11 @@ func NewServer(backend Backend) *mcp.Server {
 	}, service.GetTables)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_all_columns",
+		Description: "根据 connectionId 和 dbName 获取该数据库下全部表的字段摘要，适合按字段反查表。",
+	}, service.GetAllColumns)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_columns",
 		Description: "根据 connectionId、可选 dbName、tableName 获取字段定义。",
 	}, service.GetColumns)

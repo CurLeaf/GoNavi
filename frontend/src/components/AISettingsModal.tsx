@@ -23,8 +23,7 @@ import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildE
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
-import AIMCPClientInstallPanel from './ai/AIMCPClientInstallPanel';
-import AIMCPServerCard from './ai/AIMCPServerCard';
+import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -41,8 +40,6 @@ interface MCPClientInstallResult {
     command?: string;
     args?: string[];
 }
-
-type MCPClientKey = 'claude-code' | 'codex';
 
 // 预设配置：每个预设映射到后端 type（openai/anthropic/gemini/custom）并附带默认 URL 和 Model
 interface ProviderPreset {
@@ -1192,54 +1189,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         </div>
     );
 
-    const renderMCPSettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <AIMCPClientInstallPanel
-                statuses={mcpClientStatuses}
-                selectedClient={selectedMCPClient}
-                selectedStatus={selectedMCPClientStatus}
-                selectedCommandText={selectedMCPClientCommandText}
-                darkMode={darkMode}
-                overlayTheme={overlayTheme}
-                cardBg={cardBg}
-                cardBorder={cardBorder}
-                loading={loading}
-                statusLoading={mcpClientStatusLoading}
-                onSelectClient={setSelectedMCPClient}
-                onRefreshStatus={() => void loadMCPClientStatuses()}
-                onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
-                onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
-                onInstall={handleInstallSelectedMCPClient}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时，保存后会自动进入 AI 工具列表。</div>
-                <Button icon={<PlusOutlined />} onClick={handleAddMCPServer} style={{ borderRadius: 10 }}>新增 MCP 服务</Button>
-            </div>
-            {mcpServers.length === 0 && (
-                <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
-                    还没有 MCP 服务。常见形式是 `node server.js`、`uvx some-mcp-server`、`python -m server`。
-                </div>
-            )}
-            {mcpServers.map((server) => (
-                <AIMCPServerCard
-                    key={server.id}
-                    server={server}
-                    serverTools={mcpTools.filter((tool) => tool.serverId === server.id)}
-                    cardBg={cardBg}
-                    cardBorder={cardBorder}
-                    inputBg={inputBg}
-                    darkMode={darkMode}
-                    overlayTheme={overlayTheme}
-                    loading={loading}
-                    onChange={(patch) => updateMCPServerDraft(server.id, patch)}
-                    onTest={() => handleTestMCPServer(server)}
-                    onSave={() => handleSaveMCPServer(server)}
-                    onDelete={() => handleDeleteMCPServer(server.id)}
-                />
-            ))}
-        </div>
-    );
-
     const renderSkillSettings = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
@@ -1392,7 +1341,33 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                       {activeSection === 'providers' && (isEditing ? renderProviderForm() : renderProviderList())}
                       {activeSection === 'safety' && renderSafetySettings()}
                       {activeSection === 'context' && renderContextSettings()}
-                      {activeSection === 'mcp' && renderMCPSettings()}
+                      {activeSection === 'mcp' && (
+                          <AISettingsMCPSection
+                              mcpClientStatuses={mcpClientStatuses}
+                              selectedMCPClient={selectedMCPClient}
+                              selectedMCPClientStatus={selectedMCPClientStatus}
+                              selectedMCPClientCommandText={selectedMCPClientCommandText}
+                              mcpServers={mcpServers}
+                              mcpTools={mcpTools}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              loading={loading}
+                              mcpClientStatusLoading={mcpClientStatusLoading}
+                              onSelectClient={setSelectedMCPClient}
+                              onRefreshStatus={() => void loadMCPClientStatuses()}
+                              onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
+                              onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
+                              onInstallSelectedClient={handleInstallSelectedMCPClient}
+                              onAddServer={handleAddMCPServer}
+                              onUpdateServerDraft={updateMCPServerDraft}
+                              onTestServer={handleTestMCPServer}
+                              onSaveServer={handleSaveMCPServer}
+                              onDeleteServer={handleDeleteMCPServer}
+                          />
+                      )}
                       {activeSection === 'skills' && renderSkillSettings()}
                       {activeSection === 'tools' && (
                           <AIBuiltinToolsCatalog

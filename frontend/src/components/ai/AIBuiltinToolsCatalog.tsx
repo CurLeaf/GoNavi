@@ -18,6 +18,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先找连接、找库、找表，再确认真实字段名后生成 SQL。',
   },
   {
+    title: '字段反查表',
+    steps: 'get_databases → get_all_columns',
+    description: '适合只知道字段名、业务含义或注释关键词，但还不确定具体落在哪张表。',
+  },
+  {
     title: '结构深挖',
     steps: 'get_columns → get_indexes → get_foreign_keys → get_triggers → get_table_ddl',
     description: '适合做索引优化、关系梳理、隐式副作用排查和 DDL 审查。',
