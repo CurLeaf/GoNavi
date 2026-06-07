@@ -278,6 +278,53 @@ func mergeMySQLConnectionParams(params url.Values, values url.Values) {
 	}
 }
 
+type mySQLCompatibleDSNOptions struct {
+	defaultCharset         string
+	defaultMultiStatements *bool
+}
+
+type mySQLCompatibleConnectPlan struct {
+	label string
+	dsn   string
+}
+
+const (
+	mySQLCompatPlanDefaultLabel                = "默认兼容参数"
+	mySQLCompatPlanDisableMultiStatementsLabel = "禁用 multiStatements 兼容重试"
+)
+
+func hasMySQLConnectionParam(config connection.ConnectionConfig, names ...string) bool {
+	if len(names) == 0 {
+		return false
+	}
+
+	targets := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		normalized := strings.ToLower(strings.TrimSpace(name))
+		if normalized == "" {
+			continue
+		}
+		targets[normalized] = struct{}{}
+	}
+	if len(targets) == 0 {
+		return false
+	}
+
+	hasMatchingKey := func(values url.Values) bool {
+		for key := range values {
+			if _, ok := targets[strings.ToLower(strings.TrimSpace(key))]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "mariadb", "doris", "diros", "oceanbase", "starrocks"); ok && hasMatchingKey(parsed.Query()) {
+		return true
+	}
+	return hasMatchingKey(mysqlConnectionParamsFromText(config.ConnectionParams))
+}
+
 func resolveMySQLTLSParam(config connection.ConnectionConfig) (string, bool, error) {
 	mode := resolveMySQLTLSMode(config)
 	if mode == "false" || !hasTLSCertificatePaths(config) {
@@ -297,14 +344,18 @@ func resolveMySQLTLSParam(config connection.ConnectionConfig) (string, bool, err
 	return name, normalizeSSLModeValue(config.SSLMode) == sslModePreferred, nil
 }
 
-func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) (string, error) {
+func buildMySQLCompatibleDSNWithOptions(config connection.ConnectionConfig, protocol, address, database string, options mySQLCompatibleDSNOptions) (string, error) {
 	timeout := getConnectTimeoutSeconds(config)
 	tlsMode, allowFallbackToPlaintext, err := resolveMySQLTLSParam(config)
 	if err != nil {
 		return "", err
 	}
 	params := url.Values{}
-	params.Set("charset", "utf8mb4")
+	defaultCharset := strings.TrimSpace(options.defaultCharset)
+	if defaultCharset == "" {
+		defaultCharset = "utf8mb4,utf8"
+	}
+	params.Set("charset", defaultCharset)
 	params.Set("parseTime", "True")
 	params.Set("loc", "Local")
 	params.Set("timeout", fmt.Sprintf("%ds", timeout))
@@ -312,7 +363,11 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 	if allowFallbackToPlaintext {
 		params.Set("allowFallbackToPlaintext", "true")
 	}
-	params.Set("multiStatements", "true")
+	defaultMultiStatements := true
+	if options.defaultMultiStatements != nil {
+		defaultMultiStatements = *options.defaultMultiStatements
+	}
+	params.Set("multiStatements", strconv.FormatBool(defaultMultiStatements))
 	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros", "oceanbase"); ok {
 		mergeMySQLConnectionParams(params, parsed.Query())
 	}
@@ -321,6 +376,46 @@ func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, addre
 		"%s:%s@%s(%s)/%s?%s",
 		config.User, config.Password, protocol, address, database, params.Encode(),
 	), nil
+}
+
+func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) (string, error) {
+	defaultMultiStatements := true
+	return buildMySQLCompatibleDSNWithOptions(config, protocol, address, database, mySQLCompatibleDSNOptions{
+		defaultCharset:         "utf8mb4,utf8",
+		defaultMultiStatements: &defaultMultiStatements,
+	})
+}
+
+func buildMySQLCompatibleConnectPlans(config connection.ConnectionConfig, protocol, address, database string) ([]mySQLCompatibleConnectPlan, error) {
+	defaultDSN, err := buildMySQLCompatibleDSN(config, protocol, address, database)
+	if err != nil {
+		return nil, err
+	}
+	plans := []mySQLCompatibleConnectPlan{{
+		label: mySQLCompatPlanDefaultLabel,
+		dsn:   defaultDSN,
+	}}
+
+	if hasMySQLConnectionParam(config, "multiStatements", "allowMultiQueries") {
+		return plans, nil
+	}
+
+	disabled := false
+	fallbackDSN, err := buildMySQLCompatibleDSNWithOptions(config, protocol, address, database, mySQLCompatibleDSNOptions{
+		defaultCharset:         "utf8mb4,utf8",
+		defaultMultiStatements: &disabled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if fallbackDSN == defaultDSN {
+		return plans, nil
+	}
+
+	return append(plans, mySQLCompatibleConnectPlan{
+		label: mySQLCompatPlanDisableMultiStatementsLabel,
+		dsn:   fallbackDSN,
+	}), nil
 }
 
 func normalizeMySQLRawDSNCompatibilityParams(raw string) string {
@@ -582,20 +677,27 @@ func collectMySQLAddresses(config connection.ConnectionConfig) []string {
 	return result
 }
 
-func (m *MySQLDB) getDSN(config connection.ConnectionConfig) (string, error) {
-	database := config.Database
+func (m *MySQLDB) resolveProtocolAndAddress(config connection.ConnectionConfig) (string, string, error) {
 	protocol := "tcp"
 	address := normalizeMySQLAddress(config.Host, config.Port)
 
 	if config.UseSSH {
 		netName, err := ssh.RegisterSSHNetwork(config.SSH)
 		if err != nil {
-			return "", fmt.Errorf("创建 SSH 隧道失败：%w", err)
+			return "", "", fmt.Errorf("创建 SSH 隧道失败：%w", err)
 		}
 		protocol = netName
 	}
 
-	return buildMySQLCompatibleDSN(config, protocol, address, database)
+	return protocol, address, nil
+}
+
+func (m *MySQLDB) getDSN(config connection.ConnectionConfig) (string, error) {
+	protocol, address, err := m.resolveProtocolAndAddress(config)
+	if err != nil {
+		return "", err
+	}
+	return buildMySQLCompatibleDSN(config, protocol, address, config.Database)
 }
 
 func resolveMySQLCredential(config connection.ConnectionConfig, addressIndex int) (string, string) {
@@ -633,30 +735,50 @@ func (m *MySQLDB) Connect(config connection.ConnectionConfig) error {
 		candidateConfig.Port = port
 		candidateConfig.User, candidateConfig.Password = resolveMySQLCredential(runConfig, index)
 
-		dsn, err := m.getDSN(candidateConfig)
+		protocol, address, err := m.resolveProtocolAndAddress(candidateConfig)
 		if err != nil {
 			errorDetails = append(errorDetails, fmt.Sprintf("%s 生成连接串失败: %v", address, err))
 			continue
 		}
-		db, err := sql.Open("mysql", dsn)
+		plans, err := buildMySQLCompatibleConnectPlans(candidateConfig, protocol, address, candidateConfig.Database)
 		if err != nil {
-			errorDetails = append(errorDetails, fmt.Sprintf("%s 打开失败: %v", address, err))
+			errorDetails = append(errorDetails, fmt.Sprintf("%s 生成连接串失败: %v", address, err))
 			continue
 		}
 
-		timeout := getConnectTimeout(candidateConfig)
-		ctx, cancel := utils.ContextWithTimeout(timeout)
-		pingErr := db.PingContext(ctx)
-		cancel()
-		if pingErr != nil {
-			_ = db.Close()
-			errorDetails = append(errorDetails, fmt.Sprintf("%s 验证失败: %v", address, pingErr))
-			continue
-		}
+		for _, plan := range plans {
+			db, err := sql.Open("mysql", plan.dsn)
+			if err != nil {
+				if len(plans) > 1 || plan.label != mySQLCompatPlanDefaultLabel {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s [%s] 打开失败: %v", address, plan.label, err))
+				} else {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s 打开失败: %v", address, err))
+				}
+				continue
+			}
 
-		m.conn = db
-		m.pingTimeout = timeout
-		return nil
+			timeout := getConnectTimeout(candidateConfig)
+			ctx, cancel := utils.ContextWithTimeout(timeout)
+			pingErr := db.PingContext(ctx)
+			cancel()
+			if pingErr != nil {
+				_ = db.Close()
+				if len(plans) > 1 || plan.label != mySQLCompatPlanDefaultLabel {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s [%s] 验证失败: %v", address, plan.label, pingErr))
+				} else {
+					errorDetails = append(errorDetails, fmt.Sprintf("%s 验证失败: %v", address, pingErr))
+				}
+				continue
+			}
+
+			if plan.label != mySQLCompatPlanDefaultLabel {
+				logger.Warnf("MySQL 兼容回退生效：地址=%s 模式=%s", address, plan.label)
+			}
+
+			m.conn = db
+			m.pingTimeout = timeout
+			return nil
+		}
 	}
 
 	if len(errorDetails) == 0 {

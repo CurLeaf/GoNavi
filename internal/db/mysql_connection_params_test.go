@@ -54,6 +54,33 @@ func TestMySQLDSN_MergesConnectionParamsWithDefaults(t *testing.T) {
 	}
 }
 
+func TestMySQLDSN_EmptyDatabaseUsesCompatibilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:     "gdb.local",
+		Port:     1523,
+		User:     "glzc",
+		Password: "secret",
+		Timeout:  30,
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+	if !strings.Contains(dsn, "@tcp(gdb.local:1523)/?") {
+		t.Fatalf("empty database should still keep DSN slash separator, got=%q", dsn)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	if got := query.Get("charset"); got != "utf8mb4,utf8" {
+		t.Fatalf("default charset should fall back from utf8mb4 to utf8, got=%q", got)
+	}
+	if got := query.Get("multiStatements"); got != "true" {
+		t.Fatalf("default multiStatements should remain enabled, got=%q", got)
+	}
+}
+
 func TestMySQLDSN_MapsCommonJDBCParamsWithoutLeakingUnsupportedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -291,6 +318,61 @@ func TestMySQLDSN_MapsAllowMultiQueriesTrueWithoutLeakingKey(t *testing.T) {
 	}
 	if _, exists := query["allowMultiQueries"]; exists {
 		t.Fatalf("allowMultiQueries should not be passed to Go MySQL driver: %v", query)
+	}
+}
+
+func TestBuildMySQLCompatibleConnectPlans_AddsHandshakeFallbackWhenMultiStatementsImplicit(t *testing.T) {
+	t.Parallel()
+
+	plans, err := buildMySQLCompatibleConnectPlans(connection.ConnectionConfig{
+		Host:    "gdb.local",
+		Port:    1523,
+		User:    "glzc",
+		Timeout: 30,
+	}, "tcp", "gdb.local:1523", "")
+	if err != nil {
+		t.Fatalf("buildMySQLCompatibleConnectPlans failed: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected default plan plus compatibility fallback, got %d", len(plans))
+	}
+
+	defaultQuery := parseMySQLDSNQueryForTest(t, plans[0].dsn)
+	if got := defaultQuery.Get("multiStatements"); got != "true" {
+		t.Fatalf("default plan should keep multiStatements enabled, got=%q", got)
+	}
+	if got := defaultQuery.Get("charset"); got != "utf8mb4,utf8" {
+		t.Fatalf("default plan should use utf8 fallback charset, got=%q", got)
+	}
+
+	fallbackQuery := parseMySQLDSNQueryForTest(t, plans[1].dsn)
+	if got := fallbackQuery.Get("multiStatements"); got != "false" {
+		t.Fatalf("fallback plan should disable multiStatements, got=%q", got)
+	}
+	if got := fallbackQuery.Get("charset"); got != "utf8mb4,utf8" {
+		t.Fatalf("fallback plan should preserve charset fallback, got=%q", got)
+	}
+}
+
+func TestBuildMySQLCompatibleConnectPlans_RespectsExplicitMultiStatementsChoice(t *testing.T) {
+	t.Parallel()
+
+	plans, err := buildMySQLCompatibleConnectPlans(connection.ConnectionConfig{
+		Host:             "db.local",
+		Port:             3306,
+		User:             "root",
+		ConnectionParams: "allowMultiQueries=false",
+	}, "tcp", "db.local:3306", "app")
+	if err != nil {
+		t.Fatalf("buildMySQLCompatibleConnectPlans failed: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("explicit multiStatements choice should skip compatibility fallback, got %d plans", len(plans))
+	}
+
+	query := parseMySQLDSNQueryForTest(t, plans[0].dsn)
+	if got := query.Get("multiStatements"); got != "false" {
+		t.Fatalf("explicit allowMultiQueries=false should be preserved, got=%q", got)
 	}
 }
 
