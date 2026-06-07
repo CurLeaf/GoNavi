@@ -1,6 +1,6 @@
-import { format } from 'sql-formatter';
+import { format, type SqlLanguage } from 'sql-formatter';
 
-const resolveDdlFormatterLanguage = (dbType: string): string | null => {
+const resolveDdlFormatterLanguage = (dbType: string): SqlLanguage => {
   const normalized = String(dbType || '').trim().toLowerCase();
   switch (normalized) {
     case 'duckdb':
@@ -38,9 +38,6 @@ export const formatDdlForDisplay = (ddlText: unknown, dbType: string): string =>
     return '';
   }
   const language = resolveDdlFormatterLanguage(dbType);
-  if (!language) {
-    return raw;
-  }
   try {
     return format(raw, {
       language,
