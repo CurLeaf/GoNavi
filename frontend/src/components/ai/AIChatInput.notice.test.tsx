@@ -37,6 +37,7 @@ const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChat
     loadingModels={false}
     sendShortcutBinding={{ combo: 'Enter', enabled: true }}
     composerNotice={null}
+    onComposerNoticeAction={() => {}}
     onModelChange={() => {}}
     onFetchModels={() => {}}
     textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -71,7 +72,12 @@ describe('AIChatInput notice layout', () => {
           tone: 'error',
           title: '模型列表加载失败',
           description: '请检查供应商入口和 API Key。',
+          action: {
+            key: 'reload-models',
+            label: '重新加载模型',
+          },
         }}
+        onComposerNoticeAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -110,6 +116,7 @@ describe('AIChatInput notice layout', () => {
         sendShortcutBinding={{ combo: 'Meta+Enter', enabled: true }}
         shortcutPlatform="mac"
         composerNotice={null}
+        onComposerNoticeAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -142,6 +149,7 @@ describe('AIChatInput notice layout', () => {
         loadingModels={false}
         sendShortcutBinding={{ combo: 'Enter', enabled: true }}
         composerNotice={null}
+        onComposerNoticeAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -175,5 +183,22 @@ describe('AIChatInput notice layout', () => {
     expect(markup).not.toContain('gn-v2-ai-composer');
     expect(markup).not.toContain('gn-v2-ai-model-select');
     expect(markup).not.toContain('gn-v2-ai-send');
+  });
+
+  it('renders an actionable composer notice button when the notice provides an action', () => {
+    const markup = renderAIChatInput({
+      composerNotice: {
+        tone: 'warning',
+        title: '还没有可用供应商',
+        description: '先在 AI 设置里添加并启用一个模型供应商。',
+        action: {
+          key: 'open-settings',
+          label: '打开 AI 设置',
+        },
+      },
+      onComposerNoticeAction: () => {},
+    });
+
+    expect(markup).toContain('打开 AI 设置');
   });
 });

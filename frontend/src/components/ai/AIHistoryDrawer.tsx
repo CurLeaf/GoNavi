@@ -21,13 +21,30 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
     const aiChatSessions = useStore(state => state.aiChatSessions);
     const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
     const deleteAISession = useStore(state => state.deleteAISession);
-    
-    // 阶段4: 历史记录搜索
-    const [searchText, setSearchText] = useState('');
 
-    const filteredSessions = aiChatSessions.filter(s => 
-        !searchText || (s.title && s.title.toLowerCase().includes(searchText.toLowerCase()))
+    const [searchText, setSearchText] = useState('');
+    const normalizedSearchText = searchText.trim().toLowerCase();
+
+    React.useEffect(() => {
+        if (!open && searchText) {
+            setSearchText('');
+        }
+    }, [open, searchText]);
+
+    const sortedSessions = React.useMemo(
+        () => [...aiChatSessions].sort((left, right) => right.updatedAt - left.updatedAt),
+        [aiChatSessions],
     );
+
+    const filteredSessions = React.useMemo(
+        () => sortedSessions.filter((session) =>
+            !normalizedSearchText || (session.title && session.title.toLowerCase().includes(normalizedSearchText))),
+        [normalizedSearchText, sortedSessions],
+    );
+
+    const emptyStateText = aiChatSessions.length === 0
+        ? '还没有历史对话'
+        : `没有找到匹配“${searchText.trim()}”的历史记录`;
 
     return (
         <Drawer
@@ -36,9 +53,18 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
             onClose={onClose}
             open={open}
             getContainer={false}
-            style={{ position: 'absolute', background: bgColor || (darkMode ? '#1e1e1e' : '#f8f9fa') }}
+            rootStyle={{ position: 'absolute' }}
             width={260}
-            bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column' }}
+            styles={{
+                content: {
+                    background: bgColor || (darkMode ? '#1e1e1e' : '#f8f9fa'),
+                },
+                body: {
+                    padding: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                },
+            }}
         >
             {/* 侧拉面板头部 */}
             <div style={{ padding: '16px 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -66,6 +92,7 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
                 <Input 
                     placeholder="搜索历史记录..." 
                     prefix={<SearchOutlined style={{ color: mutedColor }} />}
+                    allowClear
                     value={searchText}
                     onChange={e => setSearchText(e.target.value)}
                     variant="filled"
@@ -77,7 +104,7 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
             {/* 列表容器 */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 16px' }} className="ai-history-list">
                 {filteredSessions.length === 0 ? (
-                    <div style={{ padding: '30px 0', textAlign: 'center', color: mutedColor, fontSize: 12 }}>暂无匹配的对话记录</div>
+                    <div style={{ padding: '30px 0', textAlign: 'center', color: mutedColor, fontSize: 12 }}>{emptyStateText}</div>
                 ) : (
                     filteredSessions.map(session => (
                         <div 

@@ -1,0 +1,85 @@
+import React from 'react';
+import { readFileSync } from 'node:fs';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('antd', async () => {
+  const actual = await vi.importActual<typeof import('antd')>('antd');
+  return {
+    ...actual,
+    Drawer: ({ children }: { children?: React.ReactNode }) => <div data-testid="mock-drawer">{children}</div>,
+  };
+});
+
+import { AIHistoryDrawer } from './AIHistoryDrawer';
+
+const setAIActiveSessionId = vi.fn();
+const deleteAISession = vi.fn();
+
+let mockState = {
+  aiChatSessions: [] as Array<{ id: string; title: string; updatedAt: number }>,
+  setAIActiveSessionId,
+  deleteAISession,
+};
+
+vi.mock('../../store', () => ({
+  useStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+}));
+
+const source = readFileSync(new URL('./AIHistoryDrawer.tsx', import.meta.url), 'utf8');
+const drawerOpenTag = source.match(/<Drawer[\s\S]*?>/)?.[0] || '';
+
+const renderHistoryDrawer = () => renderToStaticMarkup(
+  <AIHistoryDrawer
+    open
+    onClose={() => {}}
+    bgColor="#ffffff"
+    darkMode={false}
+    textColor="#162033"
+    mutedColor="rgba(16,24,40,0.55)"
+    borderColor="rgba(0,0,0,0.12)"
+    onCreateNew={() => {}}
+    sessionId="current-session"
+  />
+);
+
+describe('AIHistoryDrawer', () => {
+  beforeEach(() => {
+    setAIActiveSessionId.mockReset();
+    deleteAISession.mockReset();
+    mockState = {
+      aiChatSessions: [],
+      setAIActiveSessionId,
+      deleteAISession,
+    };
+  });
+
+  it('uses antd v5 drawer style props instead of deprecated style/bodyStyle props', () => {
+    expect(drawerOpenTag).toContain("rootStyle={{ position: 'absolute' }}");
+    expect(drawerOpenTag).toContain('styles={{');
+    expect(drawerOpenTag).not.toContain('bodyStyle=');
+    expect(drawerOpenTag).not.toMatch(/\n\s*style=\{\{/);
+  });
+
+  it('renders recent sessions before older sessions', () => {
+    mockState = {
+      ...mockState,
+      aiChatSessions: [
+        { id: 'older-session', title: '较早会话', updatedAt: 1710000000000 },
+        { id: 'newer-session', title: '较新会话', updatedAt: 1720000000000 },
+      ],
+    };
+
+    const markup = renderHistoryDrawer();
+
+    expect(markup.indexOf('较新会话')).toBeGreaterThanOrEqual(0);
+    expect(markup.indexOf('较早会话')).toBeGreaterThanOrEqual(0);
+    expect(markup.indexOf('较新会话')).toBeLessThan(markup.indexOf('较早会话'));
+  });
+
+  it('renders the dedicated empty state when there is no history session', () => {
+    const markup = renderHistoryDrawer();
+
+    expect(markup).toContain('还没有历史对话');
+  });
+});

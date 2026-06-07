@@ -27,6 +27,7 @@ interface AIChatInputProps {
     sendShortcutBinding: ShortcutPlatformBinding;
     shortcutPlatform?: ShortcutPlatform;
     composerNotice?: AIComposerNotice | null;
+    onComposerNoticeAction?: () => void;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>;
@@ -42,7 +43,7 @@ interface AIChatInputProps {
 export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
-    sendShortcutBinding, shortcutPlatform = 'windows', composerNotice,
+    sendShortcutBinding, shortcutPlatform = 'windows', composerNotice, onComposerNoticeAction,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
@@ -104,6 +105,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 iconColor: '#d48806',
             };
     }, [composerNotice, darkMode]);
+    const composerNoticeActionLabel = composerNotice?.action?.label;
 
     // Slash commands
     const [showSlashMenu, setShowSlashMenu] = React.useState(false);
@@ -314,6 +316,16 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                 <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
                                     {composerNotice.description}
                                 </div>
+                                {composerNoticeActionLabel && typeof onComposerNoticeAction === 'function' && (
+                                    <Button
+                                        size="small"
+                                        type="default"
+                                        onClick={onComposerNoticeAction}
+                                        style={{ marginTop: 8, borderRadius: 8 }}
+                                    >
+                                        {composerNoticeActionLabel}
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     )}
@@ -722,6 +734,16 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
                                 {composerNotice.description}
                             </div>
+                            {composerNoticeActionLabel && typeof onComposerNoticeAction === 'function' && (
+                                <Button
+                                    size="small"
+                                    type="default"
+                                    onClick={onComposerNoticeAction}
+                                    style={{ marginTop: 8, borderRadius: 8 }}
+                                >
+                                    {composerNoticeActionLabel}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 )}

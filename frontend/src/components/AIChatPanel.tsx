@@ -589,6 +589,24 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
     }, []);
 
+    const handleOpenSettingsFromPanel = useCallback(() => {
+        onOpenSettings?.();
+        window.setTimeout(() => {
+            void loadActiveProvider();
+        }, 500);
+    }, [loadActiveProvider, onOpenSettings]);
+
+    const handleComposerNoticeAction = useCallback(() => {
+        const actionKey = composerNotice?.action?.key;
+        if (actionKey === 'open-settings') {
+            handleOpenSettingsFromPanel();
+            return;
+        }
+        if (actionKey === 'reload-models') {
+            void fetchDynamicModels();
+        }
+    }, [composerNotice?.action?.key, fetchDynamicModels, handleOpenSettingsFromPanel]);
+
     useEffect(() => {
         if (messages.length === 0) return;
         messagesEndRef.current?.scrollIntoView({ behavior: sending ? 'auto' : 'smooth', block: 'end' });
@@ -1894,7 +1912,7 @@ SELECT * FROM users WHERE status = 1;
                     createNewAISession();
                     setActivePanelMode('chat');
                 }}
-                onSettingsClick={() => { onOpenSettings?.(); setTimeout(loadActiveProvider, 500); }}
+                onSettingsClick={handleOpenSettingsFromPanel}
                 onClose={onClose}
                 messages={messages}
                 sessionTitle={useStore.getState().aiChatSessions.find(s => s.id === sid)?.title || '新对话'}
@@ -2019,6 +2037,7 @@ SELECT * FROM users WHERE status = 1;
                 sendShortcutBinding={aiChatSendShortcutBinding}
                 shortcutPlatform={activeShortcutPlatform}
                 composerNotice={composerNotice}
+                onComposerNoticeAction={handleComposerNoticeAction}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}
                 textareaRef={textareaRef}
