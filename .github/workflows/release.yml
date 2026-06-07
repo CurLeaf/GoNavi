@@ -286,17 +286,32 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Download frontend dist
+        id: download_frontend_dist
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           name: frontend-dist
-          path: .
+          path: frontend-artifact
+
+      - name: Reset failed frontend dist download
+        if: steps.download_frontend_dist.outcome != 'success'
+        shell: bash
+        run: rm -rf frontend-artifact
+
+      - name: Retry frontend dist download
+        if: steps.download_frontend_dist.outcome != 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend-artifact
 
       - name: Extract frontend dist
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p frontend/dist
-          tar -xf frontend-dist.tar -C frontend/dist
+          test -s frontend-artifact/frontend-dist.tar
+          tar -xf frontend-artifact/frontend-dist.tar -C frontend/dist
           test -s frontend/dist/index.html
 
       - name: Install UPX (Windows)
