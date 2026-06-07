@@ -19,6 +19,9 @@ type fakeBackend struct {
 	databasesResult     connection.QueryResult
 	tablesResult        connection.QueryResult
 	columnsResult       connection.QueryResult
+	indexesResult       connection.QueryResult
+	foreignKeysResult   connection.QueryResult
+	triggersResult      connection.QueryResult
 	ddlResult           connection.QueryResult
 	queryResult         connection.QueryResult
 	inspection          appcore.SQLInspection
@@ -48,6 +51,18 @@ func (f *fakeBackend) DBGetTables(config connection.ConnectionConfig, dbName str
 
 func (f *fakeBackend) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	return f.columnsResult
+}
+
+func (f *fakeBackend) DBGetIndexes(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return f.indexesResult
+}
+
+func (f *fakeBackend) DBGetForeignKeys(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return f.foreignKeysResult
+}
+
+func (f *fakeBackend) DBGetTriggers(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return f.triggersResult
 }
 
 func (f *fakeBackend) DBShowCreateTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
@@ -111,6 +126,108 @@ func TestGetConnectionsReturnsSavedConnectionSummaries(t *testing.T) {
 	}
 	if out.Connections[1].Target != `C:\data\example.duckdb` {
 		t.Fatalf("unexpected duckdb target: %q", out.Connections[1].Target)
+	}
+}
+
+func TestGetIndexesReturnsIndexDefinitions(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		indexesResult: connection.QueryResult{
+			Success: true,
+			Data: []connection.IndexDefinition{
+				{Name: "idx_users_email", ColumnName: "email", NonUnique: 0, SeqInIndex: 1, IndexType: "BTREE"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetIndexes(context.Background(), nil, tableArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+		TableName:    "users",
+	})
+	if err != nil {
+		t.Fatalf("GetIndexes returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Indexes) != 1 || out.Indexes[0].Name != "idx_users_email" {
+		t.Fatalf("unexpected indexes output: %#v", out)
+	}
+}
+
+func TestGetForeignKeysReturnsForeignKeyDefinitions(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		foreignKeysResult: connection.QueryResult{
+			Success: true,
+			Data: []connection.ForeignKeyDefinition{
+				{Name: "fk_orders_user_id", ColumnName: "user_id", RefTableName: "users", RefColumnName: "id", ConstraintName: "fk_orders_user_id"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetForeignKeys(context.Background(), nil, tableArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+		TableName:    "orders",
+	})
+	if err != nil {
+		t.Fatalf("GetForeignKeys returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.ForeignKeys) != 1 || out.ForeignKeys[0].RefTableName != "users" {
+		t.Fatalf("unexpected foreign keys output: %#v", out)
+	}
+}
+
+func TestGetTriggersReturnsTriggerDefinitions(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		triggersResult: connection.QueryResult{
+			Success: true,
+			Data: []connection.TriggerDefinition{
+				{Name: "trg_orders_audit", Timing: "AFTER", Event: "INSERT", Statement: "INSERT INTO audit_log ..."},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetTriggers(context.Background(), nil, tableArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+		TableName:    "orders",
+	})
+	if err != nil {
+		t.Fatalf("GetTriggers returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Triggers) != 1 || out.Triggers[0].Name != "trg_orders_audit" {
+		t.Fatalf("unexpected triggers output: %#v", out)
 	}
 }
 

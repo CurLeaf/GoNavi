@@ -1207,10 +1207,11 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 
 SQL 生成规则（极重要，必须严格遵守）：
 7. 【字段精确性 - 绝对红线】生成 SQL 之前，必须先调用 get_columns 获取目标表的真实字段列表。SQL 中的每一个字段名必须与 get_columns 返回的 field 字段完全一致（区分大小写）。不得自行拼凑、缩写或联想字段名（例如字段是 channel 就必须写 channel，不得写成 pay_channel）。
-8. 生成 SQL 时禁止使用 "database.table" 格式的限定前缀，只写表名本身。
-9. 报告结果时，连接名/ID 和数据库名必须严格来自同一个 get_tables 调用的实际参数。禁止将 A 连接的 connectionId 与 B 连接的 dbName 混搭。
-10. 如果有多个名称相似的数据库，请明确告诉用户目标表具体位于哪个数据库。
-11. 【关键】每个 SQL 代码块的第一行必须添加上下文声明注释，格式严格为：-- @context connectionId=<连接ID> dbName=<数据库名>。connectionId 和 dbName 必须来自同一个成功的 get_tables 调用（即你在该调用中传入的实际参数值）。示例：
+8. 如果用户在问索引优化、联表关系、触发器副作用、约束或 DDL 细节，在 get_columns 之后继续按需调用 get_indexes、get_foreign_keys、get_triggers、get_table_ddl，再给结论。
+9. 生成 SQL 时禁止使用 "database.table" 格式的限定前缀，只写表名本身。
+10. 报告结果时，连接名/ID 和数据库名必须严格来自同一个 get_tables 调用的实际参数。禁止将 A 连接的 connectionId 与 B 连接的 dbName 混搭。
+11. 如果有多个名称相似的数据库，请明确告诉用户目标表具体位于哪个数据库。
+12. 【关键】每个 SQL 代码块的第一行必须添加上下文声明注释，格式严格为：-- @context connectionId=<连接ID> dbName=<数据库名>。connectionId 和 dbName 必须来自同一个成功的 get_tables 调用（即你在该调用中传入的实际参数值）。示例：
 \`\`\`sql
 -- @context connectionId=1770778676549 dbName=mkefu_test
 SELECT * FROM users WHERE status = 1;
@@ -1342,6 +1343,60 @@ SELECT * FROM users WHERE status = 1;
                                 } else { resStr = colRes?.message || 'Failed to fetch columns'; }
                             } catch (e: any) {
                                 resStr = `获取字段列表失败: ${e?.message || e}`;
+                            }
+                        } else { resStr = 'Connection not found'; }
+                        break;
+                    }
+                    case 'get_indexes': {
+                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
+                        if (conn) {
+                            try {
+                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
+                                const { DBGetIndexes } = await import('../../wailsjs/go/app/App');
+                                const indexRes = await DBGetIndexes(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
+                                if (indexRes?.success && Array.isArray(indexRes.data)) {
+                                    resStr = JSON.stringify(indexRes.data);
+                                    success = true;
+                                } else { resStr = indexRes?.message || 'Failed to fetch indexes'; }
+                            } catch (e: any) {
+                                resStr = `获取索引定义失败: ${e?.message || e}`;
+                            }
+                        } else { resStr = 'Connection not found'; }
+                        break;
+                    }
+                    case 'get_foreign_keys': {
+                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
+                        if (conn) {
+                            try {
+                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
+                                const { DBGetForeignKeys } = await import('../../wailsjs/go/app/App');
+                                const foreignKeyRes = await DBGetForeignKeys(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
+                                if (foreignKeyRes?.success && Array.isArray(foreignKeyRes.data)) {
+                                    resStr = JSON.stringify(foreignKeyRes.data);
+                                    success = true;
+                                } else { resStr = foreignKeyRes?.message || 'Failed to fetch foreign keys'; }
+                            } catch (e: any) {
+                                resStr = `获取外键关系失败: ${e?.message || e}`;
+                            }
+                        } else { resStr = 'Connection not found'; }
+                        break;
+                    }
+                    case 'get_triggers': {
+                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
+                        if (conn) {
+                            try {
+                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
+                                const { DBGetTriggers } = await import('../../wailsjs/go/app/App');
+                                const triggerRes = await DBGetTriggers(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
+                                if (triggerRes?.success && Array.isArray(triggerRes.data)) {
+                                    resStr = JSON.stringify(triggerRes.data);
+                                    success = true;
+                                } else { resStr = triggerRes?.message || 'Failed to fetch triggers'; }
+                            } catch (e: any) {
+                                resStr = `获取触发器定义失败: ${e?.message || e}`;
                             }
                         } else { resStr = 'Connection not found'; }
                         break;

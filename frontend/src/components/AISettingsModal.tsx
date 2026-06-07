@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined, ReloadOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig, AISkillScope } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
@@ -22,6 +22,9 @@ import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
+import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
+import AIMCPClientInstallPanel from './ai/AIMCPClientInstallPanel';
+import AIMCPServerCard from './ai/AIMCPServerCard';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -219,27 +222,6 @@ const SKILL_SCOPE_OPTIONS: Array<{ value: AISkillScope; label: string; desc: str
     { value: 'jvmDiagnostic', label: 'JVM 诊断', desc: '仅 JVM 诊断工作台启用' },
 ];
 
-const parseMCPEnvText = (text: string): Record<string, string> => {
-    const result: Record<string, string> = {};
-    String(text || '')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .forEach((line) => {
-            const index = line.indexOf('=');
-            if (index <= 0) return;
-            const key = line.slice(0, index).trim();
-            if (!key) return;
-            result[key] = line.slice(index + 1);
-        });
-    return result;
-};
-
-const stringifyMCPEnv = (env?: Record<string, string>): string =>
-    Object.entries(env || {})
-        .map(([key, value]) => `${key}=${value}`)
-        .join('\n');
-
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
@@ -272,36 +254,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const cardHoverBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
     const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
     const inputBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
-    const getMCPClientStatusTone = useCallback((status?: AIMCPClientInstallStatus) => {
-        const messageText = String(status?.message || '');
-        if (status?.matchesCurrent) {
-            return {
-                label: '已安装',
-                color: '#16a34a',
-                bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
-            };
-        }
-        if (status?.installed) {
-            return {
-                label: '需更新',
-                color: '#d97706',
-                bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
-            };
-        }
-        if (messageText.includes('失败') || messageText.includes('异常')) {
-            return {
-                label: '需检查',
-                color: '#dc2626',
-                bg: darkMode ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
-            };
-        }
-        return {
-            label: '未安装',
-            color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
-            bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
-        };
-    }, [darkMode]);
-
     // Hook 必须在组件顶层调用，不能在条件分支内
     const watchedType = Form.useWatch('type', form);
     const watchedPresetKey = Form.useWatch('presetKey', form);
@@ -1242,166 +1194,23 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 
     const renderMCPSettings = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4, lineHeight: 1.7 }}>
-                这里的“安装到客户端”是把 GoNavi 注册成外部 AI 客户端可调用的 MCP Server，供 Claude Code 或 Codex 使用；不是 GoNavi 自己安装自己。
-            </div>
-            <div style={{
-                padding: '16px',
-                borderRadius: 14,
-                border: `1px solid ${cardBorder}`,
-                background: cardBg,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 14,
-            }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>安装到外部客户端</div>
-                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-                        先选择目标客户端，再把当前 GoNavi 安装路径写入它的用户级 MCP 配置。GoNavi 会自动处理配置文件路径，不需要你自己找本机 exe。
-                    </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                    {mcpClientStatuses.map((status) => {
-                        const active = selectedMCPClient === status.client;
-                        const tone = getMCPClientStatusTone(status);
-                        return (
-                            <div
-                                key={status.client}
-                                onClick={() => {
-                                    if (status.client === 'claude-code' || status.client === 'codex') {
-                                        setSelectedMCPClient(status.client);
-                                    }
-                                }}
-                                style={{
-                                    padding: '14px 14px 12px',
-                                    borderRadius: 12,
-                                    border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
-                                    background: active ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)'),
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: 10,
-                                    transition: 'all 0.2s ease',
-                                }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>
-                                        {status.displayName}
-                                    </div>
-                                    <div style={{
-                                        padding: '4px 10px',
-                                        borderRadius: 999,
-                                        fontSize: 12,
-                                        fontWeight: 700,
-                                        color: tone.color,
-                                        background: tone.bg,
-                                        whiteSpace: 'nowrap',
-                                    }}>
-                                        {tone.label}
-                                    </div>
-                                </div>
-                                <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                                    {status.matchesCurrent
-                                        ? '当前 GoNavi 安装路径已写入，打开客户端后可直接使用。'
-                                        : status.installed
-                                            ? '检测到已有安装记录，但建议更新为当前 GoNavi 路径。'
-                                            : '当前尚未写入 GoNavi MCP 配置。'}
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-
-                <div style={{
-                    padding: '12px 14px',
-                    borderRadius: 12,
-                    border: `1px solid ${cardBorder}`,
-                    background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.78)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-                            {selectedMCPClientStatus?.displayName || '客户端'} 状态
-                        </div>
-                        {selectedMCPClientStatus && (
-                            <div style={{
-                                padding: '3px 9px',
-                                borderRadius: 999,
-                                fontSize: 11,
-                                fontWeight: 700,
-                                color: getMCPClientStatusTone(selectedMCPClientStatus).color,
-                                background: getMCPClientStatusTone(selectedMCPClientStatus).bg,
-                            }}>
-                                {getMCPClientStatusTone(selectedMCPClientStatus).label}
-                            </div>
-                        )}
-                    </div>
-                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-                        {selectedMCPClientStatus?.message || '未检测到安装状态'}
-                    </div>
-                    {selectedMCPClientStatus?.configPath && (
-                        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
-                            配置文件：{selectedMCPClientStatus.configPath}
-                        </div>
-                    )}
-                    {selectedMCPClientCommandText && (
-                        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
-                            启动命令：{selectedMCPClientCommandText}
-                        </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <Button
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            loading={mcpClientStatusLoading}
-                            onClick={() => void loadMCPClientStatuses()}
-                            style={{ borderRadius: 8 }}
-                        >
-                            刷新状态
-                        </Button>
-                        <Button
-                            size="small"
-                            icon={<CopyOutlined />}
-                            disabled={!selectedMCPClientStatus?.configPath}
-                            onClick={() => void handleCopySelectedMCPConfigPath()}
-                            style={{ borderRadius: 8 }}
-                        >
-                            复制配置路径
-                        </Button>
-                        <Button
-                            size="small"
-                            icon={<CopyOutlined />}
-                            disabled={!selectedMCPClientCommandText}
-                            onClick={() => void handleCopySelectedMCPLaunchCommand()}
-                            style={{ borderRadius: 8 }}
-                        >
-                            复制启动命令
-                        </Button>
-                    </div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                        安装后重启对应客户端即可生效；若已经是当前路径，会直接提示无需重复安装。
-                    </div>
-                    <Button
-                        type={selectedMCPClientStatus?.matchesCurrent ? 'default' : 'primary'}
-                        onClick={handleInstallSelectedMCPClient}
-                        loading={loading}
-                        disabled={Boolean(selectedMCPClientStatus?.matchesCurrent)}
-                        style={{ borderRadius: 10, fontWeight: 600, minWidth: 176, height: 40 }}
-                    >
-                        {selectedMCPClientStatus?.matchesCurrent
-                            ? `${selectedMCPClientStatus.displayName} 已安装`
-                            : selectedMCPClientStatus?.installed
-                                ? `更新到 ${selectedMCPClientStatus?.displayName || '客户端'}`
-                                : `安装到 ${selectedMCPClientStatus?.displayName || '客户端'}`}
-                    </Button>
-                </div>
-            </div>
+            <AIMCPClientInstallPanel
+                statuses={mcpClientStatuses}
+                selectedClient={selectedMCPClient}
+                selectedStatus={selectedMCPClientStatus}
+                selectedCommandText={selectedMCPClientCommandText}
+                darkMode={darkMode}
+                overlayTheme={overlayTheme}
+                cardBg={cardBg}
+                cardBorder={cardBorder}
+                loading={loading}
+                statusLoading={mcpClientStatusLoading}
+                onSelectClient={setSelectedMCPClient}
+                onRefreshStatus={() => void loadMCPClientStatuses()}
+                onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
+                onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
+                onInstall={handleInstallSelectedMCPClient}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时，保存后会自动进入 AI 工具列表。</div>
                 <Button icon={<PlusOutlined />} onClick={handleAddMCPServer} style={{ borderRadius: 10 }}>新增 MCP 服务</Button>
@@ -1411,81 +1220,23 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     还没有 MCP 服务。常见形式是 `node server.js`、`uvx some-mcp-server`、`python -m server`。
                 </div>
             )}
-            {mcpServers.map((server) => {
-                const serverTools = mcpTools.filter((tool) => tool.serverId === server.id);
-                return (
-                    <div key={server.id} style={{ padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
-                            <Input
-                                value={server.name}
-                                onChange={(event) => updateMCPServerDraft(server.id, { name: event.target.value })}
-                                placeholder="服务名称，例如：Filesystem / Browser / GitHub"
-                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
-                            />
-                            <Select
-                                value={server.enabled ? 'enabled' : 'disabled'}
-                                onChange={(value) => updateMCPServerDraft(server.id, { enabled: value === 'enabled' })}
-                                options={[{ label: '已启用', value: 'enabled' }, { label: '已禁用', value: 'disabled' }]}
-                            />
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '132px minmax(0,1fr) 132px', gap: 12 }}>
-                            <Select
-                                value={server.transport}
-                                onChange={(value) => updateMCPServerDraft(server.id, { transport: value as AIMCPServerConfig['transport'] })}
-                                options={[{ label: 'stdio', value: 'stdio' }]}
-                            />
-                            <Input
-                                value={server.command}
-                                onChange={(event) => updateMCPServerDraft(server.id, { command: event.target.value })}
-                                placeholder="启动命令，例如：node / uvx / python"
-                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
-                            />
-                            <Input
-                                type="number"
-                                min={3}
-                                max={120}
-                                value={server.timeoutSeconds}
-                                onChange={(event) => updateMCPServerDraft(server.id, { timeoutSeconds: Number(event.target.value) || 20 })}
-                                placeholder="超时(秒)"
-                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
-                            />
-                        </div>
-                        <Select
-                            mode="tags"
-                            value={server.args || []}
-                            onChange={(value) => updateMCPServerDraft(server.id, { args: value })}
-                            placeholder="命令参数，回车录入，例如：server.js、--stdio"
-                            style={{ width: '100%' }}
-                        />
-                        <Input.TextArea
-                            rows={3}
-                            value={stringifyMCPEnv(server.env)}
-                            onChange={(event) => updateMCPServerDraft(server.id, { env: parseMCPEnvText(event.target.value) })}
-                            placeholder={"环境变量，每行一个 KEY=VALUE，例如：\nOPENAI_API_KEY=...\nGITHUB_TOKEN=..."}
-                            style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
-                        />
-                        {serverTools.length > 0 && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>已发现工具</div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                    {serverTools.map((tool) => (
-                                        <span key={tool.alias} style={{ padding: '4px 8px', borderRadius: 999, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', fontSize: 12, color: overlayTheme.mutedText }}>
-                                            {tool.alias}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <Button onClick={() => handleTestMCPServer(server)} loading={loading} style={{ borderRadius: 10 }}>测试工具发现</Button>
-                            <Button type="primary" onClick={() => handleSaveMCPServer(server)} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
-                            <Popconfirm title="删除这个 MCP 服务？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteMCPServer(server.id)}>
-                                <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
-                            </Popconfirm>
-                        </div>
-                    </div>
-                );
-            })}
+            {mcpServers.map((server) => (
+                <AIMCPServerCard
+                    key={server.id}
+                    server={server}
+                    serverTools={mcpTools.filter((tool) => tool.serverId === server.id)}
+                    cardBg={cardBg}
+                    cardBorder={cardBorder}
+                    inputBg={inputBg}
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                    loading={loading}
+                    onChange={(patch) => updateMCPServerDraft(server.id, patch)}
+                    onTest={() => handleTestMCPServer(server)}
+                    onSave={() => handleSaveMCPServer(server)}
+                    onDelete={() => handleDeleteMCPServer(server.id)}
+                />
+            ))}
         </div>
     );
 
@@ -1552,46 +1303,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                         <Popconfirm title="删除这个 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteSkill(skill.id)}>
                             <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
                         </Popconfirm>
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-
-    const renderBuiltinTools = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                AI 助手在处理数据库相关问题时，可以自动调用以下内置工具获取真实数据，全程无需人工干预。
-            </div>
-            <div style={{ fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, padding: '8px 12px', borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}` }}>
-                💡 工作流程：get_connections → get_databases → get_tables → get_columns → 生成 SQL
-            </div>
-            {BUILTIN_AI_TOOL_INFO.map(tool => (
-                <div key={tool.name} style={{
-                    padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg,
-                    transition: 'all 0.2s ease',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                        <span style={{ fontSize: 20 }}>{tool.icon}</span>
-                        <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'var(--gn-font-mono)' }}>
-                                {tool.name}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 2 }}>{tool.desc}</div>
-                        </div>
-                    </div>
-                    <div style={{
-                        fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.6, padding: '8px 12px',
-                        background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.02)', borderRadius: 8,
-                    }}>
-                        {tool.detail}
-                    </div>
-                    <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <ToolOutlined style={{ fontSize: 12 }} />
-                        <span>参数：</span>
-                        <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
-                            {tool.params}
-                        </code>
                     </div>
                 </div>
             ))}
@@ -1683,7 +1394,14 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                       {activeSection === 'context' && renderContextSettings()}
                       {activeSection === 'mcp' && renderMCPSettings()}
                       {activeSection === 'skills' && renderSkillSettings()}
-                      {activeSection === 'tools' && renderBuiltinTools()}
+                      {activeSection === 'tools' && (
+                          <AIBuiltinToolsCatalog
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                          />
+                      )}
                       {activeSection === 'prompts' && renderPromptSettings()}
                   </div>
               </div>

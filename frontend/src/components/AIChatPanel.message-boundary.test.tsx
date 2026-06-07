@@ -28,6 +28,13 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain('buildAvailableAIChatTools');
   });
 
+  it('teaches the runtime to use deeper schema tools when analyzing structure details', () => {
+    expect(source).toContain('get_indexes、get_foreign_keys、get_triggers、get_table_ddl');
+    expect(source).toContain("case 'get_indexes':");
+    expect(source).toContain("case 'get_foreign_keys':");
+    expect(source).toContain("case 'get_triggers':");
+  });
+
   it('keeps the v2 history mode sorted by the latest updated session first', () => {
     expect(source).toContain('const orderedAISessions = useMemo(');
     expect(source).toContain('right.updatedAt - left.updatedAt');

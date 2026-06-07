@@ -88,6 +88,27 @@ type getColumnsResult struct {
 	Columns      []connection.ColumnDefinition `json:"columns"`
 }
 
+type getIndexesResult struct {
+	ConnectionID string                       `json:"connectionId"`
+	DBName       string                       `json:"dbName,omitempty"`
+	TableName    string                       `json:"tableName"`
+	Indexes      []connection.IndexDefinition `json:"indexes"`
+}
+
+type getForeignKeysResult struct {
+	ConnectionID string                            `json:"connectionId"`
+	DBName       string                            `json:"dbName,omitempty"`
+	TableName    string                            `json:"tableName"`
+	ForeignKeys  []connection.ForeignKeyDefinition `json:"foreignKeys"`
+}
+
+type getTriggersResult struct {
+	ConnectionID string                         `json:"connectionId"`
+	DBName       string                         `json:"dbName,omitempty"`
+	TableName    string                         `json:"tableName"`
+	Triggers     []connection.TriggerDefinition `json:"triggers"`
+}
+
 type getTableDDLResult struct {
 	ConnectionID string `json:"connectionId"`
 	DBName       string `json:"dbName,omitempty"`
@@ -238,6 +259,105 @@ func (s *Service) GetColumns(ctx context.Context, req *mcp.CallToolRequest, args
 		DBName:       dbName,
 		TableName:    tableName,
 		Columns:      ensureNonNilColumns(columns),
+	}, nil
+}
+
+func (s *Service) GetIndexes(ctx context.Context, req *mcp.CallToolRequest, args tableArgs) (*mcp.CallToolResult, getIndexesResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getIndexesResult{}, nil
+	}
+
+	tableName := strings.TrimSpace(args.TableName)
+	if tableName == "" {
+		return toolError("tableName 不能为空"), getIndexesResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	queryResult := s.backend.DBGetIndexes(view.Config, dbName, tableName)
+	if !queryResult.Success {
+		return toolError("获取索引定义失败: %s", strings.TrimSpace(queryResult.Message)), getIndexesResult{}, nil
+	}
+
+	indexes, err := decodeIndexes(queryResult.Data)
+	if err != nil {
+		return toolError("解析索引定义失败: %v", err), getIndexesResult{}, nil
+	}
+
+	return successResult(), getIndexesResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		TableName:    tableName,
+		Indexes:      ensureNonNilIndexes(indexes),
+	}, nil
+}
+
+func (s *Service) GetForeignKeys(ctx context.Context, req *mcp.CallToolRequest, args tableArgs) (*mcp.CallToolResult, getForeignKeysResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getForeignKeysResult{}, nil
+	}
+
+	tableName := strings.TrimSpace(args.TableName)
+	if tableName == "" {
+		return toolError("tableName 不能为空"), getForeignKeysResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	queryResult := s.backend.DBGetForeignKeys(view.Config, dbName, tableName)
+	if !queryResult.Success {
+		return toolError("获取外键关系失败: %s", strings.TrimSpace(queryResult.Message)), getForeignKeysResult{}, nil
+	}
+
+	foreignKeys, err := decodeForeignKeys(queryResult.Data)
+	if err != nil {
+		return toolError("解析外键关系失败: %v", err), getForeignKeysResult{}, nil
+	}
+
+	return successResult(), getForeignKeysResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		TableName:    tableName,
+		ForeignKeys:  ensureNonNilForeignKeys(foreignKeys),
+	}, nil
+}
+
+func (s *Service) GetTriggers(ctx context.Context, req *mcp.CallToolRequest, args tableArgs) (*mcp.CallToolResult, getTriggersResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getTriggersResult{}, nil
+	}
+
+	tableName := strings.TrimSpace(args.TableName)
+	if tableName == "" {
+		return toolError("tableName 不能为空"), getTriggersResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	queryResult := s.backend.DBGetTriggers(view.Config, dbName, tableName)
+	if !queryResult.Success {
+		return toolError("获取触发器定义失败: %s", strings.TrimSpace(queryResult.Message)), getTriggersResult{}, nil
+	}
+
+	triggers, err := decodeTriggers(queryResult.Data)
+	if err != nil {
+		return toolError("解析触发器定义失败: %v", err), getTriggersResult{}, nil
+	}
+
+	return successResult(), getTriggersResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		TableName:    tableName,
+		Triggers:     ensureNonNilTriggers(triggers),
 	}, nil
 }
 
@@ -457,6 +577,51 @@ func decodeColumns(data interface{}) ([]connection.ColumnDefinition, error) {
 	}
 }
 
+func decodeIndexes(data interface{}) ([]connection.IndexDefinition, error) {
+	switch indexes := data.(type) {
+	case nil:
+		return []connection.IndexDefinition{}, nil
+	case []connection.IndexDefinition:
+		return ensureNonNilIndexes(append([]connection.IndexDefinition(nil), indexes...)), nil
+	default:
+		var decoded []connection.IndexDefinition
+		if err := remarshal(data, &decoded); err != nil {
+			return nil, err
+		}
+		return ensureNonNilIndexes(decoded), nil
+	}
+}
+
+func decodeForeignKeys(data interface{}) ([]connection.ForeignKeyDefinition, error) {
+	switch foreignKeys := data.(type) {
+	case nil:
+		return []connection.ForeignKeyDefinition{}, nil
+	case []connection.ForeignKeyDefinition:
+		return ensureNonNilForeignKeys(append([]connection.ForeignKeyDefinition(nil), foreignKeys...)), nil
+	default:
+		var decoded []connection.ForeignKeyDefinition
+		if err := remarshal(data, &decoded); err != nil {
+			return nil, err
+		}
+		return ensureNonNilForeignKeys(decoded), nil
+	}
+}
+
+func decodeTriggers(data interface{}) ([]connection.TriggerDefinition, error) {
+	switch triggers := data.(type) {
+	case nil:
+		return []connection.TriggerDefinition{}, nil
+	case []connection.TriggerDefinition:
+		return ensureNonNilTriggers(append([]connection.TriggerDefinition(nil), triggers...)), nil
+	default:
+		var decoded []connection.TriggerDefinition
+		if err := remarshal(data, &decoded); err != nil {
+			return nil, err
+		}
+		return ensureNonNilTriggers(decoded), nil
+	}
+}
+
 func decodeString(data interface{}) (string, error) {
 	switch value := data.(type) {
 	case nil:
@@ -547,6 +712,27 @@ func ensureNonNilStrings(items []string) []string {
 func ensureNonNilColumns(items []connection.ColumnDefinition) []connection.ColumnDefinition {
 	if items == nil {
 		return []connection.ColumnDefinition{}
+	}
+	return items
+}
+
+func ensureNonNilIndexes(items []connection.IndexDefinition) []connection.IndexDefinition {
+	if items == nil {
+		return []connection.IndexDefinition{}
+	}
+	return items
+}
+
+func ensureNonNilForeignKeys(items []connection.ForeignKeyDefinition) []connection.ForeignKeyDefinition {
+	if items == nil {
+		return []connection.ForeignKeyDefinition{}
+	}
+	return items
+}
+
+func ensureNonNilTriggers(items []connection.TriggerDefinition) []connection.TriggerDefinition {
+	if items == nil {
+		return []connection.TriggerDefinition{}
 	}
 	return items
 }

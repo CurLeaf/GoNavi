@@ -26,17 +26,22 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('新增 Skill');
   });
 
-  it('explains external MCP installation and renders selectable client install states', () => {
-    expect(source).toContain('把 GoNavi 注册成外部 AI 客户端可调用的 MCP Server');
-    expect(source).toContain('安装到外部客户端');
-    expect(source).toContain('未安装');
-    expect(source).toContain('需更新');
-    expect(source).toContain('已安装');
-    expect(source).toContain('刷新状态');
-    expect(source).toContain('复制配置路径');
-    expect(source).toContain('复制启动命令');
+  it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
+    expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
+    expect(source).toContain("import AIMCPClientInstallPanel from './ai/AIMCPClientInstallPanel';");
+    expect(source).toContain("import AIMCPServerCard from './ai/AIMCPServerCard';");
+    expect(source).toContain('<AIMCPClientInstallPanel');
+    expect(source).toContain('<AIMCPServerCard');
+    expect(source).toContain('<AIBuiltinToolsCatalog');
+  });
+
+  it('wires the external MCP client install panel actions back to the modal handlers', () => {
+    expect(source).toContain('statuses={mcpClientStatuses}');
+    expect(source).toContain('selectedClient={selectedMCPClient}');
+    expect(source).toContain('onRefreshStatus={() => void loadMCPClientStatuses()}');
+    expect(source).toContain('onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}');
+    expect(source).toContain('onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}');
     expect(source).toContain('handleInstallSelectedMCPClient');
-    expect(source).toContain('无需重复安装');
   });
 
   it('waits briefly for the AI service bridge before warning and removes noisy provider debug logs', () => {

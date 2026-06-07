@@ -496,6 +496,12 @@ const AIToolCallingBlock: React.FC<{ tool_calls: AIToolCall[]; loading: boolean;
         if (fname === 'get_connections') return '获取可用连接信息';
         if (fname === 'get_databases') return '扫描数据库列表';
         if (fname === 'get_tables') return '分析表结构信息';
+        if (fname === 'get_columns') return '核对真实字段定义';
+        if (fname === 'get_indexes') return '检查索引定义';
+        if (fname === 'get_foreign_keys') return '梳理外键关系';
+        if (fname === 'get_triggers') return '检查触发器逻辑';
+        if (fname === 'get_table_ddl') return '提取建表语句';
+        if (fname === 'execute_sql') return '执行只读 SQL 验证';
         return fname;
     };
 

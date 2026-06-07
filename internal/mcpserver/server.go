@@ -36,6 +36,21 @@ func NewServer(backend Backend) *mcp.Server {
 	}, service.GetColumns)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_indexes",
+		Description: "根据 connectionId、可选 dbName、tableName 获取索引定义。",
+	}, service.GetIndexes)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_foreign_keys",
+		Description: "根据 connectionId、可选 dbName、tableName 获取外键关系。",
+	}, service.GetForeignKeys)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_triggers",
+		Description: "根据 connectionId、可选 dbName、tableName 获取触发器定义。",
+	}, service.GetTriggers)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_table_ddl",
 		Description: "根据 connectionId、可选 dbName、tableName 获取建表或建视图语句。",
 	}, service.GetTableDDL)

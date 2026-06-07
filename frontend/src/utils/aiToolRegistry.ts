@@ -107,6 +107,81 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "get_indexes",
+    icon: "🧭",
+    desc: "获取指定表的索引定义",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回索引名、索引列、唯一性和索引类型。AI 在做慢 SQL 分析、索引优化和执行计划推断时应优先调用。",
+    params: "connectionId, dbName, tableName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_indexes",
+        description:
+          "获取指定表的索引定义，包括索引名、字段顺序、唯一性和索引类型。适用于慢 SQL 分析、索引优化建议和确认现有索引覆盖情况。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
+    name: "get_foreign_keys",
+    icon: "🧬",
+    desc: "获取指定表的外键关系",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回当前表到其他表的外键映射。AI 在推断表关系、生成联表 SQL 和评审数据一致性时可直接使用。",
+    params: "connectionId, dbName, tableName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_foreign_keys",
+        description:
+          "获取指定表的外键关系，包括本表字段、引用表、引用字段和约束名。适用于联表路径分析、ER 关系梳理和约束检查。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
+    name: "get_triggers",
+    icon: "⏱️",
+    desc: "获取指定表的触发器定义",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回触发器名、触发时机、事件类型和语句体。AI 在分析隐式写入、副作用和审计逻辑时可直接查看。",
+    params: "connectionId, dbName, tableName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_triggers",
+        description:
+          "获取指定表的触发器定义，包括触发时机、事件和触发语句。适用于排查隐式数据变更、审计逻辑和表级副作用。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
     name: "get_table_ddl",
     icon: "📝",
     desc: "获取表的建表语句 (DDL)",

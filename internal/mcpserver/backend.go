@@ -19,6 +19,9 @@ type Backend interface {
 	DBGetDatabases(config connection.ConnectionConfig) connection.QueryResult
 	DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult
 	DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
+	DBGetIndexes(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
+	DBGetForeignKeys(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
+	DBGetTriggers(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
 	DBShowCreateTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult
 	DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult
 	InspectSQL(dbType string, sql string) appcore.SQLInspection
@@ -68,6 +71,18 @@ func (b *AppBackend) DBGetTables(config connection.ConnectionConfig, dbName stri
 
 func (b *AppBackend) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	return b.app.DBGetColumns(config, dbName, tableName)
+}
+
+func (b *AppBackend) DBGetIndexes(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return b.app.DBGetIndexes(config, dbName, tableName)
+}
+
+func (b *AppBackend) DBGetForeignKeys(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return b.app.DBGetForeignKeys(config, dbName, tableName)
+}
+
+func (b *AppBackend) DBGetTriggers(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
+	return b.app.DBGetTriggers(config, dbName, tableName)
 }
 
 func (b *AppBackend) DBShowCreateTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
