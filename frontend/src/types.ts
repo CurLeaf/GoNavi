@@ -551,6 +551,59 @@ export interface AIProviderConfig {
   temperature: number;
 }
 
+export interface AIUserPromptSettings {
+  global: string;
+  database: string;
+  jvm: string;
+  jvmDiagnostic: string;
+}
+
+export type AIMCPTransport = "stdio";
+
+export interface AIMCPServerConfig {
+  id: string;
+  name: string;
+  transport: AIMCPTransport;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled: boolean;
+  timeoutSeconds: number;
+}
+
+export interface AIMCPToolDescriptor {
+  alias: string;
+  serverId: string;
+  serverName: string;
+  originalName: string;
+  title?: string;
+  description?: string;
+  inputSchema?: Record<string, any>;
+}
+
+export interface AIMCPToolCallResult {
+  alias: string;
+  serverId: string;
+  serverName: string;
+  originalName: string;
+  title?: string;
+  content: string;
+  structuredContent?: any;
+  isError: boolean;
+}
+
+export type AISkillScope = "global" | "database" | "jvm" | "jvmDiagnostic";
+
+export interface AISkillConfig {
+  id: string;
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  enabled: boolean;
+  scopes: AISkillScope[];
+  requiredTools?: string[];
+}
+
 export interface AIToolCall {
   id: string;
   type: string;

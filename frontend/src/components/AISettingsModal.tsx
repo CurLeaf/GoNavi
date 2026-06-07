@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
-import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
+import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AISkillConfig, AISkillScope } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
     QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
@@ -21,6 +21,7 @@ import {
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -78,17 +79,77 @@ const CONTEXT_OPTIONS: { label: string; value: AIContextLevel; desc: string; ico
     { label: '含查询结果', value: 'with_results', desc: '传递最近的查询结果作为上下文', icon: '📑' },
 ];
 
+const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
+    global: '',
+    database: '',
+    jvm: '',
+    jvmDiagnostic: '',
+};
+
+const EMPTY_MCP_SERVER = (): AIMCPServerConfig => ({
+    id: `mcp-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    transport: 'stdio',
+    command: '',
+    args: [],
+    env: {},
+    enabled: true,
+    timeoutSeconds: 20,
+});
+
+const EMPTY_SKILL = (): AISkillConfig => ({
+    id: `skill-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    description: '',
+    systemPrompt: '',
+    enabled: true,
+    scopes: ['global'],
+    requiredTools: [],
+});
+
+const SKILL_SCOPE_OPTIONS: Array<{ value: AISkillScope; label: string; desc: string }> = [
+    { value: 'global', label: '全局', desc: '所有 AI 会话都启用' },
+    { value: 'database', label: '数据库', desc: '仅 SQL / 数据库场景启用' },
+    { value: 'jvm', label: 'JVM 资源', desc: '仅 JVM 资源分析场景启用' },
+    { value: 'jvmDiagnostic', label: 'JVM 诊断', desc: '仅 JVM 诊断工作台启用' },
+];
+
+const parseMCPEnvText = (text: string): Record<string, string> => {
+    const result: Record<string, string> = {};
+    String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .forEach((line) => {
+            const index = line.indexOf('=');
+            if (index <= 0) return;
+            const key = line.slice(0, index).trim();
+            if (!key) return;
+            result[key] = line.slice(index + 1);
+        });
+    return result;
+};
+
+const stringifyMCPEnv = (env?: Record<string, string>): string =>
+    Object.entries(env || {})
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n');
+
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
     const [safetyLevel, setSafetyLevel] = useState<AISafetyLevel>('readonly');
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
+    const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
+    const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
+    const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(false);
     const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [builtinPrompts, setBuiltinPrompts] = useState<Record<string, string>>({});
-    const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'prompts' | 'tools'>('providers');
+    const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
+    const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'mcp' | 'skills' | 'prompts' | 'tools'>('providers');
     const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
@@ -107,16 +168,41 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const watchedType = Form.useWatch('type', form);
     const watchedPresetKey = Form.useWatch('presetKey', form);
     const watchedApiFormat = Form.useWatch('apiFormat', form) || 'openai';
+    const skillRequiredToolOptions = useMemo(() => ([
+        ...BUILTIN_AI_TOOL_INFO.map((tool) => ({
+            label: `${tool.name} · 内置工具`,
+            value: tool.name,
+        })),
+        ...mcpTools.map((tool) => ({
+            label: `${tool.alias} · ${tool.serverName}`,
+            value: tool.alias,
+        })),
+    ]), [mcpTools]);
 
     const loadConfig = useCallback(async () => {
         try {
             const Service = (window as any).go?.aiservice?.Service;
             if (!Service) { console.warn('[AI] Service not found on window.go'); return; }
-            const [provRes, safeRes, ctxRes, promptsRes] = await Promise.all([
-                Service.AIGetProviders?.() || [],
-                Service.AIGetSafetyLevel?.() || 'readonly',
-                Service.AIGetContextLevel?.() || 'schema_only',
-                Service.AIGetBuiltinPrompts?.() || {},
+            const callOrFallback = async <T,>(loader: (() => Promise<T>) | undefined, fallback: T): Promise<T> => {
+                if (typeof loader !== 'function') {
+                    return fallback;
+                }
+                try {
+                    return await loader();
+                } catch (error) {
+                    console.warn('[AI] settings load fallback', error);
+                    return fallback;
+                }
+            };
+            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, skillsRes] = await Promise.all([
+                callOrFallback(() => Service.AIGetProviders?.(), []),
+                callOrFallback<AISafetyLevel>(() => Service.AIGetSafetyLevel?.(), 'readonly'),
+                callOrFallback<AIContextLevel>(() => Service.AIGetContextLevel?.(), 'schema_only'),
+                callOrFallback(() => Service.AIGetBuiltinPrompts?.(), {}),
+                callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS),
+                callOrFallback(() => Service.AIGetMCPServers?.(), []),
+                callOrFallback(() => Service.AIListMCPTools?.(), []),
+                callOrFallback(() => Service.AIGetSkills?.(), []),
             ]);
             console.log('[AI] AIGetProviders result:', JSON.stringify(provRes), 'isArray:', Array.isArray(provRes));
             if (Array.isArray(provRes)) {
@@ -128,6 +214,15 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (safeRes) setSafetyLevel(safeRes);
             if (ctxRes) setContextLevel(ctxRes);
             if (promptsRes) setBuiltinPrompts(promptsRes);
+            if (userPromptsRes) {
+                setUserPromptSettings({
+                    ...EMPTY_AI_USER_PROMPT_SETTINGS,
+                    ...userPromptsRes,
+                });
+            }
+            if (Array.isArray(mcpServersRes)) setMCPServers(mcpServersRes);
+            if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
+            if (Array.isArray(skillsRes)) setSkills(skillsRes);
         } catch (e) { console.warn('Failed to load AI config', e); }
     }, []);
 
@@ -308,6 +403,134 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             await Service?.AISetContextLevel?.(level);
             setContextLevel(level);
         } catch (e) { /* ignore */ }
+    };
+
+    const handleSaveUserPromptSettings = async () => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            const payload = {
+                global: String(userPromptSettings.global || ''),
+                database: String(userPromptSettings.database || ''),
+                jvm: String(userPromptSettings.jvm || ''),
+                jvmDiagnostic: String(userPromptSettings.jvmDiagnostic || ''),
+            };
+            await Service?.AISaveUserPromptSettings?.(payload);
+            setUserPromptSettings(payload);
+            void messageApi.success('自定义提示词已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存自定义提示词失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const updateMCPServerDraft = (id: string, patch: Partial<AIMCPServerConfig>) => {
+        setMCPServers((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const handleAddMCPServer = () => {
+        setMCPServers((prev) => [...prev, EMPTY_MCP_SERVER()]);
+    };
+
+    const handleSaveMCPServer = async (server: AIMCPServerConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            await Service?.AISaveMCPServer?.(server);
+            await loadConfig();
+            void messageApi.success('MCP 服务已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteMCPServer = async (id: string) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            if (typeof Service?.AIDeleteMCPServer === 'function' && !String(id).startsWith('mcp-draft-')) {
+                await Service.AIDeleteMCPServer(id);
+                await loadConfig();
+                window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+            } else {
+                setMCPServers((prev) => prev.filter((item) => item.id !== id));
+            }
+            void messageApi.success('MCP 服务已删除');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '删除 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleTestMCPServer = async (server: AIMCPServerConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            const res = await Service?.AITestMCPServer?.(server);
+            if (res?.success) {
+                void messageApi.success(res?.message || 'MCP 服务连接成功');
+                if (typeof Service?.AIListMCPTools === 'function') {
+                    const nextTools = await Service.AIListMCPTools();
+                    if (Array.isArray(nextTools)) setMCPTools(nextTools);
+                } else if (Array.isArray(res?.tools)) {
+                    setMCPTools(res.tools);
+                }
+            } else {
+                void messageApi.error(res?.message || 'MCP 服务测试失败');
+            }
+        } catch (e: any) {
+            void messageApi.error(e?.message || '测试 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
+        setSkills((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const handleAddSkill = () => {
+        setSkills((prev) => [...prev, EMPTY_SKILL()]);
+    };
+
+    const handleSaveSkill = async (skill: AISkillConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            await Service?.AISaveSkill?.(skill);
+            await loadConfig();
+            void messageApi.success('Skill 已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存 Skill 失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteSkill = async (id: string) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            if (typeof Service?.AIDeleteSkill === 'function' && !String(id).startsWith('skill-draft-')) {
+                await Service.AIDeleteSkill(id);
+                await loadConfig();
+                window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+            } else {
+                setSkills((prev) => prev.filter((item) => item.id !== id));
+            }
+            void messageApi.success('Skill 已删除');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '删除 Skill 失败');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleTestProvider = async () => {
@@ -660,10 +883,83 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         </div>
     );
 
-    const renderBuiltinPrompts = () => (
+    const renderPromptSettings = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{
+                padding: '14px 16px',
+                borderRadius: 14,
+                border: `1px solid ${cardBorder}`,
+                background: cardBg,
+            }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, marginBottom: 6 }}>
+                    用户级自定义提示词
+                </div>
+                <div style={{ fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.6, marginBottom: 14 }}>
+                    这里的内容会在系统内置提示词之后，以 system message 的形式追加注入。
+                    适合放你的个人风格偏好、输出约束、团队规范。涉及安全红线时，系统规则仍然优先。
+                </div>
+
+                {[
+                    {
+                        key: 'global',
+                        title: '全局补充提示词',
+                        desc: '对所有 AI 会话生效，例如“先给结论”“回答保持简洁”。',
+                        rows: 4,
+                    },
+                    {
+                        key: 'database',
+                        title: '数据库会话补充提示词',
+                        desc: '仅数据库/SQL 场景生效，例如“生成 SQL 前必须先确认字段名”。',
+                        rows: 5,
+                    },
+                    {
+                        key: 'jvm',
+                        title: 'JVM 资源分析补充提示词',
+                        desc: '仅 JVM 资源浏览/分析场景生效。',
+                        rows: 4,
+                    },
+                    {
+                        key: 'jvmDiagnostic',
+                        title: 'JVM 诊断补充提示词',
+                        desc: '仅 JVM 诊断工作台生效，例如“先给计划，再给命令”。',
+                        rows: 4,
+                    },
+                ].map((item) => (
+                    <div key={item.key} style={{ marginTop: 14 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: overlayTheme.titleText, marginBottom: 4 }}>
+                            {item.title}
+                        </div>
+                        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, marginBottom: 8 }}>
+                            {item.desc}
+                        </div>
+                        <Input.TextArea
+                            rows={item.rows}
+                            value={userPromptSettings[item.key as keyof AIUserPromptSettings]}
+                            onChange={(event) => setUserPromptSettings((prev) => ({
+                                ...prev,
+                                [item.key]: event.target.value,
+                            }))}
+                            placeholder="留空表示不额外追加"
+                            style={{
+                                borderRadius: 10,
+                                background: inputBg,
+                                border: `1px solid ${cardBorder}`,
+                                fontFamily: 'var(--gn-font-mono)',
+                                resize: 'vertical',
+                            }}
+                        />
+                    </div>
+                ))}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+                    <Button type="primary" onClick={handleSaveUserPromptSettings} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>
+                        保存自定义提示词
+                    </Button>
+                </div>
+            </div>
+
             <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                以下为当前版本 GoNavi 预设的底层 AI 提示词（只读）。它们会被动态注入到对应场景的请求上下文中。
+                以下为当前版本 GoNavi 预设的底层 AI 提示词（只读）。它们会先于上面的用户级提示词注入到对应场景的请求上下文中。
             </div>
             {Object.entries(builtinPrompts).map(([title, promptText]) => (
                 <div key={title} style={{
@@ -685,14 +981,166 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         </div>
     );
 
-    const BUILTIN_TOOLS_INFO = [
-        { name: 'get_connections', icon: '🔗', desc: '获取所有可用的数据库连接', detail: '返回连接 ID、名称、类型 (MySQL/PostgreSQL 等) 和 Host 地址。AI 根据返回信息决定优先探索哪个连接。', params: '无参数' },
-        { name: 'get_databases', icon: '🗄️', desc: '获取指定连接下的所有数据库', detail: '传入 connectionId，返回该连接下的数据库/Schema 名称列表。', params: 'connectionId: 连接 ID' },
-        { name: 'get_tables', icon: '📋', desc: '获取指定数据库下的所有表名', detail: '传入 connectionId 和 dbName，返回表名列表。AI 用它来定位用户提到的目标表。', params: 'connectionId, dbName' },
-        { name: 'get_columns', icon: '🔍', desc: '获取指定表的字段结构', detail: '传入 connectionId、dbName 和 tableName，返回每个字段的名称、类型、是否可空、默认值和注释。AI 在生成 SQL 前必须调用此工具确认真实字段名。', params: 'connectionId, dbName, tableName' },
-        { name: 'get_table_ddl', icon: '📝', desc: '获取表的建表语句 (DDL)', detail: '传入 connectionId、dbName 和 tableName，返回完整的 CREATE TABLE 语句，包含字段定义、索引、约束等信息。', params: 'connectionId, dbName, tableName' },
-        { name: 'execute_sql', icon: '▶️', desc: '执行 SQL 查询并返回结果', detail: '传入 connectionId、dbName 和 sql，在目标数据库上执行 SQL 并返回结果（最多 50 行）。受安全级别控制，只读模式下仅允许 SELECT/SHOW/DESCRIBE。', params: 'connectionId, dbName, sql' },
-    ];
+    const renderMCPSettings = () => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
+                MCP 会作为外部工具源接入 AI。当前阶段先支持 `stdio` 型服务，不需要为 GoNavi 的 MCP client 单独新建仓库；只有你准备发布独立的 MCP Server 时，才值得拆独立仓库。
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时，保存后会自动进入 AI 工具列表。</div>
+                <Button icon={<PlusOutlined />} onClick={handleAddMCPServer} style={{ borderRadius: 10 }}>新增 MCP 服务</Button>
+            </div>
+            {mcpServers.length === 0 && (
+                <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
+                    还没有 MCP 服务。常见形式是 `node server.js`、`uvx some-mcp-server`、`python -m server`。
+                </div>
+            )}
+            {mcpServers.map((server) => {
+                const serverTools = mcpTools.filter((tool) => tool.serverId === server.id);
+                return (
+                    <div key={server.id} style={{ padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
+                            <Input
+                                value={server.name}
+                                onChange={(event) => updateMCPServerDraft(server.id, { name: event.target.value })}
+                                placeholder="服务名称，例如：Filesystem / Browser / GitHub"
+                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
+                            />
+                            <Select
+                                value={server.enabled ? 'enabled' : 'disabled'}
+                                onChange={(value) => updateMCPServerDraft(server.id, { enabled: value === 'enabled' })}
+                                options={[{ label: '已启用', value: 'enabled' }, { label: '已禁用', value: 'disabled' }]}
+                            />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '132px minmax(0,1fr) 132px', gap: 12 }}>
+                            <Select
+                                value={server.transport}
+                                onChange={(value) => updateMCPServerDraft(server.id, { transport: value as AIMCPServerConfig['transport'] })}
+                                options={[{ label: 'stdio', value: 'stdio' }]}
+                            />
+                            <Input
+                                value={server.command}
+                                onChange={(event) => updateMCPServerDraft(server.id, { command: event.target.value })}
+                                placeholder="启动命令，例如：node / uvx / python"
+                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
+                            />
+                            <Input
+                                type="number"
+                                min={3}
+                                max={120}
+                                value={server.timeoutSeconds}
+                                onChange={(event) => updateMCPServerDraft(server.id, { timeoutSeconds: Number(event.target.value) || 20 })}
+                                placeholder="超时(秒)"
+                                style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
+                            />
+                        </div>
+                        <Select
+                            mode="tags"
+                            value={server.args || []}
+                            onChange={(value) => updateMCPServerDraft(server.id, { args: value })}
+                            placeholder="命令参数，回车录入，例如：server.js、--stdio"
+                            style={{ width: '100%' }}
+                        />
+                        <Input.TextArea
+                            rows={3}
+                            value={stringifyMCPEnv(server.env)}
+                            onChange={(event) => updateMCPServerDraft(server.id, { env: parseMCPEnvText(event.target.value) })}
+                            placeholder={"环境变量，每行一个 KEY=VALUE，例如：\nOPENAI_API_KEY=...\nGITHUB_TOKEN=..."}
+                            style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
+                        />
+                        {serverTools.length > 0 && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>已发现工具</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                    {serverTools.map((tool) => (
+                                        <span key={tool.alias} style={{ padding: '4px 8px', borderRadius: 999, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', fontSize: 12, color: overlayTheme.mutedText }}>
+                                            {tool.alias}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <Button onClick={() => handleTestMCPServer(server)} loading={loading} style={{ borderRadius: 10 }}>测试工具发现</Button>
+                            <Button type="primary" onClick={() => handleSaveMCPServer(server)} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
+                            <Popconfirm title="删除这个 MCP 服务？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteMCPServer(server.id)}>
+                                <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
+                            </Popconfirm>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+
+    const renderSkillSettings = () => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
+                Skill 不是另一条大提示词，而是“命名的提示模块 + 作用域 + 工具依赖”。当前阶段仍建议保留在主仓库内，不需要单独新建 GitHub 仓库；只有未来要做共享 skill pack 分发时，再考虑拆仓。
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>启用后会按 scope 注入对应会话；如果依赖的工具不存在，该 Skill 会被自动跳过。</div>
+                <Button icon={<PlusOutlined />} onClick={handleAddSkill} style={{ borderRadius: 10 }}>新增 Skill</Button>
+            </div>
+            {skills.length === 0 && (
+                <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
+                    还没有 Skill。你可以给数据库、JVM、诊断场景分别定义专用的 system prompt。
+                </div>
+            )}
+            {skills.map((skill) => (
+                <div key={skill.id} style={{ padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
+                        <Input
+                            value={skill.name}
+                            onChange={(event) => updateSkillDraft(skill.id, { name: event.target.value })}
+                            placeholder="Skill 名称，例如：SQL 审查 / JVM 诊断计划"
+                            style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
+                        />
+                        <Select
+                            value={skill.enabled ? 'enabled' : 'disabled'}
+                            onChange={(value) => updateSkillDraft(skill.id, { enabled: value === 'enabled' })}
+                            options={[{ label: '已启用', value: 'enabled' }, { label: '已禁用', value: 'disabled' }]}
+                        />
+                    </div>
+                    <Input
+                        value={skill.description || ''}
+                        onChange={(event) => updateSkillDraft(skill.id, { description: event.target.value })}
+                        placeholder="给自己看的说明，例如：输出 SQL 前必须先确认字段名和风险"
+                        style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
+                    />
+                    <Select
+                        mode="multiple"
+                        value={skill.scopes || []}
+                        onChange={(value) => updateSkillDraft(skill.id, { scopes: value as AISkillScope[] })}
+                        options={SKILL_SCOPE_OPTIONS.map((option) => ({ label: `${option.label} · ${option.desc}`, value: option.value }))}
+                        placeholder="选择这个 Skill 要作用到哪些场景"
+                        style={{ width: '100%' }}
+                    />
+                    <Select
+                        mode="multiple"
+                        value={skill.requiredTools || []}
+                        onChange={(value) => updateSkillDraft(skill.id, { requiredTools: value })}
+                        options={skillRequiredToolOptions}
+                        placeholder="可选：声明这个 Skill 依赖哪些工具"
+                        style={{ width: '100%' }}
+                    />
+                    <Input.TextArea
+                        rows={6}
+                        value={skill.systemPrompt}
+                        onChange={(event) => updateSkillDraft(skill.id, { systemPrompt: event.target.value })}
+                        placeholder="输入这条 Skill 要追加的 system prompt。建议聚焦一个明确能力，不要和全局提示词重复。"
+                        style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)', resize: 'vertical' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <Button type="primary" onClick={() => handleSaveSkill(skill)} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
+                        <Popconfirm title="删除这个 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteSkill(skill.id)}>
+                            <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
+                        </Popconfirm>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
 
     const renderBuiltinTools = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -702,7 +1150,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             <div style={{ fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, padding: '8px 12px', borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}` }}>
                 💡 工作流程：get_connections → get_databases → get_tables → get_columns → 生成 SQL
             </div>
-            {BUILTIN_TOOLS_INFO.map(tool => (
+            {BUILTIN_AI_TOOL_INFO.map(tool => (
                 <div key={tool.name} style={{
                     padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg,
                     transition: 'all 0.2s ease',
@@ -776,6 +1224,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               { key: 'providers', title: '模型供应商', description: '配置大模型接口与秘钥', icon: <ApiOutlined /> },
                               { key: 'safety', title: '安全控制', description: '限制 AI 操作风险级别', icon: <SafetyCertificateOutlined /> },
                               { key: 'context', title: '上下文', description: '配置携带的数据架构信息', icon: <RobotOutlined /> },
+                              { key: 'mcp', title: 'MCP 服务', description: '接入外部工具源', icon: <AppstoreOutlined /> },
+                              { key: 'skills', title: 'Skills', description: '配置可复用提示模块', icon: <ExperimentOutlined /> },
                               { key: 'tools', title: '内置工具', description: '查看 AI 可调用的数据探针', icon: <ToolOutlined /> },
                               { key: 'prompts', title: '内置提示词', description: '查看系统预设的底层要求', icon: <ExperimentOutlined /> },
                           ].map((item) => {
@@ -815,8 +1265,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                       {activeSection === 'providers' && (isEditing ? renderProviderForm() : renderProviderList())}
                       {activeSection === 'safety' && renderSafetySettings()}
                       {activeSection === 'context' && renderContextSettings()}
+                      {activeSection === 'mcp' && renderMCPSettings()}
+                      {activeSection === 'skills' && renderSkillSettings()}
                       {activeSection === 'tools' && renderBuiltinTools()}
-                      {activeSection === 'prompts' && renderBuiltinPrompts()}
+                      {activeSection === 'prompts' && renderPromptSettings()}
                   </div>
               </div>
         </Modal>

@@ -10,6 +10,21 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('await Service.AIGetEditableProvider(p.id)');
   });
 
+  it('loads and saves user-level custom prompts through the AI service', () => {
+    expect(source).toContain("callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS)");
+    expect(source).toContain('await Service?.AISaveUserPromptSettings?.(payload);');
+    expect(source).toContain("window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'))");
+    expect(source).toContain('保存自定义提示词');
+  });
+
+  it('loads MCP servers and skills through the AI service', () => {
+    expect(source).toContain('Service.AIGetMCPServers?.()');
+    expect(source).toContain('Service.AIListMCPTools?.()');
+    expect(source).toContain('Service.AIGetSkills?.()');
+    expect(source).toContain('新增 MCP 服务');
+    expect(source).toContain('新增 Skill');
+  });
+
   it('keeps the prefilled api key masked by default', () => {
     expect(source).toContain('const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);');
     expect(source).toContain('visible: primaryPasswordVisible,');

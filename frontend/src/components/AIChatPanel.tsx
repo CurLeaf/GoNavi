@@ -6,6 +6,9 @@ import { DBGetDatabases, DBGetTables } from '../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
+    AIMCPToolDescriptor,
+    AISkillConfig,
+    AIUserPromptSettings,
     AIToolCall,
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
@@ -31,6 +34,7 @@ import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut'
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
 import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts';
 import { isMacLikePlatform } from '../utils/appearance';
+import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
 
 interface AIChatPanelProps {
     width?: number;
@@ -233,93 +237,12 @@ const sanitizeErrorMsg = (raw: string): string => {
     return raw;
 };
 
-const LOCAL_TOOLS = [
-    {
-        type: 'function',
-        function: {
-            name: 'get_connections',
-            description: '当需要查询、操作数据库但用户没有选择任何连接上下文时，获取当前软件中可用的所有数据库连接信息。返回的数据包含连接ID(id)和名称(name)。',
-            parameters: { type: 'object', properties: {} }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'get_databases',
-            description: '获取指定连接（connectionId）下的所有数据库(Database/Schema)名。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    connectionId: { type: 'string', description: '连接ID (从 get_connections 获取)' }
-                },
-                required: ['connectionId']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'get_tables',
-            description: '当已经确定了目标连接和数据库名后，如果用户询问或隐式提到了表但你不知道确切表名，调用此工具获取该数据库下的所有表名列表（只含表名，帮助你推断目标表）。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    connectionId: { type: 'string', description: '连接ID' },
-                    dbName: { type: 'string', description: '数据库名' },
-                },
-                required: ['connectionId', 'dbName']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'get_columns',
-            description: '获取指定表的字段列表（字段名、类型、是否可空、默认值、注释等）。在生成 SQL 之前必须先调用此工具确认真实字段名，禁止猜测字段名。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    connectionId: { type: 'string', description: '连接ID' },
-                    dbName: { type: 'string', description: '数据库名' },
-                    tableName: { type: 'string', description: '表名' },
-                },
-                required: ['connectionId', 'dbName', 'tableName']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'get_table_ddl',
-            description: '获取指定表的完整建表语句（CREATE TABLE DDL），包含字段、索引、约束等完整结构信息。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    connectionId: { type: 'string', description: '连接ID' },
-                    dbName: { type: 'string', description: '数据库名' },
-                    tableName: { type: 'string', description: '表名' },
-                },
-                required: ['connectionId', 'dbName', 'tableName']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'execute_sql',
-            description: '在指定连接和数据库上执行 SQL 查询并返回结果。受安全级别控制，只读模式下只能执行 SELECT/SHOW/DESCRIBE 等查询操作。结果最多返回 50 行。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    connectionId: { type: 'string', description: '连接ID' },
-                    dbName: { type: 'string', description: '数据库名' },
-                    sql: { type: 'string', description: '要执行的 SQL 语句' },
-                },
-                required: ['connectionId', 'dbName', 'sql']
-            }
-        }
-    }
-];
+const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
+    global: '',
+    database: '',
+    jvm: '',
+    jvmDiagnostic: '',
+};
 
 export const AIChatPanel: React.FC<AIChatPanelProps> = ({ 
     width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme 
@@ -328,6 +251,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const [draftImages, setDraftImages] = useState<string[]>([]);
     const [sending, setSending] = useState(false);
     const [activeProvider, setActiveProvider] = useState<any>(null);
+    const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
+    const [mcpTools, setMcpTools] = useState<AIMCPToolDescriptor[]>([]);
+    const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [dynamicModels, setDynamicModels] = useState<string[]>([]);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
     const [loadingModels, setLoadingModels] = useState(false);
@@ -375,6 +301,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
     const isV2Ui = appearance.uiVersion === 'v2';
     const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+    const availableTools = useMemo(
+        () => buildAvailableAIChatTools(mcpTools),
+        [mcpTools],
+    );
     const aiChatSendShortcutBinding = useStore(state => resolveShortcutBinding(
         state.shortcutOptions,
         'sendAIChatMessage',
@@ -518,6 +448,69 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }, []);
 
     useEffect(() => { loadActiveProvider(); }, [loadActiveProvider]);
+
+    const loadUserPromptSettings = useCallback(async () => {
+        try {
+            const Service = (window as any).go?.aiservice?.Service;
+            if (!Service?.AIGetUserPromptSettings) {
+                setUserPromptSettings(EMPTY_AI_USER_PROMPT_SETTINGS);
+                return;
+            }
+            const nextSettings = await Service.AIGetUserPromptSettings();
+            setUserPromptSettings({
+                ...EMPTY_AI_USER_PROMPT_SETTINGS,
+                ...nextSettings,
+            });
+        } catch (e) {
+            console.warn('Failed to load user prompt settings', e);
+        }
+    }, []);
+
+    const loadMCPTools = useCallback(async () => {
+        try {
+            const Service = (window as any).go?.aiservice?.Service;
+            if (!Service?.AIListMCPTools) {
+                setMcpTools([]);
+                return;
+            }
+            const nextTools = await Service.AIListMCPTools();
+            setMcpTools(Array.isArray(nextTools) ? nextTools : []);
+        } catch (e) {
+            console.warn('Failed to load MCP tools', e);
+            setMcpTools([]);
+        }
+    }, []);
+
+    const loadSkills = useCallback(async () => {
+        try {
+            const Service = (window as any).go?.aiservice?.Service;
+            if (!Service?.AIGetSkills) {
+                setSkills([]);
+                return;
+            }
+            const nextSkills = await Service.AIGetSkills();
+            setSkills(Array.isArray(nextSkills) ? nextSkills : []);
+        } catch (e) {
+            console.warn('Failed to load skills', e);
+            setSkills([]);
+        }
+    }, []);
+
+    useEffect(() => {
+        void loadUserPromptSettings();
+        void loadMCPTools();
+        void loadSkills();
+        const handleAIConfigChanged = () => {
+            void loadUserPromptSettings();
+            void loadMCPTools();
+            void loadSkills();
+            void loadActiveProvider();
+        };
+        window.addEventListener('gonavi:ai:config-changed', handleAIConfigChanged as EventListener);
+        return () => {
+            window.removeEventListener('gonavi:ai:config-changed', handleAIConfigChanged as EventListener);
+        };
+    }, [loadActiveProvider, loadMCPTools, loadSkills, loadUserPromptSettings]);
 
     // 监听供应商配置变更（来自设置面板的删除/新增/切换操作），重新加载 active provider 并清空已缓存的模型
     useEffect(() => {
@@ -817,7 +810,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                                     messagesPayload.push({ role: 'user', content: '请直接使用 function call 调用工具执行操作，不要只用文字描述计划。' });
                                     const allMsg = [...sysMessages, ...messagesPayload];
                                     const Service = (window as any).go?.aiservice?.Service;
-                                    if (Service?.AIChatStream) await Service.AIChatStream(sid, allMsg, LOCAL_TOOLS);
+                                    if (Service?.AIChatStream) await Service.AIChatStream(sid, allMsg, availableTools);
                                 } catch (e) {
                                     console.error('Nudge failed', e);
                                     setSending(false);
@@ -942,9 +935,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 
                 const Service = (window as any).go?.aiservice?.Service;
                 if (Service?.AIChatStream) {
-                    await Service.AIChatStream(sid, allMessages, LOCAL_TOOLS);
+                    await Service.AIChatStream(sid, allMessages, availableTools);
                 } else if (Service?.AIChatSend) {
-                     const result = await Service.AIChatSend(allMessages, LOCAL_TOOLS);
+                     const result = await Service.AIChatSend(allMessages, availableTools);
                      const errRaw = result?.error || '未知错误';
                      const errClean = sanitizeErrorMsg(errRaw);
                      addAIChatMessage(sid, {
@@ -994,6 +987,57 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const connectionKey = ctx?.connectionId ? `${ctx.connectionId}:${ctx.dbName || ''}` : 'default';
         const activeContextItems = ctxMap[connectionKey] || [];
         const systemMessages: { role: string; content: string; images?: string[] }[] = [];
+        const appendCustomPrompt = (label: string, content: string) => {
+            const trimmed = String(content || '').trim();
+            if (!trimmed) {
+                return;
+            }
+            systemMessages.push({
+                role: 'system',
+                content: `以下是当前用户的自定义补充提示词（${label}）。在不违反安全规则和事实约束的前提下，请优先遵循：\n${trimmed}`,
+            });
+        };
+        const appendCustomPromptGroup = (prompts: string[]) => {
+            appendCustomPrompt('全局', userPromptSettings.global);
+            prompts.forEach((prompt) => {
+                if (prompt === 'database') {
+                    appendCustomPrompt('数据库会话', userPromptSettings.database);
+                } else if (prompt === 'jvm') {
+                    appendCustomPrompt('JVM 资源分析', userPromptSettings.jvm);
+                } else if (prompt === 'jvmDiagnostic') {
+                    appendCustomPrompt('JVM 诊断', userPromptSettings.jvmDiagnostic);
+                }
+            });
+        };
+        const availableToolNameSet = new Set(availableTools.map((tool) => tool.function.name));
+        const appendSkillPromptGroup = (scopes: string[]) => {
+            const wantedScopes = new Set<string>(['global', ...scopes]);
+            skills.forEach((skill) => {
+                if (!skill?.enabled) {
+                    return;
+                }
+                if (!Array.isArray(skill.scopes) || !skill.scopes.some((scope) => wantedScopes.has(scope))) {
+                    return;
+                }
+                if (Array.isArray(skill.requiredTools) && skill.requiredTools.length > 0) {
+                    const hasAllRequiredTools = skill.requiredTools.every((toolName) => availableToolNameSet.has(toolName));
+                    if (!hasAllRequiredTools) {
+                        return;
+                    }
+                }
+                const promptText = String(skill.systemPrompt || '').trim();
+                if (!promptText) {
+                    return;
+                }
+                const requiredToolText = Array.isArray(skill.requiredTools) && skill.requiredTools.length > 0
+                    ? `\n依赖工具：${skill.requiredTools.join(', ')}`
+                    : '';
+                systemMessages.push({
+                    role: 'system',
+                    content: `以下是当前启用的 Skill「${skill.name}」${skill.description ? `（${skill.description}）` : ''}。请在本次回答中遵循它的约束和工作方式：${requiredToolText}\n${promptText}`,
+                });
+            });
+        };
         const matchesDiagnosticContext = (tab: typeof allTabs[number]) => {
             if (!overrideJVMDiagnosticPlanContext || tab.type !== 'jvm-diagnostic') {
                 return false;
@@ -1055,6 +1099,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 6. expectedSignals 必须是字符串数组，描述执行后需要重点观察的信号。
 7. 如果命令权限不允许某类操作，就不要输出该类命令；无法满足时直接说明限制。`,
             });
+            appendCustomPromptGroup(['jvmDiagnostic']);
+            appendSkillPromptGroup(['jvmDiagnostic']);
             return systemMessages;
         }
 
@@ -1086,6 +1132,8 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 5. payload 只能使用 {"format":"json","value":{...}} 或 {"format":"text","value":"..."} 这两种包装形式，不要输出脚本、命令或裸值。
 6. 不要输出脚本、命令或“已经执行成功”之类的表述。`
             });
+            appendCustomPromptGroup(['jvm']);
+            appendSkillPromptGroup(['jvm']);
             return systemMessages;
         }
         
@@ -1149,8 +1197,10 @@ SELECT * FROM users WHERE status = 1;
 当前存在的连接：[${connList || '无连接'}]`
             });
         }
+        appendCustomPromptGroup(['database']);
+        appendSkillPromptGroup(['database']);
         return systemMessages;
-    }, []); // 零依赖：函数内部通过 useStore.getState() 实时读取
+    }, [availableTools, skills, userPromptSettings]);
 
     // 记录所有成功的 get_tables 调用结果，用于表级精确匹配
     const toolContextMapRef = useRef<Map<string, { connectionId: string; dbName: string; tables: string[] }>>(new Map());
@@ -1180,12 +1230,14 @@ SELECT * FROM users WHERE status = 1;
         }
 
         const results: AIChatMessage[] = [];
+        const mcpToolMap = new Map(mcpTools.map((tool) => [tool.alias, tool]));
         // 【串行逐条执行 + 实时写入 store】
         for (const tc of toolCalls) {
             let resStr = '';
             let success = false;
             try {
                 const args = JSON.parse(tc.function.arguments || '{}');
+                const mcpToolDescriptor = mcpToolMap.get(tc.function.name);
                 switch (tc.function.name) {
                     case 'get_connections':
                         const conns = useStore.getState().connections.map(c => ({
@@ -1324,19 +1376,31 @@ SELECT * FROM users WHERE status = 1;
                         break;
                     }
                     default:
-                        resStr = `Unknown function: ${tc.function.name}`;
+                        if (mcpToolDescriptor) {
+                            try {
+                                const Service = (window as any).go?.aiservice?.Service;
+                                const toolResult = await Service?.AICallMCPTool?.(tc.function.name, tc.function.arguments || '{}');
+                                resStr = String(toolResult?.content || (toolResult?.isError ? 'MCP 工具调用失败' : ''));
+                                success = !!toolResult && !toolResult.isError;
+                            } catch (e: any) {
+                                resStr = `MCP 工具调用失败: ${e?.message || e}`;
+                            }
+                        } else {
+                            resStr = `Unknown function: ${tc.function.name}`;
+                        }
                 }
             } catch (e: any) {
                 resStr = e.message;
             }
 
+            const resolvedToolDescriptor = mcpToolMap.get(tc.function.name);
             const toolResultMsg: AIChatMessage = {
                 id: genId(),
                 role: 'tool',
                 content: resStr,
                 timestamp: Date.now(),
                 tool_call_id: tc.id,
-                tool_name: tc.function.name,
+                tool_name: resolvedToolDescriptor?.title || resolvedToolDescriptor?.originalName || tc.function.name,
                 success
             };
             results.push(toolResultMsg);
@@ -1425,7 +1489,7 @@ SELECT * FROM users WHERE status = 1;
 
             // 【软收敛】超过 10 轮工具调用后，不再传递 tools 参数，从物理层面强制模型只能用文本回答
             const SOFT_LIMIT_ROUNDS = 10;
-            const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : LOCAL_TOOLS;
+            const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : availableTools;
 
             const Service = (window as any).go?.aiservice?.Service;
             if (Service?.AIChatStream) {
@@ -1450,7 +1514,7 @@ SELECT * FROM users WHERE status = 1;
             console.error('Failed to chain tool call', e);
             setSending(false);
         }
-    }, [sid, buildSystemContextMessages]);
+    }, [availableTools, buildSystemContextMessages, mcpTools, sid]);
 
     const handleSend = useCallback(async () => {
         const text = input.trim();
@@ -1534,9 +1598,9 @@ SELECT * FROM users WHERE status = 1;
         try {
             const Service = (window as any).go?.aiservice?.Service;
             if (Service?.AIChatStream) {
-                await Service.AIChatStream(sid, allMessages, LOCAL_TOOLS);
+                await Service.AIChatStream(sid, allMessages, availableTools);
             } else if (Service?.AIChatSend) {
-                const result = await Service.AIChatSend(allMessages, LOCAL_TOOLS);
+                const result = await Service.AIChatSend(allMessages, availableTools);
                 const errR2 = result?.error || '未知错误';
                 const errC2 = sanitizeErrorMsg(errR2);
                 const assistantMsg: AIChatMessage = {
@@ -1589,6 +1653,7 @@ SELECT * FROM users WHERE status = 1;
         addAIChatMessage,
         sid,
         activeProvider,
+        availableTools,
         buildSystemContextMessages,
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,

@@ -28,6 +28,14 @@ if (typeof window !== 'undefined' && !(window as any).go) {
     const mockProviders: any[] = [];
     const mockProviderSecrets = new Map<string, string>();
     let mockActiveProviderId = '';
+    let mockAIUserPromptSettings: any = {
+        global: '',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+    };
+    let mockMCPServers: any[] = [];
+    let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
     let mockDataRootInfo: any = {
         path: 'C:/mock/.gonavi',
@@ -286,6 +294,71 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 AIGetSafetyLevel: async () => 'readonly',
                 AIGetContextLevel: async () => 'schema_only',
                 AIGetBuiltinPrompts: async () => ({}),
+                AIGetUserPromptSettings: async () => cloneBrowserMockValue(mockAIUserPromptSettings),
+                AISaveUserPromptSettings: async (input: any) => {
+                    mockAIUserPromptSettings = {
+                        global: String(input?.global || ''),
+                        database: String(input?.database || ''),
+                        jvm: String(input?.jvm || ''),
+                        jvmDiagnostic: String(input?.jvmDiagnostic || ''),
+                    };
+                    return null;
+                },
+                AIGetMCPServers: async () => cloneBrowserMockValue(mockMCPServers),
+                AISaveMCPServer: async (input: any) => {
+                    const next = {
+                        id: String(input?.id || `mcp-${Date.now()}`),
+                        name: String(input?.name || ''),
+                        transport: 'stdio',
+                        command: String(input?.command || ''),
+                        args: Array.isArray(input?.args) ? [...input.args] : [],
+                        env: { ...(input?.env || {}) },
+                        enabled: input?.enabled !== false,
+                        timeoutSeconds: Number(input?.timeoutSeconds) || 20,
+                    };
+                    const index = mockMCPServers.findIndex((item) => item.id === next.id);
+                    if (index >= 0) mockMCPServers[index] = next;
+                    else mockMCPServers.push(next);
+                    return null;
+                },
+                AIDeleteMCPServer: async (id: string) => {
+                    mockMCPServers = mockMCPServers.filter((item) => item.id !== id);
+                    return null;
+                },
+                AITestMCPServer: async (input: any) => ({
+                    success: String(input?.command || '').trim() !== '',
+                    message: String(input?.command || '').trim() !== '' ? 'MCP mock 测试成功' : 'MCP 命令不能为空',
+                    tools: [],
+                }),
+                AIListMCPTools: async () => [],
+                AICallMCPTool: async (_alias: string, _argumentsJSON: string) => ({
+                    alias: _alias,
+                    serverId: '',
+                    serverName: '',
+                    originalName: _alias,
+                    content: '浏览器 mock 未接入真实 MCP 服务',
+                    isError: true,
+                }),
+                AIGetSkills: async () => cloneBrowserMockValue(mockSkills),
+                AISaveSkill: async (input: any) => {
+                    const next = {
+                        id: String(input?.id || `skill-${Date.now()}`),
+                        name: String(input?.name || ''),
+                        description: String(input?.description || ''),
+                        systemPrompt: String(input?.systemPrompt || ''),
+                        enabled: input?.enabled !== false,
+                        scopes: Array.isArray(input?.scopes) ? [...input.scopes] : ['global'],
+                        requiredTools: Array.isArray(input?.requiredTools) ? [...input.requiredTools] : [],
+                    };
+                    const index = mockSkills.findIndex((item) => item.id === next.id);
+                    if (index >= 0) mockSkills[index] = next;
+                    else mockSkills.push(next);
+                    return null;
+                },
+                AIDeleteSkill: async (id: string) => {
+                    mockSkills = mockSkills.filter((item) => item.id !== id);
+                    return null;
+                },
                 AITestProvider: async (input: any) => ({
                     success: String(input?.apiKey || '').trim() !== '',
                     message: String(input?.apiKey || '').trim() !== '' ? '端点连通性测试成功！' : '连接测试失败: missing api key',

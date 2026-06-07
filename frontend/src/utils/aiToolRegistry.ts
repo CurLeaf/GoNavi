@@ -1,0 +1,185 @@
+import type { AIMCPToolDescriptor } from "../types";
+
+export interface AIChatToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, any>;
+  };
+}
+
+export interface AIBuiltinToolInfo {
+  name: string;
+  icon: string;
+  desc: string;
+  detail: string;
+  params: string;
+  tool: AIChatToolDefinition;
+}
+
+export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
+  {
+    name: "get_connections",
+    icon: "🔗",
+    desc: "获取所有可用的数据库连接",
+    detail:
+      "返回连接 ID、名称、类型 (MySQL/PostgreSQL 等) 和 Host 地址。AI 根据返回信息决定优先探索哪个连接。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_connections",
+        description:
+          "当需要查询、操作数据库但用户没有选择任何连接上下文时，获取当前软件中可用的所有数据库连接信息。返回的数据包含连接ID(id)和名称(name)。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "get_databases",
+    icon: "🗄️",
+    desc: "获取指定连接下的所有数据库",
+    detail: "传入 connectionId，返回该连接下的数据库/Schema 名称列表。",
+    params: "connectionId: 连接 ID",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_databases",
+        description: "获取指定连接（connectionId）下的所有数据库(Database/Schema)名。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID (从 get_connections 获取)" },
+          },
+          required: ["connectionId"],
+        },
+      },
+    },
+  },
+  {
+    name: "get_tables",
+    icon: "📋",
+    desc: "获取指定数据库下的所有表名",
+    detail:
+      "传入 connectionId 和 dbName，返回表名列表。AI 用它来定位用户提到的目标表。",
+    params: "connectionId, dbName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_tables",
+        description:
+          "当已经确定了目标连接和数据库名后，如果用户询问或隐式提到了表但你不知道确切表名，调用此工具获取该数据库下的所有表名列表（只含表名，帮助你推断目标表）。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+          },
+          required: ["connectionId", "dbName"],
+        },
+      },
+    },
+  },
+  {
+    name: "get_columns",
+    icon: "🔍",
+    desc: "获取指定表的字段结构",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回每个字段的名称、类型、是否可空、默认值和注释。AI 在生成 SQL 前必须调用此工具确认真实字段名。",
+    params: "connectionId, dbName, tableName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_columns",
+        description:
+          "获取指定表的字段列表（字段名、类型、是否可空、默认值、注释等）。在生成 SQL 之前必须先调用此工具确认真实字段名，禁止猜测字段名。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
+    name: "get_table_ddl",
+    icon: "📝",
+    desc: "获取表的建表语句 (DDL)",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回完整的 CREATE TABLE 语句，包含字段定义、索引、约束等信息。",
+    params: "connectionId, dbName, tableName",
+    tool: {
+      type: "function",
+      function: {
+        name: "get_table_ddl",
+        description: "获取指定表的完整建表语句（CREATE TABLE DDL），包含字段、索引、约束等完整结构信息。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
+    name: "execute_sql",
+    icon: "▶️",
+    desc: "执行 SQL 查询并返回结果",
+    detail:
+      "传入 connectionId、dbName 和 sql，在目标数据库上执行 SQL 并返回结果（最多 50 行）。受安全级别控制，只读模式下仅允许 SELECT/SHOW/DESCRIBE。",
+    params: "connectionId, dbName, sql",
+    tool: {
+      type: "function",
+      function: {
+        name: "execute_sql",
+        description:
+          "在指定连接和数据库上执行 SQL 查询并返回结果。受安全级别控制，只读模式下只能执行 SELECT/SHOW/DESCRIBE 等查询操作。结果最多返回 50 行。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            sql: { type: "string", description: "要执行的 SQL 语句" },
+          },
+          required: ["connectionId", "dbName", "sql"],
+        },
+      },
+    },
+  },
+];
+
+export const BUILTIN_AI_TOOLS: AIChatToolDefinition[] = BUILTIN_AI_TOOL_INFO.map((item) => item.tool);
+
+export const BUILTIN_AI_TOOL_NAME_SET = new Set<string>(
+  BUILTIN_AI_TOOL_INFO.map((item) => item.name),
+);
+
+export const buildMCPAIChatTools = (
+  tools: AIMCPToolDescriptor[],
+): AIChatToolDefinition[] =>
+  (tools || []).map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.alias,
+      description:
+        tool.description ||
+        `${tool.serverName} 提供的 MCP 工具 ${tool.title || tool.originalName}`,
+      parameters:
+        tool.inputSchema && Object.keys(tool.inputSchema).length > 0
+          ? tool.inputSchema
+          : { type: "object", properties: {} },
+    },
+  }));
+
+export const buildAvailableAIChatTools = (
+  tools: AIMCPToolDescriptor[],
+): AIChatToolDefinition[] => [...BUILTIN_AI_TOOLS, ...buildMCPAIChatTools(tools)];

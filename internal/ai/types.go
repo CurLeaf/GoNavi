@@ -86,6 +86,77 @@ type ProviderConfig struct {
 	Temperature float64           `json:"temperature"`
 }
 
+// UserPromptSettings 表示用户级自定义提示词配置
+type UserPromptSettings struct {
+	Global        string `json:"global"`
+	Database      string `json:"database"`
+	JVM           string `json:"jvm"`
+	JVMDiagnostic string `json:"jvmDiagnostic"`
+}
+
+// MCPTransport 表示 MCP 服务的传输方式
+type MCPTransport string
+
+const (
+	MCPTransportStdio MCPTransport = "stdio"
+)
+
+// MCPServerConfig 表示一个可配置的 MCP 服务
+type MCPServerConfig struct {
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Transport      MCPTransport      `json:"transport"`
+	Command        string            `json:"command"`
+	Args           []string          `json:"args,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Enabled        bool              `json:"enabled"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+}
+
+// MCPToolDescriptor 表示暴露给模型和前端的 MCP 工具描述
+type MCPToolDescriptor struct {
+	Alias        string         `json:"alias"`
+	ServerID     string         `json:"serverId"`
+	ServerName   string         `json:"serverName"`
+	OriginalName string         `json:"originalName"`
+	Title        string         `json:"title,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"inputSchema,omitempty"`
+}
+
+// MCPToolCallResult 表示一次 MCP 工具调用的结果
+type MCPToolCallResult struct {
+	Alias             string `json:"alias"`
+	ServerID          string `json:"serverId"`
+	ServerName        string `json:"serverName"`
+	OriginalName      string `json:"originalName"`
+	Title             string `json:"title,omitempty"`
+	Content           string `json:"content"`
+	StructuredContent any    `json:"structuredContent,omitempty"`
+	IsError           bool   `json:"isError"`
+}
+
+// SkillScope 表示 Skill 的适用场景
+type SkillScope string
+
+const (
+	SkillScopeGlobal        SkillScope = "global"
+	SkillScopeDatabase      SkillScope = "database"
+	SkillScopeJVM           SkillScope = "jvm"
+	SkillScopeJVMDiagnostic SkillScope = "jvmDiagnostic"
+)
+
+// SkillConfig 表示一个可配置的 Skill
+type SkillConfig struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	SystemPrompt  string   `json:"systemPrompt"`
+	Enabled       bool     `json:"enabled"`
+	Scopes        []string `json:"scopes,omitempty"`
+	RequiredTools []string `json:"requiredTools,omitempty"`
+}
+
 // SQLPermissionLevel AI SQL 执行权限级别
 type SQLPermissionLevel string
 

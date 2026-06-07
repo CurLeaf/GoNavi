@@ -12,4 +12,19 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain('<AIMessageRenderBoundary');
     expect(source).toContain('onDeleteMessage={handleDeleteMessage}');
   });
+
+  it('loads user prompt settings and appends them as system messages', () => {
+    expect(source).toContain('AIGetUserPromptSettings');
+    expect(source).toContain("window.addEventListener('gonavi:ai:config-changed'");
+    expect(source).toContain('以下是当前用户的自定义补充提示词');
+    expect(source).toContain("appendCustomPromptGroup(['database'])");
+  });
+
+  it('loads MCP tools and skills into the runtime tool chain', () => {
+    expect(source).toContain('AIListMCPTools');
+    expect(source).toContain('AIGetSkills');
+    expect(source).toContain('AICallMCPTool');
+    expect(source).toContain('以下是当前启用的 Skill');
+    expect(source).toContain('buildAvailableAIChatTools');
+  });
 });

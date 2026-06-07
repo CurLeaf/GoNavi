@@ -27,16 +27,19 @@ import (
 
 // Service AI 服务，作为 Wails Binding 暴露给前端
 type Service struct {
-	ctx            context.Context
-	mu             sync.RWMutex
-	providers      []ai.ProviderConfig
-	activeProvider string // active provider ID
-	safetyLevel    ai.SQLPermissionLevel
-	contextLevel   ai.ContextLevel
-	guard          *safety.Guard
-	configDir      string // 配置存储目录
-	secretStore    secretstore.SecretStore
-	cancelFuncs    map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	ctx                context.Context
+	mu                 sync.RWMutex
+	providers          []ai.ProviderConfig
+	activeProvider     string // active provider ID
+	safetyLevel        ai.SQLPermissionLevel
+	contextLevel       ai.ContextLevel
+	userPromptSettings ai.UserPromptSettings
+	mcpServers         []ai.MCPServerConfig
+	skills             []ai.SkillConfig
+	guard              *safety.Guard
+	configDir          string // 配置存储目录
+	secretStore        secretstore.SecretStore
+	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 }
 
 var miniMaxAnthropicModels = []string{
@@ -107,6 +110,8 @@ func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
 		providers:    make([]ai.ProviderConfig, 0),
 		safetyLevel:  ai.PermissionReadOnly,
 		contextLevel: ai.ContextSchemaOnly,
+		mcpServers:   make([]ai.MCPServerConfig, 0),
+		skills:       make([]ai.SkillConfig, 0),
 		guard:        safety.NewGuard(ai.PermissionReadOnly),
 		secretStore:  store,
 		cancelFuncs:  make(map[string]context.CancelFunc),
@@ -643,6 +648,22 @@ func (s *Service) AIGetBuiltinPrompts() map[string]string {
 	return aicontext.GetBuiltinPrompts()
 }
 
+// AIGetUserPromptSettings 获取用户级自定义提示词配置
+func (s *Service) AIGetUserPromptSettings() ai.UserPromptSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userPromptSettings
+}
+
+// AISaveUserPromptSettings 保存用户级自定义提示词配置
+func (s *Service) AISaveUserPromptSettings(settings ai.UserPromptSettings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.userPromptSettings = normalizeUserPromptSettings(settings)
+	return s.saveConfig()
+}
+
 // AIListModels 获取当前活跃 Provider 的可用模型列表
 func (s *Service) AIListModels() map[string]interface{} {
 	s.mu.RLock()
@@ -988,15 +1009,41 @@ func (s *Service) loadConfig() {
 	s.safetyLevel = snapshot.SafetyLevel
 	s.guard.SetPermissionLevel(s.safetyLevel)
 	s.contextLevel = snapshot.ContextLevel
+	s.userPromptSettings = snapshot.UserPromptSettings
+	s.mcpServers = normalizeMCPServerConfigs(snapshot.MCPServers)
+	s.skills = normalizeSkillConfigs(snapshot.Skills)
 }
 
 func (s *Service) saveConfig() error {
 	return NewProviderConfigStore(s.configDir, s.secretStore).Save(ProviderConfigStoreSnapshot{
-		Providers:      s.providers,
-		ActiveProvider: s.activeProvider,
-		SafetyLevel:    s.safetyLevel,
-		ContextLevel:   s.contextLevel,
+		Providers:          s.providers,
+		ActiveProvider:     s.activeProvider,
+		SafetyLevel:        s.safetyLevel,
+		ContextLevel:       s.contextLevel,
+		UserPromptSettings: s.userPromptSettings,
+		MCPServers:         s.mcpServers,
+		Skills:             s.skills,
 	})
+}
+
+const maxUserPromptChars = 16000
+
+func normalizeUserPromptSettings(settings ai.UserPromptSettings) ai.UserPromptSettings {
+	return ai.UserPromptSettings{
+		Global:        normalizeUserPromptText(settings.Global),
+		Database:      normalizeUserPromptText(settings.Database),
+		JVM:           normalizeUserPromptText(settings.JVM),
+		JVMDiagnostic: normalizeUserPromptText(settings.JVMDiagnostic),
+	}
+}
+
+func normalizeUserPromptText(value string) string {
+	normalized := strings.ReplaceAll(value, "\r\n", "\n")
+	normalized = strings.TrimSpace(normalized)
+	if len(normalized) > maxUserPromptChars {
+		return normalized[:maxUserPromptChars]
+	}
+	return normalized
 }
 
 // --- 会话文件持久化 ---

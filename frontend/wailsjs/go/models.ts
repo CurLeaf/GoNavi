@@ -1,5 +1,81 @@
 export namespace ai {
 	
+	export class MCPServerConfig {
+	    id: string;
+	    name: string;
+	    transport: string;
+	    command: string;
+	    args?: string[];
+	    env?: Record<string, string>;
+	    enabled: boolean;
+	    timeoutSeconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServerConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.transport = source["transport"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.env = source["env"];
+	        this.enabled = source["enabled"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class MCPToolCallResult {
+	    alias: string;
+	    serverId: string;
+	    serverName: string;
+	    originalName: string;
+	    title?: string;
+	    content: string;
+	    structuredContent?: any;
+	    isError: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPToolCallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.serverId = source["serverId"];
+	        this.serverName = source["serverName"];
+	        this.originalName = source["originalName"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.structuredContent = source["structuredContent"];
+	        this.isError = source["isError"];
+	    }
+	}
+	export class MCPToolDescriptor {
+	    alias: string;
+	    serverId: string;
+	    serverName: string;
+	    originalName: string;
+	    title?: string;
+	    description?: string;
+	    inputSchema?: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPToolDescriptor(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.serverId = source["serverId"];
+	        this.serverName = source["serverName"];
+	        this.originalName = source["originalName"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.inputSchema = source["inputSchema"];
+	    }
+	}
 	export class ToolCallFunction {
 	    name: string;
 	    arguments: string;
@@ -142,6 +218,30 @@ export namespace ai {
 	        this.warningMessage = source["warningMessage"];
 	    }
 	}
+	export class SkillConfig {
+	    id: string;
+	    name: string;
+	    description?: string;
+	    systemPrompt: string;
+	    enabled: boolean;
+	    scopes?: string[];
+	    requiredTools?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.systemPrompt = source["systemPrompt"];
+	        this.enabled = source["enabled"];
+	        this.scopes = source["scopes"];
+	        this.requiredTools = source["requiredTools"];
+	    }
+	}
 	export class ToolFunction {
 	    name: string;
 	    description: string;
@@ -192,6 +292,25 @@ export namespace ai {
 	}
 	
 	
+	
+	export class UserPromptSettings {
+	    global: string;
+	    database: string;
+	    jvm: string;
+	    jvmDiagnostic: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserPromptSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.global = source["global"];
+	        this.database = source["database"];
+	        this.jvm = source["jvm"];
+	        this.jvmDiagnostic = source["jvmDiagnostic"];
+	    }
+	}
 
 }
 
