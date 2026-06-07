@@ -23,16 +23,15 @@ describe('AIChatPanel message render isolation', () => {
   it('loads MCP tools and skills into the runtime tool chain', () => {
     expect(source).toContain('AIListMCPTools');
     expect(source).toContain('AIGetSkills');
-    expect(source).toContain('AICallMCPTool');
+    expect(source).toContain('executeLocalAIToolCall');
     expect(source).toContain('以下是当前启用的 Skill');
     expect(source).toContain('buildAvailableAIChatTools');
   });
 
   it('teaches the runtime to use deeper schema tools when analyzing structure details', () => {
     expect(source).toContain('get_indexes、get_foreign_keys、get_triggers、get_table_ddl');
-    expect(source).toContain("case 'get_indexes':");
-    expect(source).toContain("case 'get_foreign_keys':");
-    expect(source).toContain("case 'get_triggers':");
+    expect(source).toContain('toolContextMap: toolContextMapRef.current');
+    expect(source).toContain('buildToolResultMessage');
   });
 
   it('keeps the v2 history mode sorted by the latest updated session first', () => {

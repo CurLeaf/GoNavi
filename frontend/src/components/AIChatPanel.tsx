@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import { useStore, loadAISessionsFromBackend, loadAISessionFromBackend } from '../store';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime';
-import { DBGetDatabases, DBGetTables } from '../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
@@ -28,13 +27,16 @@ import {
     buildMissingProviderNotice,
     buildModelFetchFailedNotice,
 } from '../utils/aiComposerNotice';
-import { buildAIReadonlyPreviewSQL } from '../utils/aiSqlLimit';
-import { resolveAITableSchemaToolResult } from '../utils/aiTableSchemaTool';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
 import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts';
 import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
+import {
+    buildToolResultMessage,
+    executeLocalAIToolCall,
+    type AIToolContextEntry,
+} from './ai/aiLocalToolExecutor';
 
 interface AIChatPanelProps {
     width?: number;
@@ -1226,7 +1228,7 @@ SELECT * FROM users WHERE status = 1;
     }, [availableTools, skills, userPromptSettings]);
 
     // 记录所有成功的 get_tables 调用结果，用于表级精确匹配
-    const toolContextMapRef = useRef<Map<string, { connectionId: string; dbName: string; tables: string[] }>>(new Map());
+    const toolContextMapRef = useRef<Map<string, AIToolContextEntry>>(new Map());
 
     const executeLocalTools = useCallback(async (toolCalls: AIToolCall[], currentAsstMsgId: string) => {
         const currentAsstMsg = (useStore.getState().aiChatHistory[sid] || []).find(m => m.id === currentAsstMsgId);
@@ -1253,233 +1255,21 @@ SELECT * FROM users WHERE status = 1;
         }
 
         const results: AIChatMessage[] = [];
-        const mcpToolMap = new Map(mcpTools.map((tool) => [tool.alias, tool]));
+        const currentConnections = useStore.getState().connections;
         // 【串行逐条执行 + 实时写入 store】
         for (const tc of toolCalls) {
-            let resStr = '';
-            let success = false;
-            try {
-                const args = JSON.parse(tc.function.arguments || '{}');
-                const mcpToolDescriptor = mcpToolMap.get(tc.function.name);
-                switch (tc.function.name) {
-                    case 'get_connections':
-                        const conns = useStore.getState().connections.map(c => ({
-                            id: c.id,
-                            name: c.name,
-                            type: c.config?.type,
-                            host: (c.config as any)?.host || (c.config as any)?.addr || ''
-                        }));
-                        resStr = JSON.stringify(conns);
-                        success = true;
-                        break;
-                    case 'get_databases': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const dbRes = await DBGetDatabases(buildRpcConnectionConfig(conn.config) as any);
-                                if (dbRes?.success && Array.isArray(dbRes.data)) {
-                                    let dNames = dbRes.data.map((r: any) => r.Database || r.database || Object.values(r)[0]);
-                                    if (dNames.length > 50) dNames = [...dNames.slice(0, 50), '...(截断)'];
-                                    resStr = JSON.stringify(dNames);
-                                    success = true;
-                                } else {
-                                    resStr = dbRes?.message || 'Failed to fetch DBs';
-                                }
-                            } catch (e: any) {
-                                resStr = `获取数据库列表失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_tables': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const rawDbName = args.dbName || args.database;
-                                const safeDbName = rawDbName ? String(rawDbName).trim() : '';
-                                const tbRes = await DBGetTables(buildRpcConnectionConfig(conn.config) as any, safeDbName);
-                                if (tbRes?.success && Array.isArray(tbRes.data)) {
-                                    let tNames = tbRes.data.map((r: any) => r.Table || r.table || Object.values(r)[0] as string);
-                                    if (tNames.length > 150) tNames = [...tNames.slice(0, 150), '...(截断)'];
-                                    resStr = JSON.stringify(tNames);
-                                    success = true;
-                                    // 🔑 记录已验证的上下文参数和表列表（用于后续表级精确匹配）
-                                    toolContextMapRef.current.set(`${args.connectionId}:${safeDbName}`, {
-                                        connectionId: args.connectionId,
-                                        dbName: safeDbName,
-                                        tables: tNames.filter((t: string) => t !== '...(截断)')
-                                    });
-                                } else { resStr = tbRes?.message || 'Failed to fetch Tables'; }
-                            } catch (e: any) {
-                                resStr = `获取表列表失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_columns': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBGetColumns } = await import('../../wailsjs/go/app/App');
-                                const colRes = await DBGetColumns(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
-                                if (colRes?.success && Array.isArray(colRes.data)) {
-                                    // 只保留关键字段信息，减少 token 占用
-                                    const cols = colRes.data.map((c: any) => {
-                                        const keys = Object.keys(c);
-                                        return {
-                                            field: c.Field || c.field || c.COLUMN_NAME || c.column_name || c.Name || c.name || (keys.length > 0 ? c[keys[0]] : ''),
-                                            type: c.Type || c.type || c.DATA_TYPE || c.data_type || (keys.length > 1 ? c[keys[1]] : ''),
-                                            nullable: c.Null || c.null || c.IS_NULLABLE || c.is_nullable || c.Nullable || c.nullable || '',
-                                            default: c.Default || c.default || c.COLUMN_DEFAULT || c.column_default || c.DefaultValue || '',
-                                            comment: c.Comment || c.comment || c.COLUMN_COMMENT || c.column_comment || c.Description || '',
-                                        };
-                                    });
-                                    // ⚠️ 在工具返回结果中直接注入强制警告，确保模型使用精确字段名
-                                    const fieldNames = cols.map((c: any) => c.field).join(', ');
-                                    resStr = `⚠️ 以下为 ${safeTable} 表的真实字段列表。生成 SQL 时只能使用这些 field 值作为列名，必须原样使用，禁止修改、缩写或自行拼凑字段名。\n可用字段：${fieldNames}\n详细信息：${JSON.stringify(cols)}`;
-                                    success = true;
-                                } else { resStr = colRes?.message || 'Failed to fetch columns'; }
-                            } catch (e: any) {
-                                resStr = `获取字段列表失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_indexes': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBGetIndexes } = await import('../../wailsjs/go/app/App');
-                                const indexRes = await DBGetIndexes(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
-                                if (indexRes?.success && Array.isArray(indexRes.data)) {
-                                    resStr = JSON.stringify(indexRes.data);
-                                    success = true;
-                                } else { resStr = indexRes?.message || 'Failed to fetch indexes'; }
-                            } catch (e: any) {
-                                resStr = `获取索引定义失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_foreign_keys': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBGetForeignKeys } = await import('../../wailsjs/go/app/App');
-                                const foreignKeyRes = await DBGetForeignKeys(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
-                                if (foreignKeyRes?.success && Array.isArray(foreignKeyRes.data)) {
-                                    resStr = JSON.stringify(foreignKeyRes.data);
-                                    success = true;
-                                } else { resStr = foreignKeyRes?.message || 'Failed to fetch foreign keys'; }
-                            } catch (e: any) {
-                                resStr = `获取外键关系失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_triggers': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBGetTriggers } = await import('../../wailsjs/go/app/App');
-                                const triggerRes = await DBGetTriggers(buildRpcConnectionConfig(conn.config) as any, safeDbName, safeTable);
-                                if (triggerRes?.success && Array.isArray(triggerRes.data)) {
-                                    resStr = JSON.stringify(triggerRes.data);
-                                    success = true;
-                                } else { resStr = triggerRes?.message || 'Failed to fetch triggers'; }
-                            } catch (e: any) {
-                                resStr = `获取触发器定义失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'get_table_ddl': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeTable = args.tableName ? String(args.tableName).trim() : '';
-                                const { DBShowCreateTable, DBGetColumns } = await import('../../wailsjs/go/app/App');
-                                const rpcConfig = buildRpcConnectionConfig(conn.config) as any;
-                                const toolResult = await resolveAITableSchemaToolResult({
-                                    tableName: safeTable,
-                                    fetchDDL: () => DBShowCreateTable(rpcConfig, safeDbName, safeTable),
-                                    fetchColumns: () => DBGetColumns(rpcConfig, safeDbName, safeTable),
-                                });
-                                resStr = toolResult.content;
-                                success = toolResult.success;
-                            } catch (e: any) {
-                                resStr = `获取建表语句失败: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    case 'execute_sql': {
-                        const conn = useStore.getState().connections.find(c => c.id === args.connectionId);
-                        if (conn) {
-                            try {
-                                const safeDbName = args.dbName ? String(args.dbName).trim() : '';
-                                const safeSql = args.sql ? String(args.sql).trim() : '';
-                                // 安全级别检查
-                                const Service = (window as any).go?.aiservice?.Service;
-                                if (Service?.AICheckSQL) {
-                                    const check = await Service.AICheckSQL(safeSql);
-                                    if (!check.allowed) {
-                                        resStr = `安全策略拦截：当前安全级别不允许执行 ${check.operationType} 类型的 SQL。请将 SQL 展示给用户，让用户手动执行。`;
-                                        break;
-                                    }
-                                }
-                                const { DBQuery } = await import('../../wailsjs/go/app/App');
-                                const finalSql = buildAIReadonlyPreviewSQL(conn.config?.type || '', safeSql, 50, conn.config?.driver || '');
-                                const qRes = await DBQuery(buildRpcConnectionConfig(conn.config) as any, safeDbName, finalSql);
-                                if (qRes?.success) {
-                                    const rows = Array.isArray(qRes.data) ? qRes.data : [];
-                                    const limitedRows = rows.slice(0, 50);
-                                    resStr = JSON.stringify({ rowCount: rows.length, data: limitedRows });
-                                    success = true;
-                                } else { resStr = qRes?.message || 'SQL 执行失败'; }
-                            } catch (e: any) {
-                                resStr = `SQL 执行异常: ${e?.message || e}`;
-                            }
-                        } else { resStr = 'Connection not found'; }
-                        break;
-                    }
-                    default:
-                        if (mcpToolDescriptor) {
-                            try {
-                                const Service = (window as any).go?.aiservice?.Service;
-                                const toolResult = await Service?.AICallMCPTool?.(tc.function.name, tc.function.arguments || '{}');
-                                resStr = String(toolResult?.content || (toolResult?.isError ? 'MCP 工具调用失败' : ''));
-                                success = !!toolResult && !toolResult.isError;
-                            } catch (e: any) {
-                                resStr = `MCP 工具调用失败: ${e?.message || e}`;
-                            }
-                        } else {
-                            resStr = `Unknown function: ${tc.function.name}`;
-                        }
-                }
-            } catch (e: any) {
-                resStr = e.message;
-            }
-
-            const resolvedToolDescriptor = mcpToolMap.get(tc.function.name);
-            const toolResultMsg: AIChatMessage = {
+            const execution = await executeLocalAIToolCall({
+                toolCall: tc,
+                connections: currentConnections,
+                mcpTools,
+                toolContextMap: toolContextMapRef.current,
+            });
+            const toolResultMsg: AIChatMessage = buildToolResultMessage({
                 id: genId(),
-                role: 'tool',
-                content: resStr,
                 timestamp: Date.now(),
-                tool_call_id: tc.id,
-                tool_name: resolvedToolDescriptor?.title || resolvedToolDescriptor?.originalName || tc.function.name,
-                success
-            };
+                toolCall: tc,
+                execution,
+            });
             results.push(toolResultMsg);
 
             // 【实时写入】每执行完一条立即写入 store，让 UI 能实时看到进度打勾
