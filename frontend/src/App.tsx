@@ -790,9 +790,15 @@ function App() {
   // 定时保存窗口状态、尺寸与位置
   useEffect(() => {
       const SAVE_INTERVAL_MS = 2000;
+      let cancelled = false;
+      let hydrated = useStore.persist.hasHydrated();
+      let eventSaveTimer: number | null = null;
       let lastSaved = '';
 
       const saveWindowState = async () => {
+          if (cancelled || !hydrated) {
+              return;
+          }
           try {
               const [isFs, isMax] = await Promise.all([
                   safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
@@ -836,8 +842,67 @@ function App() {
             }
       };
 
-      const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
-      return () => window.clearInterval(timer);
+      const scheduleWindowStateSave = (delayMs = 120) => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          eventSaveTimer = window.setTimeout(() => {
+              eventSaveTimer = null;
+              void saveWindowState();
+          }, delayMs);
+      };
+
+      const handleWindowRuntimeChange = () => {
+          scheduleWindowStateSave();
+      };
+
+      const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+              scheduleWindowStateSave(120);
+          }
+      };
+
+      const handleWindowLifecycleFlush = () => {
+          void saveWindowState();
+      };
+
+      if (hydrated) {
+          scheduleWindowStateSave(320);
+      }
+      const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
+          if (cancelled || hydrated) {
+              return;
+          }
+          hydrated = true;
+          scheduleWindowStateSave(320);
+      });
+
+      const timer = window.setInterval(() => {
+          void saveWindowState();
+      }, SAVE_INTERVAL_MS);
+      window.addEventListener('resize', handleWindowRuntimeChange);
+      window.addEventListener('focus', handleWindowRuntimeChange);
+      window.addEventListener('pageshow', handleWindowRuntimeChange);
+      window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+      window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+          cancelled = true;
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          window.clearInterval(timer);
+          window.removeEventListener('resize', handleWindowRuntimeChange);
+          window.removeEventListener('focus', handleWindowRuntimeChange);
+          window.removeEventListener('pageshow', handleWindowRuntimeChange);
+          window.removeEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+          window.removeEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          unsubscribeHydration();
+      };
   }, []);
 
   useEffect(() => {
@@ -1567,12 +1632,11 @@ function App() {
       if (!isStoreHydrated || !isMacRuntime) {
           return;
       }
-
-      try {
-          void SetMacNativeWindowControls(useNativeMacWindowControls).catch(() => undefined);
-      } catch (e) {
-          console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SetMacNativeWindowControls !== 'function') {
+          return;
       }
+      void safeWindowRuntimeCall(() => SetMacNativeWindowControls(useNativeMacWindowControls), undefined);
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
 
   useEffect(() => {

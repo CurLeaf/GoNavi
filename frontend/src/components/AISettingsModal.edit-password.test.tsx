@@ -18,11 +18,32 @@ describe('AISettingsModal edit password behavior', () => {
   });
 
   it('loads MCP servers and skills through the AI service', () => {
+    expect(source).toContain('Service.AIGetMCPClientInstallStatuses?.()');
     expect(source).toContain('Service.AIGetMCPServers?.()');
     expect(source).toContain('Service.AIListMCPTools?.()');
     expect(source).toContain('Service.AIGetSkills?.()');
     expect(source).toContain('新增 MCP 服务');
     expect(source).toContain('新增 Skill');
+  });
+
+  it('explains external MCP installation and renders selectable client install states', () => {
+    expect(source).toContain('把 GoNavi 注册成外部 AI 客户端可调用的 MCP Server');
+    expect(source).toContain('安装到外部客户端');
+    expect(source).toContain('未安装');
+    expect(source).toContain('需更新');
+    expect(source).toContain('已安装');
+    expect(source).toContain('刷新状态');
+    expect(source).toContain('复制配置路径');
+    expect(source).toContain('复制启动命令');
+    expect(source).toContain('handleInstallSelectedMCPClient');
+    expect(source).toContain('无需重复安装');
+  });
+
+  it('waits briefly for the AI service bridge before warning and removes noisy provider debug logs', () => {
+    expect(source).toContain('const resolveAIService = useCallback(async () => {');
+    expect(source).toContain('const service = await waitForAIService();');
+    expect(source).not.toContain("console.log('[AI] AIGetProviders result:'");
+    expect(source).not.toContain("console.log('[AI] AIGetActiveProvider result:'");
   });
 
   it('keeps the prefilled api key masked by default', () => {

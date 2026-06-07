@@ -592,6 +592,17 @@ export interface AIMCPToolCallResult {
   isError: boolean;
 }
 
+export interface AIMCPClientInstallStatus {
+  client: string;
+  displayName: string;
+  installed: boolean;
+  matchesCurrent: boolean;
+  message: string;
+  configPath?: string;
+  command?: string;
+  args?: string[];
+}
+
 export type AISkillScope = "global" | "database" | "jvm" | "jvmDiagnostic";
 
 export interface AISkillConfig {

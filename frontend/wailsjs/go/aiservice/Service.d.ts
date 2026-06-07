@@ -28,6 +28,8 @@ export function AIGetContextLevel():Promise<string>;
 
 export function AIGetEditableProvider(arg1:string):Promise<ai.ProviderConfig>;
 
+export function AIGetMCPClientInstallStatuses():Promise<Array<ai.MCPClientInstallStatus>>;
+
 export function AIGetMCPServers():Promise<Array<ai.MCPServerConfig>>;
 
 export function AIGetProviders():Promise<Array<ai.ProviderConfig>>;
@@ -39,6 +41,10 @@ export function AIGetSessions():Promise<Array<Record<string, any>>>;
 export function AIGetSkills():Promise<Array<ai.SkillConfig>>;
 
 export function AIGetUserPromptSettings():Promise<ai.UserPromptSettings>;
+
+export function AIInstallClaudeCodeMCP():Promise<ai.MCPClientInstallResult>;
+
+export function AIInstallCodexMCP():Promise<ai.MCPClientInstallResult>;
 
 export function AIListMCPTools():Promise<Array<ai.MCPToolDescriptor>>;
 

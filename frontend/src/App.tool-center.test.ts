@@ -191,6 +191,18 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
   });
 
+  it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {
+    expect(appSource).toContain('const scheduleWindowStateSave = (delayMs = 120) => {');
+    expect(appSource).toContain('if (hydrated) {');
+    expect(appSource).toContain('scheduleWindowStateSave(320);');
+    expect(appSource).toContain('const unsubscribeHydration = useStore.persist.onFinishHydration(() => {');
+    expect(appSource).toContain("window.addEventListener('resize', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('focus', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('pageshow', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });");
+    expect(appSource).toContain("window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });");
+  });
+
   it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
     expect(appSource).toContain('const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {');
     expect(appSource).toContain('const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;');
@@ -202,6 +214,12 @@ describe('tool center menu entries', () => {
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {
     expect(appSource).toContain("window.addEventListener('keydown', handleGlobalShortcut, true);");
     expect(appSource).toContain("window.removeEventListener('keydown', handleGlobalShortcut, true);");
+  });
+
+  it('skips the native mac titlebar bridge when the current runtime does not expose it', () => {
+    expect(appSource).toContain("const backendApp = (window as any).go?.app?.App;");
+    expect(appSource).toContain("if (typeof backendApp?.SetMacNativeWindowControls !== 'function') {");
+    expect(appSource).toContain('void safeWindowRuntimeCall(() => SetMacNativeWindowControls(useNativeMacWindowControls), undefined);');
   });
 
   it('listens for command search query-tab events and routes them through handleNewQuery', () => {

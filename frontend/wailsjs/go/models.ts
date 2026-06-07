@@ -1,5 +1,53 @@
 export namespace ai {
 	
+	export class MCPClientInstallResult {
+	    success: boolean;
+	    client?: string;
+	    message: string;
+	    configPath?: string;
+	    command?: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPClientInstallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.client = source["client"];
+	        this.message = source["message"];
+	        this.configPath = source["configPath"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	    }
+	}
+	export class MCPClientInstallStatus {
+	    client: string;
+	    displayName: string;
+	    installed: boolean;
+	    matchesCurrent: boolean;
+	    message: string;
+	    configPath?: string;
+	    command?: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPClientInstallStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.client = source["client"];
+	        this.displayName = source["displayName"];
+	        this.installed = source["installed"];
+	        this.matchesCurrent = source["matchesCurrent"];
+	        this.message = source["message"];
+	        this.configPath = source["configPath"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	    }
+	}
 	export class MCPServerConfig {
 	    id: string;
 	    name: string;
@@ -1272,4 +1320,3 @@ export namespace sync {
 	}
 
 }
-

@@ -22,12 +22,14 @@ const resolveDevHarnessMode = (): string => {
     }
 };
 
-if (typeof window !== 'undefined' && !(window as any).go) {
+if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window as any).go?.aiservice?.Service)) {
     const mockConnections: any[] = [];
     const mockConnectionSecrets = new Map<string, any>();
     const mockProviders: any[] = [];
     const mockProviderSecrets = new Map<string, string>();
     let mockActiveProviderId = '';
+    let mockAISafetyLevel = 'readonly';
+    let mockAIContextLevel = 'schema_only';
     let mockAIUserPromptSettings: any = {
         global: '',
         database: '',
@@ -35,6 +37,28 @@ if (typeof window !== 'undefined' && !(window as any).go) {
         jvmDiagnostic: '',
     };
     let mockMCPServers: any[] = [];
+    let mockMCPClientStatuses: any[] = [
+        {
+            client: 'claude-code',
+            displayName: 'Claude Code',
+            installed: false,
+            matchesCurrent: false,
+            message: '未安装到 Claude Code 用户级配置',
+            configPath: 'C:/Users/mock/.claude.json',
+            command: 'C:/Program Files/GoNavi/GoNavi.exe',
+            args: ['mcp-server'],
+        },
+        {
+            client: 'codex',
+            displayName: 'Codex',
+            installed: true,
+            matchesCurrent: false,
+            message: '已检测到 Codex 安装记录，但与当前 GoNavi 安装包路径不一致，建议更新安装',
+            configPath: 'C:/Users/mock/.codex/config.toml',
+            command: 'C:/Old/GoNavi.exe',
+            args: ['mcp-server'],
+        },
+    ];
     let mockSkills: any[] = [];
     let mockGlobalProxy: any = { enabled: false, type: 'socks5', host: '', port: 1080, user: '', password: '', hasPassword: false };
     let mockDataRootInfo: any = {
@@ -154,7 +178,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
         return cloneBrowserMockValue(view);
     };
 
-    (window as any).go = {
+    const mockGo = {
         app: {
             App: {
                 CheckUpdate: async () => ({ success: false }),
@@ -291,8 +315,8 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                     mockActiveProviderId = id;
                     return null;
                 },
-                AIGetSafetyLevel: async () => 'readonly',
-                AIGetContextLevel: async () => 'schema_only',
+                AIGetSafetyLevel: async () => mockAISafetyLevel,
+                AIGetContextLevel: async () => mockAIContextLevel,
                 AIGetBuiltinPrompts: async () => ({}),
                 AIGetUserPromptSettings: async () => cloneBrowserMockValue(mockAIUserPromptSettings),
                 AISaveUserPromptSettings: async (input: any) => {
@@ -304,7 +328,48 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                     };
                     return null;
                 },
+                AIGetMCPClientInstallStatuses: async () => cloneBrowserMockValue(mockMCPClientStatuses),
                 AIGetMCPServers: async () => cloneBrowserMockValue(mockMCPServers),
+                AIInstallClaudeCodeMCP: async () => {
+                    mockMCPClientStatuses = mockMCPClientStatuses.map((item) => item.client === 'claude-code'
+                        ? {
+                            ...item,
+                            installed: true,
+                            matchesCurrent: true,
+                            message: '已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。',
+                            command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                            args: ['mcp-server'],
+                        }
+                        : item);
+                    return {
+                        success: true,
+                        client: 'claude-code',
+                        message: '已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。',
+                        configPath: 'C:/Users/mock/.claude.json',
+                        command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                        args: ['mcp-server'],
+                    };
+                },
+                AIInstallCodexMCP: async () => {
+                    mockMCPClientStatuses = mockMCPClientStatuses.map((item) => item.client === 'codex'
+                        ? {
+                            ...item,
+                            installed: true,
+                            matchesCurrent: true,
+                            message: '已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。',
+                            command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                            args: ['mcp-server'],
+                        }
+                        : item);
+                    return {
+                        success: true,
+                        client: 'codex',
+                        message: '已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。',
+                        configPath: 'C:/Users/mock/.codex/config.toml',
+                        command: 'C:/Program Files/GoNavi/GoNavi.exe',
+                        args: ['mcp-server'],
+                    };
+                },
                 AISaveMCPServer: async (input: any) => {
                     const next = {
                         id: String(input?.id || `mcp-${Date.now()}`),
@@ -363,10 +428,37 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                     success: String(input?.apiKey || '').trim() !== '',
                     message: String(input?.apiKey || '').trim() !== '' ? '端点连通性测试成功！' : '连接测试失败: missing api key',
                 }),
-                AISetSafetyLevel: async () => null,
-                AISetContextLevel: async () => null,
+                AISetSafetyLevel: async (level: string) => {
+                    mockAISafetyLevel = String(level || 'readonly');
+                    return null;
+                },
+                AISetContextLevel: async (level: string) => {
+                    mockAIContextLevel = String(level || 'schema_only');
+                    return null;
+                },
             },
         }
+    };
+    const existingGo = (window as any).go || {};
+    (window as any).go = {
+        ...mockGo,
+        ...existingGo,
+        app: {
+            ...mockGo.app,
+            ...(existingGo.app || {}),
+            App: {
+                ...mockGo.app.App,
+                ...(existingGo.app?.App || {}),
+            },
+        },
+        aiservice: {
+            ...mockGo.aiservice,
+            ...(existingGo.aiservice || {}),
+            Service: {
+                ...mockGo.aiservice.Service,
+                ...(existingGo.aiservice?.Service || {}),
+            },
+        },
     };
 }
 const rootNode = document.getElementById('root')!;

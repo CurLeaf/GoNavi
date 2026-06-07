@@ -54,6 +54,10 @@ export function AIGetEditableProvider(arg1) {
   return window['go']['aiservice']['Service']['AIGetEditableProvider'](arg1);
 }
 
+export function AIGetMCPClientInstallStatuses() {
+  return window['go']['aiservice']['Service']['AIGetMCPClientInstallStatuses']();
+}
+
 export function AIGetMCPServers() {
   return window['go']['aiservice']['Service']['AIGetMCPServers']();
 }
@@ -76,6 +80,14 @@ export function AIGetSkills() {
 
 export function AIGetUserPromptSettings() {
   return window['go']['aiservice']['Service']['AIGetUserPromptSettings']();
+}
+
+export function AIInstallClaudeCodeMCP() {
+  return window['go']['aiservice']['Service']['AIInstallClaudeCodeMCP']();
+}
+
+export function AIInstallCodexMCP() {
+  return window['go']['aiservice']['Service']['AIInstallCodexMCP']();
 }
 
 export function AIListMCPTools() {

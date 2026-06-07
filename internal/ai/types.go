@@ -136,6 +136,31 @@ type MCPToolCallResult struct {
 	IsError           bool   `json:"isError"`
 }
 
+// MCPClientInstallResult 表示安装 GoNavi 到外部 MCP 客户端配置文件的结果。
+type MCPClientInstallResult struct {
+	Success    bool     `json:"success"`
+	Client     string   `json:"client,omitempty"`
+	Message    string   `json:"message"`
+	ConfigPath string   `json:"configPath,omitempty"`
+	Command    string   `json:"command,omitempty"`
+	Args       []string `json:"args,omitempty"`
+}
+
+// MCPClientInstallStatus 表示 GoNavi MCP 在外部客户端中的当前安装状态。
+type MCPClientInstallStatus struct {
+	Client         string   `json:"client"`
+	DisplayName    string   `json:"displayName"`
+	Installed      bool     `json:"installed"`
+	MatchesCurrent bool     `json:"matchesCurrent"`
+	Message        string   `json:"message"`
+	ConfigPath     string   `json:"configPath,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	Args           []string `json:"args,omitempty"`
+}
+
+// ClaudeCodeMCPInstallResult 兼容旧命名，便于平滑迁移到通用结果类型。
+type ClaudeCodeMCPInstallResult = MCPClientInstallResult
+
 // SkillScope 表示 Skill 的适用场景
 type SkillScope string
 

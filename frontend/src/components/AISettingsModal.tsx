@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
-import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AISkillConfig, AISkillScope } from '../types';
+import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined, ReloadOutlined, CopyOutlined } from '@ant-design/icons';
+import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig, AISkillScope } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
     QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
@@ -29,6 +29,17 @@ interface AISettingsModalProps {
     overlayTheme: OverlayWorkbenchTheme;
     focusProviderId?: string;
 }
+
+interface MCPClientInstallResult {
+    success?: boolean;
+    client?: string;
+    message?: string;
+    configPath?: string;
+    command?: string;
+    args?: string[];
+}
+
+type MCPClientKey = 'claude-code' | 'codex';
 
 // 预设配置：每个预设映射到后端 type（openai/anthropic/gemini/custom）并附带默认 URL 和 Model
 interface ProviderPreset {
@@ -97,6 +108,100 @@ const EMPTY_MCP_SERVER = (): AIMCPServerConfig => ({
     timeoutSeconds: 20,
 });
 
+const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
+    {
+        client: 'claude-code',
+        displayName: 'Claude Code',
+        installed: false,
+        matchesCurrent: false,
+        message: '未安装到 Claude Code 用户级配置',
+    },
+    {
+        client: 'codex',
+        displayName: 'Codex',
+        installed: false,
+        matchesCurrent: false,
+        message: '未安装到 Codex 用户级配置',
+    },
+];
+
+const normalizeMCPClientStatuses = (items?: AIMCPClientInstallStatus[]): AIMCPClientInstallStatus[] => {
+    const baseMap = new Map<string, AIMCPClientInstallStatus>(
+        EMPTY_MCP_CLIENT_STATUSES.map((item) => [item.client, { ...item }]),
+    );
+    (Array.isArray(items) ? items : []).forEach((item) => {
+        if (!item || !item.client) {
+            return;
+        }
+        const base = baseMap.get(item.client) || {
+            client: item.client,
+            displayName: item.client,
+            installed: false,
+            matchesCurrent: false,
+            message: '',
+        };
+        baseMap.set(item.client, {
+            ...base,
+            ...item,
+            displayName: item.displayName || base.displayName,
+            message: item.message || base.message,
+            args: Array.isArray(item.args) ? item.args : (base.args || []),
+        });
+    });
+    return (['claude-code', 'codex'] as MCPClientKey[])
+        .map((client) => baseMap.get(client))
+        .filter((item): item is AIMCPClientInstallStatus => Boolean(item));
+};
+
+const pickPreferredMCPClient = (items: AIMCPClientInstallStatus[], current?: MCPClientKey): MCPClientKey => {
+    if (current && items.some((item) => item.client === current)) {
+        return current;
+    }
+    const pending = items.find((item) => !item.matchesCurrent);
+    if (pending?.client === 'claude-code' || pending?.client === 'codex') {
+        return pending.client;
+    }
+    return 'claude-code';
+};
+
+const waitFor = (delayMs: number) => new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+});
+
+const readAIService = () => (window as any).go?.aiservice?.Service;
+
+const waitForAIService = async (attempts = 6, delayMs = 80) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const service = readAIService();
+        if (service) {
+            return service;
+        }
+        if (attempt < attempts - 1) {
+            await waitFor(delayMs);
+        }
+    }
+    return readAIService();
+};
+
+const quoteMCPCommandPart = (value: string): string => {
+    const text = String(value || '').trim();
+    if (!text) {
+        return '';
+    }
+    return /[\s"]/u.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
+};
+
+const formatMCPLaunchCommand = (input?: Pick<AIMCPClientInstallStatus, 'command' | 'args'> | Pick<MCPClientInstallResult, 'command' | 'args'> | null): string => {
+    const command = String(input?.command || '').trim();
+    if (!command) {
+        return '';
+    }
+    const args = Array.isArray(input?.args)
+        ? input.args.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+    return [command, ...args].map(quoteMCPCommandPart).filter(Boolean).join(' ');
+};
+
 const EMPTY_SKILL = (): AISkillConfig => ({
     id: `skill-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: '',
@@ -142,6 +247,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
     const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
+    const [mcpClientStatuses, setMCPClientStatuses] = useState<AIMCPClientInstallStatus[]>(EMPTY_MCP_CLIENT_STATUSES);
+    const [selectedMCPClient, setSelectedMCPClient] = useState<MCPClientKey>('claude-code');
+    const [mcpClientStatusLoading, setMCPClientStatusLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -153,6 +261,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
+    const missingAIServiceWarnedRef = useRef(false);
 
     // Modal 内部 toast 通知
     const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body });
@@ -163,6 +272,35 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const cardHoverBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
     const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
     const inputBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
+    const getMCPClientStatusTone = useCallback((status?: AIMCPClientInstallStatus) => {
+        const messageText = String(status?.message || '');
+        if (status?.matchesCurrent) {
+            return {
+                label: '已安装',
+                color: '#16a34a',
+                bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
+            };
+        }
+        if (status?.installed) {
+            return {
+                label: '需更新',
+                color: '#d97706',
+                bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
+            };
+        }
+        if (messageText.includes('失败') || messageText.includes('异常')) {
+            return {
+                label: '需检查',
+                color: '#dc2626',
+                bg: darkMode ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
+            };
+        }
+        return {
+            label: '未安装',
+            color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
+            bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
+        };
+    }, [darkMode]);
 
     // Hook 必须在组件顶层调用，不能在条件分支内
     const watchedType = Form.useWatch('type', form);
@@ -178,11 +316,71 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             value: tool.alias,
         })),
     ]), [mcpTools]);
+    const selectedMCPClientStatus = useMemo(
+        () => mcpClientStatuses.find((item) => item.client === selectedMCPClient) || mcpClientStatuses[0],
+        [mcpClientStatuses, selectedMCPClient],
+    );
+    const selectedMCPClientCommandText = useMemo(
+        () => formatMCPLaunchCommand(selectedMCPClientStatus),
+        [selectedMCPClientStatus],
+    );
+
+    const resolveAIService = useCallback(async () => {
+        const service = await waitForAIService();
+        if (service) {
+            missingAIServiceWarnedRef.current = false;
+            return service;
+        }
+        if (!missingAIServiceWarnedRef.current) {
+            console.warn('[AI] Service not found on window.go');
+            missingAIServiceWarnedRef.current = true;
+        }
+        return null;
+    }, []);
+
+    const loadMCPClientStatuses = useCallback(async (options?: { silent?: boolean }) => {
+        const silent = options?.silent === true;
+        if (!silent) {
+            setMCPClientStatusLoading(true);
+        }
+        try {
+            const Service = await resolveAIService();
+            if (typeof Service?.AIGetMCPClientInstallStatuses !== 'function') {
+                return;
+            }
+            const result = await Service.AIGetMCPClientInstallStatuses();
+            if (Array.isArray(result)) {
+                const normalizedStatuses = normalizeMCPClientStatuses(result);
+                setMCPClientStatuses(normalizedStatuses);
+                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, prev));
+            }
+        } catch (e: any) {
+            if (silent) {
+                console.warn('[AI] refresh mcp client statuses failed', e);
+            } else {
+                void messageApi.error(e?.message || '刷新客户端安装状态失败');
+            }
+        } finally {
+            if (!silent) {
+                setMCPClientStatusLoading(false);
+            }
+        }
+    }, [messageApi, resolveAIService]);
+
+    const copyTextToClipboard = useCallback(async (text: string, successMessage: string) => {
+        if (typeof navigator?.clipboard?.writeText !== 'function') {
+            throw new Error('当前环境不支持复制到剪贴板');
+        }
+        await navigator.clipboard.writeText(text);
+        void messageApi.success(successMessage);
+    }, [messageApi]);
 
     const loadConfig = useCallback(async () => {
         try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service) { console.warn('[AI] Service not found on window.go'); return; }
+            const Service = await resolveAIService();
+            if (!Service) {
+                return;
+            }
             const callOrFallback = async <T,>(loader: (() => Promise<T>) | undefined, fallback: T): Promise<T> => {
                 if (typeof loader !== 'function') {
                     return fallback;
@@ -194,7 +392,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     return fallback;
                 }
             };
-            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, skillsRes] = await Promise.all([
+            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, skillsRes, mcpClientStatusesRes] = await Promise.all([
                 callOrFallback(() => Service.AIGetProviders?.(), []),
                 callOrFallback<AISafetyLevel>(() => Service.AIGetSafetyLevel?.(), 'readonly'),
                 callOrFallback<AIContextLevel>(() => Service.AIGetContextLevel?.(), 'schema_only'),
@@ -203,12 +401,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 callOrFallback(() => Service.AIGetMCPServers?.(), []),
                 callOrFallback(() => Service.AIListMCPTools?.(), []),
                 callOrFallback(() => Service.AIGetSkills?.(), []),
+                callOrFallback<AIMCPClientInstallStatus[]>(() => Service.AIGetMCPClientInstallStatuses?.(), EMPTY_MCP_CLIENT_STATUSES),
             ]);
-            console.log('[AI] AIGetProviders result:', JSON.stringify(provRes), 'isArray:', Array.isArray(provRes));
             if (Array.isArray(provRes)) {
                 setProviders(provRes);
                 const activeRes = await Service.AIGetActiveProvider?.();
-                console.log('[AI] AIGetActiveProvider result:', activeRes);
                 if (activeRes) setActiveProviderId(activeRes);
             }
             if (safeRes) setSafetyLevel(safeRes);
@@ -223,8 +420,13 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(mcpServersRes)) setMCPServers(mcpServersRes);
             if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
             if (Array.isArray(skillsRes)) setSkills(skillsRes);
+            if (Array.isArray(mcpClientStatusesRes)) {
+                const normalizedStatuses = normalizeMCPClientStatuses(mcpClientStatusesRes);
+                setMCPClientStatuses(normalizedStatuses);
+                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, prev));
+            }
         } catch (e) { console.warn('Failed to load AI config', e); }
-    }, []);
+    }, [resolveAIService]);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
 
@@ -490,6 +692,63 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             setLoading(false);
         }
     };
+
+    const handleInstallSelectedMCPClient = async () => {
+        const targetClient = selectedMCPClientStatus?.client === 'codex' ? 'codex' : 'claude-code';
+        const targetLabel = selectedMCPClientStatus?.displayName || (targetClient === 'codex' ? 'Codex' : 'Claude Code');
+        if (selectedMCPClientStatus?.matchesCurrent) {
+            void messageApi.success(`${targetLabel} 已安装当前 GoNavi MCP，无需重复安装`);
+            return;
+        }
+        try {
+            setLoading(true);
+            const Service = await resolveAIService();
+            let result: MCPClientInstallResult;
+            if (targetClient === 'codex') {
+                if (typeof Service?.AIInstallCodexMCP !== 'function') {
+                    throw new Error('当前版本暂不支持自动安装 Codex MCP');
+                }
+                result = await Service.AIInstallCodexMCP() as MCPClientInstallResult;
+            } else {
+                if (typeof Service?.AIInstallClaudeCodeMCP !== 'function') {
+                    throw new Error('当前版本暂不支持自动安装 Claude Code MCP');
+                }
+                result = await Service.AIInstallClaudeCodeMCP() as MCPClientInstallResult;
+            }
+            await loadMCPClientStatuses({ silent: true });
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+            void messageApi.success(result?.message || `已写入 ${targetLabel} 用户级 MCP 配置`);
+        } catch (e: any) {
+            void messageApi.error(e?.message || `安装 ${targetLabel} MCP 失败`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleCopySelectedMCPConfigPath = useCallback(async () => {
+        const configPath = String(selectedMCPClientStatus?.configPath || '').trim();
+        if (!configPath) {
+            void messageApi.warning('当前没有可复制的配置文件路径');
+            return;
+        }
+        try {
+            await copyTextToClipboard(configPath, '配置文件路径已复制');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '复制配置文件路径失败');
+        }
+    }, [copyTextToClipboard, messageApi, selectedMCPClientStatus]);
+
+    const handleCopySelectedMCPLaunchCommand = useCallback(async () => {
+        if (!selectedMCPClientCommandText) {
+            void messageApi.warning('当前没有可复制的启动命令');
+            return;
+        }
+        try {
+            await copyTextToClipboard(selectedMCPClientCommandText, '启动命令已复制');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '复制启动命令失败');
+        }
+    }, [copyTextToClipboard, messageApi, selectedMCPClientCommandText]);
 
     const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
         setSkills((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
@@ -983,8 +1242,165 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 
     const renderMCPSettings = () => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                MCP 会作为外部工具源接入 AI。当前阶段先支持 `stdio` 型服务，不需要为 GoNavi 的 MCP client 单独新建仓库；只有你准备发布独立的 MCP Server 时，才值得拆独立仓库。
+            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4, lineHeight: 1.7 }}>
+                这里的“安装到客户端”是把 GoNavi 注册成外部 AI 客户端可调用的 MCP Server，供 Claude Code 或 Codex 使用；不是 GoNavi 自己安装自己。
+            </div>
+            <div style={{
+                padding: '16px',
+                borderRadius: 14,
+                border: `1px solid ${cardBorder}`,
+                background: cardBg,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+            }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>安装到外部客户端</div>
+                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+                        先选择目标客户端，再把当前 GoNavi 安装路径写入它的用户级 MCP 配置。GoNavi 会自动处理配置文件路径，不需要你自己找本机 exe。
+                    </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                    {mcpClientStatuses.map((status) => {
+                        const active = selectedMCPClient === status.client;
+                        const tone = getMCPClientStatusTone(status);
+                        return (
+                            <div
+                                key={status.client}
+                                onClick={() => {
+                                    if (status.client === 'claude-code' || status.client === 'codex') {
+                                        setSelectedMCPClient(status.client);
+                                    }
+                                }}
+                                style={{
+                                    padding: '14px 14px 12px',
+                                    borderRadius: 12,
+                                    border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
+                                    background: active ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)'),
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: 10,
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>
+                                        {status.displayName}
+                                    </div>
+                                    <div style={{
+                                        padding: '4px 10px',
+                                        borderRadius: 999,
+                                        fontSize: 12,
+                                        fontWeight: 700,
+                                        color: tone.color,
+                                        background: tone.bg,
+                                        whiteSpace: 'nowrap',
+                                    }}>
+                                        {tone.label}
+                                    </div>
+                                </div>
+                                <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                                    {status.matchesCurrent
+                                        ? '当前 GoNavi 安装路径已写入，打开客户端后可直接使用。'
+                                        : status.installed
+                                            ? '检测到已有安装记录，但建议更新为当前 GoNavi 路径。'
+                                            : '当前尚未写入 GoNavi MCP 配置。'}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div style={{
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: `1px solid ${cardBorder}`,
+                    background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.78)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
+                            {selectedMCPClientStatus?.displayName || '客户端'} 状态
+                        </div>
+                        {selectedMCPClientStatus && (
+                            <div style={{
+                                padding: '3px 9px',
+                                borderRadius: 999,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: getMCPClientStatusTone(selectedMCPClientStatus).color,
+                                background: getMCPClientStatusTone(selectedMCPClientStatus).bg,
+                            }}>
+                                {getMCPClientStatusTone(selectedMCPClientStatus).label}
+                            </div>
+                        )}
+                    </div>
+                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+                        {selectedMCPClientStatus?.message || '未检测到安装状态'}
+                    </div>
+                    {selectedMCPClientStatus?.configPath && (
+                        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
+                            配置文件：{selectedMCPClientStatus.configPath}
+                        </div>
+                    )}
+                    {selectedMCPClientCommandText && (
+                        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
+                            启动命令：{selectedMCPClientCommandText}
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={mcpClientStatusLoading}
+                            onClick={() => void loadMCPClientStatuses()}
+                            style={{ borderRadius: 8 }}
+                        >
+                            刷新状态
+                        </Button>
+                        <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            disabled={!selectedMCPClientStatus?.configPath}
+                            onClick={() => void handleCopySelectedMCPConfigPath()}
+                            style={{ borderRadius: 8 }}
+                        >
+                            复制配置路径
+                        </Button>
+                        <Button
+                            size="small"
+                            icon={<CopyOutlined />}
+                            disabled={!selectedMCPClientCommandText}
+                            onClick={() => void handleCopySelectedMCPLaunchCommand()}
+                            style={{ borderRadius: 8 }}
+                        >
+                            复制启动命令
+                        </Button>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                        安装后重启对应客户端即可生效；若已经是当前路径，会直接提示无需重复安装。
+                    </div>
+                    <Button
+                        type={selectedMCPClientStatus?.matchesCurrent ? 'default' : 'primary'}
+                        onClick={handleInstallSelectedMCPClient}
+                        loading={loading}
+                        disabled={Boolean(selectedMCPClientStatus?.matchesCurrent)}
+                        style={{ borderRadius: 10, fontWeight: 600, minWidth: 176, height: 40 }}
+                    >
+                        {selectedMCPClientStatus?.matchesCurrent
+                            ? `${selectedMCPClientStatus.displayName} 已安装`
+                            : selectedMCPClientStatus?.installed
+                                ? `更新到 ${selectedMCPClientStatus?.displayName || '客户端'}`
+                                : `安装到 ${selectedMCPClientStatus?.displayName || '客户端'}`}
+                    </Button>
+                </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时，保存后会自动进入 AI 工具列表。</div>
@@ -1217,7 +1633,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         >
               <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative' }}>
                   {messageContextHolder}
-                  <div style={{ padding: '0 12px', height: 'fit-content' }}>
+                  <div style={{ minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', padding: '0 6px 28px 12px' }}>
                       <div style={{ marginBottom: 12, fontWeight: 600, color: overlayTheme.titleText }}>设置导航</div>
                       <div style={{ display: 'grid', gap: 10 }}>
                           {[

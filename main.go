@@ -8,6 +8,7 @@ import (
 	aiservice "GoNavi-Wails/internal/ai/service"
 	"GoNavi-Wails/internal/app"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/internal/mcpserver"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -17,6 +18,10 @@ import (
 )
 
 func main() {
+	if runSpecialMode(os.Args[1:]) {
+		return
+	}
+
 	// Create an instance of the app structure
 	application := app.NewApp()
 	aiService := aiservice.NewService()
@@ -65,6 +70,30 @@ func main() {
 
 	if err != nil {
 		logger.Error(err, "应用启动失败")
+	}
+}
+
+func runSpecialMode(args []string) bool {
+	if !shouldRunMCPServerMode(args) {
+		return false
+	}
+
+	if err := mcpserver.RunAppStdioServer(context.Background()); err != nil {
+		logger.Error(err, "GoNavi MCP Server 退出")
+	}
+	return true
+}
+
+func shouldRunMCPServerMode(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "mcp-server", "--mcp-server":
+		return true
+	default:
+		return false
 	}
 }
 
