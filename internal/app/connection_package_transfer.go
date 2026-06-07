@@ -285,6 +285,21 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 		return sanitizeSavedConnectionViews(views), nil
 	}
 
+	if isNavicatNCX(trimmed) {
+		inputs, err := parseNavicatNCX(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("解析 Navicat NCX 失败: %w", err)
+		}
+		if len(inputs) == 0 {
+			return nil, fmt.Errorf("未在 Navicat NCX 中找到 GoNavi 支持的有效连接配置")
+		}
+		views, err := a.importSavedConnectionsAtomically(inputs)
+		if err != nil {
+			return nil, err
+		}
+		return sanitizeSavedConnectionViews(views), nil
+	}
+
 	var legacy []connection.LegacySavedConnection
 	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
 		return nil, errConnectionPackageUnsupported

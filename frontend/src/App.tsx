@@ -2058,14 +2058,14 @@ function App() {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
-          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组或 MySQL Workbench XML');
+          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组、MySQL Workbench XML 或 Navicat NCX');
           return;
       }
 
       try {
           setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
-          if (importKind === 'mysql-workbench-xml' && importedViews.some(v => !v.hasPrimaryPassword)) {
+          if ((importKind === 'mysql-workbench-xml' || importKind === 'navicat-ncx') && importedViews.some(v => !v.hasPrimaryPassword)) {
               void message.warning(`成功导入 ${importedViews.length} 个连接，部分连接未包含密码，请编辑对应连接并输入密码后保存`);
           } else {
               void message.success(`成功导入 ${importedViews.length} 个连接`);

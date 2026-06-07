@@ -1,6 +1,6 @@
 import type { ConnectionConfig, SavedConnection } from '../types';
 
-export type ConnectionImportKind = 'app-managed-package' | 'encrypted-package' | 'legacy-json' | 'mysql-workbench-xml' | 'invalid';
+export type ConnectionImportKind = 'app-managed-package' | 'encrypted-package' | 'legacy-json' | 'mysql-workbench-xml' | 'navicat-ncx' | 'invalid';
 export type ConnectionPackageDialogSnapshot = {
   open: boolean;
   mode: 'export' | 'import';
@@ -109,9 +109,18 @@ const isMySQLWorkbenchXML = (raw: string): boolean => (
   raw.includes('<data') && raw.includes('grt_format') && raw.includes('db.mgmt.Connection')
 );
 
+const isNavicatNCX = (raw: string): boolean => (
+  raw.includes('<Connection')
+  && raw.includes('ConnType=')
+  && raw.includes('ConnectionName=')
+);
+
 export const detectConnectionImportKind = (raw: unknown): ConnectionImportKind => {
   if (typeof raw === 'string' && isMySQLWorkbenchXML(raw)) {
     return 'mysql-workbench-xml';
+  }
+  if (typeof raw === 'string' && isNavicatNCX(raw)) {
+    return 'navicat-ncx';
   }
 
   const parsed = parseConnectionImportRaw(raw);
