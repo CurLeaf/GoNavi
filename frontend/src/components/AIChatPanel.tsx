@@ -310,6 +310,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         'sendAIChatMessage',
         activeShortcutPlatform,
     ));
+    const orderedAISessions = useMemo(
+        () => [...aiChatSessions].sort((left, right) => right.updatedAt - left.updatedAt),
+        [aiChatSessions],
+    );
 
     const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
         const state = useStore.getState();
@@ -1850,7 +1854,7 @@ SELECT * FROM users WHERE status = 1;
     }, [contextTableNames, sqlLogs]);
 
     const renderPanelHistoryList = () => {
-        const sessions = aiChatSessions.slice(0, 8);
+        const sessions = orderedAISessions.slice(0, 8);
         if (sessions.length === 0) {
             return <div className="gn-v2-ai-empty-note">暂无历史会话</div>;
         }

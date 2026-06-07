@@ -27,4 +27,10 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain('以下是当前启用的 Skill');
     expect(source).toContain('buildAvailableAIChatTools');
   });
+
+  it('keeps the v2 history mode sorted by the latest updated session first', () => {
+    expect(source).toContain('const orderedAISessions = useMemo(');
+    expect(source).toContain('right.updatedAt - left.updatedAt');
+    expect(source).toContain('const sessions = orderedAISessions.slice(0, 8);');
+  });
 });
