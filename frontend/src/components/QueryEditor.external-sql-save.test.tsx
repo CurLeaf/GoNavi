@@ -983,6 +983,35 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
+  it('keeps ctrl+q object info silent when no object is recognized', async () => {
+    editorState.value = 'select 1';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const showObjectInfoAction = editorState.editor.addAction.mock.calls
+      .map((call: any[]) => call[0])
+      .find((action: any) => action?.id === 'gonavi.queryEditor.showObjectInfo');
+    expect(showObjectInfoAction).toBeTruthy();
+
+    editorState.position = { lineNumber: 1, column: 1 };
+    await act(async () => {
+      showObjectInfoAction.run();
+    });
+
+    expect(editorState.contentHoverCalls).toHaveLength(0);
+    expect(messageApi.info).not.toHaveBeenCalled();
+  });
+
   it('adds separate object and column color decorations', async () => {
     editorState.value = 'select users.id from users';
     autoFetchState.visible = true;

@@ -2820,13 +2820,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           keybindings: showObjectInfoKeybinding,
           run: () => {
               const preferredPosition = lastHoverTargetPositionRef.current || editor.getPosition?.();
-              const shown = showObjectInfoAtPosition(preferredPosition);
-              if (!shown) {
-                  void message.info({
-                      key: 'gonavi-query-editor-object-info-miss',
-                      content: '当前光标未定位到可识别的表或字段。',
-                  });
-              }
+              showObjectInfoAtPosition(preferredPosition);
           },
       });
 
