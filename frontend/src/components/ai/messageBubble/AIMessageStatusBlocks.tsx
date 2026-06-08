@@ -24,6 +24,7 @@ interface AIToolCallingBlockProps {
 
 const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_ai_runtime: '读取当前 AI 运行状态',
+  inspect_ai_safety: '读取当前 AI 安全边界',
   inspect_ai_providers: '读取当前 AI 供应商与模型配置',
   inspect_ai_chat_readiness: '读取当前 AI 聊天发送前置状态',
   inspect_mcp_setup: '读取当前 MCP 配置状态',

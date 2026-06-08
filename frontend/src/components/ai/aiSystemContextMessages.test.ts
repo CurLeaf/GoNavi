@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_runtime', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_saved_connections', 'inspect_saved_queries', 'inspect_sql_snippets', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_saved_connections', 'inspect_saved_queries', 'inspect_sql_snippets', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -76,6 +76,7 @@ describe('buildAISystemContextMessages', () => {
     const joined = messages.map((message) => message.content).join('\n');
     expect(joined).toContain('inspect_workspace_tabs 盘点当前工作区');
     expect(joined).toContain('inspect_ai_runtime 读取当前 AI 运行状态');
+    expect(joined).toContain('inspect_ai_safety 读取真实安全边界');
     expect(joined).toContain('inspect_ai_providers 读取真实供应商配置');
     expect(joined).toContain('inspect_ai_chat_readiness 读取真实发送前置状态');
     expect(joined).toContain('inspect_mcp_setup 读取真实 MCP 配置');

@@ -28,6 +28,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_database_bundle');
     expect(markup).toContain('查看 AI 当前能力');
     expect(markup).toContain('inspect_ai_runtime');
+    expect(markup).toContain('核对写入安全边界');
+    expect(markup).toContain('inspect_ai_safety');
     expect(markup).toContain('排查供应商与模型');
     expect(markup).toContain('inspect_ai_providers');
     expect(markup).toContain('排查聊天发送状态');

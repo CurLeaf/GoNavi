@@ -43,6 +43,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前模型、安全级别、上下文级别、Skills 和 MCP 工具，再决定让 AI 走哪条探针链路。',
   },
   {
+    title: '核对写入安全边界',
+    steps: 'inspect_ai_safety → inspect_ai_runtime → inspect_current_connection',
+    description: '适合先确认当前是不是只读、DDL/DML 到底允不允许、MCP 写操作是否还需要 allowMutating，再决定后续该走查询、改数据还是改结构。',
+  },
+  {
     title: '排查供应商与模型',
     steps: 'inspect_ai_providers → inspect_ai_runtime',
     description: '适合先确认当前到底配置了哪些供应商、哪个在生效、有没有缺密钥或没选模型，再解释为什么 AI 不能发送、为什么模型列表为空。',

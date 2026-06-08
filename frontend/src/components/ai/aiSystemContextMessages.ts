@@ -108,6 +108,19 @@ const appendAIRuntimeInspectionGuidance = (
   });
 };
 
+const appendAISafetyInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_safety')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“为什么现在不能写”“当前是不是只读”“DDL 能不能执行”“allowMutating 要不要传”，优先调用 inspect_ai_safety 读取真实安全边界，不要只凭界面现象或记忆猜测。',
+  });
+};
+
 const appendAIProviderInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -271,6 +284,7 @@ export function buildAISystemContextMessages({
 7. 如果命令权限不允许某类操作，就不要输出该类命令；无法满足时直接说明限制。`,
     });
     appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+    appendAISafetyInspectionGuidance(systemMessages, availableToolNames);
     appendCustomPromptGroup(systemMessages, ['jvmDiagnostic'], userPromptSettings);
     appendSkillPromptGroup(systemMessages, ['jvmDiagnostic'], skills, availableToolNames);
     return systemMessages;
@@ -305,6 +319,7 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 6. 不要输出脚本、命令或“已经执行成功”之类的表述。`,
     });
     appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+    appendAISafetyInspectionGuidance(systemMessages, availableToolNames);
     appendCustomPromptGroup(systemMessages, ['jvm'], userPromptSettings);
     appendSkillPromptGroup(systemMessages, ['jvm'], skills, availableToolNames);
     return systemMessages;
@@ -377,6 +392,7 @@ SELECT * FROM users WHERE status = 1;
     });
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+  appendAISafetyInspectionGuidance(systemMessages, availableToolNames);
   appendAIChatReadinessInspectionGuidance(systemMessages, availableToolNames);
   appendAIProviderInspectionGuidance(systemMessages, availableToolNames);
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);

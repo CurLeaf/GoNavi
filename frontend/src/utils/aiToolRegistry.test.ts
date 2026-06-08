@@ -10,6 +10,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('当前供应商');
   });
 
+  it('registers the ai-safety inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_safety');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('写入安全边界');
+    expect(info?.tool.function.description).toContain('allowMutating');
+  });
+
   it('registers the mcp-setup inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_setup');
     expect(info).toBeTruthy();
@@ -79,6 +86,7 @@ describe('aiToolRegistry', () => {
     }]);
 
     expect(tools.some((item) => item.function.name === 'inspect_ai_runtime')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_safety')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_providers')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);

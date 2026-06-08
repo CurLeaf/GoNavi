@@ -21,6 +21,7 @@ import { buildAIGuidanceSnapshot } from './aiPromptInsights';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
+import { buildAISafetySnapshot } from './aiSafetyInsights';
 import {
   buildSavedQueriesSnapshot,
   buildSqlSnippetsSnapshot,
@@ -107,6 +108,21 @@ export async function executeSnapshotInspectionToolCall(
             mcpTools,
             dynamicModels,
             builtinToolNames: BUILTIN_AI_TOOL_NAMES,
+          })),
+          success: true,
+        };
+      }
+      case 'inspect_ai_safety': {
+        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
+          ? await runtime.getAIRuntimeState()
+          : undefined;
+        return {
+          content: JSON.stringify(buildAISafetySnapshot({
+            safetyLevel: runtimeState?.safetyLevel,
+            activeContext,
+            tabs,
+            activeTabId,
+            connections,
           })),
           success: true,
         };
@@ -254,6 +270,7 @@ export async function executeSnapshotInspectionToolCall(
   } catch (error: any) {
     const label = {
       inspect_ai_runtime: '读取当前 AI 运行状态失败',
+      inspect_ai_safety: '读取当前 AI 安全边界失败',
       inspect_ai_providers: '读取当前 AI 供应商配置失败',
       inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',

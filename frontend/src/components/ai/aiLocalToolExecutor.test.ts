@@ -224,6 +224,57 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"builtinToolCount":');
   });
 
+  it('returns the current ai safety snapshot so the model can inspect write boundaries and readonly guards', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_safety', {}),
+      connections: [{
+        id: 'jvm-1',
+        name: 'JVM 诊断环境',
+        config: {
+          type: 'jvm',
+          host: '10.0.0.8',
+          port: 0,
+          user: '',
+          jvm: {
+            environment: 'uat',
+            readOnly: true,
+            diagnostic: {
+              transport: 'agent-bridge',
+              allowObserveCommands: true,
+              allowTraceCommands: true,
+              allowMutatingCommands: false,
+            },
+          },
+        },
+      }],
+      tabs: [{
+        id: 'diag-tab-1',
+        title: 'JVM 诊断',
+        type: 'jvm-diagnostic',
+        connectionId: 'jvm-1',
+        readOnly: true,
+      }],
+      activeTabId: 'diag-tab-1',
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          safetyLevel: 'readwrite',
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"safetyLevel":"readwrite"');
+    expect(result.content).toContain('"allowDML":true');
+    expect(result.content).toContain('"allowDDL":false');
+    expect(result.content).toContain('"readOnly":true');
+    expect(result.content).toContain('"allowMutatingCommands":false');
+    expect(result.content).toContain('allowMutating=true');
+  });
+
   it('returns the current ai provider snapshot so the model can inspect provider readiness and model selection', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_ai_providers', {}),
