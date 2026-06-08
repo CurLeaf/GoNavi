@@ -429,6 +429,12 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“外部 SQL 目录”“目录里的脚本”“某个 SQL 文件放在哪个目录”“当前打开的 SQL 文件来自哪里”，优先调用 inspect_external_sql_directories 读取真实外部 SQL 目录资产，再决定继续读取活动页签还是定位具体脚本。',
     });
   }
+  if (availableToolNames.includes('inspect_external_sql_file')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户已经给出了某个外部 SQL 文件路径，或明确提到“帮我看看这个目录里的 report.sql / job.sql 在写什么”，优先调用 inspect_external_sql_file 读取真实文件内容；如果这个文件已经在编辑器中打开，再结合 inspect_active_tab 看当前草稿。',
+    });
+  }
   if (availableToolNames.includes('inspect_saved_queries')) {
     systemMessages.push({
       role: 'system',

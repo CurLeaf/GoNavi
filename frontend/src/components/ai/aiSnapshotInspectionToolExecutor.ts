@@ -31,7 +31,9 @@ import {
   buildSqlSnippetsSnapshot,
 } from './aiSavedSqlInsights';
 import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
+import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
 import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
+import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -49,6 +51,7 @@ export interface AISnapshotInspectionRuntime {
   getAIRuntimeState?: () => Promise<AISnapshotInspectionRuntimeState | undefined>;
   getMCPServers?: () => Promise<AIMCPServerConfig[] | undefined>;
   getMCPClientInstallStatuses?: () => Promise<AIMCPClientInstallStatus[] | undefined>;
+  readSQLFile?: (filePath: string) => Promise<any>;
 }
 
 interface ExecuteSnapshotInspectionToolCallOptions {
@@ -237,6 +240,41 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_external_sql_file': {
+        const requestedFilePath = String(args.filePath || '').trim();
+        if (!requestedFilePath) {
+          return {
+            content: '读取外部 SQL 文件失败: filePath 不能为空',
+            success: false,
+          };
+        }
+        if (!findBestMatchingExternalSQLDirectory(requestedFilePath, externalSQLDirectories)) {
+          return {
+            content: '读取外部 SQL 文件失败: 目标文件不在已配置的外部 SQL 目录中',
+            success: false,
+          };
+        }
+        const readResult = typeof runtime?.readSQLFile === 'function'
+          ? await runtime.readSQLFile(requestedFilePath)
+          : { success: false, message: '当前环境暂不支持读取本地 SQL 文件' };
+        if (!readResult?.success) {
+          return {
+            content: `读取外部 SQL 文件失败: ${readResult?.message || '未知错误'}`,
+            success: false,
+          };
+        }
+        return {
+          content: JSON.stringify(buildExternalSQLFileSnapshot({
+            filePath: requestedFilePath,
+            previewCharLimit: args.previewCharLimit,
+            readResult: readResult?.data,
+            externalSQLDirectories,
+            connections,
+            tabs,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_active_tab':
         return {
           content: JSON.stringify(buildActiveTabSnapshot({
@@ -328,6 +366,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',
       inspect_external_sql_directories: '读取外部 SQL 目录失败',
+      inspect_external_sql_file: '读取外部 SQL 文件失败',
       inspect_ai_sessions: '读取本地 AI 会话清单失败',
       inspect_active_tab: '读取当前活动页签失败',
       inspect_workspace_tabs: '读取当前工作区页签失败',

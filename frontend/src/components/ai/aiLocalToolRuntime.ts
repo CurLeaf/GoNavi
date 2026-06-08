@@ -1,4 +1,4 @@
-import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
+import { DBGetAllColumns, DBGetDatabases, DBGetTables, ReadSQLFile } from '../../../wailsjs/go/app/App';
 
 import type { AISnapshotInspectionRuntime } from './aiSnapshotInspectionToolExecutor';
 
@@ -12,6 +12,7 @@ export interface AILocalToolRuntime extends AISnapshotInspectionRuntime {
   getDatabases: (config: any) => Promise<any>;
   getTables: (config: any, dbName: string) => Promise<any>;
   getAllColumns: (config: any, dbName: string) => Promise<any>;
+  readSQLFile: (filePath: string) => Promise<any>;
   getColumns: (config: any, dbName: string, tableName: string) => Promise<any>;
   getIndexes: (config: any, dbName: string, tableName: string) => Promise<any>;
   getForeignKeys: (config: any, dbName: string, tableName: string) => Promise<any>;
@@ -28,6 +29,7 @@ export const buildDefaultLocalToolRuntime = (): AILocalToolRuntime => ({
   getDatabases: DBGetDatabases,
   getTables: DBGetTables,
   getAllColumns: DBGetAllColumns,
+  readSQLFile: ReadSQLFile,
   getColumns: async (config, dbName, tableName) => {
     const mod = await import('../../../wailsjs/go/app/App');
     return mod.DBGetColumns(config, dbName, tableName);

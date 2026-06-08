@@ -46,6 +46,7 @@ describe('AIChatPanel message render isolation', () => {
     expect(systemContextSource).toContain('inspect_workspace_tabs 盘点当前工作区');
     expect(systemContextSource).toContain('inspect_current_connection');
     expect(systemContextSource).toContain('inspect_external_sql_directories');
+    expect(systemContextSource).toContain('inspect_external_sql_file');
     expect(source).toContain('tabs: useStore.getState().tabs');
     expect(source).toContain('activeTabId: useStore.getState().activeTabId');
     expect(source).toContain('externalSQLDirectories: useStore.getState().externalSQLDirectories');

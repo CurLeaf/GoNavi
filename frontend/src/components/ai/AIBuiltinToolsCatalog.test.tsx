@@ -48,6 +48,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_saved_connections');
     expect(markup).toContain('盘点外部 SQL 目录');
     expect(markup).toContain('inspect_external_sql_directories');
+    expect(markup).toContain('读取外部 SQL 文件');
+    expect(markup).toContain('inspect_external_sql_file');
     expect(markup).toContain('读取当前页签');
     expect(markup).toContain('inspect_active_tab');
     expect(markup).toContain('盘点当前工作区');

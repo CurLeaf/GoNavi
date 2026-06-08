@@ -1,4 +1,7 @@
 import type { ExternalSQLDirectory, SavedConnection, TabData } from '../../types';
+import {
+  isExternalSQLPathInsideDirectory,
+} from './aiExternalSqlPathUtils';
 
 const normalizeLimit = (input: unknown, fallback: number, max: number): number => {
   const value = Math.floor(Number(input) || fallback);
@@ -9,26 +12,11 @@ const normalizeLimit = (input: unknown, fallback: number, max: number): number =
 
 const normalizeKeyword = (input: unknown): string => String(input || '').trim().toLowerCase();
 
-const normalizePath = (input: unknown): string =>
-  String(input || '').trim().replace(/\\/g, '/').replace(/\/+$/u, '');
-
 const matchesKeyword = (keyword: string, fields: Array<string | undefined>): boolean => {
   if (!keyword) {
     return true;
   }
   return fields.some((field) => String(field || '').toLowerCase().includes(keyword));
-};
-
-const belongsToDirectory = (filePath: string, directoryPath: string): boolean => {
-  if (!filePath || !directoryPath) {
-    return false;
-  }
-  const normalizedFilePath = normalizePath(filePath).toLowerCase();
-  const normalizedDirectoryPath = normalizePath(directoryPath).toLowerCase();
-  if (!normalizedFilePath || !normalizedDirectoryPath) {
-    return false;
-  }
-  return normalizedFilePath === normalizedDirectoryPath || normalizedFilePath.startsWith(`${normalizedDirectoryPath}/`);
 };
 
 export const buildExternalSQLDirectoriesSnapshot = (params: {
@@ -79,7 +67,7 @@ export const buildExternalSQLDirectoriesSnapshot = (params: {
 
   const visibleDirectories = filteredDirectories.slice(0, safeLimit).map((directory) => {
     const connection = connections.find((item) => item.id === directory.connectionId);
-    const matchingTabs = externalSqlTabs.filter((tab) => belongsToDirectory(String(tab.filePath || ''), directory.path));
+    const matchingTabs = externalSqlTabs.filter((tab) => isExternalSQLPathInsideDirectory(String(tab.filePath || ''), directory.path));
 
     return {
       id: directory.id,

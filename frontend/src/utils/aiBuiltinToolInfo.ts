@@ -521,6 +521,30 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_external_sql_file",
+    icon: "📄",
+    desc: "读取外部 SQL 文件内容",
+    detail:
+      "传入具体 filePath，读取已配置外部 SQL 目录中的 SQL 文件内容，并返回所属目录、绑定连接/数据库、是否已有打开页签，以及截断后的正文预览。适合用户提到“看一下这个目录里的某个脚本”“帮我解释 report.sql 在写什么”时，先读取真实文件内容再分析。",
+    params: "filePath, previewCharLimit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_external_sql_file",
+        description:
+          "读取指定外部 SQL 文件的内容预览，仅用于已配置外部 SQL 目录中的 SQL 文件。返回文件路径、所属目录、绑定连接/数据库、是否已在工作区打开，以及截断后的正文内容。适用于用户提到某个目录中的具体 SQL 脚本、想让 AI 直接解释脚本逻辑、或想确认某个外部 SQL 文件内容时，先读真实文件再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            filePath: { type: "string", description: "必填，要读取的 SQL 文件绝对路径，通常先通过 inspect_external_sql_directories 找到" },
+            previewCharLimit: { type: "number", description: "可选，正文预览最多返回多少字符，默认 12000，最大 40000" },
+          },
+          required: ["filePath"],
+        },
+      },
+    },
+  },
+  {
     name: "inspect_active_tab",
     icon: "📍",
     desc: "查看当前活动页签上下文",
