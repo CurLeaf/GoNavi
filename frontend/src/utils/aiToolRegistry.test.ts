@@ -24,6 +24,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('模型列表为空');
   });
 
+  it('registers the chat-readiness inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_chat_readiness');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('发送条件');
+    expect(info?.tool.function.description).toContain('当前 AI 聊天输入区');
+  });
+
   it('registers the ai-guidance inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_guidance');
     expect(info).toBeTruthy();
@@ -66,6 +73,7 @@ describe('aiToolRegistry', () => {
 
     expect(tools.some((item) => item.function.name === 'inspect_ai_runtime')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_providers')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_guidance')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);

@@ -6,6 +6,7 @@ import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
     AIMCPToolDescriptor,
+    AIProviderConfig,
     AISkillConfig,
     AIUserPromptSettings,
     AIToolCall,
@@ -22,9 +23,10 @@ import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import AIMessageRenderBoundary from './ai/AIMessageRenderBoundary';
 import AIChatPanelModeContent, { type AIChatInsightItem } from './ai/AIChatPanelModeContent';
-import type { AIComposerNotice } from '../utils/aiComposerNotice';
+import type { AIComposerNotice, AIComposerNoticeAction } from '../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
+    buildIncompleteProviderNotice,
     buildMissingModelNotice,
     buildMissingProviderNotice,
     buildModelFetchFailedNotice,
@@ -40,6 +42,7 @@ import {
     executeLocalAIToolCall,
     type AIToolContextEntry,
 } from './ai/aiLocalToolExecutor';
+import { buildAIChatReadinessSnapshot } from './ai/aiChatReadiness';
 import { buildAISystemContextMessages } from './ai/aiSystemContextMessages';
 
 interface AIChatPanelProps {
@@ -67,7 +70,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const [input, setInput] = useState('');
     const [draftImages, setDraftImages] = useState<string[]>([]);
     const [sending, setSending] = useState(false);
-    const [activeProvider, setActiveProvider] = useState<any>(null);
+    const [activeProvider, setActiveProvider] = useState<AIProviderConfig | null>(null);
     const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
     const [mcpTools, setMcpTools] = useState<AIMCPToolDescriptor[]>([]);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
@@ -417,8 +420,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }, 500);
     }, [loadActiveProvider, onOpenSettings]);
 
-    const handleComposerNoticeAction = useCallback(() => {
-        const actionKey = composerNotice?.action?.key;
+    const handleComposerAction = useCallback((actionKey: AIComposerNoticeAction) => {
         if (actionKey === 'open-settings') {
             handleOpenSettingsFromPanel();
             return;
@@ -426,7 +428,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         if (actionKey === 'reload-models') {
             void fetchDynamicModels();
         }
-    }, [composerNotice?.action?.key, fetchDynamicModels, handleOpenSettingsFromPanel]);
+    }, [fetchDynamicModels, handleOpenSettingsFromPanel]);
 
     useEffect(() => {
         if (messages.length === 0) return;
@@ -1005,12 +1007,25 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const text = input.trim();
         if ((!text && draftImages.length === 0) || sending) return;
 
-        // 前置校验：必须配置供应商且选择模型后才能发送
-        if (!activeProvider) {
+        const connectionKey = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
+        const readiness = buildAIChatReadinessSnapshot({
+            activeProvider,
+            dynamicModels,
+            loadingModels,
+            activeContext,
+            activeContextItems: aiContexts[connectionKey] || [],
+        });
+
+        // 前置校验：必须配置供应商、补全基础参数并选择模型后才能发送
+        if (readiness.status === 'missing_provider') {
             setComposerNotice(buildMissingProviderNotice());
             return;
         }
-        if (!activeProvider.model || !activeProvider.model.trim()) {
+        if (readiness.status === 'provider_incomplete') {
+            setComposerNotice(buildIncompleteProviderNotice(readiness.issues));
+            return;
+        }
+        if (readiness.status === 'missing_model' || readiness.status === 'loading_models') {
             setComposerNotice(buildMissingModelNotice());
             return;
         }
@@ -1137,11 +1152,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         messages,
         addAIChatMessage,
         sid,
+        activeContext,
         activeProvider,
+        aiContexts,
         availableTools,
         buildSystemContextMessages,
+        dynamicModels,
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
+        loadingModels,
     ]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1473,7 +1492,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 sendShortcutBinding={aiChatSendShortcutBinding}
                 shortcutPlatform={activeShortcutPlatform}
                 composerNotice={composerNotice}
-                onComposerNoticeAction={handleComposerNoticeAction}
+                onComposerAction={handleComposerAction}
                 onModelChange={handleModelChange}
                 onFetchModels={fetchDynamicModels}
                 textareaRef={textareaRef}

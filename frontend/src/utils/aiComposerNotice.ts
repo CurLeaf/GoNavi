@@ -1,3 +1,6 @@
+import type { AIChatReadinessIssue } from '../components/ai/aiChatReadiness';
+import { formatAIChatProviderIssueLabels } from '../components/ai/aiChatReadiness';
+
 export type AIComposerNoticeTone = 'warning' | 'error';
 export type AIComposerNoticeAction = 'open-settings' | 'reload-models';
 
@@ -32,6 +35,22 @@ export const buildMissingModelNotice = (): AIComposerNotice => ({
     label: '重新加载模型',
   },
 });
+
+export const buildIncompleteProviderNotice = (issues: AIChatReadinessIssue[] = []): AIComposerNotice => {
+  const missingLabels = formatAIChatProviderIssueLabels(issues.filter((issue) => issue !== 'missing_selected_model'));
+  const title = missingLabels.length > 0
+    ? `当前供应商还缺少 ${missingLabels.join('、')}`
+    : '当前供应商配置还不完整';
+  return {
+    tone: 'error',
+    title,
+    description: '先补全供应商配置再发送，避免请求刚发起就失败。',
+    action: {
+      key: 'open-settings',
+      label: '修复供应商配置',
+    },
+  };
+};
 
 export const buildModelFetchFailedNotice = (error?: string): AIComposerNotice => ({
   tone: 'error',

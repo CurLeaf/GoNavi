@@ -278,6 +278,52 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).not.toContain('secret-token');
   });
 
+  it('returns the current chat readiness snapshot so the model can inspect why ai input cannot send yet', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_chat_readiness', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      dynamicModels: ['gpt-5.5', 'gpt-4.1-mini'],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'demo',
+      },
+      aiContexts: {
+        'conn-1:demo': [{
+          dbName: 'demo',
+          tableName: 'orders',
+          ddl: 'CREATE TABLE orders (...)',
+        }],
+      },
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          activeProviderId: 'provider-1',
+          providers: [{
+            id: 'provider-1',
+            type: 'openai',
+            name: 'OpenAI 主账号',
+            apiKey: '',
+            hasSecret: true,
+            baseUrl: 'https://api.openai.com/v1',
+            model: '',
+            models: ['gpt-5.5', 'gpt-4.1-mini'],
+            maxTokens: 32000,
+            temperature: 0.2,
+          }],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"status":"missing_model"');
+    expect(result.content).toContain('"contextAttachedCount":1');
+    expect(result.content).toContain('"selectableModelCount":2');
+    expect(result.content).toContain('OpenAI 主账号');
+  });
+
   it('returns the current mcp setup snapshot so the model can inspect configured servers and client install state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_setup', {}),

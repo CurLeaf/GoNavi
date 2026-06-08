@@ -30,6 +30,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_ai_runtime');
     expect(markup).toContain('排查供应商与模型');
     expect(markup).toContain('inspect_ai_providers');
+    expect(markup).toContain('排查聊天发送状态');
+    expect(markup).toContain('inspect_ai_chat_readiness');
     expect(markup).toContain('排查 MCP 接入状态');
     expect(markup).toContain('inspect_mcp_setup');
     expect(markup).toContain('查看当前提示与 Skills');

@@ -121,6 +121,19 @@ const appendAIProviderInspectionGuidance = (
   });
 };
 
+const appendAIChatReadinessInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_chat_readiness')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“为什么现在不能发送”“当前 AI 聊天到底缺什么配置”“输入区准备好了没有”，优先调用 inspect_ai_chat_readiness 读取真实发送前置状态，不要只凭界面现象或记忆判断。',
+  });
+};
+
 const appendMCPSetupInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -364,6 +377,7 @@ SELECT * FROM users WHERE status = 1;
     });
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+  appendAIChatReadinessInspectionGuidance(systemMessages, availableToolNames);
   appendAIProviderInspectionGuidance(systemMessages, availableToolNames);
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);

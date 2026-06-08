@@ -1,10 +1,11 @@
 import React from 'react';
-import { Input, Select, Tooltip, message, Button } from 'antd';
-import { CodeOutlined, DatabaseOutlined, DownOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined } from '@ant-design/icons';
+import { Input, Tooltip, message, Button } from 'antd';
+import { CodeOutlined, DatabaseOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined } from '@ant-design/icons';
 import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
-import type { AIComposerNotice } from '../../utils/aiComposerNotice';
+import type { AIComposerNotice, AIComposerNoticeAction } from '../../utils/aiComposerNotice';
+import type { AIProviderConfig } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
@@ -12,8 +13,11 @@ import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shor
 import AIContextSelectorModal from './AIContextSelectorModal';
 import AISlashCommandMenu, { type AISlashCommandDefinition } from './AISlashCommandMenu';
 import AIChatComposerNotice from './AIChatComposerNotice';
+import AIChatComposerStatus from './AIChatComposerStatus';
 import AIChatAttachmentStrip from './AIChatAttachmentStrip';
 import AIChatContextPreview from './AIChatContextPreview';
+import AIChatProviderModelSelect from './AIChatProviderModelSelect';
+import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { filterAISlashCommands } from './aiSlashCommands';
 
 interface AIChatInputProps {
@@ -26,14 +30,14 @@ interface AIChatInputProps {
     onStop: () => void;
     handleKeyDown: (e: React.KeyboardEvent) => void;
     activeConnName: string;
-    activeContext: any;
-    activeProvider: any;
+    activeContext: { connectionId?: string | null; dbName?: string | null } | null;
+    activeProvider: AIProviderConfig | null;
     dynamicModels: string[];
     loadingModels: boolean;
     sendShortcutBinding: ShortcutPlatformBinding;
     shortcutPlatform?: ShortcutPlatform;
     composerNotice?: AIComposerNotice | null;
-    onComposerNoticeAction?: () => void;
+    onComposerAction?: (actionKey: AIComposerNoticeAction) => void;
     onModelChange: (val: string) => void;
     onFetchModels: () => void;
     textareaRef: React.RefObject<HTMLTextAreaElement>;
@@ -49,7 +53,7 @@ interface AIChatInputProps {
 export const AIChatInput: React.FC<AIChatInputProps> = ({
     input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
-    sendShortcutBinding, shortcutPlatform = 'windows', composerNotice, onComposerNoticeAction,
+    sendShortcutBinding, shortcutPlatform = 'windows', composerNotice, onComposerAction,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
@@ -100,6 +104,13 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
     const connectionKey = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
     const activeContextItems = aiContexts[connectionKey] || [];
+    const composerReadiness = React.useMemo(() => buildAIChatReadinessSnapshot({
+        activeProvider,
+        dynamicModels,
+        loadingModels,
+        activeContext,
+        activeContextItems,
+    }), [activeProvider, dynamicModels, loadingModels, activeContext, activeContextItems]);
 
     const fetchTablesForDb = async (dbName: string, connConfig: any) => {
         setContextLoading(true);
@@ -159,6 +170,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     };
 
     const handleAppendContext = async () => {
+        if (!activeContext?.connectionId) {
+            return;
+        }
         const conn = useStore.getState().connections.find(c => c.id === activeContext.connectionId);
         if (!conn) return;
 
@@ -260,6 +274,16 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         textareaRef.current?.focus();
     }, [setInput, textareaRef]);
 
+    const handleComposerNoticeAction = React.useCallback(() => {
+        if (composerNotice?.action?.key && typeof onComposerAction === 'function') {
+            onComposerAction(composerNotice.action.key);
+        }
+    }, [composerNotice?.action?.key, onComposerAction]);
+    const composerActionHandler = typeof onComposerAction === 'function' ? onComposerAction : undefined;
+    const composerNoticeActionHandler = composerNotice?.action?.key && composerActionHandler
+        ? handleComposerNoticeAction
+        : undefined;
+
     const handleRemoveDraftImage = React.useCallback((index: number) => {
         setDraftImages(prev => prev.filter((_, currentIndex) => currentIndex !== index));
     }, [setDraftImages]);
@@ -303,8 +327,16 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         darkMode={darkMode}
                         textColor={textColor}
                         mutedColor={mutedColor}
-                        onComposerNoticeAction={onComposerNoticeAction}
+                        onComposerNoticeAction={composerNoticeActionHandler}
                     />
+                    {!composerNotice && (
+                        <AIChatComposerStatus
+                            snapshot={composerReadiness}
+                            darkMode={darkMode}
+                            overlayTheme={overlayTheme}
+                            onAction={composerActionHandler}
+                        />
+                    )}
                     <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                         <AISlashCommandMenu
                             visible={showSlashMenu}
@@ -351,25 +383,14 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                                 </Tooltip>
                             )}
 
-                            {activeProvider && (
-                                <Select
-                                    size="small"
-                                    variant="filled"
-                                    value={activeProvider.model || undefined}
-                                    onChange={onModelChange}
-                                    onOpenChange={(open) => {
-                                        if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
-                                            onFetchModels();
-                                        }
-                                    }}
-                                    loading={loadingModels}
-                                    options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
-                                    style={{ width: 130, fontSize: 11, background: 'transparent' }}
-                                    styles={{ popup: { root: { minWidth: 200 } } }}
-                                    showSearch
-                                    placeholder="选择模型"
-                                />
-                            )}
+                            <AIChatProviderModelSelect
+                                activeProvider={activeProvider}
+                                dynamicModels={dynamicModels}
+                                loadingModels={loadingModels}
+                                variant="legacy"
+                                onModelChange={onModelChange}
+                                onFetchModels={onFetchModels}
+                            />
 
                             {contextUsageChars !== undefined && maxContextChars !== undefined && (
                                 <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
@@ -507,8 +528,16 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     darkMode={darkMode}
                     textColor={textColor}
                     mutedColor={mutedColor}
-                    onComposerNoticeAction={onComposerNoticeAction}
+                    onComposerNoticeAction={composerNoticeActionHandler}
                 />
+                {!composerNotice && (
+                    <AIChatComposerStatus
+                        snapshot={composerReadiness}
+                        darkMode={darkMode}
+                        overlayTheme={overlayTheme}
+                        onAction={composerActionHandler}
+                    />
+                )}
                 <div className="gn-v2-ai-input-box" data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                     <AISlashCommandMenu
                         visible={showSlashMenu}
@@ -602,24 +631,14 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         </Tooltip>
                     )}
 
-                    {activeProvider && (
-                        <Select
-                            size="small"
-                            value={activeProvider.model || undefined}
-                            onChange={onModelChange}
-                            onOpenChange={(open) => {
-                                if (open && dynamicModels.length === 0 && (activeProvider.models || []).length === 0) {
-                                    onFetchModels();
-                                }
-                            }}
-                            loading={loadingModels}
-                            options={(dynamicModels.length > 0 ? dynamicModels : (activeProvider.models || [])).map((m: string) => ({ label: m, value: m }))}
-                            styles={{ popup: { root: { minWidth: 200 } } }}
-                            placeholder="选择模型"
-                            className="gn-v2-ai-model-select"
-                            suffixIcon={<DownOutlined />}
-                        />
-                    )}
+                    <AIChatProviderModelSelect
+                        activeProvider={activeProvider}
+                        dynamicModels={dynamicModels}
+                        loadingModels={loadingModels}
+                        variant="v2"
+                        onModelChange={onModelChange}
+                        onFetchModels={onFetchModels}
+                    />
 
                     <div className="gn-v2-ai-model-spacer" />
 

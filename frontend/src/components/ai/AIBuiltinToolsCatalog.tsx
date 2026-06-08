@@ -48,6 +48,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前到底配置了哪些供应商、哪个在生效、有没有缺密钥或没选模型，再解释为什么 AI 不能发送、为什么模型列表为空。',
   },
   {
+    title: '排查聊天发送状态',
+    steps: 'inspect_ai_chat_readiness → inspect_ai_providers',
+    description: '适合先确认当前聊天输入区到底缺什么前置条件，例如没选活动供应商、缺密钥、缺接口地址、没选模型，避免只凭界面现象猜测。',
+  },
+  {
     title: '排查 MCP 接入状态',
     steps: 'inspect_mcp_setup → inspect_ai_runtime',
     description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合运行时工具列表判断为什么某个工具没暴露出来。',

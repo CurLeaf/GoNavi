@@ -344,6 +344,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_chat_readiness",
+    icon: "🚦",
+    desc: "查看当前 AI 聊天是否具备发送条件",
+    detail:
+      "返回当前聊天输入区是否已经具备发送条件，包括有没有活动供应商、当前供应商是否缺密钥或接口地址、是否已选模型、当前连接/表结构上下文是否已挂载，以及下一步建议动作。适合用户问“为什么现在不能发送”“输入框到底缺什么配置”“当前 AI 聊天准备好了没有”时先读真实状态。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_chat_readiness",
+        description:
+          "读取当前 AI 聊天输入区的发送前置状态，包括活动供应商、密钥和接口地址是否完整、是否已选模型、当前连接上下文和已挂载表结构数量，以及建议的下一步动作。适用于用户提到为什么现在不能发送、为什么输入区还没准备好、当前到底缺什么配置时，先读取真实状态再回答。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_setup",
     icon: "🪛",
     desc: "查看当前 MCP 配置与外部接入状态",

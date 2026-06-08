@@ -20,6 +20,19 @@ vi.mock('../../../wailsjs/go/app/App', () => ({
   DBGetColumns: vi.fn(),
 }));
 
+const baseProvider = {
+  id: 'provider-1',
+  type: 'openai' as const,
+  name: 'OpenAI 主账号',
+  apiKey: '',
+  hasSecret: true,
+  baseUrl: 'https://api.openai.com/v1',
+  model: '',
+  models: [] as string[],
+  maxTokens: 32000,
+  temperature: 0.2,
+};
+
 const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChatInput>> = {}) => renderToStaticMarkup(
   <AIChatInput
     input=""
@@ -32,12 +45,12 @@ const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChat
     handleKeyDown={() => {}}
     activeConnName=""
     activeContext={null}
-    activeProvider={{ model: '', models: [] }}
+    activeProvider={baseProvider}
     dynamicModels={[]}
     loadingModels={false}
     sendShortcutBinding={{ combo: 'Enter', enabled: true }}
     composerNotice={null}
-    onComposerNoticeAction={() => {}}
+    onComposerAction={() => {}}
     onModelChange={() => {}}
     onFetchModels={() => {}}
     textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -64,7 +77,7 @@ describe('AIChatInput notice layout', () => {
         handleKeyDown={() => {}}
         activeConnName=""
         activeContext={null}
-        activeProvider={{ model: '', models: [] }}
+        activeProvider={baseProvider}
         dynamicModels={[]}
         loadingModels={false}
         sendShortcutBinding={{ combo: 'Enter', enabled: true }}
@@ -77,7 +90,7 @@ describe('AIChatInput notice layout', () => {
             label: '重新加载模型',
           },
         }}
-        onComposerNoticeAction={() => {}}
+        onComposerAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -110,13 +123,13 @@ describe('AIChatInput notice layout', () => {
         handleKeyDown={() => {}}
         activeConnName=""
         activeContext={null}
-        activeProvider={{ model: '', models: [] }}
+        activeProvider={baseProvider}
         dynamicModels={[]}
         loadingModels={false}
         sendShortcutBinding={{ combo: 'Meta+Enter', enabled: true }}
         shortcutPlatform="mac"
         composerNotice={null}
-        onComposerNoticeAction={() => {}}
+        onComposerAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -144,12 +157,12 @@ describe('AIChatInput notice layout', () => {
         handleKeyDown={() => {}}
         activeConnName=""
         activeContext={null}
-        activeProvider={{ model: 'gpt-5.5', models: ['gpt-5.5'] }}
+        activeProvider={{ ...baseProvider, model: 'gpt-5.5', models: ['gpt-5.5'] }}
         dynamicModels={[]}
         loadingModels={false}
         sendShortcutBinding={{ combo: 'Enter', enabled: true }}
         composerNotice={null}
-        onComposerNoticeAction={() => {}}
+        onComposerAction={() => {}}
         onModelChange={() => {}}
         onFetchModels={() => {}}
         textareaRef={React.createRef<HTMLTextAreaElement>()}
@@ -196,9 +209,37 @@ describe('AIChatInput notice layout', () => {
           label: '打开 AI 设置',
         },
       },
-      onComposerNoticeAction: () => {},
+      onComposerAction: () => {},
     });
 
     expect(markup).toContain('打开 AI 设置');
+  });
+
+  it('renders a proactive readiness status when no active provider is configured yet', () => {
+    const markup = renderAIChatInput({ activeProvider: null });
+
+    expect(markup).toContain('data-ai-chat-composer-status="true"');
+    expect(markup).toContain('还没有配置 AI 供应商');
+    expect(markup).toContain('打开 AI 设置');
+  });
+
+  it('surfaces incomplete provider state before send when base url or secret is missing', () => {
+    const markup = renderAIChatInput({
+      activeProvider: {
+        id: 'provider-1',
+        type: 'custom',
+        name: '自建代理',
+        apiKey: '',
+        hasSecret: false,
+        baseUrl: '',
+        model: '',
+        models: [],
+        maxTokens: 16000,
+        temperature: 0.7,
+      },
+    });
+
+    expect(markup).toContain('自建代理 还缺少 密钥、接口地址');
+    expect(markup).toContain('修复供应商配置');
   });
 });
