@@ -548,11 +548,39 @@ jobs:
               return 0
             fi
             mkdir -p "$lib_dir"
-            curl -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"
-            unzip -qo "$zip_path" -d "$lib_dir"
-            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
-            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
-            echo "$lib_dir"
+            rm -f "$zip_path"
+            local attempt dll_path lib_path
+            for attempt in 1 2 3; do
+              echo "📥 下载 DuckDB Windows 动态库 (${attempt}/3): ${DUCKDB_WINDOWS_LIBRARY_URL}"
+              if curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 300 -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"; then
+                if unzip -tq "$zip_path" >/dev/null 2>&1; then
+                  rm -rf "$lib_dir"
+                  mkdir -p "$lib_dir"
+                  unzip -qo "$zip_path" -d "$lib_dir"
+                  dll_path="$(find "$lib_dir" -type f -name duckdb.dll | head -n 1 || true)"
+                  lib_path="$(find "$lib_dir" -type f -name duckdb.lib | head -n 1 || true)"
+                  if [ -n "$dll_path" ] && [ -n "$lib_path" ]; then
+                    cp "$dll_path" "$lib_dir/duckdb.dll"
+                    cp "$lib_path" "$lib_dir/duckdb.lib"
+                    cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
+                    cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
+                    echo "$lib_dir"
+                    return 0
+                  fi
+                  echo "⚠️ DuckDB Windows 动态库压缩包缺少 duckdb.dll 或 duckdb.lib，准备重试"
+                else
+                  echo "⚠️ DuckDB Windows 动态库压缩包校验失败，准备重试"
+                fi
+              else
+                echo "⚠️ DuckDB Windows 动态库下载失败，准备重试"
+              fi
+              rm -f "$zip_path"
+              rm -rf "$lib_dir"
+              mkdir -p "$lib_dir"
+              sleep $((attempt * 2))
+            done
+            echo "❌ 无法准备 DuckDB Windows 动态库：${DUCKDB_WINDOWS_LIBRARY_URL}" >&2
+            return 1
           }
 
           for DRIVER in "${DRIVERS[@]}"; do
