@@ -27,6 +27,9 @@ export namespace ai {
 	    displayName: string;
 	    installed: boolean;
 	    matchesCurrent: boolean;
+	    clientDetected: boolean;
+	    clientCommand?: string;
+	    clientPath?: string;
 	    message: string;
 	    configPath?: string;
 	    command?: string;
@@ -42,6 +45,9 @@ export namespace ai {
 	        this.displayName = source["displayName"];
 	        this.installed = source["installed"];
 	        this.matchesCurrent = source["matchesCurrent"];
+	        this.clientDetected = source["clientDetected"];
+	        this.clientCommand = source["clientCommand"];
+	        this.clientPath = source["clientPath"];
 	        this.message = source["message"];
 	        this.configPath = source["configPath"];
 	        this.command = source["command"];
@@ -1320,4 +1326,3 @@ export namespace sync {
 	}
 
 }
-

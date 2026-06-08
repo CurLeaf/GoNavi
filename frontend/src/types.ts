@@ -597,6 +597,9 @@ export interface AIMCPClientInstallStatus {
   displayName: string;
   installed: boolean;
   matchesCurrent: boolean;
+  clientDetected?: boolean;
+  clientCommand?: string;
+  clientPath?: string;
   message: string;
   configPath?: string;
   command?: string;

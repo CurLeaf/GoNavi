@@ -152,6 +152,9 @@ type MCPClientInstallStatus struct {
 	DisplayName    string   `json:"displayName"`
 	Installed      bool     `json:"installed"`
 	MatchesCurrent bool     `json:"matchesCurrent"`
+	ClientDetected bool     `json:"clientDetected"`
+	ClientCommand  string   `json:"clientCommand,omitempty"`
+	ClientPath     string   `json:"clientPath,omitempty"`
 	Message        string   `json:"message"`
 	ConfigPath     string   `json:"configPath,omitempty"`
 	Command        string   `json:"command,omitempty"`

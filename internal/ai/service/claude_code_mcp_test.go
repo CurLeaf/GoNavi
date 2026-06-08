@@ -2,6 +2,7 @@ package aiservice
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -272,5 +273,73 @@ func TestUpsertCodexMCPServerConfigReplacesExistingBlockAndNestedSections(t *tes
 	}
 	if !strings.Contains(text, `[projects.'D:\Work\CodeRepos\GoNavi']`) {
 		t.Fatalf("expected unrelated project config to be preserved, got %s", text)
+	}
+}
+
+func TestInspectClaudeCodeMCPInstallStatusIncludesLocalCLIAvailability(t *testing.T) {
+	originalConfigPathFunc := claudeCodeConfigPathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalConfigPathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, ".claude.json"), nil
+	}
+	localCLICommandPathFunc = func(file string) (string, error) {
+		if file != claudeCodeClientCommandName {
+			t.Fatalf("expected lookup for %q, got %q", claudeCodeClientCommandName, file)
+		}
+		return `C:\Users\mock\AppData\Roaming\npm\claude.CMD`, nil
+	}
+
+	status := inspectClaudeCodeMCPInstallStatus(`C:\Program Files\GoNavi\GoNavi.exe`, []string{"mcp-server"}, nil)
+	if !status.ClientDetected {
+		t.Fatal("expected Claude Code command detection to be true")
+	}
+	if status.ClientCommand != claudeCodeClientCommandName {
+		t.Fatalf("expected client command %q, got %q", claudeCodeClientCommandName, status.ClientCommand)
+	}
+	if status.ClientPath != `C:\Users\mock\AppData\Roaming\npm\claude.CMD` {
+		t.Fatalf("unexpected client path: %q", status.ClientPath)
+	}
+	if status.Installed {
+		t.Fatal("expected MCP config to remain uninstalled when config file is absent")
+	}
+}
+
+func TestInspectCodexMCPInstallStatusKeepsMissingCLISignalSeparateFromConfigState(t *testing.T) {
+	originalConfigPathFunc := codexConfigPathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		codexConfigPathFunc = originalConfigPathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	tempDir := t.TempDir()
+	codexConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, "config.toml"), nil
+	}
+	localCLICommandPathFunc = func(file string) (string, error) {
+		if file != codexClientCommandName {
+			t.Fatalf("expected lookup for %q, got %q", codexClientCommandName, file)
+		}
+		return "", errors.New("not found")
+	}
+
+	status := inspectCodexMCPInstallStatus(`C:\Program Files\GoNavi\GoNavi.exe`, []string{"mcp-server"}, nil)
+	if status.ClientDetected {
+		t.Fatal("expected codex command detection to be false")
+	}
+	if status.ClientCommand != codexClientCommandName {
+		t.Fatalf("expected client command %q, got %q", codexClientCommandName, status.ClientCommand)
+	}
+	if status.ClientPath != "" {
+		t.Fatalf("expected missing codex command path to be empty, got %q", status.ClientPath)
+	}
+	if status.Message != "未检测到 Codex 用户级 GoNavi MCP 配置" {
+		t.Fatalf("unexpected config message: %q", status.Message)
 	}
 }

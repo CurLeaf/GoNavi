@@ -27,6 +27,9 @@ describe('mcpClientInstallStatus helpers', () => {
         displayName: 'Codex',
         installed: true,
         matchesCurrent: true,
+        clientDetected: false,
+        clientCommand: 'codex',
+        clientPath: '',
         message: '已检测到 Codex 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致',
         args: [],
       },
@@ -48,6 +51,32 @@ describe('mcpClientInstallStatus helpers', () => {
         installed: true,
         matchesCurrent: false,
         message: '已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新',
+      },
+    ];
+
+    expect(pickPreferredMCPClient(statuses)).toBe('codex');
+  });
+
+  it('prefers a locally detected client command when neither client has existing GoNavi MCP config', () => {
+    const statuses: AIMCPClientInstallStatus[] = [
+      {
+        client: 'claude-code',
+        displayName: 'Claude Code',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: false,
+        clientCommand: 'claude',
+        message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
+      },
+      {
+        client: 'codex',
+        displayName: 'Codex',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: true,
+        clientCommand: 'codex',
+        clientPath: 'C:/Users/mock/AppData/Roaming/npm/codex.cmd',
+        message: '未检测到 Codex 用户级 GoNavi MCP 配置',
       },
     ];
 

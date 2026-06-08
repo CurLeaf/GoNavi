@@ -8,6 +8,8 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     displayName: 'Claude Code',
     installed: false,
     matchesCurrent: false,
+    clientDetected: false,
+    clientCommand: 'claude',
     message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
   },
   {
@@ -15,6 +17,8 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     displayName: 'Codex',
     installed: false,
     matchesCurrent: false,
+    clientDetected: false,
+    clientCommand: 'codex',
     message: '未检测到 Codex 用户级 GoNavi MCP 配置',
   },
 ];
@@ -36,16 +40,19 @@ const hasStatusError = (status: AIMCPClientInstallStatus): boolean =>
   /失败|异常|错误|校验失败/u.test(String(status.message || ''));
 
 const getMCPClientPriority = (status: AIMCPClientInstallStatus): number => {
-  if (hasStatusError(status)) {
+  if (status.installed && !status.matchesCurrent) {
     return 0;
   }
-  if (status.installed && !status.matchesCurrent) {
+  if (status.matchesCurrent) {
     return 1;
   }
-  if (status.matchesCurrent) {
+  if (status.clientDetected) {
     return 2;
   }
-  return 3;
+  if (hasStatusError(status)) {
+    return 3;
+  }
+  return 4;
 };
 
 export const normalizeMCPClientStatuses = (items?: AIMCPClientInstallStatus[]): AIMCPClientInstallStatus[] => {
@@ -67,6 +74,9 @@ export const normalizeMCPClientStatuses = (items?: AIMCPClientInstallStatus[]): 
       ...base,
       ...item,
       displayName: item.displayName || base.displayName,
+      clientDetected: item.clientDetected ?? base.clientDetected ?? false,
+      clientCommand: item.clientCommand || base.clientCommand,
+      clientPath: item.clientPath || '',
       message: item.message || base.message,
       args: Array.isArray(item.args) ? item.args : (base.args || []),
     });

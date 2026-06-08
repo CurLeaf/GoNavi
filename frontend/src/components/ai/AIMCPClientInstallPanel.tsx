@@ -55,6 +55,29 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
   };
 };
 
+const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) => {
+  const command = String(status?.clientCommand || '').trim();
+  if (command) {
+    return command;
+  }
+  return status?.client === 'codex' ? 'codex' : 'claude';
+};
+
+const getClientDetectionTone = (status: AIMCPClientInstallStatus | undefined, darkMode: boolean) => {
+  if (status?.clientDetected) {
+    return {
+      label: '命令已检测',
+      color: '#16a34a',
+      bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
+    };
+  }
+  return {
+    label: '未检测命令',
+    color: '#d97706',
+    bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
+  };
+};
+
 const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
   const messageText = String(status?.message || '');
@@ -80,6 +103,15 @@ const getClientCardDescription = (status: AIMCPClientInstallStatus | undefined) 
   return '还没有写入 GoNavi MCP 配置。';
 };
 
+const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined) => {
+  const label = status?.displayName || '这个客户端';
+  const commandName = resolveClientCommandName(status);
+  if (status?.clientDetected) {
+    return `已检测到本机 ${commandName} 命令，写入后可直接重启 ${label} 验证。`;
+  }
+  return `未检测到本机 ${commandName} 命令；如果你只装了桌面端或 CLI 还没加入 PATH，也可以先写配置，稍后再重启 ${label}。`;
+};
+
 const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '客户端';
   if (status?.matchesCurrent) {
@@ -87,6 +119,9 @@ const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   }
   if (status?.installed) {
     return `更新 ${label} 配置`;
+  }
+  if (status?.clientDetected === false) {
+    return `预写入 ${label} 配置`;
   }
   return `写入 ${label} 配置`;
 };
@@ -149,7 +184,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>第 1 步：选择目标客户端</div>
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-            每次只处理一个外部客户端，先看状态，再决定是否写入。
+            每次只处理一个外部客户端，先看 GoNavi MCP 配置状态，再看本机有没有检测到对应命令。
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
@@ -157,6 +192,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
             const client = status.client === 'codex' ? 'codex' : 'claude-code';
             const active = selectedClient === client;
             const tone = getStatusTone(status, darkMode);
+            const detectionTone = getClientDetectionTone(status, darkMode);
             return (
               <button
                 key={status.client}
@@ -172,12 +208,12 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                   flexDirection: 'column',
                   gap: 10,
                   textAlign: 'left',
-                  minHeight: 118,
+                  minHeight: 138,
                   transition: 'all 0.2s ease',
                   opacity: statusLoading ? 0.72 : 1,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <div
                       aria-hidden
@@ -199,23 +235,44 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                       {status.displayName}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: tone.color,
-                      background: tone.bg,
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {tone.label}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                    <div
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: tone.color,
+                        background: tone.bg,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {tone.label}
+                    </div>
+                    <div
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: detectionTone.color,
+                        background: detectionTone.bg,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {detectionTone.label}
+                    </div>
                   </div>
                 </div>
-                <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                  {getClientCardDescription(status)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                    {getClientCardDescription(status)}
+                  </div>
+                  <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                    {getClientDetectionSummary(status)}
+                  </div>
                 </div>
               </button>
             );
@@ -262,6 +319,16 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           {getStatusSummary(selectedStatus)}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+          本机命令状态：{selectedStatus?.clientDetected
+            ? `已检测到 ${resolveClientCommandName(selectedStatus)}`
+            : `未检测到 ${resolveClientCommandName(selectedStatus)}，仍可先写配置`}
+        </div>
+        {selectedStatus?.clientPath && (
+          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
+            命令路径：{selectedStatus.clientPath}
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           检测结果：{selectedStatus?.message || '未检测到安装状态'}
         </div>
         {selectedStatus?.configPath && (
@@ -307,7 +374,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-          写入后重启对应客户端即可生效；如果当前路径已经一致，按钮会自动禁用，避免重复写入。
+          命令未检测到时也可以先写配置；后续装好 CLI 或把命令加入 PATH 后，重启对应客户端即可生效。当前路径已经一致时按钮会自动禁用，避免重复写入。
         </div>
         <Button
           type={selectedStatus?.matchesCurrent ? 'default' : 'primary'}

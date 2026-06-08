@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -15,6 +16,8 @@ import (
 const (
 	gonaviMCPServerID                   = "gonavi"
 	defaultCodexMCPStartupTimeoutSecond = 60
+	claudeCodeClientCommandName         = "claude"
+	codexClientCommandName              = "codex"
 )
 
 var claudeCodeConfigPathFunc = func() (string, error) {
@@ -42,6 +45,7 @@ var codexConfigPathFunc = func() (string, error) {
 }
 
 var localMCPExecutablePathFunc = os.Executable
+var localCLICommandPathFunc = exec.LookPath
 
 type claudeCodeMCPServerConfig struct {
 	Type    string            `json:"type"`
@@ -166,13 +170,33 @@ func resolveLocalMCPCommand(executablePath string) (string, []string, error) {
 	}
 }
 
+func detectLocalCLICommand(commandName string) (bool, string) {
+	commandName = strings.TrimSpace(commandName)
+	if commandName == "" {
+		return false, ""
+	}
+	resolvedPath, err := localCLICommandPathFunc(commandName)
+	if err != nil {
+		return false, ""
+	}
+	resolvedPath = strings.TrimSpace(resolvedPath)
+	if resolvedPath == "" {
+		return false, ""
+	}
+	return true, filepath.Clean(resolvedPath)
+}
+
 func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error) ai.MCPClientInstallStatus {
 	configPath, pathErr := claudeCodeConfigPathFunc()
+	clientDetected, clientPath := detectLocalCLICommand(claudeCodeClientCommandName)
 	status := ai.MCPClientInstallStatus{
-		Client:      "claude-code",
-		DisplayName: "Claude Code",
-		ConfigPath:  strings.TrimSpace(configPath),
-		Message:     "未检测到 Claude Code 用户级 GoNavi MCP 配置",
+		Client:         "claude-code",
+		DisplayName:    "Claude Code",
+		ClientDetected: clientDetected,
+		ClientCommand:  claudeCodeClientCommandName,
+		ClientPath:     clientPath,
+		ConfigPath:     strings.TrimSpace(configPath),
+		Message:        "未检测到 Claude Code 用户级 GoNavi MCP 配置",
 	}
 	if pathErr != nil {
 		status.Message = fmt.Sprintf("定位 Claude Code 配置失败: %v", pathErr)
@@ -214,11 +238,15 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 
 func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error) ai.MCPClientInstallStatus {
 	configPath, pathErr := codexConfigPathFunc()
+	clientDetected, clientPath := detectLocalCLICommand(codexClientCommandName)
 	status := ai.MCPClientInstallStatus{
-		Client:      "codex",
-		DisplayName: "Codex",
-		ConfigPath:  strings.TrimSpace(configPath),
-		Message:     "未检测到 Codex 用户级 GoNavi MCP 配置",
+		Client:         "codex",
+		DisplayName:    "Codex",
+		ClientDetected: clientDetected,
+		ClientCommand:  codexClientCommandName,
+		ClientPath:     clientPath,
+		ConfigPath:     strings.TrimSpace(configPath),
+		Message:        "未检测到 Codex 用户级 GoNavi MCP 配置",
 	}
 	if pathErr != nil {
 		status.Message = fmt.Sprintf("定位 Codex 配置失败: %v", pathErr)
