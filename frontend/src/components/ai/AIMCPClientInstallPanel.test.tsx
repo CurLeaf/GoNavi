@@ -62,12 +62,11 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('安装到外部客户端');
-    expect(markup).toContain('不是给 GoNavi 自己装 MCP');
-    expect(markup).toContain('选择要安装到的客户端');
+    expect(markup).toContain('这里不是给 GoNavi 自己安装 MCP');
+    expect(markup).toContain('接入外部客户端');
     expect(markup).toContain('目标客户端');
     expect(markup).toContain('只会修改你选中的客户端用户级 MCP 配置');
-    expect(markup).toContain('未安装');
+    expect(markup).toContain('未接入');
     expect(markup).toContain('需更新');
     expect(markup).toContain('复制配置路径');
     expect(markup).toContain('复制启动命令');
@@ -125,9 +124,9 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('安装到 Claude Code');
+    expect(markup).toContain('接入到 Claude Code');
     expect(markup).toContain('CLI 检测：未检测到 claude');
     expect(markup).toContain('未检测到本机 claude 命令');
-    expect(markup).toContain('已安装');
+    expect(markup).toContain('已接入');
   });
 });

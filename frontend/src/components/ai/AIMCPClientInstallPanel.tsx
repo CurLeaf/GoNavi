@@ -24,11 +24,13 @@ interface AIMCPClientInstallPanelProps {
   onInstall: () => void;
 }
 
+const hasStatusIssue = (status: AIMCPClientInstallStatus | undefined) =>
+  /失败|异常|错误/u.test(String(status?.message || ''));
+
 const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: boolean) => {
-  const messageText = String(status?.message || '');
   if (status?.matchesCurrent) {
     return {
-      label: '已安装',
+      label: '已接入',
       color: '#16a34a',
       bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
     };
@@ -40,7 +42,7 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
       bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
     };
   }
-  if (messageText.includes('失败') || messageText.includes('异常')) {
+  if (hasStatusIssue(status)) {
     return {
       label: '状态异常',
       color: '#dc2626',
@@ -48,7 +50,7 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
     };
   }
   return {
-    label: '未安装',
+    label: '未接入',
     color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
     bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
   };
@@ -64,50 +66,49 @@ const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) 
 
 const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
-  const messageText = String(status?.message || '');
   if (status?.matchesCurrent) {
-    return `${label} 已安装当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
+    return `${label} 已接入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
   }
   if (status?.installed) {
-    return `${label} 里已经有旧的 GoNavi MCP 记录，更新后会切到当前这份 GoNavi。`;
+    return `${label} 里已经有旧的 GoNavi 记录，更新后会切到当前这份 GoNavi。`;
   }
-  if (messageText.includes('失败') || messageText.includes('异常')) {
-    return `${label} 的安装状态读取失败，建议先刷新检测。`;
+  if (hasStatusIssue(status)) {
+    return `${label} 的接入状态读取失败，建议先刷新检测。`;
   }
-  return `${label} 还没有安装 GoNavi MCP 配置。`;
+  return `当前还没有把 GoNavi MCP 写入 ${label}。`;
 };
 
 const getClientOptionSummary = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return '当前 GoNavi MCP 已安装到这个客户端。';
+    return '当前 GoNavi MCP 已接入到这个客户端。';
   }
   if (status?.installed) {
     return '检测到旧的 GoNavi MCP 记录，建议更新为当前安装路径。';
   }
-  if (String(status?.message || '').includes('失败') || String(status?.message || '').includes('异常')) {
-    return '安装状态读取异常，建议先刷新再处理。';
+  if (hasStatusIssue(status)) {
+    return '接入状态读取异常，建议先刷新再处理。';
   }
-  return '尚未安装 GoNavi MCP 配置。';
+  return '尚未接入 GoNavi MCP 配置。';
 };
 
 const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
   const commandName = resolveClientCommandName(status);
   if (status?.clientDetected) {
-    return `已检测到本机 ${commandName} 命令，安装后重启 ${label} 即可验证。`;
+    return `已检测到本机 ${commandName} 命令，接入或更新后重启 ${label} 即可验证。`;
   }
-  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先安装到 ${label}，稍后再重启验证。`;
+  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先写入 ${label} 配置，稍后再重启验证。`;
 };
 
 const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '客户端';
   if (status?.matchesCurrent) {
-    return `已安装到 ${label}`;
+    return `已接入到 ${label}`;
   }
   if (status?.installed) {
     return `更新 ${label} 配置`;
   }
-  return `安装到 ${label}`;
+  return `接入到 ${label}`;
 };
 
 const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
@@ -128,34 +129,8 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
   onInstall,
 }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <div
-      style={{
-        padding: '14px 16px',
-        borderRadius: 14,
-        border: `1px solid ${cardBorder}`,
-        background: darkMode ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.06)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>安装到外部客户端</div>
-      <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
-        这里的“安装”不是给 GoNavi 自己装 MCP，而是把 GoNavi 作为 MCP Server 写入 Claude Code 或 Codex 这类外部 AI 客户端。
-      </div>
-      <div
-        style={{
-          padding: '10px 12px',
-          borderRadius: 12,
-          border: `1px solid ${darkMode ? 'rgba(96,165,250,0.18)' : 'rgba(96,165,250,0.22)'}`,
-          background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.7)',
-          fontSize: 12,
-          color: overlayTheme.titleText,
-          lineHeight: 1.7,
-        }}
-      >
-        只会修改你选中的客户端用户级 MCP 配置，不会安装新的 GoNavi，也不会替换 GoNavi 自己的程序文件。
-      </div>
+    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.9 }}>
+      这里不是给 GoNavi 自己安装 MCP，而是把 GoNavi 作为 MCP Server 接入 Claude Code 或 Codex 这类外部 AI 客户端。
     </div>
 
     <div
@@ -170,10 +145,23 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>选择要安装到的客户端</div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          先选 1 个目标客户端，再执行安装或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
+          选择 1 个客户端后再执行接入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
         </div>
+      </div>
+      <div
+        style={{
+          padding: '12px 14px',
+          borderRadius: 12,
+          border: `1px solid ${darkMode ? 'rgba(96,165,250,0.16)' : 'rgba(96,165,250,0.18)'}`,
+          background: darkMode ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.05)',
+          fontSize: 12,
+          color: overlayTheme.titleText,
+          lineHeight: 1.7,
+        }}
+      >
+        只会修改你选中的客户端用户级 MCP 配置，不会安装新的 GoNavi，也不会替换 GoNavi 自己的程序文件。
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -234,7 +222,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                       fontWeight: 700,
                       color: tone.color,
                       background: tone.bg,
-                      minWidth: 72,
+                      minWidth: 76,
                       textAlign: 'center',
                     }}
                   >
@@ -290,10 +278,10 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           当前状态：{selectedStatus?.matchesCurrent
-            ? '当前 GoNavi MCP 已安装到这个客户端'
+            ? '当前 GoNavi MCP 已接入到这个客户端'
             : selectedStatus?.installed
               ? '检测到旧配置，建议更新到当前安装路径'
-              : '当前还没有把 GoNavi MCP 安装到这个客户端'}
+              : '当前还没有把 GoNavi MCP 接入到这个客户端'}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           CLI 检测：{selectedStatus?.clientDetected
@@ -353,7 +341,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
           {getClientDetectionSummary(selectedStatus)}
           {' '}
-          已经是当前配置时按钮会自动禁用，避免重复安装。
+          已经是当前配置时按钮会自动禁用，避免重复写入。
         </div>
         <Button
           type={selectedStatus?.matchesCurrent ? 'default' : 'primary'}
