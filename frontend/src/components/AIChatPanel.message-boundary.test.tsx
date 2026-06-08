@@ -5,6 +5,7 @@ const source = readFileSync(new URL('./AIChatPanel.tsx', import.meta.url), 'utf8
 const boundarySource = readFileSync(new URL('./ai/AIMessageRenderBoundary.tsx', import.meta.url), 'utf8');
 const conversationViewSource = readFileSync(new URL('./ai/AIChatPanelConversationView.tsx', import.meta.url), 'utf8');
 const derivedStateSource = readFileSync(new URL('./ai/aiChatPanelDerivedState.ts', import.meta.url), 'utf8');
+const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
 const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
 
@@ -21,15 +22,17 @@ describe('AIChatPanel message render isolation', () => {
   });
 
   it('loads user prompt settings and appends them as system messages', () => {
-    expect(source).toContain('AIGetUserPromptSettings');
-    expect(source).toContain("window.addEventListener('gonavi:ai:config-changed'");
+    expect(source).toContain("import { useAIChatRuntimeResources } from './ai/useAIChatRuntimeResources';");
+    expect(source).toContain('useAIChatRuntimeResources({ onOpenSettings })');
+    expect(runtimeResourcesSource).toContain('AIGetUserPromptSettings');
+    expect(runtimeResourcesSource).toContain("window.addEventListener('gonavi:ai:config-changed'");
     expect(systemContextSource).toContain('以下是当前用户的自定义补充提示词');
     expect(systemContextSource).toContain("appendCustomPromptGroup(systemMessages, ['database']");
   });
 
   it('loads MCP tools and skills into the runtime tool chain', () => {
-    expect(source).toContain('AIListMCPTools');
-    expect(source).toContain('AIGetSkills');
+    expect(runtimeResourcesSource).toContain('AIListMCPTools');
+    expect(runtimeResourcesSource).toContain('AIGetSkills');
     expect(source).toContain('executeLocalAIToolCall');
     expect(systemContextSource).toContain('以下是当前启用的 Skill');
     expect(source).toContain('buildAvailableAIChatTools');

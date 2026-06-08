@@ -5,10 +5,6 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
-    AIMCPToolDescriptor,
-    AIProviderConfig,
-    AISkillConfig,
-    AIUserPromptSettings,
     AIToolCall,
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
@@ -19,13 +15,11 @@ import { AIChatHeader } from './ai/AIChatHeader';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import AIChatPanelConversationView from './ai/AIChatPanelConversationView';
-import type { AIComposerNotice, AIComposerNoticeAction } from '../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     buildIncompleteProviderNotice,
     buildMissingModelNotice,
     buildMissingProviderNotice,
-    buildModelFetchFailedNotice,
 } from '../utils/aiComposerNotice';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
@@ -48,6 +42,7 @@ import {
 } from './ai/aiChatPanelDerivedState';
 import { buildAIChatReadinessSnapshot } from './ai/aiChatReadiness';
 import { buildAISystemContextMessages } from './ai/aiSystemContextMessages';
+import { useAIChatRuntimeResources } from './ai/useAIChatRuntimeResources';
 
 interface AIChatPanelProps {
     width?: number;
@@ -61,31 +56,31 @@ interface AIChatPanelProps {
 
 const genId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
-    global: '',
-    database: '',
-    jvm: '',
-    jvmDiagnostic: '',
-};
-
 export const AIChatPanel: React.FC<AIChatPanelProps> = ({ 
     width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme 
 }) => {
     const [input, setInput] = useState('');
     const [draftImages, setDraftImages] = useState<string[]>([]);
     const [sending, setSending] = useState(false);
-    const [activeProvider, setActiveProvider] = useState<AIProviderConfig | null>(null);
-    const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
-    const [mcpTools, setMcpTools] = useState<AIMCPToolDescriptor[]>([]);
-    const [skills, setSkills] = useState<AISkillConfig[]>([]);
-    const [dynamicModels, setDynamicModels] = useState<string[]>([]);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
-    const [loadingModels, setLoadingModels] = useState(false);
-    const [composerNotice, setComposerNotice] = useState<AIComposerNotice | null>(null);
     const [panelWidth, setPanelWidth] = useState(width);
     const [isResizing, setIsResizing] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [activePanelMode, setActivePanelMode] = useState<'chat' | 'insights' | 'history'>('chat');
+    const {
+        activeProvider,
+        composerNotice,
+        dynamicModels,
+        fetchDynamicModels,
+        handleComposerAction,
+        handleModelChange,
+        handleOpenSettingsFromPanel,
+        loadingModels,
+        mcpTools,
+        setComposerNotice,
+        skills,
+        userPromptSettings,
+    } = useAIChatRuntimeResources({ onOpenSettings });
     
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -259,180 +254,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const assistantBubbleBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
     const quickActionBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.8)';
     const quickActionBorder = overlayTheme.sectionBorder;
-
-    const loadActiveProvider = useCallback(async () => {
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service) return;
-            const [provRes, activeRes] = await Promise.all([
-                Service.AIGetProviders?.(),
-                Service.AIGetActiveProvider?.(),
-            ]);
-            if (Array.isArray(provRes) && activeRes) {
-                const current = provRes.find((p: any) => p.id === activeRes);
-                setActiveProvider(current || null);
-            }
-        } catch (e) { console.warn('Failed to load active provider', e); }
-    }, []);
-
-    useEffect(() => { loadActiveProvider(); }, [loadActiveProvider]);
-
-    const loadUserPromptSettings = useCallback(async () => {
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service?.AIGetUserPromptSettings) {
-                setUserPromptSettings(EMPTY_AI_USER_PROMPT_SETTINGS);
-                return;
-            }
-            const nextSettings = await Service.AIGetUserPromptSettings();
-            setUserPromptSettings({
-                ...EMPTY_AI_USER_PROMPT_SETTINGS,
-                ...nextSettings,
-            });
-        } catch (e) {
-            console.warn('Failed to load user prompt settings', e);
-        }
-    }, []);
-
-    const loadMCPTools = useCallback(async () => {
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service?.AIListMCPTools) {
-                setMcpTools([]);
-                return;
-            }
-            const nextTools = await Service.AIListMCPTools();
-            setMcpTools(Array.isArray(nextTools) ? nextTools : []);
-        } catch (e) {
-            console.warn('Failed to load MCP tools', e);
-            setMcpTools([]);
-        }
-    }, []);
-
-    const loadSkills = useCallback(async () => {
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service?.AIGetSkills) {
-                setSkills([]);
-                return;
-            }
-            const nextSkills = await Service.AIGetSkills();
-            setSkills(Array.isArray(nextSkills) ? nextSkills : []);
-        } catch (e) {
-            console.warn('Failed to load skills', e);
-            setSkills([]);
-        }
-    }, []);
-
-    useEffect(() => {
-        void loadUserPromptSettings();
-        void loadMCPTools();
-        void loadSkills();
-        const handleAIConfigChanged = () => {
-            void loadUserPromptSettings();
-            void loadMCPTools();
-            void loadSkills();
-            void loadActiveProvider();
-        };
-        window.addEventListener('gonavi:ai:config-changed', handleAIConfigChanged as EventListener);
-        return () => {
-            window.removeEventListener('gonavi:ai:config-changed', handleAIConfigChanged as EventListener);
-        };
-    }, [loadActiveProvider, loadMCPTools, loadSkills, loadUserPromptSettings]);
-
-    // 监听供应商配置变更（来自设置面板的删除/新增/切换操作），重新加载 active provider 并清空已缓存的模型
-    useEffect(() => {
-        const handler = () => {
-            setDynamicModels([]);
-            setComposerNotice(null);
-            activeProviderIdRef.current = null;
-            loadActiveProvider();
-        };
-        window.addEventListener('gonavi:ai:provider-changed', handler);
-        return () => window.removeEventListener('gonavi:ai:provider-changed', handler);
-    }, [loadActiveProvider]);
-
-    const handleModelChange = async (val: string) => {
-        if (!activeProvider) return;
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            const payload = {
-                ...activeProvider,
-                model: val,
-                apiKey: activeProvider.apiKey || '',
-                hasSecret: activeProvider.hasSecret ?? Boolean(activeProvider.secretRef),
-            };
-            await Service?.AISaveProvider?.(payload);
-            setActiveProvider(payload);
-            setComposerNotice(null);
-        } catch (e) { console.warn('Failed to update provider model', e); }
-    };
-
-    const activeProviderIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        if (activeProvider?.id && activeProvider.id !== activeProviderIdRef.current) {
-            setDynamicModels([]);
-            setComposerNotice(null);
-            activeProviderIdRef.current = activeProvider.id;
-        }
-        // 供应商被删除后 activeProvider 变为 null，此时也必须清空残留模型
-        if (!activeProvider) {
-            setDynamicModels([]);
-            setComposerNotice(null);
-            activeProviderIdRef.current = null;
-        }
-    }, [activeProvider?.id, activeProvider]);
-
-    useEffect(() => {
-        if (activeProvider?.model && String(activeProvider.model).trim()) {
-            setComposerNotice(null);
-        }
-    }, [activeProvider?.model]);
-
-
-    // dynamicModels 仅在内存中使用，不再写回供应商配置，避免污染静态 models 列表
-
-    const fetchDynamicModels = useCallback(async () => {
-        try {
-            setLoadingModels(true);
-            setComposerNotice(null);
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service) return;
-            const result = await Service.AIListModels?.();
-            if (result?.success && Array.isArray(result.models) && result.models.length > 0) {
-                const sortedModels = [...result.models].sort((a, b) => a.localeCompare(b));
-                setDynamicModels(sortedModels);
-                setComposerNotice(null);
-            } else if (result && !result.success) {
-                setDynamicModels([]);
-                setComposerNotice(buildModelFetchFailedNotice(result.error));
-            }
-        } catch (e: any) {
-            console.warn('Failed to fetch models', e);
-            setDynamicModels([]);
-            setComposerNotice(buildModelFetchFailedNotice('获取模型列表失败：' + (e?.message || '未知错误')));
-        } finally {
-            setLoadingModels(false);
-        }
-    }, []);
-
-    const handleOpenSettingsFromPanel = useCallback(() => {
-        onOpenSettings?.();
-        window.setTimeout(() => {
-            void loadActiveProvider();
-        }, 500);
-    }, [loadActiveProvider, onOpenSettings]);
-
-    const handleComposerAction = useCallback((actionKey: AIComposerNoticeAction) => {
-        if (actionKey === 'open-settings') {
-            handleOpenSettingsFromPanel();
-            return;
-        }
-        if (actionKey === 'reload-models') {
-            void fetchDynamicModels();
-        }
-    }, [fetchDynamicModels, handleOpenSettingsFromPanel]);
 
     useEffect(() => {
         if (messages.length === 0) return;
