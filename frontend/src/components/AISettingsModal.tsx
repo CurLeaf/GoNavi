@@ -15,6 +15,7 @@ import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
+import { EMPTY_MCP_CLIENT_STATUSES, formatMCPLaunchCommand, normalizeMCPClientStatuses, pickPreferredMCPClient } from '../utils/mcpClientInstallStatus';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
 import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';
 import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
@@ -106,62 +107,6 @@ const EMPTY_MCP_SERVER = (seed?: Partial<AIMCPServerConfig>): AIMCPServerConfig 
     };
 };
 
-const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
-    {
-        client: 'claude-code',
-        displayName: 'Claude Code',
-        installed: false,
-        matchesCurrent: false,
-        message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
-    },
-    {
-        client: 'codex',
-        displayName: 'Codex',
-        installed: false,
-        matchesCurrent: false,
-        message: '未检测到 Codex 用户级 GoNavi MCP 配置',
-    },
-];
-
-const normalizeMCPClientStatuses = (items?: AIMCPClientInstallStatus[]): AIMCPClientInstallStatus[] => {
-    const baseMap = new Map<string, AIMCPClientInstallStatus>(
-        EMPTY_MCP_CLIENT_STATUSES.map((item) => [item.client, { ...item }]),
-    );
-    (Array.isArray(items) ? items : []).forEach((item) => {
-        if (!item || !item.client) {
-            return;
-        }
-        const base = baseMap.get(item.client) || {
-            client: item.client,
-            displayName: item.client,
-            installed: false,
-            matchesCurrent: false,
-            message: '',
-        };
-        baseMap.set(item.client, {
-            ...base,
-            ...item,
-            displayName: item.displayName || base.displayName,
-            message: item.message || base.message,
-            args: Array.isArray(item.args) ? item.args : (base.args || []),
-        });
-    });
-    return (['claude-code', 'codex'] as MCPClientKey[])
-        .map((client) => baseMap.get(client))
-        .filter((item): item is AIMCPClientInstallStatus => Boolean(item));
-};
-
-const pickPreferredMCPClient = (items: AIMCPClientInstallStatus[], current?: MCPClientKey): MCPClientKey => {
-    if (current && items.some((item) => item.client === current)) {
-        return current;
-    }
-    const pending = items.find((item) => !item.matchesCurrent);
-    if (pending?.client === 'claude-code' || pending?.client === 'codex') {
-        return pending.client;
-    }
-    return 'claude-code';
-};
-
 const waitFor = (delayMs: number) => new Promise<void>((resolve) => {
     window.setTimeout(resolve, delayMs);
 });
@@ -179,25 +124,6 @@ const waitForAIService = async (attempts = 6, delayMs = 80) => {
         }
     }
     return readAIService();
-};
-
-const quoteMCPCommandPart = (value: string): string => {
-    const text = String(value || '').trim();
-    if (!text) {
-        return '';
-    }
-    return /[\s"]/u.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
-};
-
-const formatMCPLaunchCommand = (input?: Pick<AIMCPClientInstallStatus, 'command' | 'args'> | Pick<MCPClientInstallResult, 'command' | 'args'> | null): string => {
-    const command = String(input?.command || '').trim();
-    if (!command) {
-        return '';
-    }
-    const args = Array.isArray(input?.args)
-        ? input.args.map((item) => String(item || '').trim()).filter(Boolean)
-        : [];
-    return [command, ...args].map(quoteMCPCommandPart).filter(Boolean).join(' ');
 };
 
 const EMPTY_SKILL = (): AISkillConfig => ({
