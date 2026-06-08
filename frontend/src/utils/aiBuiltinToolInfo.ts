@@ -594,6 +594,30 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_sessions",
+    icon: "🗂️",
+    desc: "查看本地 AI 历史会话清单",
+    detail:
+      "可按关键词过滤，返回本地 AI 会话标题、更新时间、消息数量、是否是当前会话，以及首条用户提问和最近一条消息预览。适合用户提到“之前那条 AI 对话”“帮我找上次聊过的记录”“最近哪个会话讲过这个问题”时先读真实会话资产。",
+    params: "keyword?, limit?, includePreview?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_sessions",
+        description:
+          "读取本地 AI 历史会话清单，可按关键词过滤，并返回会话标题、更新时间、消息数量、是否是当前活动会话，以及首条用户问题和最近消息预览。适用于用户提到之前的 AI 对话、上次聊过的记录、最近哪个会话讲过某个问题时，先读取真实会话清单再继续定位。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按会话标题、会话 ID、首条用户问题或最近消息内容做关键词筛选" },
+            limit: { type: "number", description: "可选，最多返回多少条会话，默认 10，最大 50" },
+            includePreview: { type: "boolean", description: "可选，是否附带首条用户问题和最近消息预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_sql_snippets",
     icon: "🧩",
     desc: "查看 SQL 片段模板",

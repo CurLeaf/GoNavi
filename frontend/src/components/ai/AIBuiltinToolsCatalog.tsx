@@ -108,6 +108,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',
   },
   {
+    title: '回看 AI 历史对话',
+    steps: 'inspect_ai_sessions → inspect_active_tab / inspect_saved_queries',
+    description: '适合先定位之前聊过的 AI 会话、首条问题和最近回复，再继续复用当前页签或历史 SQL 上下文。',
+  },
+  {
     title: '查找模板片段',
     steps: 'inspect_sql_snippets',
     description: '适合先找团队已有的 SQL 片段模板、补全前缀和常用骨架，再决定是否继续改写。',

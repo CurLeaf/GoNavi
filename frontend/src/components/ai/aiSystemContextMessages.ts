@@ -429,6 +429,12 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“保存过的查询”“历史 SQL”“之前写过的语句”“帮我找以前那条脚本”，优先调用 inspect_saved_queries 读取本地已保存查询，再决定是否继续核对字段或复用 SQL。',
     });
   }
+  if (availableToolNames.includes('inspect_ai_sessions')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“之前那条 AI 对话”“上次聊过的记录”“最近哪个会话说过这个问题”，优先调用 inspect_ai_sessions 读取本地 AI 会话清单和预览，再决定继续查看当前页签还是复用历史 SQL。',
+    });
+  }
   if (availableToolNames.includes('inspect_sql_snippets')) {
     systemMessages.push({
       role: 'system',

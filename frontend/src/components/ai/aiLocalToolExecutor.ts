@@ -26,6 +26,9 @@ export interface ExecuteLocalAIToolCallOptions {
   connections: SavedConnection[];
   activeContext?: { connectionId: string; dbName: string } | null;
   aiContexts?: Record<string, AIContextItem[]>;
+  aiChatHistory?: Record<string, AIChatMessage[]>;
+  aiChatSessions?: Array<{ id: string; title: string; updatedAt: number }>;
+  activeSessionId?: string | null;
   tabs?: TabData[];
   activeTabId?: string | null;
   mcpTools: AIMCPToolDescriptor[];
@@ -53,6 +56,9 @@ export async function executeLocalAIToolCall({
   connections,
   activeContext = null,
   aiContexts = {},
+  aiChatHistory = {},
+  aiChatSessions = [],
+  activeSessionId = null,
   tabs = [],
   activeTabId = null,
   mcpTools,
@@ -76,6 +82,9 @@ export async function executeLocalAIToolCall({
       args,
       activeContext,
       aiContexts,
+      aiChatHistory,
+      aiChatSessions,
+      activeSessionId,
       connections,
       tabs,
       activeTabId,

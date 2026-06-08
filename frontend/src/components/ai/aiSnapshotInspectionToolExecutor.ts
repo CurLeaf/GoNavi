@@ -3,6 +3,7 @@ import type {
   AIMCPClientInstallStatus,
   AIMCPServerConfig,
   AIMCPToolDescriptor,
+  AIChatMessage,
   AIProviderConfig,
   AISafetyLevel,
   AISkillConfig,
@@ -15,6 +16,7 @@ import type {
 import type { SqlLog } from '../../store';
 import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildAIContextSnapshot } from './aiContextInsights';
+import { buildAIChatSessionsSnapshot } from './aiChatSessionInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
@@ -52,6 +54,9 @@ interface ExecuteSnapshotInspectionToolCallOptions {
   args: Record<string, any>;
   activeContext?: { connectionId: string; dbName: string } | null;
   aiContexts?: Record<string, AIContextItem[]>;
+  aiChatHistory?: Record<string, AIChatMessage[]>;
+  aiChatSessions?: Array<{ id: string; title: string; updatedAt: number }>;
+  activeSessionId?: string | null;
   connections: SavedConnection[];
   tabs?: TabData[];
   activeTabId?: string | null;
@@ -80,6 +85,9 @@ export async function executeSnapshotInspectionToolCall(
     args,
     activeContext = null,
     aiContexts = {},
+    aiChatHistory = {},
+    aiChatSessions = [],
+    activeSessionId = null,
     connections,
     tabs = [],
     activeTabId = null,
@@ -244,6 +252,18 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_ai_sessions':
+        return {
+          content: JSON.stringify(buildAIChatSessionsSnapshot({
+            aiChatSessions,
+            aiChatHistory,
+            activeSessionId,
+            keyword: args.keyword,
+            limit: args.limit,
+            includePreview: args.includePreview !== false,
+          })),
+          success: true,
+        };
       case 'inspect_recent_sql_logs':
         return {
           content: JSON.stringify(buildRecentSqlLogsSnapshot({
@@ -290,6 +310,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_current_connection: '读取当前连接失败',
       inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',
+      inspect_ai_sessions: '读取本地 AI 会话清单失败',
       inspect_active_tab: '读取当前活动页签失败',
       inspect_workspace_tabs: '读取当前工作区页签失败',
       inspect_ai_context: '读取当前 AI 上下文失败',

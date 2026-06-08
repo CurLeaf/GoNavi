@@ -54,6 +54,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_recent_sql_logs');
     expect(markup).toContain('复用历史 SQL');
     expect(markup).toContain('inspect_saved_queries');
+    expect(markup).toContain('回看 AI 历史对话');
+    expect(markup).toContain('inspect_ai_sessions');
     expect(markup).toContain('查找模板片段');
     expect(markup).toContain('inspect_sql_snippets');
     expect(markup).toContain('理解样例数据');

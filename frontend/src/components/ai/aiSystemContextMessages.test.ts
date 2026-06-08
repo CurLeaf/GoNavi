@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_saved_queries', 'inspect_sql_snippets', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -86,6 +86,7 @@ describe('buildAISystemContextMessages', () => {
     expect(joined).toContain('inspect_connection_capabilities');
     expect(joined).toContain('inspect_saved_connections');
     expect(joined).toContain('inspect_saved_queries');
+    expect(joined).toContain('inspect_ai_sessions');
     expect(joined).toContain('inspect_sql_snippets');
     expect(joined).toContain('当前连接');
     expect(joined).toContain('以下是当前用户的自定义补充提示词（全局）');

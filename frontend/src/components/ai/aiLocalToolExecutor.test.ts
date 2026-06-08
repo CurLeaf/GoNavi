@@ -893,6 +893,43 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('status = \'paid\'');
   });
 
+  it('returns local ai chat sessions so the model can locate previous conversations by title or preview', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_sessions', {
+        keyword: '支付',
+        limit: 5,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      aiChatSessions: [
+        { id: 'session-1', title: '支付异常排查', updatedAt: 200 },
+        { id: 'session-2', title: '用户列表', updatedAt: 100 },
+      ],
+      aiChatHistory: {
+        'session-1': [
+          { id: 'msg-1', role: 'user', content: '帮我排查支付超时', timestamp: 101 },
+          { id: 'msg-2', role: 'assistant', content: '先看最近错误日志', timestamp: 102 },
+        ],
+        'session-2': [
+          { id: 'msg-3', role: 'user', content: '列出最近注册用户', timestamp: 103 },
+        ],
+      },
+      activeSessionId: 'session-2',
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('支付异常排查');
+    expect(result.content).toContain('帮我排查支付超时');
+    expect(result.content).toContain('先看最近错误日志');
+    expect(result.content).not.toContain('列出最近注册用户');
+  });
+
   it('returns sql snippets so the model can inspect local query templates', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_sql_snippets', {
