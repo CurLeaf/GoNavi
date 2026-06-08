@@ -1,11 +1,7 @@
 import type {
   AIContextItem,
-  AIMCPClientInstallStatus,
-  AIMCPServerConfig,
   AIMCPToolDescriptor,
   AIChatMessage,
-  AIProviderConfig,
-  AISafetyLevel,
   AISkillConfig,
   AIUserPromptSettings,
   ExternalSQLDirectory,
@@ -15,17 +11,10 @@ import type {
   TabData,
 } from '../../types';
 import type { SqlLog } from '../../store';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildAIChatSessionsSnapshot } from './aiChatSessionInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
-import { buildMCPSetupSnapshot } from './aiMCPInsights';
-import { buildAIGuidanceSnapshot } from './aiPromptInsights';
-import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
-import { buildAIProviderSnapshot } from './aiProviderInsights';
-import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
-import { buildAISafetySnapshot } from './aiSafetyInsights';
 import {
   buildSavedQueriesSnapshot,
   buildSqlSnippetsSnapshot,
@@ -42,20 +31,11 @@ import {
   buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
 } from './aiWorkspaceInsights';
-
-export interface AISnapshotInspectionRuntimeState {
-  providers?: AIProviderConfig[];
-  activeProviderId?: string;
-  safetyLevel?: AISafetyLevel | string;
-  contextLevel?: string;
-}
-
-export interface AISnapshotInspectionRuntime {
-  getAIRuntimeState?: () => Promise<AISnapshotInspectionRuntimeState | undefined>;
-  getMCPServers?: () => Promise<AIMCPServerConfig[] | undefined>;
-  getMCPClientInstallStatuses?: () => Promise<AIMCPClientInstallStatus[] | undefined>;
-  readSQLFile?: (filePath: string) => Promise<any>;
-}
+import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
+import type {
+  AISnapshotInspectionRuntime,
+  SnapshotInspectionResult,
+} from './aiSnapshotInspectionToolTypes';
 
 interface ExecuteSnapshotInspectionToolCallOptions {
   toolName: string;
@@ -78,13 +58,6 @@ interface ExecuteSnapshotInspectionToolCallOptions {
   dynamicModels?: string[];
   runtime?: AISnapshotInspectionRuntime;
 }
-
-interface SnapshotInspectionResult {
-  content: string;
-  success: boolean;
-}
-
-const BUILTIN_AI_TOOL_NAMES = BUILTIN_AI_TOOL_INFO.map((item) => item.name);
 
 export async function executeSnapshotInspectionToolCall(
   options: ExecuteSnapshotInspectionToolCallOptions,
@@ -112,93 +85,24 @@ export async function executeSnapshotInspectionToolCall(
   } = options;
 
   try {
+    const aiConfigResult = await executeAIConfigSnapshotToolCall({
+      toolName,
+      activeContext,
+      aiContexts,
+      connections,
+      tabs,
+      activeTabId,
+      mcpTools,
+      skills,
+      userPromptSettings,
+      dynamicModels,
+      runtime,
+    });
+    if (aiConfigResult) {
+      return aiConfigResult;
+    }
+
     switch (toolName) {
-      case 'inspect_ai_runtime': {
-        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
-          ? await runtime.getAIRuntimeState()
-          : undefined;
-        return {
-          content: JSON.stringify(buildAIRuntimeSnapshot({
-            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
-            activeProviderId: runtimeState?.activeProviderId || '',
-            safetyLevel: runtimeState?.safetyLevel,
-            contextLevel: runtimeState?.contextLevel,
-            skills,
-            mcpTools,
-            dynamicModels,
-            builtinToolNames: BUILTIN_AI_TOOL_NAMES,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_safety': {
-        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
-          ? await runtime.getAIRuntimeState()
-          : undefined;
-        return {
-          content: JSON.stringify(buildAISafetySnapshot({
-            safetyLevel: runtimeState?.safetyLevel,
-            activeContext,
-            tabs,
-            activeTabId,
-            connections,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_providers': {
-        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
-          ? await runtime.getAIRuntimeState()
-          : undefined;
-        return {
-          content: JSON.stringify(buildAIProviderSnapshot({
-            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
-            activeProviderId: runtimeState?.activeProviderId || '',
-            dynamicModels,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_chat_readiness': {
-        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
-          ? await runtime.getAIRuntimeState()
-          : undefined;
-        const activeContextKey = activeContext?.connectionId
-          ? `${activeContext.connectionId}:${activeContext.dbName || ''}`
-          : 'default';
-        return {
-          content: JSON.stringify(buildAIChatReadinessSnapshot({
-            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
-            activeProviderId: runtimeState?.activeProviderId || '',
-            dynamicModels,
-            activeContext,
-            activeContextItems: aiContexts[activeContextKey] || [],
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_mcp_setup': {
-        const [mcpServers, mcpClientInstallStatuses] = await Promise.all([
-          typeof runtime?.getMCPServers === 'function' ? runtime.getMCPServers() : Promise.resolve(undefined),
-          typeof runtime?.getMCPClientInstallStatuses === 'function' ? runtime.getMCPClientInstallStatuses() : Promise.resolve(undefined),
-        ]);
-        return {
-          content: JSON.stringify(buildMCPSetupSnapshot({
-            mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
-            mcpClientStatuses: Array.isArray(mcpClientInstallStatuses) ? mcpClientInstallStatuses : [],
-            mcpTools,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_guidance':
-        return {
-          content: JSON.stringify(buildAIGuidanceSnapshot({
-            userPromptSettings,
-            skills,
-          })),
-          success: true,
-        };
       case 'inspect_current_connection':
         return {
           content: JSON.stringify(buildCurrentConnectionSnapshot({
@@ -371,12 +275,6 @@ export async function executeSnapshotInspectionToolCall(
     }
   } catch (error: any) {
     const label = {
-      inspect_ai_runtime: '读取当前 AI 运行状态失败',
-      inspect_ai_safety: '读取当前 AI 安全边界失败',
-      inspect_ai_providers: '读取当前 AI 供应商配置失败',
-      inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
-      inspect_mcp_setup: '读取 MCP 配置状态失败',
-      inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
       inspect_current_connection: '读取当前连接失败',
       inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',

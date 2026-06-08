@@ -108,6 +108,19 @@ const appendAIRuntimeInspectionGuidance = (
   });
 };
 
+const appendAISetupHealthInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_setup_health')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“AI 为什么不好用”“帮我体检一下当前 AI 配置”“当前 AI 整体还有哪些明显问题”，优先调用 inspect_ai_setup_health 先拿到整体现状，再按需下钻 inspect_ai_providers、inspect_ai_chat_readiness、inspect_mcp_setup 或 inspect_ai_guidance。',
+  });
+};
+
 const appendAISafetyInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -405,6 +418,7 @@ SELECT * FROM users WHERE status = 1;
     });
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+  appendAISetupHealthInspectionGuidance(systemMessages, availableToolNames);
   appendAISafetyInspectionGuidance(systemMessages, availableToolNames);
   appendAIChatReadinessInspectionGuidance(systemMessages, availableToolNames);
   appendAIProviderInspectionGuidance(systemMessages, availableToolNames);

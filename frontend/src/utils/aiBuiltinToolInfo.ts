@@ -308,6 +308,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_setup_health",
+    icon: "🩺",
+    desc: "一键体检当前 AI 配置健康度",
+    detail:
+      "汇总当前 AI 供应商、聊天发送前置、MCP 服务与外部客户端接入、提示词与 Skills、上下文挂载情况，并给出阻塞项、告警项和下一步建议。适合用户说“AI 为什么不好用”“帮我看下 AI 整体有没有问题”“现在这套 AI 配置还缺什么”时先做一次总览诊断。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_setup_health",
+        description:
+          "体检当前 AI 配置健康度，返回供应商、模型、聊天发送前置、MCP 接入、提示词与 Skills、表结构上下文挂载等整体快照，并给出阻塞项、建议项和下一步动作。适用于用户提到 AI 为什么不好用、当前 AI 配置哪里还缺、是否已经能稳定工作时，优先读取这份总览诊断，不要拆成多次猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_ai_runtime",
     icon: "🎛️",
     desc: "查看当前 AI 自身运行状态",

@@ -10,6 +10,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('当前供应商');
   });
 
+  it('registers the ai-setup-health inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_setup_health');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('体检当前 AI 配置');
+    expect(info?.tool.function.description).toContain('聊天发送前置');
+  });
+
   it('registers the ai-safety inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_safety');
     expect(info).toBeTruthy();
@@ -113,6 +120,7 @@ describe('aiToolRegistry', () => {
     }]);
 
     expect(tools.some((item) => item.function.name === 'inspect_ai_runtime')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_setup_health')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_safety')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_providers')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);

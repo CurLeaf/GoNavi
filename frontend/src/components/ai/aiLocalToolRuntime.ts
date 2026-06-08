@@ -1,6 +1,6 @@
 import { DBGetAllColumns, DBGetDatabases, DBGetTables, ReadSQLFile } from '../../../wailsjs/go/app/App';
 
-import type { AISnapshotInspectionRuntime } from './aiSnapshotInspectionToolExecutor';
+import type { AISnapshotInspectionRuntime } from './aiSnapshotInspectionToolTypes';
 
 export interface AIToolContextEntry {
   connectionId: string;

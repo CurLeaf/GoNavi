@@ -38,6 +38,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
   },
   {
+    title: '一键体检 AI 配置',
+    steps: 'inspect_ai_setup_health → inspect_ai_providers / inspect_mcp_setup / inspect_ai_guidance',
+    description: '适合先拿到一份 AI 配置健康快照，看清当前是供应商没配好、聊天发送前置没满足、MCP 没接入，还是提示词 / Skills / 上下文还不完整，再决定往哪条探针继续下钻。',
+  },
+  {
     title: '查看 AI 当前能力',
     steps: 'inspect_ai_runtime → inspect_ai_context / inspect_current_connection',
     description: '适合先确认当前模型、安全级别、上下文级别、Skills 和 MCP 工具，再决定让 AI 走哪条探针链路。',
