@@ -100,15 +100,27 @@ const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined)
   return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先写入 ${label} 配置，稍后再重启验证。`;
 };
 
-const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
-  const label = status?.displayName || '客户端';
+const getSelectedClientStateLine = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return `已接入到 ${label}`;
+    return '已接入当前 GoNavi，无需重复写入';
   }
   if (status?.installed) {
-    return `更新 ${label} 配置`;
+    return '已存在旧记录，建议更新到当前 GoNavi 路径';
   }
-  return `接入到 ${label}`;
+  if (hasStatusIssue(status)) {
+    return '状态读取异常，建议先刷新检测';
+  }
+  return '当前还没有写入 GoNavi MCP 配置';
+};
+
+const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
+  if (status?.matchesCurrent) {
+    return '当前已接入，无需重复写入';
+  }
+  if (status?.installed) {
+    return '更新已选客户端配置';
+  }
+  return '写入到已选客户端';
 };
 
 const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
@@ -129,10 +141,6 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
   onInstall,
 }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-    <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.9 }}>
-      这里不是给 GoNavi 自己安装 MCP，而是把 GoNavi 作为 MCP Server 接入 Claude Code 或 Codex 这类外部 AI 客户端。
-    </div>
-
     <div
       style={{
         padding: '16px',
@@ -144,24 +152,78 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         gap: 14,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
-        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          选择 1 个客户端后再执行接入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
-        </div>
-      </div>
       <div
         style={{
           padding: '12px 14px',
           borderRadius: 12,
           border: `1px solid ${darkMode ? 'rgba(96,165,250,0.16)' : 'rgba(96,165,250,0.18)'}`,
           background: darkMode ? 'rgba(59,130,246,0.08)' : 'rgba(59,130,246,0.05)',
-          fontSize: 12,
-          color: overlayTheme.titleText,
-          lineHeight: 1.7,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
         }}
       >
-        只会修改你选中的客户端用户级 MCP 配置，不会安装新的 GoNavi，也不会替换 GoNavi 自己的程序文件。
+        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
+          这里是在给外部客户端接入 GoNavi MCP，不是给 GoNavi 自己安装 MCP。
+        </div>
+        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+          你只需要选中 Claude Code 或 Codex 其中一个目标，GoNavi 就会把“如何启动当前这份 GoNavi MCP”的配置写入那个客户端的用户级配置文件。
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
+        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+          先选择 1 个目标客户端，再执行写入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 10,
+        }}
+      >
+        {[
+          { step: '1', title: '选择目标客户端', detail: 'Claude Code 和 Codex 二选一即可。' },
+          { step: '2', title: '写入当前 GoNavi 配置', detail: '只改用户级 MCP 配置，不会重装 GoNavi。' },
+          { step: '3', title: '重启对应客户端', detail: '重启后就能在外部 CLI 里调用当前 GoNavi MCP。' },
+        ].map((item) => (
+          <div
+            key={item.step}
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1px solid ${cardBorder}`,
+              background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 5,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 999,
+                  background: overlayTheme.selectedText,
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {item.step}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>{item.title}</div>
+            </div>
+            <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{item.detail}</div>
+          </div>
+        ))}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -222,8 +284,9 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                       fontWeight: 700,
                       color: tone.color,
                       background: tone.bg,
-                      minWidth: 76,
+                      width: 80,
                       textAlign: 'center',
+                      flexShrink: 0,
                     }}
                   >
                     {tone.label}
@@ -233,7 +296,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                   {getClientOptionSummary(status)}
                 </div>
                 <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                  {active ? '当前已选中这个客户端。' : '点击后切换到这个客户端。'}
+                  {active ? '当前已选中，将只对这个客户端执行写入或更新。' : '点击后切换到这个客户端。'}
                 </div>
               </button>
             );
@@ -256,6 +319,9 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
             {selectedStatus?.displayName || '客户端'} 状态
           </div>
+          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+            已选目标：{selectedStatus?.displayName || '未选择客户端'}
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
               {getStatusSummary(selectedStatus)}
@@ -277,11 +343,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           </div>
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          当前状态：{selectedStatus?.matchesCurrent
-            ? '当前 GoNavi MCP 已接入到这个客户端'
-            : selectedStatus?.installed
-              ? '检测到旧配置，建议更新到当前安装路径'
-              : '当前还没有把 GoNavi MCP 接入到这个客户端'}
+          当前状态：{getSelectedClientStateLine(selectedStatus)}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           CLI 检测：{selectedStatus?.clientDetected
@@ -341,14 +403,14 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
           {getClientDetectionSummary(selectedStatus)}
           {' '}
-          已经是当前配置时按钮会自动禁用，避免重复写入。
+          已经是当前配置时，下面的主按钮会自动禁用，避免重复写入。
         </div>
         <Button
           type={selectedStatus?.matchesCurrent ? 'default' : 'primary'}
           onClick={onInstall}
           loading={loading}
           disabled={Boolean(selectedStatus?.matchesCurrent)}
-          style={{ borderRadius: 10, fontWeight: 600, minWidth: 192, height: 40 }}
+          style={{ borderRadius: 10, fontWeight: 600, width: 208, maxWidth: '100%', height: 40 }}
         >
           {resolveActionLabel(selectedStatus)}
         </Button>
