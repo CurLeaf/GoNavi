@@ -387,6 +387,12 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
     });
   }
+  if (availableToolNames.includes('inspect_saved_connections')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“本地存了哪些连接”“帮我找 mysql / postgres / redis 连接”“哪条连接配了 SSH/代理”，优先调用 inspect_saved_connections 读取真实本地连接清单，再决定继续查看哪条连接。',
+    });
+  }
   if (availableToolNames.includes('inspect_saved_queries')) {
     systemMessages.push({
       role: 'system',

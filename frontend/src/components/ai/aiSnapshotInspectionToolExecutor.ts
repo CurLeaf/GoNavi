@@ -25,6 +25,7 @@ import {
   buildSavedQueriesSnapshot,
   buildSqlSnippetsSnapshot,
 } from './aiSavedSqlInsights';
+import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -173,6 +174,16 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_saved_connections':
+        return {
+          content: JSON.stringify(buildSavedConnectionsSnapshot({
+            connections,
+            keyword: args.keyword,
+            type: args.type,
+            limit: args.limit,
+          })),
+          success: true,
+        };
       case 'inspect_active_tab':
         return {
           content: JSON.stringify(buildActiveTabSnapshot({
@@ -248,6 +259,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_mcp_setup: '读取 MCP 配置状态失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
       inspect_current_connection: '读取当前连接失败',
+      inspect_saved_connections: '读取本地连接清单失败',
       inspect_active_tab: '读取当前活动页签失败',
       inspect_workspace_tabs: '读取当前工作区页签失败',
       inspect_ai_context: '读取当前 AI 上下文失败',

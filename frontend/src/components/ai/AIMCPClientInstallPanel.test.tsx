@@ -62,18 +62,20 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
+    expect(markup).toContain('安装到外部客户端');
     expect(markup).toContain('不是给 GoNavi 自己再装一个 MCP');
     expect(markup).toContain('把 GoNavi MCP 接入外部 AI 客户端');
-    expect(markup).toContain('第 1 步：选择目标客户端');
-    expect(markup).toContain('第 2 步：确认状态后写入');
-    expect(markup).toContain('未接入');
+    expect(markup).toContain('第 1 步：选择安装目标');
+    expect(markup).toContain('第 2 步：确认并安装');
+    expect(markup).toContain('未安装');
     expect(markup).toContain('需更新');
-    expect(markup).toContain('命令已检测');
+    expect(markup).toContain('CLI 已检测');
     expect(markup).toContain('复制配置路径');
     expect(markup).toContain('复制启动命令');
-    expect(markup).toContain('更新 Codex 配置');
+    expect(markup).toContain('更新到 Codex');
+    expect(markup).toContain('当前目标：Codex');
     expect(markup).toContain('本机命令状态：已检测到 codex');
-    expect(markup).toContain('不会下载 Claude Code / Codex');
+    expect(markup).toContain('不会下载安装 Claude Code / Codex');
   });
 
   it('shows an already-connected label and supports prewriting config when the client command is not detected locally', () => {
@@ -124,8 +126,9 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('预写入 Claude Code 配置');
-    expect(markup).toContain('未检测命令');
+    expect(markup).toContain('安装到 Claude Code');
+    expect(markup).toContain('CLI 未检测');
     expect(markup).toContain('未检测到本机 claude 命令');
+    expect(markup).toContain('已安装当前');
   });
 });

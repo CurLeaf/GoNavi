@@ -48,6 +48,10 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('不要写 export');
     expect(markup).toContain('当前阶段只支持 stdio');
     expect(markup).toContain('实际启动命令预览');
+    expect(markup).toContain('操作说明');
+    expect(markup).toContain('测试工具发现');
+    expect(markup).toContain('不会保存配置');
+    expect(markup).toContain('测试通过后，上方会显示这条服务实际发现到的工具');
     expect(markup).toContain('node server.js --stdio');
   });
 });

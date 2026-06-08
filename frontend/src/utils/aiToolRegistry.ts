@@ -435,6 +435,30 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_saved_connections",
+    icon: "🧭",
+    desc: "查看本地已保存连接清单",
+    detail:
+      "可按关键词或数据库类型过滤，返回本地保存的数据源列表、连接类型分布，以及每条连接的地址、当前库、SSH/代理/HTTP 隧道状态。适合用户问“我本地存了哪些连接”“帮我找 mysql / postgres 连接”“哪条连接配置了 SSH”时先读真实本地连接资产。",
+    params: "keyword?, type?, limit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_saved_connections",
+        description:
+          "读取本地已保存连接清单，可按关键词和数据库类型过滤，并返回每条连接的类型、地址、当前库、SSH/代理/HTTP 隧道等摘要。适用于用户提到本地保存了哪些连接、要找哪条 mysql/postgres 连接、哪条连接启用了 SSH 或代理时，先读取真实本地连接资产再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按连接名、ID、类型、主机、数据库名或 SSH/代理地址做关键词筛选" },
+            type: { type: "string", description: "可选，只看某种数据库类型，例如 mysql、postgres、redis、mongodb" },
+            limit: { type: "number", description: "可选，最多返回多少条连接，默认 20，最大 100" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_active_tab",
     icon: "📍",
     desc: "查看当前活动页签上下文",

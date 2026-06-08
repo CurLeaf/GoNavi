@@ -40,6 +40,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_ai_context');
     expect(markup).toContain('查看当前连接');
     expect(markup).toContain('inspect_current_connection');
+    expect(markup).toContain('盘点本地连接资产');
+    expect(markup).toContain('inspect_saved_connections');
     expect(markup).toContain('读取当前页签');
     expect(markup).toContain('inspect_active_tab');
     expect(markup).toContain('盘点当前工作区');

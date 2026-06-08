@@ -467,6 +467,58 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"activeTabType":"query"');
   });
 
+  it('returns the local saved connections snapshot so the model can find matching data sources by type or keyword', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_saved_connections', {
+        type: 'mysql',
+        keyword: '订单',
+      }),
+      connections: [
+        {
+          id: 'conn-1',
+          name: '订单主库',
+          config: {
+            type: 'mysql',
+            host: '10.10.1.18',
+            port: 3306,
+            user: 'root',
+            database: 'crm',
+            useSSH: true,
+            ssh: {
+              host: '192.168.1.8',
+              port: 22,
+              user: 'ops',
+            },
+          },
+        },
+        {
+          id: 'conn-2',
+          name: '分析仓库',
+          config: {
+            type: 'postgres',
+            host: '10.10.1.20',
+            port: 5432,
+            user: 'analyst',
+            database: 'dw',
+          },
+        },
+      ],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('"typeBreakdown":{"mysql":1}');
+    expect(result.content).toContain('"name":"订单主库"');
+    expect(result.content).toContain('"useSSH":true');
+    expect(result.content).not.toContain('分析仓库');
+  });
+
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {
     const query = vi.fn();
     const result = await executeLocalAIToolCall({

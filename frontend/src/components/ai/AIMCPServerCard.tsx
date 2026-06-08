@@ -329,6 +329,18 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
           </div>
         </div>
       )}
+      <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)' }}>
+        <div style={{ ...labelStyle, color: overlayTheme.titleText }}>操作说明</div>
+        <div style={{ ...hintStyle(overlayTheme.mutedText), marginTop: 4 }}>
+          <strong>测试工具发现</strong>
+          {' '}只会按当前字段试启动一次，检查能发现哪些工具，不会保存配置。
+          {' '}<strong>保存</strong>
+          {' '}才会把这条 MCP 长期写入本地配置。
+          {serverTools.length > 0
+            ? ' 当前上方列出的工具，就是最近一次测试成功后发现到的别名。'
+            : ' 建议先测试成功，再保存；测试通过后，上方会显示这条服务实际发现到的工具。'}
+        </div>
+      </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <Button onClick={onTest} loading={loading} style={{ borderRadius: 10 }}>测试工具发现</Button>
         <Button type="primary" onClick={onSave} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>

@@ -73,6 +73,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前活动数据源的类型、地址、当前库和 SSH/代理状态，再继续做库表探索或连接问题排查。',
   },
   {
+    title: '盘点本地连接资产',
+    steps: 'inspect_saved_connections → inspect_current_connection / get_databases',
+    description: '适合先按关键词或类型筛出本地保存的数据源，再挑目标连接继续看当前状态或库表结构。',
+  },
+  {
     title: '读取当前页签',
     steps: 'inspect_active_tab → get_columns / get_indexes / execute_sql',
     description: '适合先读取当前编辑器里的 SQL 草稿或当前表页签，再继续做字段核对、索引分析和只读验证。',
