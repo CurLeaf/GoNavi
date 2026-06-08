@@ -43,6 +43,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认这轮对话当前到底挂了哪些表结构，再继续做字段核对、表设计评审或 SQL 生成。',
   },
   {
+    title: '查看当前连接',
+    steps: 'inspect_current_connection → get_databases / get_tables',
+    description: '适合先确认当前活动数据源的类型、地址、当前库和 SSH/代理状态，再继续做库表探索或连接问题排查。',
+  },
+  {
     title: '读取当前页签',
     steps: 'inspect_active_tab → get_columns / get_indexes / execute_sql',
     description: '适合先读取当前编辑器里的 SQL 草稿或当前表页签，再继续做字段核对、索引分析和只读验证。',

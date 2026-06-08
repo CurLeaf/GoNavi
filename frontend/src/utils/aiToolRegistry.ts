@@ -333,6 +333,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_current_connection",
+    icon: "🛰️",
+    desc: "查看当前活动连接/数据源摘要",
+    detail:
+      "返回当前活动连接的类型、地址、端口、当前数据库、是否启用 SSH/代理/HTTP 隧道，以及当前活动页签绑定的表信息。适合用户问“我现在连的是哪个库”“这个连接走没走 SSH”“当前数据源是什么类型”时先读取真实连接状态。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_current_connection",
+        description:
+          "读取当前活动连接或当前页签对应数据源的真实摘要，包括连接类型、地址、端口、当前数据库、SSH/代理/HTTP 隧道状态，以及当前页签绑定的表上下文。适用于用户提到当前连接、当前数据源、当前库地址、是否走 SSH、当前连的是哪种数据库时，先读取真实界面上下文，避免模型猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_active_tab",
     icon: "📍",
     desc: "查看当前活动页签上下文",

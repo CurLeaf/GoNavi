@@ -20,6 +20,7 @@ import { AIChatWelcome } from './ai/AIChatWelcome';
 import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
+import AIMessageRenderBoundary from './ai/AIMessageRenderBoundary';
 import AIChatPanelModeContent, { type AIChatInsightItem } from './ai/AIChatPanelModeContent';
 import type { AIComposerNotice } from '../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -30,6 +31,7 @@ import {
 } from '../utils/aiComposerNotice';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
+import { compressContextIfNeeded, getDynamicMaxContextChars, sanitizeErrorMsg } from '../utils/aiChatRuntime';
 import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts';
 import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
@@ -51,195 +53,6 @@ interface AIChatPanelProps {
 }
 
 const genId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-interface AIMessageRenderBoundaryProps {
-    children: React.ReactNode;
-    msg: AIChatMessage;
-    darkMode: boolean;
-    overlayTheme: OverlayWorkbenchTheme;
-    onDeleteMessage: (id: string) => void;
-    onError?: (error: Error, errorInfo: React.ErrorInfo, msg: AIChatMessage) => void;
-}
-
-interface AIMessageRenderBoundaryState {
-    hasError: boolean;
-    error: Error | null;
-}
-
-class AIMessageRenderBoundary extends React.Component<
-    AIMessageRenderBoundaryProps,
-    AIMessageRenderBoundaryState
-> {
-    constructor(props: AIMessageRenderBoundaryProps) {
-        super(props);
-        this.state = { hasError: false, error: null };
-    }
-
-    static getDerivedStateFromError(error: Error): AIMessageRenderBoundaryState {
-        return { hasError: true, error };
-    }
-
-    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-        this.props.onError?.(error, errorInfo, this.props.msg);
-    }
-
-    private handleRetryRender = () => {
-        this.setState({ hasError: false, error: null });
-    };
-
-    render() {
-        if (this.state.hasError) {
-            const { msg, darkMode, overlayTheme, onDeleteMessage } = this.props;
-            return (
-                <div className="ai-ide-message" style={{ borderBottom: 'none', padding: '8px 16px' }}>
-                    <div style={{
-                        background: darkMode ? 'rgba(239,68,68,0.08)' : 'rgba(239,68,68,0.05)',
-                        border: `1px solid ${darkMode ? 'rgba(248,113,113,0.32)' : 'rgba(239,68,68,0.18)'}`,
-                        borderRadius: 12,
-                        padding: '14px 16px',
-                    }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: overlayTheme.titleText }}>
-                            这条 AI 消息渲染失败，已自动隔离
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: overlayTheme.mutedText }}>
-                            其余对话仍可继续使用。你可以先删除这条异常消息，再继续操作。
-                        </div>
-                        <div style={{
-                            marginTop: 10,
-                            padding: '8px 10px',
-                            borderRadius: 8,
-                            background: darkMode ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.03)',
-                            fontSize: 12,
-                            color: overlayTheme.titleText,
-                            wordBreak: 'break-word',
-                            whiteSpace: 'pre-wrap',
-                        }}>
-                            {this.state.error?.message || '未知渲染错误'}
-                        </div>
-                        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                            <button
-                                type="button"
-                                onClick={this.handleRetryRender}
-                                style={{
-                                    border: overlayTheme.sectionBorder,
-                                    background: 'transparent',
-                                    color: overlayTheme.titleText,
-                                    borderRadius: 8,
-                                    padding: '6px 12px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                重试渲染
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => onDeleteMessage(msg.id)}
-                                style={{
-                                    border: '1px solid rgba(239,68,68,0.28)',
-                                    background: darkMode ? 'rgba(239,68,68,0.08)' : 'rgba(239,68,68,0.05)',
-                                    color: '#ef4444',
-                                    borderRadius: 8,
-                                    padding: '6px 12px',
-                                    cursor: 'pointer',
-                                }}
-                            >
-                                删除这条消息
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        return this.props.children;
-    }
-}
-
-export const getDynamicMaxContextChars = (modelName?: string) => {
-    if (!modelName) return 258000; // 默认 258k (2026主流基线)
-    const lower = modelName.toLowerCase();
-    
-    // 「星际杯」- 百万到千万级 Tokens (保守取 2~5M 字符)
-    if (lower.includes('gemini-1.5-pro') || lower.includes('gemini-2') || lower.includes('gemini-3')) {
-        return 5000000;
-    }
-    // 「超大杯」- 1M Tokens (针对 2026 旗舰：约 1,000,000 字符)
-    if (lower.includes('glm-5') || lower.includes('claude-4') || lower.includes('claude-3.7') || lower.includes('gpt-5') || lower.includes('qwen3') || lower.includes('deepseek-v4')) {
-        return 1000000;
-    }
-    if (lower.includes('claude-3-opus') || lower.includes('claude-3.5') || lower.includes('glm-4-long') || lower.includes('qwen-long')) {
-        return 1000000;
-    }
-    // 「大杯」- 200K ~ 258K Tokens (针对现代主流：约 258,000 字符)
-    if (lower.includes('claude') || lower.includes('deepseek') || lower.includes('gpt-4.5') || lower.includes('qwen2.5')) {
-        return 258000;
-    }
-    // 「中杯/小杯」- 128K Tokens (老基线：约 128,000 字符)
-    if (lower.includes('gpt-4') || lower.includes('gpt-4o') || lower.includes('glm') || lower.includes('z-ai')) {
-        return 128000;
-    }
-    if (lower.includes('qwen')) {
-        return 128000;
-    }
-    // Default fallback
-    return 258000; 
-};
-
-// 当超出指定字符上限时触发上下文自建压缩
-const compressContextIfNeeded = async (sid: string, messagesPayload: any[], maxLimit: number) => {
-    try {
-        const chars = messagesPayload.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning_content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0);
-        if (chars < maxLimit) return null;
-
-        const Service = (window as any).go?.aiservice?.Service;
-        if (!Service?.AIChatSend) return null;
-
-        const connectingMsgId = genId();
-        useStore.getState().addAIChatMessage(sid, {
-            id: connectingMsgId, role: 'assistant', phase: 'connecting', content: '⚙️ 对话已超载，正在启动记忆压缩...', timestamp: Date.now(), loading: true
-        });
-
-        const summaryPrompt = `这是一段超长对话的历史记录。为了释放上下文空间同时保留你的记忆核心，请你仔细阅读并以“技术事实、已探索出的数据结构状态、用户的中心诉求、当前进展”为准则，进行高度浓缩的结构化总结。
-注意：
-1. 客观准确，不能遗漏关键业务逻辑或探索出的表名/字段。
-2. 剔除无效执行过程、客套话、JSON返回值本身。
-3. 请控制在 1000-2000 字左右，输出纯干货 Markdown。
-4. 开头直接输出总结，不要带寒暄。`;
-
-        const sysMsg = { role: 'system', content: summaryPrompt };
-        const result = await Service.AIChatSend([sysMsg, ...messagesPayload]);
-
-        if (result?.success && result.content) {
-            useStore.getState().deleteAIChatMessage(sid, connectingMsgId);
-            return result.content;
-        } else {
-            useStore.getState().updateAIChatMessage(sid, connectingMsgId, { loading: false, phase: 'idle', content: '❌ 记忆压缩失败，将尝试原样接续...' });
-        }
-    } catch (e) {
-        console.error("Compression exception:", e);
-    }
-    return null;
-};
-
-// 清洗错误信息：去除 HTML 标签、提取关键错误描述、截断过长文本
-const sanitizeErrorMsg = (raw: string): string => {
-    if (!raw || typeof raw !== 'string') return '未知错误';
-    // 检测 HTML 内容
-    if (raw.includes('<html') || raw.includes('<!DOCTYPE') || raw.includes('<head')) {
-        // 尝试提取 <title> 内容
-        const titleMatch = raw.match(/<title[^>]*>([^<]+)<\/title>/i);
-        // 尝试提取 HTTP 状态码
-        const codeMatch = raw.match(/\b(4\d{2}|5\d{2})\b/);
-        const title = titleMatch?.[1]?.trim();
-        const code = codeMatch?.[1];
-        if (title) return code ? `HTTP ${code}: ${title}` : title;
-        if (code) return `HTTP ${code} 服务端错误`;
-        return '服务端返回了异常 HTML 响应（可能是网关超时或服务不可用）';
-    }
-    // 截断过长的纯文本错误
-    if (raw.length > 300) return raw.substring(0, 280) + '...(已截断)';
-    return raw;
-};
 
 const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
     global: '',

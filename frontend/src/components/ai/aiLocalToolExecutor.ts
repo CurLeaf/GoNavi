@@ -7,6 +7,7 @@ import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { buildAIContextSnapshot } from './aiContextInsights';
+import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -180,6 +181,20 @@ export async function executeLocalAIToolCall({
   try {
     const args = JSON.parse(toolCall.function.arguments || '{}');
     switch (toolCall.function.name) {
+      case 'inspect_current_connection': {
+        try {
+          content = JSON.stringify(buildCurrentConnectionSnapshot({
+            activeContext,
+            tabs,
+            activeTabId,
+            connections,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取当前连接失败: ${error?.message || error}`;
+        }
+        break;
+      }
       case 'inspect_active_tab': {
         try {
           content = JSON.stringify(buildActiveTabSnapshot({

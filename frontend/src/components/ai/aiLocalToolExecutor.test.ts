@@ -169,6 +169,58 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('CREATE TABLE orders');
   });
 
+  it('returns the current connection snapshot so the model can inspect host, db, and ssh state', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_current_connection', {}),
+      connections: [{
+        id: 'conn-1',
+        name: '主库',
+        config: {
+          type: 'mysql',
+          host: '10.188.101.184',
+          port: 1523,
+          user: 'glzc',
+          database: 'crm',
+          useSSH: true,
+          ssh: {
+            host: '192.168.66.28',
+            port: 22,
+            user: 'wyeye',
+          },
+        },
+      }],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      },
+      tabs: [{
+        id: 'tab-query-1',
+        title: '订单分析',
+        type: 'query',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        query: 'select * from orders limit 20',
+      }],
+      activeTabId: 'tab-query-1',
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"hasActiveConnection":true');
+    expect(result.content).toContain('"connectionName":"主库"');
+    expect(result.content).toContain('"host":"10.188.101.184"');
+    expect(result.content).toContain('"port":1523');
+    expect(result.content).toContain('"activeDbName":"crm"');
+    expect(result.content).toContain('"useSSH":true');
+    expect(result.content).toContain('"sshHost":"192.168.66.28"');
+    expect(result.content).toContain('"activeTabType":"query"');
+  });
+
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {
     const query = vi.fn();
     const result = await executeLocalAIToolCall({
