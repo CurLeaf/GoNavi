@@ -29,7 +29,13 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
     expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
+    expect(source).toContain("import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';");
+    expect(source).toContain("import AISettingsSafetySection from './ai/AISettingsSafetySection';");
+    expect(source).toContain("import AISettingsContextSection from './ai/AISettingsContextSection';");
     expect(source).toContain("import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';");
+    expect(source).toContain('<AISettingsSidebar');
+    expect(source).toContain('<AISettingsSafetySection');
+    expect(source).toContain('<AISettingsContextSection');
     expect(source).toContain('<AISettingsMCPSection');
     expect(source).toContain('<AIBuiltinToolsCatalog');
   });

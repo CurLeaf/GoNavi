@@ -123,6 +123,20 @@ const normalizePreviewLimit = (input: unknown): number => {
   return value;
 };
 
+const normalizeTableLimit = (input: unknown): number => {
+  const value = Math.floor(Number(input) || 80);
+  if (value < 1) return 1;
+  if (value > 200) return 200;
+  return value;
+};
+
+const normalizePerTableColumnLimit = (input: unknown): number => {
+  const value = Math.floor(Number(input) || 8);
+  if (value < 1) return 1;
+  if (value > 30) return 30;
+  return value;
+};
+
 const buildPreviewSQLForTable = (connection: SavedConnection, tableName: string, limit: number): string => {
   const dbType = String(connection.config?.type || '').trim();
   return buildPaginatedSelectSQL(
@@ -450,6 +464,95 @@ export async function executeLocalAIToolCall({
           success = true;
         } catch (error: any) {
           content = `获取表结构快照失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'inspect_database_bundle': {
+        const connection = findConnection(connections, args.connectionId);
+        if (!connection) {
+          content = 'Connection not found';
+          break;
+        }
+        try {
+          const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+          if (!safeDbName) {
+            content = 'dbName 不能为空';
+            break;
+          }
+          const includeColumns = args.includeColumns !== false;
+          const tableLimit = normalizeTableLimit(args.tableLimit);
+          const perTableColumnLimit = normalizePerTableColumnLimit(args.perTableColumnLimit);
+          const rpcConfig = buildRpcConnectionConfig(connection.config) as any;
+          const results = await Promise.allSettled([
+            mergedRuntime.getTables(rpcConfig, safeDbName),
+            includeColumns ? mergedRuntime.getAllColumns(rpcConfig, safeDbName) : Promise.resolve(undefined),
+          ]);
+
+          const warnings: string[] = [];
+          const tablesResult = results[0];
+          const allColumnsResult = results[1];
+          const allColumns = allColumnsResult.status === 'fulfilled' && allColumnsResult.value?.success && Array.isArray(allColumnsResult.value.data)
+            ? normalizeColumnsWithTable(allColumnsResult.value.data)
+            : [];
+          const tableNamesFromColumns = Array.from(new Set(allColumns.map((column) => column.tableName).filter(Boolean)));
+
+          let tableNames: string[] = [];
+          if (tablesResult.status === 'fulfilled' && tablesResult.value?.success && Array.isArray(tablesResult.value.data)) {
+            tableNames = normalizeTableList(tablesResult.value.data).filter(Boolean);
+          } else if (tableNamesFromColumns.length > 0) {
+            tableNames = tableNamesFromColumns;
+            warnings.push(`表列表获取失败，已退回字段摘要推断：${tablesResult.status === 'fulfilled' ? (tablesResult.value?.message || '未知错误') : String(tablesResult.reason)}`);
+          } else {
+            warnings.push(`表列表获取失败：${tablesResult.status === 'fulfilled' ? (tablesResult.value?.message || '未知错误') : String(tablesResult.reason)}`);
+          }
+
+          if (includeColumns && allColumnsResult.status === 'fulfilled' && (!allColumnsResult.value?.success || !Array.isArray(allColumnsResult.value.data))) {
+            warnings.push(`字段摘要获取失败：${allColumnsResult.value?.message || '未知错误'}`);
+          } else if (includeColumns && allColumnsResult.status === 'rejected') {
+            warnings.push(`字段摘要获取失败：${String(allColumnsResult.reason)}`);
+          }
+
+          const uniqueTableNames = Array.from(new Set(tableNames.filter(Boolean)));
+          const visibleTableNames = uniqueTableNames.slice(0, tableLimit);
+          const columnsByTable = new Map<string, ReturnType<typeof normalizeColumnsWithTable>>();
+          allColumns.forEach((column) => {
+            const tableName = String(column.tableName || '').trim();
+            if (!tableName) {
+              return;
+            }
+            const current = columnsByTable.get(tableName) || [];
+            current.push(column);
+            columnsByTable.set(tableName, current);
+          });
+
+          const payload: Record<string, unknown> = {
+            dbName: safeDbName,
+            tableCount: uniqueTableNames.length,
+            totalColumns: allColumns.length,
+            tables: visibleTableNames,
+            truncatedTables: uniqueTableNames.length > visibleTableNames.length,
+          };
+
+          if (includeColumns) {
+            payload.tableSummaries = visibleTableNames.map((tableName) => {
+              const tableColumns = columnsByTable.get(tableName) || [];
+              return {
+                tableName,
+                columnCount: tableColumns.length,
+                truncatedColumns: tableColumns.length > perTableColumnLimit,
+                columns: tableColumns.slice(0, perTableColumnLimit),
+              };
+            });
+          }
+
+          if (warnings.length > 0) {
+            payload.warnings = warnings;
+          }
+
+          content = JSON.stringify(payload);
+          success = true;
+        } catch (error: any) {
+          content = `获取数据库结构总览失败: ${error?.message || error}`;
         }
         break;
       }

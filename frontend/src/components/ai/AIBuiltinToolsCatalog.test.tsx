@@ -6,7 +6,7 @@ import AIBuiltinToolsCatalog from './AIBuiltinToolsCatalog';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 describe('AIBuiltinToolsCatalog', () => {
-  it('renders the field-to-table flow and the deeper structure analysis tools', () => {
+  it('renders the field-to-table flow and both table-level and database-level snapshot tools', () => {
     const markup = renderToStaticMarkup(
       <AIBuiltinToolsCatalog
         darkMode={false}
@@ -24,6 +24,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('get_triggers');
     expect(markup).toContain('一键结构快照');
     expect(markup).toContain('inspect_table_bundle');
+    expect(markup).toContain('全库快速摸底');
+    expect(markup).toContain('inspect_database_bundle');
     expect(markup).toContain('理解样例数据');
     expect(markup).toContain('preview_table_rows');
   });

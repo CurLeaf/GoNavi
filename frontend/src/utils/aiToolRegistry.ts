@@ -283,6 +283,33 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_database_bundle",
+    icon: "🗂️",
+    desc: "一次抓取指定数据库的结构总览",
+    detail:
+      "传入 connectionId 和 dbName，返回库内表清单、表数量、总字段数，以及按表聚合的字段摘要预览。适合刚接手陌生库时先做全局摸底，再决定深入哪张表。",
+    params: "connectionId, dbName, includeColumns?, tableLimit?, perTableColumnLimit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_database_bundle",
+        description:
+          "一次性获取指定数据库的结构总览，返回表名列表、总字段数，以及按表聚合的字段摘要预览。适用于陌生数据库摸底、做数据地图和快速选择下一步要深入分析的表。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            includeColumns: { type: "boolean", description: "可选，是否附带按表聚合的字段摘要，默认 true" },
+            tableLimit: { type: "number", description: "可选，最多返回多少张表，默认 80，最大 200" },
+            perTableColumnLimit: { type: "number", description: "可选，每张表最多返回多少个字段摘要，默认 8，最大 30" },
+          },
+          required: ["connectionId", "dbName"],
+        },
+      },
+    },
+  },
+  {
     name: "execute_sql",
     icon: "▶️",
     desc: "执行 SQL 查询并返回结果",

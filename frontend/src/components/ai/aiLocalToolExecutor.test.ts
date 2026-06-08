@@ -244,4 +244,40 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"sampleRows"');
     expect(result.content).toContain('"status":"paid"');
   });
+
+  it('returns a database overview bundle with per-table column previews in one tool call', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_database_bundle', {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        tableLimit: 5,
+        perTableColumnLimit: 1,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ Table: 'users' }, { Table: 'orders' }],
+        }),
+        getAllColumns: vi.fn().mockResolvedValue({
+          success: true,
+          data: [
+            { TableName: 'users', Name: 'id', Type: 'bigint', Comment: '主键' },
+            { TableName: 'users', Name: 'email', Type: 'varchar(255)', Comment: '邮箱' },
+            { TableName: 'orders', Name: 'id', Type: 'bigint', Comment: '主键' },
+          ],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"dbName":"crm"');
+    expect(result.content).toContain('"tableCount":2');
+    expect(result.content).toContain('"tableName":"users"');
+    expect(result.content).toContain('"columnCount":2');
+    expect(result.content).toContain('"truncatedColumns":true');
+  });
 });

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
@@ -24,6 +24,9 @@ import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
 import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';
+import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
+import AISettingsSafetySection from './ai/AISettingsSafetySection';
+import AISettingsContextSection from './ai/AISettingsContextSection';
 import AISettingsPromptsSection from './ai/AISettingsPromptsSection';
 import AISettingsSkillsSection from './ai/AISettingsSkillsSection';
 interface AISettingsModalProps {
@@ -79,18 +82,6 @@ const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl'
     const presetKey = resolveProviderPresetKey(provider, PROVIDER_PRESETS, 'custom');
     return findPreset(presetKey);
 };
-
-const SAFETY_OPTIONS: { label: string; value: AISafetyLevel; desc: string; color: string; icon: string }[] = [
-    { label: '只读模式', value: 'readonly', desc: 'AI 仅可执行 SELECT 等查询操作，最安全', color: '#22c55e', icon: '🔒' },
-    { label: '读写模式', value: 'readwrite', desc: 'AI 可执行 INSERT/UPDATE/DELETE，危险操作需二次确认', color: '#f59e0b', icon: '⚠️' },
-    { label: '完全模式', value: 'full', desc: 'AI 可执行所有操作（含 DDL），高危操作自动告警', color: '#ef4444', icon: '🔓' },
-];
-
-const CONTEXT_OPTIONS: { label: string; value: AIContextLevel; desc: string; icon: string }[] = [
-    { label: '仅 Schema', value: 'schema_only', desc: '只传递表/列结构信息给 AI', icon: '📋' },
-    { label: '含采样数据', value: 'with_samples', desc: '包含少量采样数据帮助 AI 理解数据特征', icon: '📊' },
-    { label: '含查询结果', value: 'with_results', desc: '传递最近的查询结果作为上下文', icon: '📑' },
-];
 
 const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
     global: '',
@@ -242,7 +233,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [builtinPrompts, setBuiltinPrompts] = useState<Record<string, string>>({});
     const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
-    const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'mcp' | 'skills' | 'prompts' | 'tools'>('providers');
+    const [activeSection, setActiveSection] = useState<AISettingsSectionKey>('providers');
     const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
@@ -1025,78 +1016,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         );
     };
 
-    // ===== 安全控制 =====
-    const renderSafetySettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
-                控制 AI 可执行的 SQL 操作类型，保护数据安全
-            </div>
-            {SAFETY_OPTIONS.map(opt => {
-                const active = safetyLevel === opt.value;
-                return (
-                    <div key={opt.value} onClick={() => handleSafetyChange(opt.value)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${active ? (opt.color === '#ef4444' ? opt.color : overlayTheme.selectedText) : cardBorder}`,
-                        background: active ? (opt.color === '#ef4444' ? `${opt.color}15` : overlayTheme.selectedBg) : cardBg,
-                        display: 'flex', alignItems: 'flex-start', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 18, flexShrink: 0,
-                            background: active ? (opt.color === '#ef4444' ? `${opt.color}25` : overlayTheme.iconBg) : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-                            color: active ? (opt.color === '#ef4444' ? opt.color : overlayTheme.iconColor) : overlayTheme.mutedText,
-                            transition: 'all 0.2s ease',
-                        }}>
-                            {opt.icon}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {opt.label}
-                                {active && <CheckOutlined style={{ color: opt.color === '#ef4444' ? opt.color : overlayTheme.iconColor, fontSize: 14 }} />}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{opt.desc}</div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-
-    // ===== 上下文级别 =====
-    const renderContextSettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
-                控制发送给 AI 的数据库上下文信息量
-            </div>
-            {CONTEXT_OPTIONS.map(opt => {
-                const active = contextLevel === opt.value;
-                return (
-                    <div key={opt.value} onClick={() => handleContextChange(opt.value)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
-                        background: active ? overlayTheme.selectedBg : cardBg,
-                        display: 'flex', alignItems: 'flex-start', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 18, flexShrink: 0,
-                            background: active ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-                            color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
-                            transition: 'all 0.2s ease',
-                        }}>
-                            {opt.icon}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {opt.label}
-                                {active && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 14 }} />}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{opt.desc}</div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-
     const modalShellStyle = {
         background: overlayTheme.shellBg, border: overlayTheme.shellBorder,
         boxShadow: overlayTheme.shellShadow, backdropFilter: overlayTheme.shellBackdropFilter,
@@ -1132,54 +1051,34 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         >
               <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative' }}>
                   {messageContextHolder}
-                  <div style={{ minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', padding: '0 6px 28px 12px' }}>
-                      <div style={{ marginBottom: 12, fontWeight: 600, color: overlayTheme.titleText }}>设置导航</div>
-                      <div style={{ display: 'grid', gap: 10 }}>
-                          {[
-                              { key: 'providers', title: '模型供应商', description: '配置大模型接口与秘钥', icon: <ApiOutlined /> },
-                              { key: 'safety', title: '安全控制', description: '限制 AI 操作风险级别', icon: <SafetyCertificateOutlined /> },
-                              { key: 'context', title: '上下文', description: '配置携带的数据架构信息', icon: <RobotOutlined /> },
-                              { key: 'mcp', title: 'MCP 服务', description: '接入外部工具源', icon: <AppstoreOutlined /> },
-                              { key: 'skills', title: 'Skills', description: '配置可复用提示模块', icon: <ExperimentOutlined /> },
-                              { key: 'tools', title: '内置工具', description: '查看 AI 可调用的数据探针', icon: <ToolOutlined /> },
-                              { key: 'prompts', title: '内置提示词', description: '查看系统预设的底层要求', icon: <ExperimentOutlined /> },
-                          ].map((item) => {
-                              const active = activeSection === item.key;
-                              return (
-                                  <button
-                                      key={item.key}
-                                      type="button"
-                                      onClick={() => setActiveSection(item.key as typeof activeSection)}
-                                      style={{
-                                          textAlign: 'left',
-                                          padding: '12px 14px',
-                                          borderRadius: 12,
-                                          border: `1px solid ${active
-                                              ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
-                                              : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                          background: active
-                                              ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
-                                              : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                          color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                                          cursor: 'pointer',
-                                      }}
-                                  >
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                          <span style={{ fontSize: 16 }}>{item.icon}</span>
-                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.title}</span>
-                                      </div>
-                                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : 'rgba(128,128,128,0.7)' }}>
-                                          {item.description}
-                                      </div>
-                                  </button>
-                              );
-                          })}
-                      </div>
-                  </div>
+                  <AISettingsSidebar
+                      activeSection={activeSection}
+                      darkMode={darkMode}
+                      overlayTheme={overlayTheme}
+                      onSelectSection={setActiveSection}
+                  />
                   <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
                       {activeSection === 'providers' && (isEditing ? renderProviderForm() : renderProviderList())}
-                      {activeSection === 'safety' && renderSafetySettings()}
-                      {activeSection === 'context' && renderContextSettings()}
+                      {activeSection === 'safety' && (
+                          <AISettingsSafetySection
+                              safetyLevel={safetyLevel}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              onChange={handleSafetyChange}
+                          />
+                      )}
+                      {activeSection === 'context' && (
+                          <AISettingsContextSection
+                              contextLevel={contextLevel}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              onChange={handleContextChange}
+                          />
+                      )}
                       {activeSection === 'mcp' && (
                           <AISettingsMCPSection
                               mcpClientStatuses={mcpClientStatuses}

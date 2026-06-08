@@ -26,12 +26,15 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   get_connections: '获取可用连接信息',
   get_databases: '扫描数据库列表',
   get_tables: '分析表结构信息',
+  get_all_columns: '汇总跨表字段摘要',
   get_columns: '核对真实字段定义',
   get_indexes: '检查索引定义',
   get_foreign_keys: '梳理外键关系',
   get_triggers: '检查触发器逻辑',
   get_table_ddl: '提取建表语句',
   inspect_table_bundle: '抓取完整表结构快照',
+  inspect_database_bundle: '抓取数据库结构总览',
+  preview_table_rows: '预览真实样例数据',
   execute_sql: '执行只读 SQL 验证',
 };
 

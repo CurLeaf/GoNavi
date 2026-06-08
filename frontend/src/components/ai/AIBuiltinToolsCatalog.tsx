@@ -33,6 +33,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合一次带回字段、索引、外键、触发器和 DDL；必要时还能附带样例行，减少来回调用。',
   },
   {
+    title: '全库快速摸底',
+    steps: 'inspect_database_bundle → inspect_table_bundle',
+    description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
+  },
+  {
     title: '理解样例数据',
     steps: 'get_columns → preview_table_rows',
     description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',
