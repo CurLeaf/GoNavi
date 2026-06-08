@@ -3,12 +3,13 @@ import { Button } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 
 import type { AIMCPClientInstallStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
+import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
 import AIMCPServerCard from './AIMCPServerCard';
 
-export type MCPClientKey = 'claude-code' | 'codex';
+export type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 
 interface AISettingsMCPSectionProps {
   mcpClientStatuses: AIMCPClientInstallStatus[];

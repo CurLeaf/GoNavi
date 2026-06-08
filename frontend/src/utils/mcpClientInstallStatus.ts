@@ -1,6 +1,6 @@
 import type { AIMCPClientInstallStatus } from '../types';
 
-type MCPClientKey = 'claude-code' | 'codex';
+export type MCPClientKey = 'claude-code' | 'codex';
 
 export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
   {

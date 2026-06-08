@@ -15,30 +15,22 @@ import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
-import { EMPTY_MCP_CLIENT_STATUSES, formatMCPLaunchCommand, normalizeMCPClientStatuses, pickPreferredMCPClient } from '../utils/mcpClientInstallStatus';
+import { EMPTY_MCP_CLIENT_STATUSES } from '../utils/mcpClientInstallStatus';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
-import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';
+import AISettingsMCPSection from './ai/AISettingsMCPSection';
 import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
 import AISettingsSafetySection from './ai/AISettingsSafetySection';
 import AISettingsContextSection from './ai/AISettingsContextSection';
 import AISettingsProvidersSection from './ai/AISettingsProvidersSection';
 import AISettingsPromptsSection from './ai/AISettingsPromptsSection';
 import AISettingsSkillsSection from './ai/AISettingsSkillsSection';
+import { useAIMCPClientInstaller } from './ai/useAIMCPClientInstaller';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
     darkMode: boolean;
     overlayTheme: OverlayWorkbenchTheme;
     focusProviderId?: string;
-}
-
-interface MCPClientInstallResult {
-    success?: boolean;
-    client?: string;
-    message?: string;
-    configPath?: string;
-    command?: string;
-    args?: string[];
 }
 
 // 预设配置：每个预设映射到后端 type（openai/anthropic/gemini/custom）并附带默认 URL 和 Model
@@ -143,10 +135,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
     const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
-    const [mcpClientStatuses, setMCPClientStatuses] = useState<AIMCPClientInstallStatus[]>(EMPTY_MCP_CLIENT_STATUSES);
-    const [selectedMCPClient, setSelectedMCPClient] = useState<MCPClientKey>('claude-code');
-    const [mcpClientSelectionTouched, setMCPClientSelectionTouched] = useState(false);
-    const [mcpClientStatusLoading, setMCPClientStatusLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -182,18 +170,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             value: tool.alias,
         })),
     ]), [mcpTools]);
-    const selectedMCPClientStatus = useMemo(
-        () => mcpClientStatuses.find((item) => item.client === selectedMCPClient) || mcpClientStatuses[0],
-        [mcpClientStatuses, selectedMCPClient],
-    );
-    const selectedMCPClientCommandText = useMemo(
-        () => formatMCPLaunchCommand(selectedMCPClientStatus),
-        [selectedMCPClientStatus],
-    );
-    const handleSelectMCPClient = useCallback((client: MCPClientKey) => {
-        setMCPClientSelectionTouched(true);
-        setSelectedMCPClient(client);
-    }, []);
 
     const resolveAIService = useCallback(async () => {
         const service = await waitForAIService();
@@ -208,35 +184,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         return null;
     }, []);
 
-    const loadMCPClientStatuses = useCallback(async (options?: { silent?: boolean }) => {
-        const silent = options?.silent === true;
-        if (!silent) {
-            setMCPClientStatusLoading(true);
-        }
-        try {
-            const Service = await resolveAIService();
-            if (typeof Service?.AIGetMCPClientInstallStatuses !== 'function') {
-                return;
-            }
-            const result = await Service.AIGetMCPClientInstallStatuses();
-            if (Array.isArray(result)) {
-                const normalizedStatuses = normalizeMCPClientStatuses(result);
-                setMCPClientStatuses(normalizedStatuses);
-                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined));
-            }
-        } catch (e: any) {
-            if (silent) {
-                console.warn('[AI] refresh mcp client statuses failed', e);
-            } else {
-                void messageApi.error(e?.message || '刷新客户端安装状态失败');
-            }
-        } finally {
-            if (!silent) {
-                setMCPClientStatusLoading(false);
-            }
-        }
-    }, [mcpClientSelectionTouched, messageApi, resolveAIService]);
-
     const copyTextToClipboard = useCallback(async (text: string, successMessage: string) => {
         if (typeof navigator?.clipboard?.writeText !== 'function') {
             throw new Error('当前环境不支持复制到剪贴板');
@@ -244,6 +191,28 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         await navigator.clipboard.writeText(text);
         void messageApi.success(successMessage);
     }, [messageApi]);
+
+    const {
+        handleCopySelectedMCPConfigPath,
+        handleCopySelectedMCPLaunchCommand,
+        handleInstallSelectedMCPClient,
+        handleSelectMCPClient,
+        loadMCPClientStatuses,
+        mcpClientStatusLoading,
+        mcpClientStatuses,
+        resetMCPClientSelectionTouched,
+        selectedMCPClient,
+        selectedMCPClientCommandText,
+        selectedMCPClientStatus,
+        syncMCPClientStatuses,
+    } = useAIMCPClientInstaller({
+        resolveAIService,
+        messageApi,
+        copyTextToClipboard,
+        onBeforeInstall: () => setLoading(true),
+        onAfterInstall: () => setLoading(false),
+        onConfigChanged: () => window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed')),
+    });
 
     const loadConfig = useCallback(async () => {
         try {
@@ -291,20 +260,18 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
             if (Array.isArray(skillsRes)) setSkills(skillsRes);
             if (Array.isArray(mcpClientStatusesRes)) {
-                const normalizedStatuses = normalizeMCPClientStatuses(mcpClientStatusesRes);
-                setMCPClientStatuses(normalizedStatuses);
-                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined));
+                syncMCPClientStatuses(mcpClientStatusesRes);
             }
         } catch (e) { console.warn('Failed to load AI config', e); }
-    }, [mcpClientSelectionTouched, resolveAIService]);
+    }, [resolveAIService, syncMCPClientStatuses]);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
 
     useEffect(() => {
         if (open) {
-            setMCPClientSelectionTouched(false);
+            resetMCPClientSelectionTouched();
         }
-    }, [open]);
+    }, [open, resetMCPClientSelectionTouched]);
 
     useEffect(() => {
         if (!open || !focusProviderId) {
@@ -568,64 +535,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             setLoading(false);
         }
     };
-
-    const handleInstallSelectedMCPClient = async () => {
-        const targetClient = selectedMCPClientStatus?.client === 'codex' ? 'codex' : 'claude-code';
-        const targetLabel = selectedMCPClientStatus?.displayName || (targetClient === 'codex' ? 'Codex' : 'Claude Code');
-        if (selectedMCPClientStatus?.matchesCurrent) {
-            void messageApi.success(`${targetLabel} 已安装当前 GoNavi MCP，无需重复安装`);
-            return;
-        }
-        try {
-            setLoading(true);
-            setMCPClientSelectionTouched(true);
-            const Service = await resolveAIService();
-            let result: MCPClientInstallResult;
-            if (targetClient === 'codex') {
-                if (typeof Service?.AIInstallCodexMCP !== 'function') {
-                    throw new Error('当前版本暂不支持自动安装 Codex MCP');
-                }
-                result = await Service.AIInstallCodexMCP() as MCPClientInstallResult;
-            } else {
-                if (typeof Service?.AIInstallClaudeCodeMCP !== 'function') {
-                    throw new Error('当前版本暂不支持自动安装 Claude Code MCP');
-                }
-                result = await Service.AIInstallClaudeCodeMCP() as MCPClientInstallResult;
-            }
-            await loadMCPClientStatuses({ silent: true });
-            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
-            void messageApi.success(result?.message || `已写入 ${targetLabel} 用户级 MCP 配置`);
-        } catch (e: any) {
-            void messageApi.error(e?.message || `安装 ${targetLabel} MCP 失败`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleCopySelectedMCPConfigPath = useCallback(async () => {
-        const configPath = String(selectedMCPClientStatus?.configPath || '').trim();
-        if (!configPath) {
-            void messageApi.warning('当前没有可复制的配置文件路径');
-            return;
-        }
-        try {
-            await copyTextToClipboard(configPath, '配置文件路径已复制');
-        } catch (e: any) {
-            void messageApi.error(e?.message || '复制配置文件路径失败');
-        }
-    }, [copyTextToClipboard, messageApi, selectedMCPClientStatus]);
-
-    const handleCopySelectedMCPLaunchCommand = useCallback(async () => {
-        if (!selectedMCPClientCommandText) {
-            void messageApi.warning('当前没有可复制的启动命令');
-            return;
-        }
-        try {
-            await copyTextToClipboard(selectedMCPClientCommandText, '启动命令已复制');
-        } catch (e: any) {
-            void messageApi.error(e?.message || '复制启动命令失败');
-        }
-    }, [copyTextToClipboard, messageApi, selectedMCPClientCommandText]);
 
     const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
         setSkills((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));

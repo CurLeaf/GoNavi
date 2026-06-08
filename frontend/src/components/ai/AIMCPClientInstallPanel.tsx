@@ -3,9 +3,8 @@ import { Button } from 'antd';
 import { CheckCircleFilled, CopyOutlined, ReloadOutlined } from '@ant-design/icons';
 
 import type { AIMCPClientInstallStatus } from '../../types';
+import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
-
-type MCPClientKey = 'claude-code' | 'codex';
 
 interface AIMCPClientInstallPanelProps {
   statuses: AIMCPClientInstallStatus[];
