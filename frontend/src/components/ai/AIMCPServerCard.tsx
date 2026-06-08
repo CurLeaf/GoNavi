@@ -6,6 +6,7 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
 import { formatMCPEnvDraft, parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
+import AIMCPCommandDraftPreview from './AIMCPCommandDraftPreview';
 
 interface AIMCPServerCardProps {
   server: AIMCPServerConfig;
@@ -216,6 +217,14 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
             自动拆分到下方字段
           </Button>
         </div>
+        {parsedCommandDraft.ok && parsedCommandDraft.draft && rawCommandDraft.trim() && (
+          <AIMCPCommandDraftPreview
+            draft={parsedCommandDraft.draft}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
+            cardBorder={cardBorder}
+          />
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
