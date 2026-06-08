@@ -878,6 +878,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 sqlLogs: useStore.getState().sqlLogs,
                 savedQueries: useStore.getState().savedQueries,
                 sqlSnippets: useStore.getState().sqlSnippets,
+                skills,
+                dynamicModels,
             });
             const toolResultMsg: AIChatMessage = buildToolResultMessage({
                 id: genId(),
@@ -996,7 +998,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             console.error('Failed to chain tool call', e);
             setSending(false);
         }
-    }, [availableTools, buildSystemContextMessages, mcpTools, sid]);
+    }, [availableTools, buildSystemContextMessages, dynamicModels, mcpTools, sid, skills]);
 
     const handleSend = useCallback(async () => {
         const text = input.trim();

@@ -2,21 +2,27 @@ import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/g
 
 import type { SqlLog } from '../../store';
 import type {
+  AIContextLevel,
   AIChatMessage,
   AIContextItem,
   AIMCPToolDescriptor,
+  AIProviderConfig,
+  AISafetyLevel,
+  AISkillConfig,
   AIToolCall,
   SavedConnection,
   SavedQuery,
   SqlSnippet,
   TabData,
 } from '../../types';
+import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
+import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import {
   buildSavedQueriesSnapshot,
   buildSqlSnippetsSnapshot,
@@ -33,6 +39,13 @@ export interface AIToolContextEntry {
   tables: string[];
 }
 
+interface AILocalRuntimeState {
+  providers?: AIProviderConfig[];
+  activeProviderId?: string;
+  safetyLevel?: AISafetyLevel | string;
+  contextLevel?: AIContextLevel | string;
+}
+
 interface AILocalToolRuntime {
   getDatabases: (config: any) => Promise<any>;
   getTables: (config: any, dbName: string) => Promise<any>;
@@ -45,6 +58,7 @@ interface AILocalToolRuntime {
   query: (config: any, dbName: string, sql: string) => Promise<any>;
   checkSQL?: (sql: string) => Promise<{ allowed?: boolean; operationType?: string } | undefined>;
   callMCPTool?: (name: string, args: string) => Promise<{ content?: string; isError?: boolean } | undefined>;
+  getAIRuntimeState?: () => Promise<AILocalRuntimeState | undefined>;
 }
 
 export interface ExecuteLocalAIToolCallOptions {
@@ -59,6 +73,8 @@ export interface ExecuteLocalAIToolCallOptions {
   sqlLogs?: SqlLog[];
   savedQueries?: SavedQuery[];
   sqlSnippets?: SqlSnippet[];
+  skills?: AISkillConfig[];
+  dynamicModels?: string[];
   runtime?: Partial<AILocalToolRuntime>;
 }
 
@@ -110,7 +126,27 @@ const buildDefaultRuntime = (): AILocalToolRuntime => ({
     }
     return service.AICallMCPTool(name, args);
   },
+  getAIRuntimeState: async () => {
+    const service = (window as any).go?.aiservice?.Service;
+    if (!service) {
+      return undefined;
+    }
+    const [providers, activeProviderId, safetyLevel, contextLevel] = await Promise.all([
+      typeof service.AIGetProviders === 'function' ? service.AIGetProviders() : Promise.resolve([]),
+      typeof service.AIGetActiveProvider === 'function' ? service.AIGetActiveProvider() : Promise.resolve(''),
+      typeof service.AIGetSafetyLevel === 'function' ? service.AIGetSafetyLevel() : Promise.resolve(''),
+      typeof service.AIGetContextLevel === 'function' ? service.AIGetContextLevel() : Promise.resolve(''),
+    ]);
+    return {
+      providers: Array.isArray(providers) ? providers : [],
+      activeProviderId: String(activeProviderId || '').trim(),
+      safetyLevel: String(safetyLevel || '').trim(),
+      contextLevel: String(contextLevel || '').trim(),
+    };
+  },
 });
+
+const BUILTIN_AI_TOOL_NAMES = BUILTIN_AI_TOOL_INFO.map((item) => item.name);
 
 const normalizeTableList = (rows: any[]): string[] =>
   rows.map((row) => row.Table || row.table || (Object.values(row)[0] as string));
@@ -188,6 +224,8 @@ export async function executeLocalAIToolCall({
   sqlLogs = [],
   savedQueries = [],
   sqlSnippets = [],
+  skills = [],
+  dynamicModels = [],
   runtime,
 }: ExecuteLocalAIToolCallOptions): Promise<ExecuteLocalAIToolCallResult> {
   const mergedRuntime = { ...buildDefaultRuntime(), ...(runtime || {}) };
@@ -198,6 +236,27 @@ export async function executeLocalAIToolCall({
   try {
     const args = JSON.parse(toolCall.function.arguments || '{}');
     switch (toolCall.function.name) {
+      case 'inspect_ai_runtime': {
+        try {
+          const runtimeState = typeof mergedRuntime.getAIRuntimeState === 'function'
+            ? await mergedRuntime.getAIRuntimeState()
+            : undefined;
+          content = JSON.stringify(buildAIRuntimeSnapshot({
+            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
+            activeProviderId: runtimeState?.activeProviderId || '',
+            safetyLevel: runtimeState?.safetyLevel,
+            contextLevel: runtimeState?.contextLevel,
+            skills,
+            mcpTools,
+            dynamicModels,
+            builtinToolNames: BUILTIN_AI_TOOL_NAMES,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取当前 AI 运行状态失败: ${error?.message || error}`;
+        }
+        break;
+      }
       case 'inspect_current_connection': {
         try {
           content = JSON.stringify(buildCurrentConnectionSnapshot({

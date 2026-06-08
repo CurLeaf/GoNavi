@@ -169,6 +169,61 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('CREATE TABLE orders');
   });
 
+  it('returns the current ai runtime snapshot so the model can inspect provider, safety, skills, and tools', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_runtime', {}),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'browser_open',
+        originalName: 'browser_open',
+        serverId: 'server-1',
+        serverName: 'browser',
+        title: '打开浏览器',
+        description: '打开页面',
+      }],
+      skills: [{
+        id: 'skill-1',
+        name: '结构审查',
+        systemPrompt: '先核对字段',
+        enabled: true,
+        scopes: ['database'],
+        requiredTools: ['get_columns'],
+      }],
+      dynamicModels: ['gpt-5.4', 'gpt-4.1'],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          activeProviderId: 'provider-1',
+          providers: [{
+            id: 'provider-1',
+            type: 'openai',
+            name: 'OpenAI 主账号',
+            apiKey: '',
+            hasSecret: true,
+            baseUrl: 'https://api.openai.com/v1',
+            model: 'gpt-5.4',
+            models: ['gpt-5.4', 'gpt-4.1'],
+            maxTokens: 32000,
+            temperature: 0.2,
+          }],
+          safetyLevel: 'readonly',
+          contextLevel: 'with_samples',
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"hasActiveProvider":true');
+    expect(result.content).toContain('"name":"OpenAI 主账号"');
+    expect(result.content).toContain('"safetyLevel":"readonly"');
+    expect(result.content).toContain('"contextLevel":"with_samples"');
+    expect(result.content).toContain('"enabledSkillCount":1');
+    expect(result.content).toContain('"alias":"browser_open"');
+    expect(result.content).toContain('"builtinToolCount":');
+  });
+
   it('returns the current connection snapshot so the model can inspect host, db, and ssh state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_current_connection', {}),

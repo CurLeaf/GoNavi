@@ -38,6 +38,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
   },
   {
+    title: '查看 AI 当前能力',
+    steps: 'inspect_ai_runtime → inspect_ai_context / inspect_current_connection',
+    description: '适合先确认当前模型、安全级别、上下文级别、Skills 和 MCP 工具，再决定让 AI 走哪条探针链路。',
+  },
+  {
     title: '查看当前 AI 上下文',
     steps: 'inspect_ai_context → inspect_table_bundle / get_columns',
     description: '适合先确认这轮对话当前到底挂了哪些表结构，再继续做字段核对、表设计评审或 SQL 生成。',

@@ -23,6 +23,7 @@ interface AIToolCallingBlockProps {
 }
 
 const TOOL_ACTION_LABELS: Record<string, string> = {
+  inspect_ai_runtime: '读取当前 AI 运行状态',
   get_connections: '获取可用连接信息',
   get_databases: '扫描数据库列表',
   get_tables: '分析表结构信息',

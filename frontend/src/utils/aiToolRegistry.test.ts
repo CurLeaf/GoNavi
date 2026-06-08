@@ -3,6 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { BUILTIN_AI_TOOL_INFO, buildAvailableAIChatTools } from './aiToolRegistry';
 
 describe('aiToolRegistry', () => {
+  it('registers the ai-runtime inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_runtime');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('AI 自身运行状态');
+    expect(info?.tool.function.description).toContain('当前供应商');
+  });
+
   it('registers the current-connection inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_current_connection');
     expect(info).toBeTruthy();
@@ -36,6 +43,7 @@ describe('aiToolRegistry', () => {
       },
     }]);
 
+    expect(tools.some((item) => item.function.name === 'inspect_ai_runtime')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

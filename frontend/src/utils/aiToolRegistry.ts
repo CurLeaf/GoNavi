@@ -310,6 +310,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_runtime",
+    icon: "🎛️",
+    desc: "查看当前 AI 自身运行状态",
+    detail:
+      "返回当前启用的模型供应商、模型名、安全级别、上下文级别、启用的 Skills，以及当前已暴露的内置工具和 MCP 工具。适合用户问“你现在能调用什么”“当前用的哪个模型”“为什么不能执行写操作”时，先读真实运行状态再回答。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_runtime",
+        description:
+          "读取当前 AI 运行时快照，包括当前供应商、模型、安全级别、上下文级别、启用的 Skills、当前可用的内置工具与 MCP 工具。适用于用户询问当前 AI 能力边界、当前使用哪个模型、为什么不能执行某些操作时，先读取真实运行状态，避免模型猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_ai_context",
     icon: "🧷",
     desc: "查看当前 AI 已关联的表结构上下文",

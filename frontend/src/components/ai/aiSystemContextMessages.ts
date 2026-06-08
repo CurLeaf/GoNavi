@@ -95,6 +95,19 @@ const appendSkillPromptGroup = (
   });
 };
 
+const appendAIRuntimeInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_runtime')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“你现在用的哪个模型”“当前安全级别”“你现在能调用什么工具”“当前启用了哪些 skills / MCP 工具”，优先调用 inspect_ai_runtime 读取当前 AI 运行状态，不要凭记忆或假设回答。',
+  });
+};
+
 const resolveDatabaseDisplayType = (config: ConnectionConfig | undefined): string => {
   const dbType = config?.type || 'unknown';
   return dbType === 'diros' ? 'Doris' : dbType.charAt(0).toUpperCase() + dbType.slice(1);
@@ -205,6 +218,7 @@ export function buildAISystemContextMessages({
 6. expectedSignals 必须是字符串数组，描述执行后需要重点观察的信号。
 7. 如果命令权限不允许某类操作，就不要输出该类命令；无法满足时直接说明限制。`,
     });
+    appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
     appendCustomPromptGroup(systemMessages, ['jvmDiagnostic'], userPromptSettings);
     appendSkillPromptGroup(systemMessages, ['jvmDiagnostic'], skills, availableToolNames);
     return systemMessages;
@@ -238,6 +252,7 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 5. payload 只能使用 {"format":"json","value":{...}} 或 {"format":"text","value":"..."} 这两种包装形式，不要输出脚本、命令或裸值。
 6. 不要输出脚本、命令或“已经执行成功”之类的表述。`,
     });
+    appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
     appendCustomPromptGroup(systemMessages, ['jvm'], userPromptSettings);
     appendSkillPromptGroup(systemMessages, ['jvm'], skills, availableToolNames);
     return systemMessages;
@@ -309,6 +324,7 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“当前 AI 上下文”“当前关联了哪些表”“现在带了哪些表结构”，优先调用 inspect_ai_context 读取当前挂载的表结构上下文，不要凭记忆复述。',
     });
   }
+  appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({
       role: 'system',
