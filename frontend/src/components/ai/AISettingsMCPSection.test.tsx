@@ -47,14 +47,14 @@ describe('AISettingsMCPSection', () => {
             displayName: 'Claude Code',
             installed: false,
             matchesCurrent: false,
-            message: '未安装到 Claude Code 用户级配置',
+            message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
           },
           {
             client: 'codex',
             displayName: 'Codex',
             installed: false,
             matchesCurrent: false,
-            message: '未安装到 Codex 用户级配置',
+            message: '未检测到 Codex 用户级 GoNavi MCP 配置',
           },
         ]}
         selectedMCPClient="claude-code"
@@ -63,7 +63,7 @@ describe('AISettingsMCPSection', () => {
           displayName: 'Claude Code',
           installed: false,
           matchesCurrent: false,
-          message: '未安装到 Claude Code 用户级配置',
+          message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
         }}
         selectedMCPClientCommandText=""
         mcpServers={[]}
@@ -88,7 +88,7 @@ describe('AISettingsMCPSection', () => {
       />,
     );
 
-    expect(markup).toContain('安装到外部 AI 客户端');
+    expect(markup).toContain('把 GoNavi MCP 接入外部 AI 客户端');
     expect(markup).toContain('常见启动方式模板');
     expect(markup).toContain('Node 脚本');
     expect(markup).toContain('新增 MCP 服务');

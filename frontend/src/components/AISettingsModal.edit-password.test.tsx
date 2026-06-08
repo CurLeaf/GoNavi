@@ -46,6 +46,11 @@ describe('AISettingsModal edit password behavior', () => {
   it('wires the external MCP client install panel actions back to the modal handlers', () => {
     expect(source).toContain('mcpClientStatuses={mcpClientStatuses}');
     expect(source).toContain('selectedMCPClient={selectedMCPClient}');
+    expect(source).toContain('const [mcpClientSelectionTouched, setMCPClientSelectionTouched] = useState(false);');
+    expect(source).toContain('const handleSelectMCPClient = useCallback((client: MCPClientKey) => {');
+    expect(source).toContain('pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined)');
+    expect(source).toContain('setMCPClientSelectionTouched(true);');
+    expect(source).toContain('onSelectClient={handleSelectMCPClient}');
     expect(source).toContain('onRefreshStatus={() => void loadMCPClientStatuses()}');
     expect(source).toContain('onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}');
     expect(source).toContain('onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}');

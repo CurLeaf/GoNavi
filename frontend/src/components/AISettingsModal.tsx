@@ -112,14 +112,14 @@ const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
         displayName: 'Claude Code',
         installed: false,
         matchesCurrent: false,
-        message: '未安装到 Claude Code 用户级配置',
+        message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
     },
     {
         client: 'codex',
         displayName: 'Codex',
         installed: false,
         matchesCurrent: false,
-        message: '未安装到 Codex 用户级配置',
+        message: '未检测到 Codex 用户级 GoNavi MCP 配置',
     },
 ];
 
@@ -219,6 +219,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
     const [mcpClientStatuses, setMCPClientStatuses] = useState<AIMCPClientInstallStatus[]>(EMPTY_MCP_CLIENT_STATUSES);
     const [selectedMCPClient, setSelectedMCPClient] = useState<MCPClientKey>('claude-code');
+    const [mcpClientSelectionTouched, setMCPClientSelectionTouched] = useState(false);
     const [mcpClientStatusLoading, setMCPClientStatusLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
@@ -263,6 +264,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         () => formatMCPLaunchCommand(selectedMCPClientStatus),
         [selectedMCPClientStatus],
     );
+    const handleSelectMCPClient = useCallback((client: MCPClientKey) => {
+        setMCPClientSelectionTouched(true);
+        setSelectedMCPClient(client);
+    }, []);
 
     const resolveAIService = useCallback(async () => {
         const service = await waitForAIService();
@@ -291,7 +296,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(result)) {
                 const normalizedStatuses = normalizeMCPClientStatuses(result);
                 setMCPClientStatuses(normalizedStatuses);
-                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, prev));
+                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined));
             }
         } catch (e: any) {
             if (silent) {
@@ -304,7 +309,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 setMCPClientStatusLoading(false);
             }
         }
-    }, [messageApi, resolveAIService]);
+    }, [mcpClientSelectionTouched, messageApi, resolveAIService]);
 
     const copyTextToClipboard = useCallback(async (text: string, successMessage: string) => {
         if (typeof navigator?.clipboard?.writeText !== 'function') {
@@ -362,12 +367,18 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(mcpClientStatusesRes)) {
                 const normalizedStatuses = normalizeMCPClientStatuses(mcpClientStatusesRes);
                 setMCPClientStatuses(normalizedStatuses);
-                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, prev));
+                setSelectedMCPClient((prev) => pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined));
             }
         } catch (e) { console.warn('Failed to load AI config', e); }
-    }, [resolveAIService]);
+    }, [mcpClientSelectionTouched, resolveAIService]);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
+
+    useEffect(() => {
+        if (open) {
+            setMCPClientSelectionTouched(false);
+        }
+    }, [open]);
 
     useEffect(() => {
         if (!open || !focusProviderId) {
@@ -641,6 +652,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         }
         try {
             setLoading(true);
+            setMCPClientSelectionTouched(true);
             const Service = await resolveAIService();
             let result: MCPClientInstallResult;
             if (targetClient === 'codex') {
@@ -904,7 +916,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               inputBg={inputBg}
                               loading={loading}
                               mcpClientStatusLoading={mcpClientStatusLoading}
-                              onSelectClient={setSelectedMCPClient}
+                              onSelectClient={handleSelectMCPClient}
                               onRefreshStatus={() => void loadMCPClientStatuses()}
                               onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
                               onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}

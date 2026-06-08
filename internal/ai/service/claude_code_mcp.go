@@ -172,7 +172,7 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 		Client:      "claude-code",
 		DisplayName: "Claude Code",
 		ConfigPath:  strings.TrimSpace(configPath),
-		Message:     "未安装到 Claude Code 用户级配置",
+		Message:     "未检测到 Claude Code 用户级 GoNavi MCP 配置",
 	}
 	if pathErr != nil {
 		status.Message = fmt.Sprintf("定位 Claude Code 配置失败: %v", pathErr)
@@ -197,18 +197,18 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 	status.Command = strings.TrimSpace(serverConfig.Command)
 	status.Args = append([]string(nil), serverConfig.Args...)
 	if expectedErr != nil {
-		status.Message = fmt.Sprintf("已检测到 Claude Code 安装记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
+		status.Message = fmt.Sprintf("已检测到 Claude Code 中的 GoNavi MCP 记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
 		return status
 	}
 
 	status.MatchesCurrent = strings.EqualFold(strings.TrimSpace(serverConfig.Type), "stdio") &&
 		sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs)
 	if status.MatchesCurrent {
-		status.Message = "已安装到 Claude Code 用户级配置"
+		status.Message = "已检测到 Claude Code 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致"
 		return status
 	}
 
-	status.Message = "已检测到 Claude Code 安装记录，但与当前 GoNavi 安装包路径不一致，建议更新安装"
+	status.Message = "已检测到 Claude Code 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新"
 	return status
 }
 
@@ -218,7 +218,7 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 		Client:      "codex",
 		DisplayName: "Codex",
 		ConfigPath:  strings.TrimSpace(configPath),
-		Message:     "未安装到 Codex 用户级配置",
+		Message:     "未检测到 Codex 用户级 GoNavi MCP 配置",
 	}
 	if pathErr != nil {
 		status.Message = fmt.Sprintf("定位 Codex 配置失败: %v", pathErr)
@@ -243,18 +243,18 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 	status.Command = strings.TrimSpace(serverConfig.Command)
 	status.Args = append([]string(nil), serverConfig.Args...)
 	if expectedErr != nil {
-		status.Message = fmt.Sprintf("已检测到 Codex 安装记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
+		status.Message = fmt.Sprintf("已检测到 Codex 中的 GoNavi MCP 记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
 		return status
 	}
 
 	status.MatchesCurrent = sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs) &&
 		(serverConfig.StartupTimeoutSec == 0 || serverConfig.StartupTimeoutSec == defaultCodexMCPStartupTimeoutSecond)
 	if status.MatchesCurrent {
-		status.Message = "已安装到 Codex 用户级配置"
+		status.Message = "已检测到 Codex 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致"
 		return status
 	}
 
-	status.Message = "已检测到 Codex 安装记录，但与当前 GoNavi 安装包路径不一致，建议更新安装"
+	status.Message = "已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新"
 	return status
 }
 
