@@ -37,6 +37,8 @@ describe('AIChatPanel message render isolation', () => {
   it('keeps the v2 history mode sorted by the latest updated session first', () => {
     expect(source).toContain('const orderedAISessions = useMemo(');
     expect(source).toContain('right.updatedAt - left.updatedAt');
-    expect(source).toContain('const sessions = orderedAISessions.slice(0, 8);');
+    expect(source).toContain('const panelHistorySessions = useMemo(');
+    expect(source).toContain('orderedAISessions.slice(0, 8)');
+    expect(source).toContain('sessions={panelHistorySessions}');
   });
 });

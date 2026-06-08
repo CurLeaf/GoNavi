@@ -12,7 +12,7 @@ import type {
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
 } from '../types';
-import { DatabaseOutlined, DownOutlined, HistoryOutlined, TableOutlined, WarningOutlined } from '@ant-design/icons';
+import { DownOutlined } from '@ant-design/icons';
 import './AIChatPanel.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
@@ -20,6 +20,7 @@ import { AIChatWelcome } from './ai/AIChatWelcome';
 import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
+import AIChatPanelModeContent, { type AIChatInsightItem } from './ai/AIChatPanelModeContent';
 import type { AIComposerNotice } from '../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
@@ -1664,7 +1665,7 @@ SELECT * FROM users WHERE status = 1;
         const ck = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
         return (aiContexts[ck] || []).map(c => `${c.dbName}.${c.tableName}`);
     }, [activeContext?.connectionId, activeContext?.dbName, aiContexts]);
-    const aiInsights = useMemo(() => {
+    const aiInsights = useMemo<AIChatInsightItem[]>(() => {
         const recentLogs = sqlLogs.slice(0, 24);
         const slowest = recentLogs
             .filter((log) => log.status === 'success')
@@ -1697,30 +1698,10 @@ SELECT * FROM users WHERE status = 1;
             },
         ];
     }, [contextTableNames, sqlLogs]);
-
-    const renderPanelHistoryList = () => {
-        const sessions = orderedAISessions.slice(0, 8);
-        if (sessions.length === 0) {
-            return <div className="gn-v2-ai-empty-note">暂无历史会话</div>;
-        }
-        return sessions.map((session) => (
-            <button
-                key={session.id}
-                type="button"
-                className={`gn-v2-ai-history-card${session.id === sid ? ' is-active' : ''}`}
-                onClick={() => {
-                    setAIActiveSessionId(session.id);
-                    setActivePanelMode('chat');
-                }}
-            >
-                <span>
-                    <HistoryOutlined />
-                    <strong>{session.title || '新对话'}</strong>
-                </span>
-                <small>{new Date(session.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
-            </button>
-        ));
-    };
+    const panelHistorySessions = useMemo(
+        () => orderedAISessions.slice(0, 8),
+        [orderedAISessions],
+    );
     const effectivePanelMode = isV2Ui ? activePanelMode : 'chat';
 
     return (
@@ -1827,28 +1808,17 @@ SELECT * FROM users WHERE status = 1;
                     )
                 )}
 
-                {effectivePanelMode === 'insights' && (
-                    <div className="gn-v2-ai-insights-list">
-                        {aiInsights.map((item) => (
-                            <div className={`gn-v2-ai-insight-card tone-${item.tone}`} key={item.title}>
-                                <span className="gn-v2-ai-insight-icon">
-                                    {item.tone === 'warn' ? <WarningOutlined /> : item.tone === 'accent' ? <DatabaseOutlined /> : <TableOutlined />}
-                                </span>
-                                <div>
-                                    <strong>{item.title}</strong>
-                                    <p>{item.body}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {effectivePanelMode === 'history' && (
-                    <div className="gn-v2-ai-history-list">
-                        {renderPanelHistoryList()}
-                    </div>
-                )}
-                
+                <AIChatPanelModeContent
+                    mode={effectivePanelMode}
+                    insights={aiInsights}
+                    sessions={panelHistorySessions}
+                    activeSessionId={sid}
+                    onSelectSession={(sessionId) => {
+                        setAIActiveSessionId(sessionId);
+                        setActivePanelMode('chat');
+                    }}
+                />
+                 
 
                 <div ref={messagesEndRef} />
             </div>
