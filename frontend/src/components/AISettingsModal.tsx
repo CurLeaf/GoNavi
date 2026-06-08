@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
-import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig, AISkillScope } from '../types';
+import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
     QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
@@ -24,6 +24,7 @@ import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
 import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';
+import AISettingsSkillsSection from './ai/AISettingsSkillsSection';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -97,16 +98,27 @@ const EMPTY_AI_USER_PROMPT_SETTINGS: AIUserPromptSettings = {
     jvmDiagnostic: '',
 };
 
-const EMPTY_MCP_SERVER = (): AIMCPServerConfig => ({
-    id: `mcp-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: '',
-    transport: 'stdio',
-    command: '',
-    args: [],
-    env: {},
-    enabled: true,
-    timeoutSeconds: 20,
-});
+const EMPTY_MCP_SERVER = (seed?: Partial<AIMCPServerConfig>): AIMCPServerConfig => {
+    const base: AIMCPServerConfig = {
+        id: `mcp-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: '',
+        transport: 'stdio',
+        command: '',
+        args: [],
+        env: {},
+        enabled: true,
+        timeoutSeconds: 20,
+    };
+    return {
+        ...base,
+        ...seed,
+        transport: seed?.transport || base.transport,
+        args: Array.isArray(seed?.args) ? seed.args : base.args,
+        env: seed?.env || base.env,
+        enabled: seed?.enabled ?? base.enabled,
+        timeoutSeconds: seed?.timeoutSeconds || base.timeoutSeconds,
+    };
+};
 
 const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     {
@@ -211,13 +223,6 @@ const EMPTY_SKILL = (): AISkillConfig => ({
     scopes: ['global'],
     requiredTools: [],
 });
-
-const SKILL_SCOPE_OPTIONS: Array<{ value: AISkillScope; label: string; desc: string }> = [
-    { value: 'global', label: '全局', desc: '所有 AI 会话都启用' },
-    { value: 'database', label: '数据库', desc: '仅 SQL / 数据库场景启用' },
-    { value: 'jvm', label: 'JVM 资源', desc: '仅 JVM 资源分析场景启用' },
-    { value: 'jvmDiagnostic', label: 'JVM 诊断', desc: '仅 JVM 诊断工作台启用' },
-];
 
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
@@ -581,8 +586,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         setMCPServers((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
     };
 
-    const handleAddMCPServer = () => {
-        setMCPServers((prev) => [...prev, EMPTY_MCP_SERVER()]);
+    const handleAddMCPServer = (seed?: Partial<AIMCPServerConfig>) => {
+        setMCPServers((prev) => [...prev, EMPTY_MCP_SERVER(seed)]);
     };
 
     const handleSaveMCPServer = async (server: AIMCPServerConfig) => {
@@ -1189,75 +1194,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         </div>
     );
 
-    const renderSkillSettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                Skill 不是另一条大提示词，而是“命名的提示模块 + 作用域 + 工具依赖”。当前阶段仍建议保留在主仓库内，不需要单独新建 GitHub 仓库；只有未来要做共享 skill pack 分发时，再考虑拆仓。
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>启用后会按 scope 注入对应会话；如果依赖的工具不存在，该 Skill 会被自动跳过。</div>
-                <Button icon={<PlusOutlined />} onClick={handleAddSkill} style={{ borderRadius: 10 }}>新增 Skill</Button>
-            </div>
-            {skills.length === 0 && (
-                <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
-                    还没有 Skill。你可以给数据库、JVM、诊断场景分别定义专用的 system prompt。
-                </div>
-            )}
-            {skills.map((skill) => (
-                <div key={skill.id} style={{ padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
-                        <Input
-                            value={skill.name}
-                            onChange={(event) => updateSkillDraft(skill.id, { name: event.target.value })}
-                            placeholder="Skill 名称，例如：SQL 审查 / JVM 诊断计划"
-                            style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
-                        />
-                        <Select
-                            value={skill.enabled ? 'enabled' : 'disabled'}
-                            onChange={(value) => updateSkillDraft(skill.id, { enabled: value === 'enabled' })}
-                            options={[{ label: '已启用', value: 'enabled' }, { label: '已禁用', value: 'disabled' }]}
-                        />
-                    </div>
-                    <Input
-                        value={skill.description || ''}
-                        onChange={(event) => updateSkillDraft(skill.id, { description: event.target.value })}
-                        placeholder="给自己看的说明，例如：输出 SQL 前必须先确认字段名和风险"
-                        style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
-                    />
-                    <Select
-                        mode="multiple"
-                        value={skill.scopes || []}
-                        onChange={(value) => updateSkillDraft(skill.id, { scopes: value as AISkillScope[] })}
-                        options={SKILL_SCOPE_OPTIONS.map((option) => ({ label: `${option.label} · ${option.desc}`, value: option.value }))}
-                        placeholder="选择这个 Skill 要作用到哪些场景"
-                        style={{ width: '100%' }}
-                    />
-                    <Select
-                        mode="multiple"
-                        value={skill.requiredTools || []}
-                        onChange={(value) => updateSkillDraft(skill.id, { requiredTools: value })}
-                        options={skillRequiredToolOptions}
-                        placeholder="可选：声明这个 Skill 依赖哪些工具"
-                        style={{ width: '100%' }}
-                    />
-                    <Input.TextArea
-                        rows={6}
-                        value={skill.systemPrompt}
-                        onChange={(event) => updateSkillDraft(skill.id, { systemPrompt: event.target.value })}
-                        placeholder="输入这条 Skill 要追加的 system prompt。建议聚焦一个明确能力，不要和全局提示词重复。"
-                        style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)', resize: 'vertical' }}
-                    />
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                        <Button type="primary" onClick={() => handleSaveSkill(skill)} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
-                        <Popconfirm title="删除这个 Skill？" okText="删除" cancelText="取消" onConfirm={() => handleDeleteSkill(skill.id)}>
-                            <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
-                        </Popconfirm>
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-
     const modalShellStyle = {
         background: overlayTheme.shellBg, border: overlayTheme.shellBorder,
         boxShadow: overlayTheme.shellShadow, backdropFilter: overlayTheme.shellBackdropFilter,
@@ -1368,7 +1304,21 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               onDeleteServer={handleDeleteMCPServer}
                           />
                       )}
-                      {activeSection === 'skills' && renderSkillSettings()}
+                      {activeSection === 'skills' && (
+                          <AISettingsSkillsSection
+                              skills={skills}
+                              skillRequiredToolOptions={skillRequiredToolOptions}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              loading={loading}
+                              onAddSkill={handleAddSkill}
+                              onUpdateSkillDraft={updateSkillDraft}
+                              onSaveSkill={handleSaveSkill}
+                              onDeleteSkill={handleDeleteSkill}
+                          />
+                      )}
                       {activeSection === 'tools' && (
                           <AIBuiltinToolsCatalog
                               darkMode={darkMode}

@@ -22,5 +22,7 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('get_indexes');
     expect(markup).toContain('get_foreign_keys');
     expect(markup).toContain('get_triggers');
+    expect(markup).toContain('理解样例数据');
+    expect(markup).toContain('preview_table_rows');
   });
 });

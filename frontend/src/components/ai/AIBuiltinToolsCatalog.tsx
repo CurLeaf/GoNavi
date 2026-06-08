@@ -28,8 +28,13 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合做索引优化、关系梳理、隐式副作用排查和 DDL 审查。',
   },
   {
+    title: '理解样例数据',
+    steps: 'get_columns → preview_table_rows',
+    description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',
+  },
+  {
     title: '只读验证',
-    steps: 'get_columns → execute_sql',
+    steps: 'get_columns → preview_table_rows → execute_sql',
     description: '适合生成 SQL 后做小范围结果核对，仍会受 AI 安全级别控制。',
   },
 ];

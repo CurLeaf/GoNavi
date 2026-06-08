@@ -3,6 +3,7 @@ import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/g
 import type { AIChatMessage, AIMCPToolDescriptor, AIToolCall, SavedConnection } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
+import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 
 export interface AIToolContextEntry {
@@ -114,6 +115,13 @@ const buildToolName = (toolCall: AIToolCall, descriptor?: AIMCPToolDescriptor) =
 
 const findConnection = (connections: SavedConnection[], connectionId: string) =>
   connections.find((connection) => connection.id === connectionId);
+
+const normalizePreviewLimit = (input: unknown): number => {
+  const value = Math.floor(Number(input) || 20);
+  if (value < 1) return 1;
+  if (value > 100) return 100;
+  return value;
+};
 
 export async function executeLocalAIToolCall({
   toolCall,
@@ -328,6 +336,47 @@ export async function executeLocalAIToolCall({
           success = result.success;
         } catch (error: any) {
           content = `获取建表语句失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'preview_table_rows': {
+        const connection = findConnection(connections, args.connectionId);
+        if (!connection) {
+          content = 'Connection not found';
+          break;
+        }
+        try {
+          const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+          const safeTable = args.tableName ? String(args.tableName).trim() : '';
+          if (!safeTable) {
+            content = 'tableName 不能为空';
+            break;
+          }
+          const safeLimit = normalizePreviewLimit(args.limit);
+          const dbType = String(connection.config?.type || '').trim();
+          const previewSQL = buildPaginatedSelectSQL(
+            dbType,
+            `SELECT * FROM ${quoteQualifiedIdent(dbType, safeTable)}`,
+            '',
+            safeLimit,
+            0,
+          );
+          const result = await mergedRuntime.query(buildRpcConnectionConfig(connection.config) as any, safeDbName, previewSQL);
+          if (result?.success) {
+            const rows = Array.isArray(result.data) ? result.data : [];
+            content = JSON.stringify({
+              dbName: safeDbName,
+              tableName: safeTable,
+              limit: safeLimit,
+              rowCount: rows.length,
+              rows: rows.slice(0, safeLimit),
+            });
+            success = true;
+          } else {
+            content = result?.message || 'Failed to preview table rows';
+          }
+        } catch (error: any) {
+          content = `预览表样例数据失败: ${error?.message || error}`;
         }
         break;
       }

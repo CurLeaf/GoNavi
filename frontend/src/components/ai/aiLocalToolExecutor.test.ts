@@ -156,4 +156,41 @@ describe('aiLocalToolExecutor', () => {
     expect(indexResult.content).toContain('idx_users_email');
     expect(message.tool_name).toBe('自定义探针');
   });
+
+  it('previews sample rows for a table without forcing the model to handwrite select limit sql', async () => {
+    const query = vi.fn().mockResolvedValue({
+      success: true,
+      data: [
+        { id: 1, status: 'paid', amount: 120.5 },
+        { id: 2, status: 'pending', amount: null },
+      ],
+    });
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('preview_table_rows', {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        tableName: 'orders',
+        limit: 5,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getColumns: vi.fn(),
+        getIndexes: vi.fn(),
+        getForeignKeys: vi.fn(),
+        getTriggers: vi.fn(),
+        showCreateTable: vi.fn(),
+        query,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(query).toHaveBeenCalledWith(expect.anything(), 'crm', 'SELECT * FROM `orders` LIMIT 5 OFFSET 0');
+    expect(result.content).toContain('"tableName":"orders"');
+    expect(result.content).toContain('"status":"paid"');
+    expect(result.content).toContain('"rowCount":2');
+  });
 });

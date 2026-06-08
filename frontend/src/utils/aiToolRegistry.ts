@@ -230,6 +230,32 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "preview_table_rows",
+    icon: "👀",
+    desc: "抽样预览指定表的前几行数据",
+    detail:
+      "传入 connectionId、dbName、tableName 和可选 limit，返回该表的前几行真实样例数据。适合先看数据形态、空值分布和枚举值，再决定怎么写 SQL。",
+    params: "connectionId, dbName, tableName, limit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "preview_table_rows",
+        description:
+          "预览指定表的前几行样例数据。适用于快速理解字段取值形态、空值情况、时间格式和状态枚举，减少模型盲写 SQL。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+            limit: { type: "number", description: "可选，预览行数，默认 20，最大 100" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
     name: "execute_sql",
     icon: "▶️",
     desc: "执行 SQL 查询并返回结果",

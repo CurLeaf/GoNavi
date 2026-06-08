@@ -55,9 +55,10 @@ describe('AIMCPClientInstallPanel', () => {
     );
 
     expect(markup).toContain('不是给 GoNavi 自己安装 MCP');
-    expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('目标客户端');
-    expect(markup).toContain('未接入');
+    expect(markup).toContain('安装到外部 AI 客户端');
+    expect(markup).toContain('第 1 步：选择安装目标');
+    expect(markup).toContain('第 2 步：确认当前状态并安装');
+    expect(markup).toContain('待安装');
     expect(markup).toContain('需更新');
     expect(markup).toContain('复制配置路径');
     expect(markup).toContain('复制启动命令');

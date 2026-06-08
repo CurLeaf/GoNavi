@@ -22,7 +22,8 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('Service.AIGetMCPServers?.()');
     expect(source).toContain('Service.AIListMCPTools?.()');
     expect(source).toContain('Service.AIGetSkills?.()');
-    expect(source).toContain('新增 Skill');
+    expect(source).toContain("import AISettingsSkillsSection from './ai/AISettingsSkillsSection';");
+    expect(source).toContain('<AISettingsSkillsSection');
   });
 
   it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
