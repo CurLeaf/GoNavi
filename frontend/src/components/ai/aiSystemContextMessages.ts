@@ -108,6 +108,19 @@ const appendAIRuntimeInspectionGuidance = (
   });
 };
 
+const appendMCPSetupInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_mcp_setup')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“我现在配了哪些 MCP”“Claude/Codex 有没有接入 GoNavi MCP”“为什么外部客户端用不了”“当前 MCP 服务启用了哪些”，优先调用 inspect_mcp_setup 读取真实 MCP 配置和外部客户端接入状态，不要凭记忆猜测。',
+  });
+};
+
 const resolveDatabaseDisplayType = (config: ConnectionConfig | undefined): string => {
   const dbType = config?.type || 'unknown';
   return dbType === 'diros' ? 'Doris' : dbType.charAt(0).toUpperCase() + dbType.slice(1);
@@ -325,6 +338,7 @@ SELECT * FROM users WHERE status = 1;
     });
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+  appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({
       role: 'system',

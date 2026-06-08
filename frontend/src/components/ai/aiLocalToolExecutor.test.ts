@@ -224,6 +224,62 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"builtinToolCount":');
   });
 
+  it('returns the current mcp setup snapshot so the model can inspect configured servers and client install state', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_setup', {}),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'browser_open',
+        originalName: 'browser_open',
+        serverId: 'server-1',
+        serverName: 'Browser',
+        title: '打开页面',
+        description: '打开页面',
+      }],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getMCPServers: vi.fn().mockResolvedValue([
+          {
+            id: 'server-1',
+            name: 'Browser',
+            transport: 'stdio',
+            command: 'uvx',
+            args: ['mcp-server-browser'],
+            env: {
+              OPENAI_API_KEY: '***',
+            },
+            enabled: true,
+            timeoutSeconds: 20,
+          },
+        ]),
+        getMCPClientInstallStatuses: vi.fn().mockResolvedValue([
+          {
+            client: 'codex',
+            displayName: 'Codex',
+            installed: true,
+            matchesCurrent: false,
+            clientDetected: true,
+            clientCommand: 'codex',
+            clientPath: 'C:/Tools/codex.exe',
+            configPath: 'C:/Users/demo/.codex/config.toml',
+            command: 'gonavi-mcp-server',
+            args: ['stdio'],
+            message: '检测到旧的 GoNavi 路径',
+          },
+        ]),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"serverCount":1');
+    expect(result.content).toContain('"name":"Browser"');
+    expect(result.content).toContain('"launchCommandPreview":"uvx mcp-server-browser"');
+    expect(result.content).toContain('"displayName":"Codex"');
+    expect(result.content).toContain('"launchCommandPreview":"gonavi-mcp-server stdio"');
+  });
+
   it('returns the current connection snapshot so the model can inspect host, db, and ssh state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_current_connection', {}),

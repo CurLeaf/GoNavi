@@ -2,12 +2,9 @@ import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/g
 
 import type { SqlLog } from '../../store';
 import type {
-  AIContextLevel,
   AIChatMessage,
   AIContextItem,
   AIMCPToolDescriptor,
-  AIProviderConfig,
-  AISafetyLevel,
   AISkillConfig,
   AIToolCall,
   SavedConnection,
@@ -15,23 +12,14 @@ import type {
   SqlSnippet,
   TabData,
 } from '../../types';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
-import { buildAIContextSnapshot } from './aiContextInsights';
-import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
-import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import {
-  buildSavedQueriesSnapshot,
-  buildSqlSnippetsSnapshot,
-} from './aiSavedSqlInsights';
-import {
-  buildActiveTabSnapshot,
-  buildRecentSqlLogsSnapshot,
-  buildWorkspaceTabsSnapshot,
-} from './aiWorkspaceInsights';
+  executeSnapshotInspectionToolCall,
+  type AISnapshotInspectionRuntime,
+} from './aiSnapshotInspectionToolExecutor';
 
 export interface AIToolContextEntry {
   connectionId: string;
@@ -39,14 +27,7 @@ export interface AIToolContextEntry {
   tables: string[];
 }
 
-interface AILocalRuntimeState {
-  providers?: AIProviderConfig[];
-  activeProviderId?: string;
-  safetyLevel?: AISafetyLevel | string;
-  contextLevel?: AIContextLevel | string;
-}
-
-interface AILocalToolRuntime {
+export interface AILocalToolRuntime extends AISnapshotInspectionRuntime {
   getDatabases: (config: any) => Promise<any>;
   getTables: (config: any, dbName: string) => Promise<any>;
   getAllColumns: (config: any, dbName: string) => Promise<any>;
@@ -58,7 +39,6 @@ interface AILocalToolRuntime {
   query: (config: any, dbName: string, sql: string) => Promise<any>;
   checkSQL?: (sql: string) => Promise<{ allowed?: boolean; operationType?: string } | undefined>;
   callMCPTool?: (name: string, args: string) => Promise<{ content?: string; isError?: boolean } | undefined>;
-  getAIRuntimeState?: () => Promise<AILocalRuntimeState | undefined>;
 }
 
 export interface ExecuteLocalAIToolCallOptions {
@@ -144,9 +124,21 @@ const buildDefaultRuntime = (): AILocalToolRuntime => ({
       contextLevel: String(contextLevel || '').trim(),
     };
   },
+  getMCPServers: async () => {
+    const service = (window as any).go?.aiservice?.Service;
+    if (typeof service?.AIGetMCPServers !== 'function') {
+      return undefined;
+    }
+    return service.AIGetMCPServers();
+  },
+  getMCPClientInstallStatuses: async () => {
+    const service = (window as any).go?.aiservice?.Service;
+    if (typeof service?.AIGetMCPClientInstallStatuses !== 'function') {
+      return undefined;
+    }
+    return service.AIGetMCPClientInstallStatuses();
+  },
 });
-
-const BUILTIN_AI_TOOL_NAMES = BUILTIN_AI_TOOL_INFO.map((item) => item.name);
 
 const normalizeTableList = (rows: any[]): string[] =>
   rows.map((row) => row.Table || row.table || (Object.values(row)[0] as string));
@@ -235,86 +227,32 @@ export async function executeLocalAIToolCall({
 
   try {
     const args = JSON.parse(toolCall.function.arguments || '{}');
+    const snapshotInspectionResult = await executeSnapshotInspectionToolCall({
+      toolName: toolCall.function.name,
+      args,
+      activeContext,
+      aiContexts,
+      connections,
+      tabs,
+      activeTabId,
+      mcpTools,
+      sqlLogs,
+      savedQueries,
+      sqlSnippets,
+      skills,
+      dynamicModels,
+      runtime: mergedRuntime,
+    });
+    if (snapshotInspectionResult) {
+      content = snapshotInspectionResult.content;
+      success = snapshotInspectionResult.success;
+      return {
+        content,
+        success,
+        toolName: buildToolName(toolCall, descriptor),
+      };
+    }
     switch (toolCall.function.name) {
-      case 'inspect_ai_runtime': {
-        try {
-          const runtimeState = typeof mergedRuntime.getAIRuntimeState === 'function'
-            ? await mergedRuntime.getAIRuntimeState()
-            : undefined;
-          content = JSON.stringify(buildAIRuntimeSnapshot({
-            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
-            activeProviderId: runtimeState?.activeProviderId || '',
-            safetyLevel: runtimeState?.safetyLevel,
-            contextLevel: runtimeState?.contextLevel,
-            skills,
-            mcpTools,
-            dynamicModels,
-            builtinToolNames: BUILTIN_AI_TOOL_NAMES,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取当前 AI 运行状态失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_current_connection': {
-        try {
-          content = JSON.stringify(buildCurrentConnectionSnapshot({
-            activeContext,
-            tabs,
-            activeTabId,
-            connections,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取当前连接失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_active_tab': {
-        try {
-          content = JSON.stringify(buildActiveTabSnapshot({
-            tabs,
-            activeTabId,
-            connections,
-            includeContent: args.includeContent !== false,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取当前活动页签失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_workspace_tabs': {
-        try {
-          content = JSON.stringify(buildWorkspaceTabsSnapshot({
-            tabs,
-            activeTabId,
-            connections,
-            includeContent: args.includeContent === true,
-            limit: args.limit,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取当前工作区页签失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_ai_context': {
-        try {
-          content = JSON.stringify(buildAIContextSnapshot({
-            activeContext,
-            aiContexts,
-            connections,
-            includeDDL: args.includeDDL === true,
-            ddlLimit: args.ddlLimit,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取当前 AI 上下文失败: ${error?.message || error}`;
-        }
-        break;
-      }
       case 'get_connections': {
         const availableConnections = connections.map((connection) => ({
           id: connection.id,
@@ -705,50 +643,6 @@ export async function executeLocalAIToolCall({
           success = true;
         } catch (error: any) {
           content = `获取数据库结构总览失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_recent_sql_logs': {
-        try {
-          content = JSON.stringify(buildRecentSqlLogsSnapshot({
-            sqlLogs,
-            limit: args.limit,
-            status: args.status,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `获取最近 SQL 日志失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_saved_queries': {
-        try {
-          content = JSON.stringify(buildSavedQueriesSnapshot({
-            savedQueries,
-            connections,
-            keyword: args.keyword,
-            connectionId: args.connectionId,
-            dbName: args.dbName,
-            limit: args.limit,
-            includeSql: args.includeSql !== false,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取已保存查询失败: ${error?.message || error}`;
-        }
-        break;
-      }
-      case 'inspect_sql_snippets': {
-        try {
-          content = JSON.stringify(buildSqlSnippetsSnapshot({
-            sqlSnippets,
-            keyword: args.keyword,
-            limit: args.limit,
-            includeBody: args.includeBody !== false,
-          }));
-          success = true;
-        } catch (error: any) {
-          content = `读取 SQL 片段失败: ${error?.message || error}`;
         }
         break;
       }
