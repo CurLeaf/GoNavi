@@ -38,6 +38,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
   },
   {
+    title: '回看最近执行记录',
+    steps: 'inspect_recent_sql_logs → get_columns / get_indexes / execute_sql',
+    description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',
+  },
+  {
     title: '理解样例数据',
     steps: 'get_columns → preview_table_rows',
     description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',

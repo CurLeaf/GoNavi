@@ -310,6 +310,33 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_recent_sql_logs",
+    icon: "🧾",
+    desc: "查看最近 SQL 执行日志",
+    detail:
+      "传入可选 limit 和 status，返回最近 SQL 执行记录，包括数据库、耗时、成功/失败、报错、受影响行数和 SQL 文本。适合追查刚执行失败的语句、定位慢查询，并让 AI 基于真实执行历史给出解释或优化建议。",
+    params: "limit?, status?(all|success|error)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_recent_sql_logs",
+        description:
+          "获取最近 SQL 执行日志摘要，可按成功/失败过滤。适用于回看刚执行过的 SQL、排查失败原因、定位慢查询，以及让 AI 基于真实执行历史给出解释和优化建议。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，返回多少条日志，默认 20，最大 100" },
+            status: {
+              type: "string",
+              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              enum: ["all", "success", "error"],
+            },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "execute_sql",
     icon: "▶️",
     desc: "执行 SQL 查询并返回结果",

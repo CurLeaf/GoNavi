@@ -34,6 +34,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   get_table_ddl: '提取建表语句',
   inspect_table_bundle: '抓取完整表结构快照',
   inspect_database_bundle: '抓取数据库结构总览',
+  inspect_recent_sql_logs: '回看最近 SQL 执行日志',
   preview_table_rows: '预览真实样例数据',
   execute_sql: '执行只读 SQL 验证',
 };

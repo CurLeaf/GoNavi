@@ -245,6 +245,58 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"status":"paid"');
   });
 
+  it('returns recent sql logs and supports filtering only failed statements', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_recent_sql_logs', {
+        limit: 2,
+        status: 'error',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      sqlLogs: [
+        {
+          id: 'log-1',
+          timestamp: 3,
+          sql: 'DELETE FROM users WHERE id = 9',
+          status: 'error',
+          duration: 120,
+          message: 'permission denied',
+          dbName: 'crm',
+        },
+        {
+          id: 'log-2',
+          timestamp: 2,
+          sql: 'SELECT * FROM users LIMIT 10',
+          status: 'success',
+          duration: 18,
+          dbName: 'crm',
+          affectedRows: 10,
+        },
+        {
+          id: 'log-3',
+          timestamp: 1,
+          sql: 'UPDATE orders SET status = \'paid\' WHERE id = 1',
+          status: 'error',
+          duration: 95,
+          message: 'row lock timeout',
+          dbName: 'crm',
+        },
+      ],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"status":"error"');
+    expect(result.content).toContain('"totalMatched":2');
+    expect(result.content).toContain('permission denied');
+    expect(result.content).toContain('row lock timeout');
+    expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
+  });
+
   it('returns a database overview bundle with per-table column previews in one tool call', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_database_bundle', {

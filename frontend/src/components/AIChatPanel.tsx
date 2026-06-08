@@ -1264,6 +1264,7 @@ SELECT * FROM users WHERE status = 1;
                 connections: currentConnections,
                 mcpTools,
                 toolContextMap: toolContextMapRef.current,
+                sqlLogs: useStore.getState().sqlLogs,
             });
             const toolResultMsg: AIChatMessage = buildToolResultMessage({
                 id: genId(),
