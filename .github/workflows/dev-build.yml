@@ -556,7 +556,7 @@ jobs:
             rm -f "$zip_path"
             local attempt dll_path
             for attempt in 1 2 3; do
-              echo "📥 下载 DuckDB Windows 动态库 (${attempt}/3): ${DUCKDB_WINDOWS_LIBRARY_URL}"
+              echo "📥 下载 DuckDB Windows 动态库 (${attempt}/3): ${DUCKDB_WINDOWS_LIBRARY_URL}" >&2
               if curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 300 -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"; then
                 if unzip -tq "$zip_path" >/dev/null 2>&1; then
                   rm -rf "$lib_dir"
@@ -575,12 +575,12 @@ jobs:
                     echo "$lib_dir"
                     return 0
                   fi
-                  echo "⚠️ DuckDB Windows 动态库压缩包缺少 duckdb.dll，准备重试"
+                  echo "⚠️ DuckDB Windows 动态库压缩包缺少 duckdb.dll，准备重试" >&2
                 else
-                  echo "⚠️ DuckDB Windows 动态库压缩包校验失败，准备重试"
+                  echo "⚠️ DuckDB Windows 动态库压缩包校验失败，准备重试" >&2
                 fi
               else
-                echo "⚠️ DuckDB Windows 动态库下载失败，准备重试"
+                echo "⚠️ DuckDB Windows 动态库下载失败，准备重试" >&2
               fi
               rm -f "$zip_path"
               rm -rf "$lib_dir"
@@ -618,6 +618,7 @@ jobs:
               if [ -n "$DUCKDB_LIB_DIR" ]; then
                 DUCKDB_LIB_DIR_GCC="$(cygpath -m "$DUCKDB_LIB_DIR")"
                 DUCKDB_LIB_DIR_PATH="$(cygpath -u "$DUCKDB_LIB_DIR")"
+                # cgo 会把每个 CGO_LDFLAGS 片段转成 //go:cgo_ldflag，-L 参数不能再额外包引号。
                 DUCKDB_WINDOWS_CGO_LDFLAGS="-L${DUCKDB_LIB_DIR_GCC} -lduckdb -lstdc++ -lm -lws2_32 -lwsock32 -lrstrtmgr"
                 CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="${DUCKDB_WINDOWS_CGO_LDFLAGS}" PATH="${DUCKDB_LIB_DIR_PATH}:$PATH" go build \
                   -tags "${BUILD_TAGS}" \

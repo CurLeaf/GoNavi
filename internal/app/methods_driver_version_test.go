@@ -430,7 +430,7 @@ func TestDuckDBWindowsBuildUsesDynamicLibraryTag(t *testing.T) {
 func TestDuckDBWindowsDynamicLibraryCGOLDFlagsIncludeSupportLibraries(t *testing.T) {
 	flags := duckDBWindowsDynamicLibraryCGOLDFlags(`C:\tmp\duckdb lib`)
 	for _, expected := range []string{
-		`-L"C:/tmp/duckdb lib"`,
+		`-LC:/tmp/duckdb lib`,
 		"-lduckdb",
 		"-lstdc++",
 		"-lm",

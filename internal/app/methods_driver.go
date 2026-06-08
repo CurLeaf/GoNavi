@@ -4132,7 +4132,8 @@ func withEnvValue(env []string, key string, value string) []string {
 func duckDBWindowsDynamicLibraryCGOLDFlags(libDir string) string {
 	normalizedDir := filepath.ToSlash(strings.TrimSpace(libDir))
 	parts := []string{
-		fmt.Sprintf("-L\"%s\"", normalizedDir),
+		// cgo 会把每个 CGO_LDFLAGS 片段转成 //go:cgo_ldflag，带引号的 -L 在 windows/amd64 上会被当成非法参数。
+		fmt.Sprintf("-L%s", normalizedDir),
 		"-lduckdb",
 		"-lstdc++",
 		"-lm",
