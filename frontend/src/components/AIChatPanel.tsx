@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore, loadAISessionsFromBackend, loadAISessionFromBackend } from '../store';
-import { EventsOn, EventsOff } from '../../wailsjs/runtime';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
@@ -15,6 +14,7 @@ import { AIChatHeader } from './ai/AIChatHeader';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import AIChatPanelConversationView from './ai/AIChatPanelConversationView';
+import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
     buildIncompleteProviderNotice,
@@ -23,7 +23,7 @@ import {
 } from '../utils/aiComposerNotice';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
-import { compressContextIfNeeded, getDynamicMaxContextChars, sanitizeErrorMsg } from '../utils/aiChatRuntime';
+import { compressContextIfNeeded, getDynamicMaxContextChars } from '../utils/aiChatRuntime';
 import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts';
 import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
@@ -284,231 +284,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         window.addEventListener('gonavi:ai:inject-prompt', handler);
         return () => window.removeEventListener('gonavi:ai:inject-prompt', handler);
     }, []);
-
-    useEffect(() => {
-        const eventName = `ai:stream:${sid}`;
-        let assistantMsgId = '';
-        let isFirstCompletion = false;
-
-        // 新增：利用 requestAnimationFrame 缓冲高频事件，避免 React 重绘阻塞导致感官吞吐变慢
-        const streamBuffer = { thinking: '', reasoningContent: '', content: '' };
-        let flushPending = false;
-
-        const flushStreamBuffer = () => {
-            if (!assistantMsgId) return;
-            const current = useStore.getState().aiChatHistory[sid];
-            const existing = current?.find(m => m.id === assistantMsgId);
-            if (!existing) return;
-
-            const updates: any = {};
-            if (streamBuffer.thinking) {
-                updates.thinking = (existing.thinking || '') + streamBuffer.thinking;
-                updates.phase = 'thinking';
-                streamBuffer.thinking = '';
-            }
-            if (streamBuffer.reasoningContent) {
-                updates.reasoning_content = (existing.reasoning_content || '') + streamBuffer.reasoningContent;
-                streamBuffer.reasoningContent = '';
-            }
-            if (streamBuffer.content) {
-                updates.content = (existing.content || '') + streamBuffer.content;
-                updates.phase = 'generating';
-                streamBuffer.content = '';
-            }
-            
-            if (Object.keys(updates).length > 0) {
-                updateAIChatMessage(sid, assistantMsgId, updates);
-            }
-            flushPending = false;
-        };
-
-        const handler = (data: { content?: string; thinking?: string; reasoning_content?: string; tool_calls?: AIToolCall[]; done?: boolean; error?: string }) => {
-            // Find connecting message if there's no active assistant string
-            if (!assistantMsgId) {
-                const history = useStore.getState().aiChatHistory[sid] || [];
-                const lastMsg = history[history.length - 1];
-                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.loading && lastMsg.phase === 'connecting') {
-                    assistantMsgId = lastMsg.id;
-                    // 【关键】接管 connecting 消息时，立即清空其过渡文案，防止泄漏到 AI 回复正文
-                    updateAIChatMessage(sid, assistantMsgId, { content: '' });
-                }
-            }
-
-            if (data.error) {
-                const cleanErr = sanitizeErrorMsg(data.error);
-                const rawErr = cleanErr !== data.error ? data.error : undefined;
-                if (assistantMsgId) {
-                    updateAIChatMessage(sid, assistantMsgId, { content: `❌ 错误: ${cleanErr}`, phase: 'idle', loading: false, rawError: rawErr });
-                } else {
-                    addAIChatMessage(sid, {
-                        id: genId(),
-                        role: 'assistant',
-                        phase: 'idle',
-                        content: `❌ 错误: ${cleanErr}`,
-                        rawError: rawErr,
-                        timestamp: Date.now(),
-                        jvmPlanContext: pendingJVMPlanContextRef.current,
-                        jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
-                    });
-                }
-                assistantMsgId = '';
-                setSending(false);
-                return;
-            }
-
-            if (data.tool_calls && data.tool_calls.length > 0) {
-                if (assistantMsgId) {
-                    updateAIChatMessage(sid, assistantMsgId, { tool_calls: data.tool_calls, phase: 'tool_calling' });
-                } else {
-                    assistantMsgId = genId();
-                    addAIChatMessage(sid, {
-                        id: assistantMsgId,
-                        role: 'assistant',
-                        phase: 'tool_calling',
-                        content: '',
-                        tool_calls: data.tool_calls,
-                        timestamp: Date.now(),
-                        loading: true,
-                        jvmPlanContext: pendingJVMPlanContextRef.current,
-                        jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
-                    });
-                }
-            }
-
-            // 处理 thinking（模型思考过程）
-            const displayThinking = data.thinking || data.reasoning_content || '';
-            if (displayThinking || data.reasoning_content) {
-                if (!assistantMsgId) {
-                    assistantMsgId = genId();
-                    addAIChatMessage(sid, {
-                        id: assistantMsgId,
-                        role: 'assistant',
-                        phase: 'thinking',
-                        content: '',
-                        thinking: displayThinking || undefined,
-                        reasoning_content: data.reasoning_content || undefined,
-                        timestamp: Date.now(),
-                        loading: true,
-                        jvmPlanContext: pendingJVMPlanContextRef.current,
-                        jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
-                    });
-                    if (sending) setSending(false);
-                } else {
-                    streamBuffer.thinking += displayThinking;
-                    if (data.reasoning_content) {
-                        streamBuffer.reasoningContent += data.reasoning_content;
-                    }
-                    if (sending) setSending(false);
-                }
-            }
-
-            if (data.content) {
-                if (!assistantMsgId) {
-                    assistantMsgId = genId();
-                    addAIChatMessage(sid, {
-                        id: assistantMsgId,
-                        role: 'assistant',
-                        phase: 'generating',
-                        content: data.content,
-                        timestamp: Date.now(),
-                        loading: true,
-                        jvmPlanContext: pendingJVMPlanContextRef.current,
-                        jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
-                    });
-                    setSending(false);
-                    const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-                    if (currentHistory.length <= 1) isFirstCompletion = true;
-                } else {
-                    streamBuffer.content += data.content;
-                    if (sending) setSending(false);
-                }
-            }
-
-            if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
-                if (!flushPending) {
-                    flushPending = true;
-                    requestAnimationFrame(flushStreamBuffer);
-                }
-            }
-
-            if (data.done) {
-                // 如果有残留未 flush 的 buffer，立刻推入状态树
-                if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
-                    flushStreamBuffer();
-                }
-                const doneAssistantId = assistantMsgId;
-                const doneIsFirst = isFirstCompletion;
-                assistantMsgId = '';
-                setTimeout(() => {
-                    // 🔧 清除所有残留的 connecting 过渡气泡的 loading 状态
-                    const currentMsgs = useStore.getState().aiChatHistory[sid] || [];
-                    for (const msg of currentMsgs) {
-                        if (msg.id !== doneAssistantId && msg.loading && msg.phase === 'connecting') {
-                            updateAIChatMessage(sid, msg.id, { loading: false, phase: 'idle' });
-                        }
-                    }
-
-                    if (doneAssistantId) {
-                        const current = useStore.getState().aiChatHistory[sid];
-                        const existing = current?.find(m => m.id === doneAssistantId);
-                        if (existing && existing.tool_calls && existing.tool_calls.length > 0) {
-                            // 【关键】保持 loading:true 和 phase:'tool_calling'，让 UI 能实时展示工具执行进度
-                            nudgeCountRef.current = 0;
-                            setTimeout(() => executeLocalTools(existing.tool_calls!, doneAssistantId), 50);
-                            return;
-                        }
-
-                        // 自动催促：模型描述了要调用工具但没有 function call
-                        if (existing && nudgeCountRef.current < 2 &&
-                            /(?:让我|我先|我来|现在|接下来|下面).*(?:查询|查找|获取|查看|检查|调用)|(?:获取|查询|查找|查看).*(?:信息|字段|列表|数据)[：:]?\s*$/.test(existing.content || '')) {
-                            nudgeCountRef.current += 1;
-                            // 🔧 关闭当前消息的 loading 状态，消除闪烁光标
-                            updateAIChatMessage(sid, doneAssistantId, { loading: false, phase: 'idle' });
-                            // 注入 system 催促并重发
-                            (async () => {
-                                try {
-                                    const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-                                    const messagesPayload = currentHistory.map(toAIRequestMessage);
-                                    const sysMessages = await buildSystemContextMessages(
-                                        existing.jvmPlanContext,
-                                        existing.jvmDiagnosticPlanContext,
-                                    );
-                                    // 追加催促消息
-                                    messagesPayload.push({ role: 'user', content: '请直接使用 function call 调用工具执行操作，不要只用文字描述计划。' });
-                                    const allMsg = [...sysMessages, ...messagesPayload];
-                                    const Service = (window as any).go?.aiservice?.Service;
-                                    if (Service?.AIChatStream) await Service.AIChatStream(sid, allMsg, availableTools);
-                                } catch (e) {
-                                    console.error('Nudge failed', e);
-                                    setSending(false);
-                                }
-                            })();
-                            return;
-                        }
-
-                        if (doneIsFirst) generateTitleForSession(sid);
-                        
-                        // 正常完成：关闭 loading，消除闪烁光标
-                        const hasContent = !!existing?.content?.trim();
-                        const hasThinking = !!existing?.thinking?.trim();
-                        const hasTools = !!(existing?.tool_calls?.length);
-                        
-                        if (!hasContent && !hasThinking && !hasTools) {
-                            updateAIChatMessage(sid, doneAssistantId, { content: '❌ 模型未能成功响应任何内容，可能遭遇频控、上下文超载或理解拒绝。', loading: false, phase: 'idle' });
-                        } else {
-                            updateAIChatMessage(sid, doneAssistantId, { loading: false, phase: 'idle' });
-                        }
-                    } else {
-                        addAIChatMessage(sid, { id: genId(), role: 'assistant', content: '❌ 请求中断：未收到任何具体回复。', timestamp: Date.now(), loading: false });
-                    }
-                    setSending(false);
-                }, 50);
-            }
-        };
-
-        EventsOn(eventName, handler);
-        return () => { EventsOff(eventName); };
-    }, [addAIChatMessage, updateAIChatMessage, sid]);
 
     const generateTitleForSession = async (currentSid: string) => {
         try {
@@ -799,6 +574,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             setSending(false);
         }
     }, [availableTools, buildSystemContextMessages, dynamicModels, mcpTools, sid, skills]);
+
+    useAIChatStreamSubscription({
+        sid,
+        sending,
+        setSending,
+        availableTools,
+        addAIChatMessage,
+        updateAIChatMessage,
+        buildSystemContextMessages,
+        executeLocalTools,
+        generateTitleForSession,
+        nextMessageId: genId,
+        nudgeCountRef,
+        pendingJVMPlanContextRef,
+        pendingJVMDiagnosticPlanContextRef,
+    });
 
     const handleSend = useCallback(async () => {
         const text = input.trim();

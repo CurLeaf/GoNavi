@@ -7,6 +7,7 @@ const conversationViewSource = readFileSync(new URL('./ai/AIChatPanelConversatio
 const derivedStateSource = readFileSync(new URL('./ai/aiChatPanelDerivedState.ts', import.meta.url), 'utf8');
 const payloadDispatchSource = readFileSync(new URL('./ai/aiChatPayloadDispatch.ts', import.meta.url), 'utf8');
 const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
+const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
 const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
 
@@ -52,12 +53,17 @@ describe('AIChatPanel message render isolation', () => {
 
   it('extracts chat runtime helpers so context compression and error cleanup stay out of the panel file', () => {
     expect(source).toContain("import { dispatchAIChatPayload } from './ai/aiChatPayloadDispatch';");
+    expect(source).toContain("import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';");
     expect(source).toContain('compressContextIfNeeded, getDynamicMaxContextChars');
+    expect(source).toContain('useAIChatStreamSubscription({');
     expect(runtimeSource).toContain('export const getDynamicMaxContextChars');
     expect(runtimeSource).toContain('export const compressContextIfNeeded');
     expect(runtimeSource).toContain('export const sanitizeErrorMsg');
     expect(payloadDispatchSource).toContain('export const dispatchAIChatPayload');
     expect(payloadDispatchSource).toContain('sanitizeErrorMsg');
+    expect(streamSubscriptionSource).toContain('EventsOn(eventName, handler);');
+    expect(streamSubscriptionSource).toContain('请直接使用 function call 调用工具执行操作');
+    expect(streamSubscriptionSource).toContain('executeLocalTools(existing.tool_calls!, doneAssistantId)');
     expect(runtimeSource).toContain('⚙️ 对话已超载，正在启动记忆压缩');
   });
 
