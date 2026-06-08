@@ -33,6 +33,29 @@ const hintStyle = (mutedText: string): React.CSSProperties => ({
   lineHeight: 1.6,
 });
 
+const buildFieldTone = (kind: 'required' | 'optional' | 'fixed', darkMode: boolean) => {
+  switch (kind) {
+    case 'required':
+      return {
+        label: '必填',
+        color: '#b45309',
+        bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
+      };
+    case 'fixed':
+      return {
+        label: '固定',
+        color: '#2563eb',
+        bg: darkMode ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.12)',
+      };
+    default:
+      return {
+        label: '可选',
+        color: '#475569',
+        bg: darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.12)',
+      };
+  }
+};
+
 const MCP_COMMAND_EXAMPLES = [
   'uvx mcp-server-fetch',
   'node server.js --stdio',
@@ -57,11 +80,29 @@ const MCPHelpBlock: React.FC<{
   title: string;
   description: string;
   overlayTheme: OverlayWorkbenchTheme;
+  darkMode: boolean;
+  fieldState: 'required' | 'optional' | 'fixed';
   example?: string;
   children: React.ReactNode;
-}> = ({ title, description, overlayTheme, example, children }) => (
+}> = ({ title, description, overlayTheme, darkMode, fieldState, example, children }) => {
+  const tone = buildFieldTone(fieldState, darkMode);
+  return (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-    <div style={labelStyle}>{title}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={labelStyle}>{title}</div>
+      <span
+        style={{
+          padding: '2px 8px',
+          borderRadius: 999,
+          fontSize: 11,
+          fontWeight: 700,
+          color: tone.color,
+          background: tone.bg,
+        }}
+      >
+        {tone.label}
+      </span>
+    </div>
     <div style={hintStyle(overlayTheme.mutedText)}>
       {description}
       {example ? (
@@ -72,7 +113,8 @@ const MCPHelpBlock: React.FC<{
     </div>
     {children}
   </div>
-);
+  );
+};
 
 export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
   server,
@@ -121,6 +163,35 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
         </div>
       </div>
 
+      <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ ...labelStyle, color: overlayTheme.titleText }}>推荐填写顺序</div>
+        <div style={hintStyle(overlayTheme.mutedText)}>
+          小白用户可以按这个顺序填：先选上面的模板或粘整行命令，再确认下面的必填项，最后只在需要时补参数、环境变量和超时。
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {[
+            '1. 模板 / 完整命令',
+            '2. 服务名称',
+            '3. 启动命令',
+            '4. 命令参数（可选）',
+            '5. 环境变量 / 超时（按需）',
+          ].map((item) => (
+            <span
+              key={item}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 12,
+                color: overlayTheme.titleText,
+                background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
+              }}
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+
       <div style={{ padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ ...labelStyle, color: overlayTheme.titleText }}>只有一条完整命令？</div>
         <div style={hintStyle(overlayTheme.mutedText)}>
@@ -148,7 +219,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
-        <MCPHelpBlock title="服务名称" description="给这个 MCP 起一个你自己能识别的名字，后面 AI 工具列表里会直接显示。" overlayTheme={overlayTheme} example="Filesystem / Browser / GitHub">
+        <MCPHelpBlock title="服务名称" description="给这个 MCP 起一个你自己能识别的名字，后面 AI 工具列表里会直接显示；不要只写 server、test 这类看不出用途的名字。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="Filesystem / Browser / GitHub">
           <Input
             value={server.name}
             onChange={(event) => onChange({ name: event.target.value })}
@@ -156,7 +227,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
             style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
           />
         </MCPHelpBlock>
-        <MCPHelpBlock title="启用状态" description="临时不用可以先禁用，保留配置但不参与 AI 工具发现。" overlayTheme={overlayTheme}>
+        <MCPHelpBlock title="启用状态" description="临时不用可以先禁用，保留配置但不参与 AI 工具发现。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional">
           <Select
             value={server.enabled ? 'enabled' : 'disabled'}
             onChange={(value) => onChange({ enabled: value === 'enabled' })}
@@ -166,14 +237,14 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '132px minmax(0,1fr) 132px', gap: 12 }}>
-        <MCPHelpBlock title="传输方式" description="当前阶段只支持 stdio，表示 GoNavi 会在本机启动这个进程，并通过标准输入输出与它通信。" overlayTheme={overlayTheme}>
+        <MCPHelpBlock title="传输方式" description="当前阶段只支持 stdio，表示 GoNavi 会在本机启动这个进程，并通过标准输入输出与它通信。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="fixed">
           <Select
             value={server.transport}
             onChange={(value) => onChange({ transport: value as AIMCPServerConfig['transport'] })}
             options={[{ label: 'stdio', value: 'stdio' }]}
           />
         </MCPHelpBlock>
-        <MCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 node/uvx/python 这类启动器，把脚本名或模块名放到下面的参数里。" overlayTheme={overlayTheme} example="node / uvx / python">
+        <MCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 node/uvx/python 这类启动器，把脚本名或模块名放到下面的参数里。不要把 node server.js --stdio 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="node / uvx / python">
           <Input
             value={server.command}
             onChange={(event) => onChange({ command: event.target.value })}
@@ -181,7 +252,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
             style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
           />
         </MCPHelpBlock>
-        <MCPHelpBlock title="超时(秒)" description="工具发现和工具调用单次最多等多久。远端服务或启动慢的脚本可以适当调大。" overlayTheme={overlayTheme} example="20">
+        <MCPHelpBlock title="超时(秒)" description="工具发现和工具调用单次最多等多久。大多数本机工具保持默认 20 秒即可；远端服务或启动慢的脚本再调大。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="20">
           <Input
             type="number"
             min={3}
@@ -194,7 +265,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
         </MCPHelpBlock>
       </div>
 
-      <MCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 node server.js --stdio，要把 server.js 和 --stdio 分开填。" overlayTheme={overlayTheme} example="server.js、--stdio、-m、your_mcp_server">
+      <MCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 node server.js --stdio，要把 server.js 和 --stdio 分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="server.js、--stdio、-m、your_mcp_server">
         <Select
           mode="tags"
           value={server.args || []}
@@ -216,7 +287,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
         </div>
       )}
 
-      <MCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。" overlayTheme={overlayTheme} example="OPENAI_API_KEY=...">
+      <MCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。这里只填变量本身，不要写 export，也不要把它和启动命令混成一整行。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="OPENAI_API_KEY=...">
         <Input.TextArea
           rows={3}
           value={envDraft}
