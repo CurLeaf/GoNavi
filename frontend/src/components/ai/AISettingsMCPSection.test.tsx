@@ -95,8 +95,8 @@ describe('AISettingsMCPSection', () => {
       />,
     );
 
-    expect(markup).toContain('选择接入目标客户端');
-    expect(markup).toContain('接入到 Claude Code');
+    expect(markup).toContain('选择要安装到的客户端');
+    expect(markup).toContain('安装到 Claude Code');
     expect(markup).toContain('常见启动方式模板');
     expect(markup).toContain('Node 脚本');
     expect(markup).toContain('新增 MCP 服务');

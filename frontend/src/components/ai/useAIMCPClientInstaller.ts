@@ -107,7 +107,7 @@ export const useAIMCPClientInstaller = ({
     const targetClient = selectedMCPClientStatus?.client === 'codex' ? 'codex' : 'claude-code';
     const targetLabel = selectedMCPClientStatus?.displayName || (targetClient === 'codex' ? 'Codex' : 'Claude Code');
     if (selectedMCPClientStatus?.matchesCurrent) {
-      void messageApi.success(`${targetLabel} 已接入当前 GoNavi MCP，无需重复写入`);
+      void messageApi.success(`${targetLabel} 已安装当前 GoNavi MCP，无需重复安装`);
       return;
     }
     try {
