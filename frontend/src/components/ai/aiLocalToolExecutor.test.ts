@@ -518,6 +518,41 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"activeTabType":"query"');
   });
 
+  it('returns the current connection capability snapshot so the model can inspect supported UI actions', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_connection_capabilities', {}),
+      connections: [{
+        id: 'conn-1',
+        name: '分析库',
+        config: {
+          type: 'clickhouse',
+          host: '10.10.1.30',
+          port: 8123,
+          user: 'default',
+          database: 'analytics',
+        },
+      }],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'analytics',
+      },
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"connectionName":"分析库"');
+    expect(result.content).toContain('"resolvedType":"clickhouse"');
+    expect(result.content).toContain('"supportsCreateDatabase":true');
+    expect(result.content).toContain('"supportsRenameDatabase":false');
+    expect(result.content).toContain('"forceReadOnlyQueryResult":true');
+    expect(result.content).toContain('force_readonly_query_result');
+  });
+
   it('returns the local saved connections snapshot so the model can find matching data sources by type or keyword', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_saved_connections', {

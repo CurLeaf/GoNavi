@@ -78,6 +78,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前活动数据源的类型、地址、当前库和 SSH/代理状态，再继续做库表探索或连接问题排查。',
   },
   {
+    title: '核对数据源能力边界',
+    steps: 'inspect_connection_capabilities → inspect_current_connection',
+    description: '适合先确认当前连接到底支不支持建库、删库、结果编辑、SQL 导出或近似计数，再解释为什么某些按钮没出现或某类操作只能只读。',
+  },
+  {
     title: '盘点本地连接资产',
     steps: 'inspect_saved_connections → inspect_current_connection / get_databases',
     description: '适合先按关键词或类型筛出本地保存的数据源，再挑目标连接继续看当前状态或库表结构。',

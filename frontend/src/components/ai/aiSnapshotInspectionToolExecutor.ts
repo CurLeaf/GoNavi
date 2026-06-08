@@ -15,6 +15,7 @@ import type {
 import type { SqlLog } from '../../store';
 import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildAIContextSnapshot } from './aiContextInsights';
+import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import { buildAIGuidanceSnapshot } from './aiPromptInsights';
@@ -190,6 +191,17 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_connection_capabilities':
+        return {
+          content: JSON.stringify(buildConnectionCapabilitiesSnapshot({
+            connectionId: args.connectionId,
+            activeContext,
+            tabs,
+            activeTabId,
+            connections,
+          })),
+          success: true,
+        };
       case 'inspect_saved_connections':
         return {
           content: JSON.stringify(buildSavedConnectionsSnapshot({
@@ -276,6 +288,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_mcp_setup: '读取 MCP 配置状态失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
       inspect_current_connection: '读取当前连接失败',
+      inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',
       inspect_active_tab: '读取当前活动页签失败',
       inspect_workspace_tabs: '读取当前工作区页签失败',

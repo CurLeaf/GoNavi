@@ -41,6 +41,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_table_bundle: '抓取完整表结构快照',
   inspect_database_bundle: '抓取数据库结构总览',
   inspect_current_connection: '读取当前连接摘要',
+  inspect_connection_capabilities: '读取当前连接能力矩阵',
   inspect_saved_connections: '盘点本地已保存连接',
   inspect_active_tab: '读取当前活动页签',
   inspect_workspace_tabs: '盘点当前工作区页签',

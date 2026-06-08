@@ -450,6 +450,28 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_connection_capabilities",
+    icon: "🧱",
+    desc: "查看当前连接支持哪些前端能力",
+    detail:
+      "返回当前或指定连接的数据源能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否倾向手动总数或近似计数。适合用户问“为什么这里不能建库/删库”“这个数据源为什么结果不能编辑”“这个类型支持哪些操作”时，先读取真实能力边界。",
+    params: "connectionId?(默认取当前活动连接)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_connection_capabilities",
+        description:
+          "读取当前活动连接或指定 saved connection 的前端能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否适合手动总数或近似计数。适用于用户提到当前连接为什么不能建库、为什么结果集不能编辑、某种数据库类型到底支持哪些前端动作时，先读取真实能力配置，避免模型凭经验猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "可选，指定要查看的连接 ID；不传时默认读取当前活动连接" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_saved_connections",
     icon: "🧭",
     desc: "查看本地已保存连接清单",

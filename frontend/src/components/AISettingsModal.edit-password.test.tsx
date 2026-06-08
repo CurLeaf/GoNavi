@@ -35,7 +35,7 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain("import AISettingsSafetySection from './ai/AISettingsSafetySection';");
     expect(source).toContain("import AISettingsContextSection from './ai/AISettingsContextSection';");
     expect(source).toContain('<AISettingsProvidersSection');
-    expect(source).toContain("import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';");
+    expect(source).toContain("import AISettingsMCPSection from './ai/AISettingsMCPSection';");
     expect(source).toContain('<AISettingsSidebar');
     expect(source).toContain('<AISettingsSafetySection');
     expect(source).toContain('<AISettingsContextSection');
@@ -46,10 +46,11 @@ describe('AISettingsModal edit password behavior', () => {
   it('wires the external MCP client install panel actions back to the modal handlers', () => {
     expect(source).toContain('mcpClientStatuses={mcpClientStatuses}');
     expect(source).toContain('selectedMCPClient={selectedMCPClient}');
-    expect(source).toContain('const [mcpClientSelectionTouched, setMCPClientSelectionTouched] = useState(false);');
-    expect(source).toContain('const handleSelectMCPClient = useCallback((client: MCPClientKey) => {');
-    expect(source).toContain('pickPreferredMCPClient(normalizedStatuses, mcpClientSelectionTouched ? prev : undefined)');
-    expect(source).toContain('setMCPClientSelectionTouched(true);');
+    expect(source).toContain("import { useAIMCPClientInstaller } from './ai/useAIMCPClientInstaller';");
+    expect(source).toContain('} = useAIMCPClientInstaller({');
+    expect(source).toContain('handleSelectMCPClient,');
+    expect(source).toContain('loadMCPClientStatuses,');
+    expect(source).toContain('selectedMCPClientStatus,');
     expect(source).toContain('onSelectClient={handleSelectMCPClient}');
     expect(source).toContain('onRefreshStatus={() => void loadMCPClientStatuses()}');
     expect(source).toContain('onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}');

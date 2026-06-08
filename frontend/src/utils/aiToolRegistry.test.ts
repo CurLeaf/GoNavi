@@ -52,6 +52,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('SSH/代理/HTTP 隧道状态');
   });
 
+  it('registers the connection-capability inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_connection_capabilities');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('前端能力');
+    expect(info?.tool.function.description).toContain('结果是否强制只读');
+  });
+
   it('registers the saved-connections inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_connections');
     expect(info).toBeTruthy();
@@ -92,6 +99,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_guidance')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_connection_capabilities')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_connections')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

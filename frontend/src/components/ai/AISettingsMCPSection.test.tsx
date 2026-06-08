@@ -95,8 +95,8 @@ describe('AISettingsMCPSection', () => {
       />,
     );
 
-    expect(markup).toContain('把 GoNavi MCP 接入外部 AI 客户端');
-    expect(markup).toContain('CLI 未检测');
+    expect(markup).toContain('选择接入目标客户端');
+    expect(markup).toContain('接入到 Claude Code');
     expect(markup).toContain('常见启动方式模板');
     expect(markup).toContain('Node 脚本');
     expect(markup).toContain('新增 MCP 服务');

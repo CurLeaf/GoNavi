@@ -28,7 +28,7 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
   const messageText = String(status?.message || '');
   if (status?.matchesCurrent) {
     return {
-      label: '已安装当前',
+      label: '已接入',
       color: '#16a34a',
       bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
     };
@@ -42,13 +42,13 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
   }
   if (messageText.includes('失败') || messageText.includes('异常')) {
     return {
-      label: '读取异常',
+      label: '状态异常',
       color: '#dc2626',
       bg: darkMode ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
     };
   }
   return {
-    label: '未安装',
+    label: '未接入',
     color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
     bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
   };
@@ -62,67 +62,52 @@ const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) 
   return status?.client === 'codex' ? 'codex' : 'claude';
 };
 
-const getClientDetectionTone = (status: AIMCPClientInstallStatus | undefined, darkMode: boolean) => {
-  if (status?.clientDetected) {
-    return {
-      label: 'CLI 已检测',
-      color: '#16a34a',
-      bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
-    };
-  }
-  return {
-    label: 'CLI 未检测',
-    color: '#d97706',
-    bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
-  };
-};
-
 const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
   const messageText = String(status?.message || '');
   if (status?.matchesCurrent) {
-    return `${label} 已安装当前 GoNavi MCP，可直接在这个客户端里调用。`;
+    return `${label} 已经接入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
   }
   if (status?.installed) {
-    return `${label} 已检测到旧的 GoNavi 安装路径，更新后会切到当前这份 GoNavi。`;
+    return `${label} 里已经有旧的 GoNavi 记录，更新后会切到当前这份 GoNavi。`;
   }
   if (messageText.includes('失败') || messageText.includes('异常')) {
-    return `${label} 的安装状态读取失败，建议先刷新检测。`;
+    return `${label} 的接入状态读取失败，建议先刷新检测。`;
   }
-  return `${label} 还没有安装 GoNavi MCP。`;
+  return `${label} 还没有写入 GoNavi MCP 配置。`;
 };
 
 const getClientOptionSummary = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return '当前 GoNavi 已安装到这个客户端。';
+    return '当前 GoNavi 已经接入到这个客户端。';
   }
   if (status?.installed) {
-    return '已发现旧配置，建议更新到当前安装路径。';
+    return '检测到旧的 GoNavi 记录，建议更新为当前安装路径。';
   }
   if (String(status?.message || '').includes('失败') || String(status?.message || '').includes('异常')) {
-    return '安装状态读取异常，建议先刷新再处理。';
+    return '接入状态读取异常，建议先刷新再处理。';
   }
-  return '尚未安装到这个客户端。';
+  return '尚未写入 GoNavi MCP 配置。';
 };
 
 const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
   const commandName = resolveClientCommandName(status);
   if (status?.clientDetected) {
-    return `已检测到本机 ${commandName} 命令，安装后重启 ${label} 即可验证。`;
+    return `已检测到本机 ${commandName} 命令，写入配置后重启 ${label} 即可验证。`;
   }
-  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先安装到 ${label}，稍后再重启验证。`;
+  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先写入 ${label} 配置，稍后再重启验证。`;
 };
 
 const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '客户端';
   if (status?.matchesCurrent) {
-    return `已安装到 ${label}`;
+    return `已接入 ${label}`;
   }
   if (status?.installed) {
-    return `更新到 ${label}`;
+    return `更新 ${label} 配置`;
   }
-  return `安装到 ${label}`;
+  return `接入到 ${label}`;
 };
 
 const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
@@ -154,30 +139,22 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         gap: 10,
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>安装到外部客户端</div>
+      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
       <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
-        这里的“安装”不是给 GoNavi 自己再装一个 MCP，而是把 GoNavi 的 MCP Server 配置写入 Claude Code、Codex 这类外部 AI 客户端。
+        这里不是给 GoNavi 自己安装 MCP，而是把 GoNavi 作为 MCP Server 接入 Claude Code 或 Codex 这类外部 AI 客户端。
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {[
-          '只写入用户级 MCP 配置',
-          '不会下载安装 Claude Code / Codex',
-          '不会重装 GoNavi 程序',
-        ].map((item) => (
-          <div
-            key={item}
-            style={{
-              padding: '4px 10px',
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 700,
-              color: darkMode ? '#bfdbfe' : '#1d4ed8',
-              background: darkMode ? 'rgba(96,165,250,0.14)' : 'rgba(191,219,254,0.7)',
-            }}
-          >
-            {item}
-          </div>
-        ))}
+      <div
+        style={{
+          padding: '10px 12px',
+          borderRadius: 12,
+          border: `1px solid ${darkMode ? 'rgba(96,165,250,0.18)' : 'rgba(96,165,250,0.22)'}`,
+          background: darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.7)',
+          fontSize: 12,
+          color: overlayTheme.titleText,
+          lineHeight: 1.7,
+        }}
+      >
+        只会修改你选中的客户端用户级 MCP 配置，不会安装新的 GoNavi，也不会替换 GoNavi 自己的程序文件。
       </div>
     </div>
 
@@ -191,27 +168,21 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         flexDirection: 'column',
         gap: 14,
       }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>把 GoNavi MCP 接入外部 AI 客户端</div>
-          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-            先选 1 个安装目标，再执行安装或更新。GoNavi 会自动写入当前安装路径，不需要你自己找本机 exe，也不用手改配置。
-          </div>
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>选择接入目标客户端</div>
+        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+          选择 1 个客户端后再执行接入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
         </div>
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>第 1 步：选择安装目标</div>
-          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-            这里只会处理你当前选中的 1 个外部客户端，并显示它是否已经安装过、是否需要更新。
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>目标客户端</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
           {statuses.map((status) => {
             const client = status.client === 'codex' ? 'codex' : 'claude-code';
             const active = selectedClient === client;
             const tone = getStatusTone(status, darkMode);
-            const detectionTone = getClientDetectionTone(status, darkMode);
             return (
               <button
                 key={status.client}
@@ -224,79 +195,57 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                   background: active ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)'),
                   cursor: 'pointer',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 14,
+                  flexDirection: 'column',
+                  alignItems: 'stretch',
+                  gap: 10,
                   textAlign: 'left',
-                  minHeight: 92,
+                  minHeight: 98,
                   transition: 'all 0.2s ease',
                   opacity: statusLoading ? 0.72 : 1,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: '1 1 auto' }}>
-                  <div
-                    aria-hidden
-                    style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: 999,
-                      border: `1.5px solid ${active ? overlayTheme.selectedText : darkMode ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.12)'}`,
-                      background: active ? overlayTheme.selectedText : 'transparent',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {active ? <CheckCircleFilled style={{ color: '#fff', fontSize: 12 }} /> : null}
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: '1 1 auto' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <div
-                      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
-                    >
-                      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>
-                        {status.displayName}
-                      </div>
-                      <div
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: 999,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: tone.color,
-                          background: tone.bg,
-                          minWidth: 76,
-                          textAlign: 'center',
-                        }}
-                      >
-                        {tone.label}
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.6 }}>
-                      {getClientOptionSummary(status)}
-                    </div>
-                    <div
+                      aria-hidden
                       style={{
-                        padding: '4px 10px',
+                        width: 22,
+                        height: 22,
                         borderRadius: 999,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: detectionTone.color,
-                        background: detectionTone.bg,
-                        whiteSpace: 'nowrap',
-                        alignSelf: 'flex-start',
-                        minWidth: 76,
-                        textAlign: 'center',
+                        border: `1.5px solid ${active ? overlayTheme.selectedText : darkMode ? 'rgba(255,255,255,0.16)' : 'rgba(15,23,42,0.16)'}`,
+                        background: active ? overlayTheme.selectedText : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
                       }}
                     >
-                      {detectionTone.label}
+                      {active ? <CheckCircleFilled style={{ color: '#fff', fontSize: 12 }} /> : null}
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, minWidth: 0 }}>
+                      {status.displayName}
                     </div>
                   </div>
+                  <div
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: tone.color,
+                      background: tone.bg,
+                      minWidth: 72,
+                      textAlign: 'center',
+                    }}
+                  >
+                    {tone.label}
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6, maxWidth: 300 }}>
-                  {active ? '当前已选中这个客户端。' : '点击切换到这个客户端。'}
-                  {' '}
-                  {getClientDetectionSummary(status)}
+                <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
+                  {getClientOptionSummary(status)}
+                </div>
+                <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                  {active ? '当前已选中这个客户端。' : '点击后切换到这个客户端。'}
                 </div>
               </button>
             );
@@ -317,11 +266,11 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-            第 2 步：确认并安装
+            {selectedStatus?.displayName || '客户端'} 状态
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-              当前目标：{selectedStatus?.displayName || '客户端'}
+              {getStatusSummary(selectedStatus)}
             </div>
             {selectedStatus && (
               <div
@@ -339,11 +288,15 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
             )}
           </div>
         </div>
-        <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
-          {getStatusSummary(selectedStatus)}
+        <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+          当前状态：{selectedStatus?.matchesCurrent
+            ? '当前 GoNavi MCP 已经写入这个客户端'
+            : selectedStatus?.installed
+              ? '检测到旧配置，建议更新到当前安装路径'
+              : '当前还没有把 GoNavi MCP 写入这个客户端'}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          本机命令状态：{selectedStatus?.clientDetected
+          CLI 检测：{selectedStatus?.clientDetected
             ? `已检测到 ${resolveClientCommandName(selectedStatus)}`
             : `未检测到 ${resolveClientCommandName(selectedStatus)}，仍可先写配置`}
         </div>
@@ -353,7 +306,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           </div>
         )}
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          检测结果：{selectedStatus?.message || '未检测到安装状态'}
+          检测结果：{selectedStatus?.message || '未检测到接入状态'}
         </div>
         {selectedStatus?.configPath && (
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
@@ -398,14 +351,16 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-          命令未检测到时也可以先安装到目标客户端；后续装好 CLI 或把命令加入 PATH 后，重启对应客户端即可生效。已经是当前配置时按钮会自动禁用，避免重复安装。
+          {getClientDetectionSummary(selectedStatus)}
+          {' '}
+          已经是当前配置时按钮会自动禁用，避免重复写入。
         </div>
         <Button
           type={selectedStatus?.matchesCurrent ? 'default' : 'primary'}
           onClick={onInstall}
           loading={loading}
           disabled={Boolean(selectedStatus?.matchesCurrent)}
-          style={{ borderRadius: 10, fontWeight: 600, minWidth: 180, height: 40 }}
+          style={{ borderRadius: 10, fontWeight: 600, minWidth: 192, height: 40 }}
         >
           {resolveActionLabel(selectedStatus)}
         </Button>

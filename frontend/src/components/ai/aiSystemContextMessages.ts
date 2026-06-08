@@ -173,6 +173,19 @@ const appendAIGuidanceInspectionGuidance = (
   });
 };
 
+const appendConnectionCapabilityInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_connection_capabilities')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“为什么这里不能建库/删库/改库名”“为什么结果不能编辑”“这个数据源支持哪些前端动作”，优先调用 inspect_connection_capabilities 读取真实连接能力矩阵，不要凭数据库常识或记忆猜测。',
+  });
+};
+
 const resolveDatabaseDisplayType = (config: ConnectionConfig | undefined): string => {
   const dbType = config?.type || 'unknown';
   return dbType === 'diros' ? 'Doris' : dbType.charAt(0).toUpperCase() + dbType.slice(1);
@@ -403,6 +416,7 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
     });
   }
+  appendConnectionCapabilityInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_saved_connections')) {
     systemMessages.push({
       role: 'system',
