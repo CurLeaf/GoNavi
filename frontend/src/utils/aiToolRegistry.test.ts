@@ -80,11 +80,14 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('目录中的具体 SQL 脚本');
   });
 
-  it('registers the saved-query and sql-snippet inspectors as builtin tools', () => {
+  it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
+    const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
     const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
     const snippetTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_snippets');
 
+    expect(recentActivityTool?.desc).toContain('最近 SQL 活动');
+    expect(recentActivityTool?.tool.function.description).toContain('最近 SQL 活动');
     expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
     expect(savedQueryTool?.tool.function.description).toContain('历史查询');
     expect(aiSessionsTool?.desc).toContain('AI 历史会话');
@@ -120,6 +123,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_saved_connections')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_directories')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_file')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_recent_sql_activity')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

@@ -49,6 +49,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_active_tab: '读取当前活动页签',
   inspect_workspace_tabs: '盘点当前工作区页签',
   inspect_recent_sql_logs: '回看最近 SQL 执行日志',
+  inspect_recent_sql_activity: '总结最近 SQL 活动',
   inspect_saved_queries: '检索本地已保存查询',
   inspect_sql_snippets: '读取 SQL 片段模板',
   preview_table_rows: '预览真实样例数据',

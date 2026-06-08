@@ -1,4 +1,3 @@
-import type { SqlLog } from '../../store';
 import type { SavedConnection, TabData } from '../../types';
 
 const ACTIVE_TAB_CONTENT_LIMIT = 12000;
@@ -9,21 +8,6 @@ const normalizeWorkspaceTabLimit = (input: unknown): number => {
   if (value < 1) return 1;
   if (value > 30) return 30;
   return value;
-};
-
-const normalizeRecentSqlLogLimit = (input: unknown): number => {
-  const value = Math.floor(Number(input) || 20);
-  if (value < 1) return 1;
-  if (value > 100) return 100;
-  return value;
-};
-
-const normalizeSqlLogStatus = (input: unknown): 'all' | 'success' | 'error' => {
-  const value = String(input || 'all').trim().toLowerCase();
-  if (value === 'success' || value === 'error') {
-    return value;
-  }
-  return 'all';
 };
 
 const resolveContentKind = (tab: TabData, includeContent: boolean, trimmedContent: string): 'sql' | 'command' | 'text' | 'none' => {
@@ -158,35 +142,5 @@ export const buildWorkspaceTabsSnapshot = (params: {
         includeContent,
         contentLimit: WORKSPACE_TAB_CONTENT_LIMIT,
       })),
-  };
-};
-
-export const buildRecentSqlLogsSnapshot = (params: {
-  sqlLogs?: SqlLog[];
-  limit?: unknown;
-  status?: unknown;
-}) => {
-  const { sqlLogs = [], limit, status } = params;
-  const safeStatus = normalizeSqlLogStatus(status);
-  const safeLimit = normalizeRecentSqlLogLimit(limit);
-  const filteredLogs = sqlLogs.filter((log) => safeStatus === 'all' || log.status === safeStatus);
-  const visibleLogs = filteredLogs.slice(0, safeLimit).map((log) => ({
-    id: log.id,
-    timestamp: log.timestamp,
-    status: log.status,
-    duration: log.duration,
-    dbName: log.dbName || '',
-    affectedRows: typeof log.affectedRows === 'number' ? log.affectedRows : null,
-    sql: log.sql,
-    message: log.message || '',
-  }));
-
-  return {
-    status: safeStatus,
-    limit: safeLimit,
-    totalMatched: filteredLogs.length,
-    successCount: filteredLogs.filter((log) => log.status === 'success').length,
-    errorCount: filteredLogs.filter((log) => log.status === 'error').length,
-    logs: visibleLogs,
   };
 };

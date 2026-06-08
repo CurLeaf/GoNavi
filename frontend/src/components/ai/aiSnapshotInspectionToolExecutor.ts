@@ -35,8 +35,11 @@ import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
 import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
 import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
 import {
-  buildActiveTabSnapshot,
+  buildRecentSqlActivitySnapshot,
   buildRecentSqlLogsSnapshot,
+} from './aiSqlLogInsights';
+import {
+  buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
 } from './aiWorkspaceInsights';
 
@@ -328,6 +331,18 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_recent_sql_activity':
+        return {
+          content: JSON.stringify(buildRecentSqlActivitySnapshot({
+            sqlLogs,
+            limit: args.limit,
+            status: args.status,
+            keyword: args.keyword,
+            dbName: args.dbName,
+            activityKind: args.activityKind,
+          })),
+          success: true,
+        };
       case 'inspect_saved_queries':
         return {
           content: JSON.stringify(buildSavedQueriesSnapshot({
@@ -372,6 +387,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_workspace_tabs: '读取当前工作区页签失败',
       inspect_ai_context: '读取当前 AI 上下文失败',
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
+      inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
     }[toolName] || '读取本地探针快照失败';

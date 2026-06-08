@@ -617,6 +617,40 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_recent_sql_activity",
+    icon: "📊",
+    desc: "总结最近 SQL 活动分布",
+    detail:
+      "可按 status、activityKind、dbName 和 keyword 过滤，返回最近 SQL 活动的结构化总结，包括读写/DDL 比例、语句类型分布、数据库分布、最近报错、最近写操作和最慢语句。适合用户提到“最近都执行了什么”“是不是刚删过数据”“哪个库最近报错最多”“最近主要在跑查询还是写入”时先读真实执行画像。",
+    params: "limit?, status?(all|success|error), activityKind?(all|read|write|ddl|transaction|session|other), dbName?, keyword?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_recent_sql_activity",
+        description:
+          "汇总最近 SQL 活动的结构化画像，可按执行状态、活动类型、数据库名和关键词过滤。适用于排查最近主要在执行哪些读写操作、某个库近期错误是否集中、是否发生过删除或 DDL、以及让 AI 基于真实执行现场先做全局判断。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，最近活动样例最多返回多少条，默认 30，最大 100" },
+            status: {
+              type: "string",
+              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              enum: ["all", "success", "error"],
+            },
+            activityKind: {
+              type: "string",
+              description: "可选，按活动类型过滤，支持 all、read、write、ddl、transaction、session、other，默认 all",
+              enum: ["all", "read", "write", "ddl", "transaction", "session", "other"],
+            },
+            dbName: { type: "string", description: "可选，只看数据库名里包含该关键词的日志" },
+            keyword: { type: "string", description: "可选，按 SQL 文本、报错信息、语句类型或数据库名做关键词筛选" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_saved_queries",
     icon: "💾",
     desc: "查看本地已保存的 SQL 查询",

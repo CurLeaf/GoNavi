@@ -988,6 +988,70 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
   });
 
+  it('returns a recent sql activity summary so the model can quickly spot writes, ddl, and repeated failures', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_recent_sql_activity', {
+        limit: 3,
+        activityKind: 'write',
+        dbName: 'crm',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      sqlLogs: [
+        {
+          id: 'log-1',
+          timestamp: 4,
+          sql: 'DELETE FROM users WHERE id = 9',
+          status: 'error',
+          duration: 120,
+          message: 'permission denied',
+          dbName: 'crm',
+        },
+        {
+          id: 'log-2',
+          timestamp: 3,
+          sql: 'UPDATE orders SET status = \'paid\' WHERE id = 1',
+          status: 'error',
+          duration: 95,
+          message: 'row lock timeout',
+          dbName: 'crm',
+        },
+        {
+          id: 'log-3',
+          timestamp: 2,
+          sql: 'ALTER TABLE orders ADD COLUMN note varchar(32)',
+          status: 'success',
+          duration: 160,
+          dbName: 'crm',
+        },
+        {
+          id: 'log-4',
+          timestamp: 1,
+          sql: 'SELECT * FROM users LIMIT 10',
+          status: 'success',
+          duration: 18,
+          dbName: 'crm',
+          affectedRows: 10,
+        },
+      ],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"activityKind":"write"');
+    expect(result.content).toContain('"totalMatched":2');
+    expect(result.content).toContain('"writeCount":2');
+    expect(result.content).toContain('"statementTypeBreakdown":{"delete":1,"update":1}');
+    expect(result.content).toContain('permission denied');
+    expect(result.content).toContain('row lock timeout');
+    expect(result.content).not.toContain('ALTER TABLE orders');
+    expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
+  });
+
   it('returns local saved queries so the model can reuse historical sql scripts', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_saved_queries', {

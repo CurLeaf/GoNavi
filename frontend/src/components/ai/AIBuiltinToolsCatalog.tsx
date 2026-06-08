@@ -113,6 +113,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',
   },
   {
+    title: '总结最近 SQL 活动',
+    steps: 'inspect_recent_sql_activity → inspect_recent_sql_logs → inspect_current_connection',
+    description: '适合先看最近到底以读还是写为主、有没有 DDL 或删除、哪个库最近报错最多，再决定继续下钻哪条日志或哪个连接。',
+  },
+  {
     title: '复用历史 SQL',
     steps: 'inspect_saved_queries → get_columns / execute_sql',
     description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',
