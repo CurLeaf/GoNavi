@@ -66,6 +66,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('本地已保存连接清单');
   });
 
+  it('registers the external-sql-directory inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_external_sql_directories');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('外部 SQL 目录');
+    expect(info?.tool.function.description).toContain('当前打开的外部 SQL 文件页签');
+  });
+
   it('registers the saved-query and sql-snippet inspectors as builtin tools', () => {
     const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
@@ -104,6 +111,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_connection_capabilities')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_connections')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_external_sql_directories')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

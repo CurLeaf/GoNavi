@@ -43,6 +43,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_current_connection: '读取当前连接摘要',
   inspect_connection_capabilities: '读取当前连接能力矩阵',
   inspect_saved_connections: '盘点本地已保存连接',
+  inspect_external_sql_directories: '盘点外部 SQL 目录',
   inspect_ai_sessions: '盘点本地 AI 历史会话',
   inspect_active_tab: '读取当前活动页签',
   inspect_workspace_tabs: '盘点当前工作区页签',

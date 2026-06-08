@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AIMCPToolDescriptor, AIToolCall, SavedConnection } from '../../types';
+import type { AIMCPToolDescriptor, AIToolCall, ExternalSQLDirectory, SavedConnection } from '../../types';
 import { buildToolResultMessage, executeLocalAIToolCall } from './aiLocalToolExecutor';
 
 const buildConnection = (): SavedConnection => ({
@@ -603,6 +603,57 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"name":"订单主库"');
     expect(result.content).toContain('"useSSH":true');
     expect(result.content).not.toContain('分析仓库');
+  });
+
+  it('returns configured external sql directories so the model can locate local script assets', async () => {
+    const externalSQLDirectories: ExternalSQLDirectory[] = [
+      {
+        id: 'dir-1',
+        name: '报表脚本',
+        path: 'D:/sql/reports',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        createdAt: 2,
+      },
+      {
+        id: 'dir-2',
+        name: '运维脚本',
+        path: 'D:/sql/ops',
+        createdAt: 1,
+      },
+    ];
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_external_sql_directories', {
+        keyword: '报表',
+      }),
+      connections: [buildConnection()],
+      tabs: [
+        {
+          id: 'tab-1',
+          title: '日报.sql',
+          type: 'query',
+          connectionId: 'conn-1',
+          dbName: 'crm',
+          filePath: 'D:/sql/reports/daily.sql',
+          query: 'select 1',
+        },
+      ],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      externalSQLDirectories,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('"name":"报表脚本"');
+    expect(result.content).toContain('"connectionName":"主库"');
+    expect(result.content).toContain('"openFileTabCount":1');
+    expect(result.content).toContain('日报.sql');
+    expect(result.content).not.toContain('运维脚本');
   });
 
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {

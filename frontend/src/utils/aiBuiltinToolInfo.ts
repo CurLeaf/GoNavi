@@ -496,6 +496,31 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_external_sql_directories",
+    icon: "🗂️",
+    desc: "查看本地外部 SQL 目录资产",
+    detail:
+      "可按关键词、连接或数据库过滤，返回本地配置的外部 SQL 目录、目录路径、绑定连接/数据库，以及当前是否已经打开这些目录里的 SQL 文件。适合用户提到“外部 SQL 目录”“某个脚本在哪个目录”“现在打开的 SQL 文件来自哪个外部目录”时，先读真实资产。",
+    params: "keyword?, connectionId?, dbName?, limit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_external_sql_directories",
+        description:
+          "读取本地配置的外部 SQL 目录清单，可按关键词、连接和数据库过滤，并返回目录路径、绑定连接/数据库，以及当前打开的外部 SQL 文件页签摘要。适用于用户提到外部 SQL 目录、某个 SQL 文件放在哪、当前打开的脚本来自哪个目录时，先读取真实本地资产再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按目录名、路径、连接名或数据库名做关键词筛选" },
+            connectionId: { type: "string", description: "可选，只看绑定到某个连接的外部 SQL 目录" },
+            dbName: { type: "string", description: "可选，只看绑定到某个数据库的外部 SQL 目录" },
+            limit: { type: "number", description: "可选，最多返回多少条目录，默认 20，最大 100" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_active_tab",
     icon: "📍",
     desc: "查看当前活动页签上下文",

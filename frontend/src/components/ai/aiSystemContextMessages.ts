@@ -423,6 +423,12 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“本地存了哪些连接”“帮我找 mysql / postgres / redis 连接”“哪条连接配了 SSH/代理”，优先调用 inspect_saved_connections 读取真实本地连接清单，再决定继续查看哪条连接。',
     });
   }
+  if (availableToolNames.includes('inspect_external_sql_directories')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“外部 SQL 目录”“目录里的脚本”“某个 SQL 文件放在哪个目录”“当前打开的 SQL 文件来自哪里”，优先调用 inspect_external_sql_directories 读取真实外部 SQL 目录资产，再决定继续读取活动页签还是定位具体脚本。',
+    });
+  }
   if (availableToolNames.includes('inspect_saved_queries')) {
     systemMessages.push({
       role: 'system',

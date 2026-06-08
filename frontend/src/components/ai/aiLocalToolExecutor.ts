@@ -9,6 +9,7 @@ import type {
   SavedConnection,
   SavedQuery,
   SqlSnippet,
+  ExternalSQLDirectory,
   TabData,
 } from '../../types';
 import { executeDatabaseToolCall } from './aiDatabaseToolExecutor';
@@ -36,6 +37,7 @@ export interface ExecuteLocalAIToolCallOptions {
   sqlLogs?: SqlLog[];
   savedQueries?: SavedQuery[];
   sqlSnippets?: SqlSnippet[];
+  externalSQLDirectories?: ExternalSQLDirectory[];
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
@@ -66,6 +68,7 @@ export async function executeLocalAIToolCall({
   sqlLogs = [],
   savedQueries = [],
   sqlSnippets = [],
+  externalSQLDirectories = [],
   skills = [],
   userPromptSettings,
   dynamicModels = [],
@@ -92,6 +95,7 @@ export async function executeLocalAIToolCall({
       sqlLogs,
       savedQueries,
       sqlSnippets,
+      externalSQLDirectories,
       skills,
       userPromptSettings,
       dynamicModels,

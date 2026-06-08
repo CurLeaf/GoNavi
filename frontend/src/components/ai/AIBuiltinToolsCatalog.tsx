@@ -88,6 +88,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先按关键词或类型筛出本地保存的数据源，再挑目标连接继续看当前状态或库表结构。',
   },
   {
+    title: '盘点外部 SQL 目录',
+    steps: 'inspect_external_sql_directories → inspect_workspace_tabs / inspect_active_tab',
+    description: '适合先确认本地配置了哪些外部 SQL 目录、目录绑定到哪个连接/库，以及当前打开的 SQL 文件来自哪里，再继续分析脚本内容。',
+  },
+  {
     title: '读取当前页签',
     steps: 'inspect_active_tab → get_columns / get_indexes / execute_sql',
     description: '适合先读取当前编辑器里的 SQL 草稿或当前表页签，再继续做字段核对、索引分析和只读验证。',

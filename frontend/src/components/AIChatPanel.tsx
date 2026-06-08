@@ -461,6 +461,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 sqlLogs: useStore.getState().sqlLogs,
                 savedQueries: useStore.getState().savedQueries,
                 sqlSnippets: useStore.getState().sqlSnippets,
+                externalSQLDirectories: useStore.getState().externalSQLDirectories,
                 skills,
                 userPromptSettings,
                 dynamicModels,

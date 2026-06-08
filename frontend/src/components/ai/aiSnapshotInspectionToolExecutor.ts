@@ -8,6 +8,7 @@ import type {
   AISafetyLevel,
   AISkillConfig,
   AIUserPromptSettings,
+  ExternalSQLDirectory,
   SavedConnection,
   SavedQuery,
   SqlSnippet,
@@ -30,6 +31,7 @@ import {
   buildSqlSnippetsSnapshot,
 } from './aiSavedSqlInsights';
 import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
+import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -64,6 +66,7 @@ interface ExecuteSnapshotInspectionToolCallOptions {
   sqlLogs?: SqlLog[];
   savedQueries?: SavedQuery[];
   sqlSnippets?: SqlSnippet[];
+  externalSQLDirectories?: ExternalSQLDirectory[];
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
@@ -95,6 +98,7 @@ export async function executeSnapshotInspectionToolCall(
     sqlLogs = [],
     savedQueries = [],
     sqlSnippets = [],
+    externalSQLDirectories = [],
     skills = [],
     userPromptSettings,
     dynamicModels = [],
@@ -220,6 +224,19 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_external_sql_directories':
+        return {
+          content: JSON.stringify(buildExternalSQLDirectoriesSnapshot({
+            externalSQLDirectories,
+            connections,
+            tabs,
+            keyword: args.keyword,
+            connectionId: args.connectionId,
+            dbName: args.dbName,
+            limit: args.limit,
+          })),
+          success: true,
+        };
       case 'inspect_active_tab':
         return {
           content: JSON.stringify(buildActiveTabSnapshot({
@@ -310,6 +327,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_current_connection: '读取当前连接失败',
       inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',
+      inspect_external_sql_directories: '读取外部 SQL 目录失败',
       inspect_ai_sessions: '读取本地 AI 会话清单失败',
       inspect_active_tab: '读取当前活动页签失败',
       inspect_workspace_tabs: '读取当前工作区页签失败',
