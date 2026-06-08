@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Modal, Form, message as antdMessage } from 'antd';
+import { ApiOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, AppstoreOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig } from '../types';
 import {
     QWEN_BAILIAN_ANTHROPIC_BASE_URL,
@@ -11,13 +11,6 @@ import {
     resolvePresetModelSelection,
     resolvePresetTransport,
 } from '../utils/aiProviderPresets';
-import {
-    PROVIDER_PRESET_CARD_BASE_STYLE,
-    PROVIDER_PRESET_CARD_CONTENT_STYLE,
-    PROVIDER_PRESET_CARD_DESCRIPTION_STYLE,
-    PROVIDER_PRESET_GRID_STYLE,
-    PROVIDER_PRESET_CARD_TITLE_STYLE,
-} from '../utils/aiSettingsPresetLayout';
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
@@ -27,6 +20,7 @@ import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSecti
 import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
 import AISettingsSafetySection from './ai/AISettingsSafetySection';
 import AISettingsContextSection from './ai/AISettingsContextSection';
+import AISettingsProvidersSection from './ai/AISettingsProvidersSection';
 import AISettingsPromptsSection from './ai/AISettingsPromptsSection';
 import AISettingsSkillsSection from './ai/AISettingsSkillsSection';
 interface AISettingsModalProps {
@@ -246,7 +240,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const cardBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
     const cardBorder = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
     const cardHoverBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
-    const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
     const inputBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
     // Hook 必须在组件顶层调用，不能在条件分支内
     const watchedType = Form.useWatch('type', form);
@@ -803,219 +796,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         });
     };
 
-    // ---- 字段装饰器样式 ----
-    const fieldGroupStyle: React.CSSProperties = {
-        padding: '14px 16px', borderRadius: 12, border: `1px solid ${cardBorder}`,
-        background: cardBg, marginBottom: 12,
-    };
-    const fieldLabelStyle: React.CSSProperties = {
-        fontSize: 13, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em',
-        color: sectionLabelColor, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
-    };
-
-    // ===== Provider 列表 =====
-    const renderProviderList = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {providers.length === 0 && (
-                <div style={{
-                    textAlign: 'center', padding: '36px 20px', color: overlayTheme.mutedText, fontSize: 14,
-                    border: `1px dashed ${cardBorder}`, borderRadius: 14, background: cardBg,
-                }}>
-                    <RobotOutlined style={{ fontSize: 32, marginBottom: 12, opacity: 0.3, display: 'block' }} />
-                    暂未配置模型供应商<br />
-                    <span style={{ fontSize: 13, opacity: 0.6 }}>添加一个以开始使用 AI 助手</span>
-                </div>
-            )}
-            {providers.map(p => {
-                const matchedPreset = matchProviderPreset(p);
-                const isActive = p.id === activeProviderId;
-                return (
-                    <div key={p.id} onClick={() => handleSetActive(p.id)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${isActive ? overlayTheme.selectedText : cardBorder}`,
-                        background: isActive ? overlayTheme.selectedBg : cardBg,
-                        display: 'flex', alignItems: 'center', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center',
-                            background: isActive ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
-                            color: isActive ? overlayTheme.iconColor : overlayTheme.mutedText, 
-                            fontSize: 18, flexShrink: 0, transition: 'all 0.2s ease',
-                        }}>
-                            {matchedPreset.icon || <ApiOutlined />}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {p.name || p.type}
-                                {isActive && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 13 }} />}
-                            </div>
-                            <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span>{matchedPreset.label}</span>
-                                <span style={{ opacity: 0.4 }}>·</span>
-                                <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{p.model || '未选择模型'}</span>
-                            </div>
-                        </div>
-                        <Space size={2}>
-                            <Tooltip title="编辑">
-                                <Button type="text" size="small" icon={<EditOutlined />}
-                                    onClick={e => { e.stopPropagation(); handleEditProvider(p); }}
-                                    style={{ color: overlayTheme.mutedText }} />
-                            </Tooltip>
-                            <Popconfirm title="确认删除？" onConfirm={() => handleDeleteProvider(p.id)}
-                                okButtonProps={{ danger: true }} okText="删除" cancelText="取消">
-                                <Button type="text" size="small" icon={<DeleteOutlined />} danger
-                                    onClick={e => e.stopPropagation()} />
-                            </Popconfirm>
-                        </Space>
-                    </div>
-                );
-            })}
-            <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddProvider}
-                style={{ borderRadius: 12, height: 42, borderColor: darkMode ? 'rgba(255,255,255,0.12)' : undefined }}>
-                添加模型供应商
-            </Button>
-        </div>
-    );
-
-    // ===== Provider 编辑表单 =====
-    const renderProviderForm = () => {
-        const presetKeyFromForm = watchedPresetKey || (editingProvider as any)?.presetKey || 'openai';
-        return (
-            <div>
-                {/* 顶部返回 */}
-                <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Button size="small" onClick={resetProviderEditorSession}
-                        style={{ borderRadius: 8 }}>← 返回</Button>
-                    <span style={{ fontWeight: 700, fontSize: 16, color: overlayTheme.titleText }}>
-                        {editingProvider?.id ? '编辑模型供应商' : '添加模型供应商'}
-                    </span>
-                </div>
-
-                <Form form={form} layout="vertical" size="small">
-                    {/* Provider 类型选择 - 卡片式 */}
-                    <div style={fieldGroupStyle}>
-                        <div style={fieldLabelStyle}>
-                            <AppstoreOutlined style={{ fontSize: 14 }} /> 服务类型
-                        </div>
-                        <Form.Item name="presetKey" noStyle>
-                            <div style={PROVIDER_PRESET_GRID_STYLE}>
-                                {PROVIDER_PRESETS.map(pt => (
-                                    <div key={pt.key} onClick={() => { form.setFieldValue('presetKey', pt.key); handlePresetChange(pt.key); }}
-                                        style={{
-                                            ...PROVIDER_PRESET_CARD_BASE_STYLE,
-                                            border: `1.5px solid ${presetKeyFromForm === pt.key ? overlayTheme.selectedText : 'transparent'}`,
-                                            background: presetKeyFromForm === pt.key ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                            boxShadow: presetKeyFromForm === pt.key ? 'none' : (darkMode ? 'inset 0 0 0 1px rgba(255,255,255,0.028)' : 'inset 0 0 0 1px rgba(16,24,40,0.03)'),
-                                        }}>
-                                        <div style={{
-                                            color: presetKeyFromForm === pt.key ? overlayTheme.iconColor : overlayTheme.mutedText,
-                                            fontSize: 18, marginTop: 2, transition: 'all 0.2s ease', flexShrink: 0,
-                                        }}>
-                                            {pt.icon}
-                                        </div>
-                                        <div style={PROVIDER_PRESET_CARD_CONTENT_STYLE}>
-                                            <div style={{ ...PROVIDER_PRESET_CARD_TITLE_STYLE, fontSize: 13, fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{pt.label}</div>
-                                            <div style={{ ...PROVIDER_PRESET_CARD_DESCRIPTION_STYLE, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.4 }}>{pt.desc}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </Form.Item>
-                        <Form.Item name="type" hidden><Input /></Form.Item>
-                    </div>
-
-                    {/* 基本信息 - 仅自定义/Ollama 显示 */}
-                    {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-                        <div style={{ ...fieldGroupStyle, marginTop: 16 }}>
-                            <div style={fieldLabelStyle}>
-                                <RobotOutlined style={{ fontSize: 14 }} /> 基本信息
-                            </div>
-                            
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>供应商名称</span>} name="name" rules={[{ required: true, message: '请输入名称' }]} style={{ marginBottom: 16 }}>
-                                <Input placeholder="例如：我的自建 OpenAI / 专属大模型"
-                                    size="middle"
-                                    style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                            </Form.Item>
-                            
-                            {presetKeyFromForm === 'custom' && (
-                                <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API 格式</span>} name="apiFormat" style={{ marginBottom: 16 }}>
-                                    <div style={{ 
-                                        display: 'inline-flex', padding: 4, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)', 
-                                        borderRadius: 8, gap: 4 
-                                    }}>
-                                        {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'claude-cli', label: 'Claude CLI' }].map(fmt => (
-                                            <div
-                                                key={fmt.value}
-                                                onClick={() => form.setFieldsValue({ apiFormat: fmt.value })}
-                                                style={{
-                                                    padding: '6px 16px', borderRadius: 6, fontSize: 13, fontWeight: watchedApiFormat === fmt.value ? 600 : 500, cursor: 'pointer',
-                                                    background: watchedApiFormat === fmt.value ? (darkMode ? '#374151' : '#ffffff') : 'transparent',
-                                                    color: watchedApiFormat === fmt.value ? overlayTheme.titleText : overlayTheme.mutedText,
-                                                    boxShadow: watchedApiFormat === fmt.value ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                                    transition: 'all 0.2s ease',
-                                                }}
-                                            >
-                                                {fmt.label}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </Form.Item>
-                            )}
-                            
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>可用模型列表（可选配置）</span>} name="models" style={{ marginBottom: 0 }}>
-                                <Select mode="tags" size="middle" placeholder="配置指定的模型ID，留空则默认去服务端拉取" style={{ width: '100%' }} />
-                            </Form.Item>
-                        </div>
-                    )}
-                    <Form.Item name="model" hidden><Input /></Form.Item>
-                    <Form.Item name="name" hidden><Input /></Form.Item>
-
-                    {/* 认证信息 */}
-                    <div style={{ ...fieldGroupStyle, marginTop: 16 }}>
-                        <div style={fieldLabelStyle}>
-                            <KeyOutlined style={{ fontSize: 14 }} /> 认证 & 连接
-                        </div>
-                        <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Key</span>} name="apiKey" rules={[{ validator: (_, value) => { const apiKey = String(value || '').trim(); if (apiKey || editingProvider?.id) { return Promise.resolve(); } return Promise.reject(new Error('请输入 API Key')); } }]} style={{ marginBottom: 16 }}>
-                            <Input.Password placeholder="sk-... / 你的 API Key"
-                                size="middle"
-                                visibilityToggle={{
-                                    visible: primaryPasswordVisible,
-                                    onVisibleChange: setPrimaryPasswordVisible,
-                                }}
-                                style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                        </Form.Item>
-
-                        {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Endpoint (URL)</span>} name="baseUrl" rules={[{ required: true, message: '请输入有效的接口地址' }]} style={{ marginBottom: 0 }}>
-                                <Input placeholder={findPreset(presetKeyFromForm).defaultBaseUrl || 'https://...'}
-                                    size="middle"
-                                    suffix={<LinkOutlined style={{ color: overlayTheme.mutedText }} />}
-                                    style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                            </Form.Item>
-                        )}
-                    </div>
-
-
-
-                    {/* 操作按钮 */}
-                    <div style={{
-                        display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12, paddingTop: 16,
-                        borderTop: `1px solid ${cardBorder}`, paddingBottom: 24,
-                    }}>
-                        <Button onClick={handleTestProvider} loading={loading} style={{ borderRadius: 10 }}
-                            icon={testStatus === 'success' ? <CheckOutlined style={{ color: '#22c55e' }} /> : undefined}>
-                            {testStatus === 'success' ? '连接正常' : testStatus === 'error' ? '重新测试' : '测试连接'}
-                        </Button>
-                        <Button type="primary" onClick={handleSaveProvider} loading={loading}
-                            style={{ borderRadius: 10, fontWeight: 600 }}>
-                            保存
-                        </Button>
-                    </div>
-                </Form>
-            </div>
-        );
-    };
-
     const modalShellStyle = {
         background: overlayTheme.shellBg, border: overlayTheme.shellBorder,
         boxShadow: overlayTheme.shellShadow, backdropFilter: overlayTheme.shellBackdropFilter,
@@ -1058,7 +838,37 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                       onSelectSection={setActiveSection}
                   />
                   <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
-                      {activeSection === 'providers' && (isEditing ? renderProviderForm() : renderProviderList())}
+                      {activeSection === 'providers' && (
+                          <AISettingsProvidersSection
+                              providers={providers}
+                              activeProviderId={activeProviderId}
+                              editingProvider={editingProvider}
+                              isEditing={isEditing}
+                              form={form}
+                              providerPresets={PROVIDER_PRESETS}
+                              watchedPresetKey={watchedPresetKey}
+                              watchedApiFormat={watchedApiFormat}
+                              loading={loading}
+                              testStatus={testStatus}
+                              primaryPasswordVisible={primaryPasswordVisible}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              onPrimaryPasswordVisibleChange={setPrimaryPasswordVisible}
+                              resolveProviderPreset={matchProviderPreset}
+                              resolvePresetByKey={findPreset}
+                              onAddProvider={handleAddProvider}
+                              onEditProvider={handleEditProvider}
+                              onDeleteProvider={handleDeleteProvider}
+                              onSetActiveProvider={handleSetActive}
+                              onCancelEdit={resetProviderEditorSession}
+                              onPresetChange={handlePresetChange}
+                              onTestProvider={handleTestProvider}
+                              onSaveProvider={handleSaveProvider}
+                          />
+                      )}
                       {activeSection === 'safety' && (
                           <AISettingsSafetySection
                               safetyLevel={safetyLevel}

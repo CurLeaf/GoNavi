@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./AISettingsModal.tsx', import.meta.url), 'utf8');
 const aiChatPanelCss = readFileSync(new URL('./AIChatPanel.css', import.meta.url), 'utf8');
+const providersSectionSource = readFileSync(new URL('./ai/AISettingsProvidersSection.tsx', import.meta.url), 'utf8');
 
 describe('AISettingsModal edit password behavior', () => {
   it('loads editable provider details before opening the edit modal', () => {
@@ -29,9 +30,11 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
     expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
+    expect(source).toContain("import AISettingsProvidersSection from './ai/AISettingsProvidersSection';");
     expect(source).toContain("import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';");
     expect(source).toContain("import AISettingsSafetySection from './ai/AISettingsSafetySection';");
     expect(source).toContain("import AISettingsContextSection from './ai/AISettingsContextSection';");
+    expect(source).toContain('<AISettingsProvidersSection');
     expect(source).toContain("import AISettingsMCPSection, { type MCPClientKey } from './ai/AISettingsMCPSection';");
     expect(source).toContain('<AISettingsSidebar');
     expect(source).toContain('<AISettingsSafetySection');
@@ -58,7 +61,7 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('keeps the prefilled api key masked by default', () => {
     expect(source).toContain('const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);');
-    expect(source).toContain('visible: primaryPasswordVisible,');
+    expect(providersSectionSource).toContain('visible: primaryPasswordVisible,');
   });
 
   it('does not render the clear helper block anymore', () => {
