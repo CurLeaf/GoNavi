@@ -193,4 +193,55 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"status":"paid"');
     expect(result.content).toContain('"rowCount":2');
   });
+
+  it('returns a full table snapshot bundle with optional sample rows in one tool call', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_table_bundle', {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        tableName: 'orders',
+        includeSampleRows: true,
+        sampleLimit: 2,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getColumns: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ Field: 'id', Type: 'bigint', Null: 'NO', Comment: '主键' }],
+        }),
+        getIndexes: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ keyName: 'PRIMARY', seqInIndex: 1 }],
+        }),
+        getForeignKeys: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ columnName: 'user_id', refTable: 'users' }],
+        }),
+        getTriggers: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ triggerName: 'orders_bi' }],
+        }),
+        showCreateTable: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ ddl: 'CREATE TABLE orders (...)' }],
+        }),
+        query: vi.fn().mockResolvedValue({
+          success: true,
+          data: [{ id: 1, status: 'paid' }, { id: 2, status: 'pending' }],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"tableName":"orders"');
+    expect(result.content).toContain('"field":"id"');
+    expect(result.content).toContain('"keyName":"PRIMARY"');
+    expect(result.content).toContain('"triggerName":"orders_bi"');
+    expect(result.content).toContain('"sampleRows"');
+    expect(result.content).toContain('"status":"paid"');
+  });
 });

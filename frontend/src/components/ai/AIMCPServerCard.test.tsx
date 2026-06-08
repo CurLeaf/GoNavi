@@ -34,6 +34,8 @@ describe('AIMCPServerCard', () => {
     );
 
     expect(markup).toContain('启动命令只填可执行程序本身');
+    expect(markup).toContain('直接粘贴完整命令');
+    expect(markup).toContain('自动拆分到下方字段');
     expect(markup).toContain('每个参数单独录入一个标签');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('当前阶段只支持 stdio');

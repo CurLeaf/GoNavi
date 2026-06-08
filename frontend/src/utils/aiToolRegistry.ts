@@ -256,6 +256,33 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_table_bundle",
+    icon: "🧰",
+    desc: "一次抓取指定表的结构快照",
+    detail:
+      "传入 connectionId、dbName 和 tableName，返回字段、索引、外键、触发器和 DDL；还可以附带前几行样例数据。适合在写 SQL、评审表设计或排查副作用前先做完整摸底。",
+    params: "connectionId, dbName, tableName, includeSampleRows?, sampleLimit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_table_bundle",
+        description:
+          "一次性获取指定表的结构快照，返回字段、索引、外键、触发器、DDL，以及可选样例数据。适用于做完整表设计摸底、快速理解表关系和降低模型多次往返调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "连接ID" },
+            dbName: { type: "string", description: "数据库名" },
+            tableName: { type: "string", description: "表名" },
+            includeSampleRows: { type: "boolean", description: "可选，是否附带前几行样例数据" },
+            sampleLimit: { type: "number", description: "可选，样例行数，默认 10，最大 100" },
+          },
+          required: ["connectionId", "dbName", "tableName"],
+        },
+      },
+    },
+  },
+  {
     name: "execute_sql",
     icon: "▶️",
     desc: "执行 SQL 查询并返回结果",

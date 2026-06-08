@@ -14,7 +14,8 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain("callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS)");
     expect(source).toContain('await Service?.AISaveUserPromptSettings?.(payload);');
     expect(source).toContain("window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'))");
-    expect(source).toContain('保存自定义提示词');
+    expect(source).toContain("import AISettingsPromptsSection from './ai/AISettingsPromptsSection';");
+    expect(source).toContain('<AISettingsPromptsSection');
   });
 
   it('loads MCP servers and skills through the AI service', () => {

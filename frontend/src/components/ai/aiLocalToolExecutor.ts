@@ -123,6 +123,17 @@ const normalizePreviewLimit = (input: unknown): number => {
   return value;
 };
 
+const buildPreviewSQLForTable = (connection: SavedConnection, tableName: string, limit: number): string => {
+  const dbType = String(connection.config?.type || '').trim();
+  return buildPaginatedSelectSQL(
+    dbType,
+    `SELECT * FROM ${quoteQualifiedIdent(dbType, tableName)}`,
+    '',
+    limit,
+    0,
+  );
+};
+
 export async function executeLocalAIToolCall({
   toolCall,
   connections,
@@ -339,6 +350,109 @@ export async function executeLocalAIToolCall({
         }
         break;
       }
+      case 'inspect_table_bundle': {
+        const connection = findConnection(connections, args.connectionId);
+        if (!connection) {
+          content = 'Connection not found';
+          break;
+        }
+        try {
+          const safeDbName = args.dbName ? String(args.dbName).trim() : '';
+          const safeTable = args.tableName ? String(args.tableName).trim() : '';
+          if (!safeTable) {
+            content = 'tableName 不能为空';
+            break;
+          }
+          const includeSampleRows = args.includeSampleRows === true;
+          const sampleLimit = normalizePreviewLimit(args.sampleLimit ?? 10);
+          const rpcConfig = buildRpcConnectionConfig(connection.config) as any;
+          const results = await Promise.allSettled([
+            mergedRuntime.getColumns(rpcConfig, safeDbName, safeTable),
+            mergedRuntime.getIndexes(rpcConfig, safeDbName, safeTable),
+            mergedRuntime.getForeignKeys(rpcConfig, safeDbName, safeTable),
+            mergedRuntime.getTriggers(rpcConfig, safeDbName, safeTable),
+            resolveAITableSchemaToolResult({
+              tableName: safeTable,
+              fetchDDL: () => mergedRuntime.showCreateTable(rpcConfig, safeDbName, safeTable),
+              fetchColumns: () => mergedRuntime.getColumns(rpcConfig, safeDbName, safeTable),
+            }),
+            includeSampleRows
+              ? mergedRuntime.query(rpcConfig, safeDbName, buildPreviewSQLForTable(connection, safeTable, sampleLimit))
+              : Promise.resolve(undefined),
+          ]);
+
+          const warnings: string[] = [];
+          const columnsResult = results[0];
+          const indexesResult = results[1];
+          const foreignKeysResult = results[2];
+          const triggersResult = results[3];
+          const ddlResult = results[4];
+          const sampleRowsResult = results[5];
+
+          const payload: Record<string, unknown> = {
+            dbName: safeDbName,
+            tableName: safeTable,
+            columns: [],
+            indexes: [],
+            foreignKeys: [],
+            triggers: [],
+            ddl: '',
+          };
+
+          if (columnsResult.status === 'fulfilled' && columnsResult.value?.success && Array.isArray(columnsResult.value.data)) {
+            payload.columns = normalizeColumns(columnsResult.value.data);
+          } else {
+            warnings.push(`字段列表获取失败：${columnsResult.status === 'fulfilled' ? (columnsResult.value?.message || '未知错误') : String(columnsResult.reason)}`);
+          }
+
+          if (indexesResult.status === 'fulfilled' && indexesResult.value?.success && Array.isArray(indexesResult.value.data)) {
+            payload.indexes = indexesResult.value.data;
+          } else {
+            warnings.push(`索引定义获取失败：${indexesResult.status === 'fulfilled' ? (indexesResult.value?.message || '未知错误') : String(indexesResult.reason)}`);
+          }
+
+          if (foreignKeysResult.status === 'fulfilled' && foreignKeysResult.value?.success && Array.isArray(foreignKeysResult.value.data)) {
+            payload.foreignKeys = foreignKeysResult.value.data;
+          } else {
+            warnings.push(`外键关系获取失败：${foreignKeysResult.status === 'fulfilled' ? (foreignKeysResult.value?.message || '未知错误') : String(foreignKeysResult.reason)}`);
+          }
+
+          if (triggersResult.status === 'fulfilled' && triggersResult.value?.success && Array.isArray(triggersResult.value.data)) {
+            payload.triggers = triggersResult.value.data;
+          } else {
+            warnings.push(`触发器获取失败：${triggersResult.status === 'fulfilled' ? (triggersResult.value?.message || '未知错误') : String(triggersResult.reason)}`);
+          }
+
+          if (ddlResult.status === 'fulfilled' && ddlResult.value?.success) {
+            payload.ddl = ddlResult.value.content;
+          } else {
+            warnings.push(`DDL 获取失败：${ddlResult.status === 'fulfilled' ? (ddlResult.value?.content || '未知错误') : String(ddlResult.reason)}`);
+          }
+
+          if (includeSampleRows) {
+            if (sampleRowsResult.status === 'fulfilled' && sampleRowsResult.value?.success) {
+              const rows = Array.isArray(sampleRowsResult.value.data) ? sampleRowsResult.value.data : [];
+              payload.sampleRows = {
+                limit: sampleLimit,
+                rowCount: rows.length,
+                rows: rows.slice(0, sampleLimit),
+              };
+            } else {
+              warnings.push(`样例数据获取失败：${sampleRowsResult.status === 'fulfilled' ? (sampleRowsResult.value?.message || '未知错误') : String(sampleRowsResult.reason)}`);
+            }
+          }
+
+          if (warnings.length > 0) {
+            payload.warnings = warnings;
+          }
+
+          content = JSON.stringify(payload);
+          success = true;
+        } catch (error: any) {
+          content = `获取表结构快照失败: ${error?.message || error}`;
+        }
+        break;
+      }
       case 'preview_table_rows': {
         const connection = findConnection(connections, args.connectionId);
         if (!connection) {
@@ -353,14 +467,7 @@ export async function executeLocalAIToolCall({
             break;
           }
           const safeLimit = normalizePreviewLimit(args.limit);
-          const dbType = String(connection.config?.type || '').trim();
-          const previewSQL = buildPaginatedSelectSQL(
-            dbType,
-            `SELECT * FROM ${quoteQualifiedIdent(dbType, safeTable)}`,
-            '',
-            safeLimit,
-            0,
-          );
+          const previewSQL = buildPreviewSQLForTable(connection, safeTable, safeLimit);
           const result = await mergedRuntime.query(buildRpcConnectionConfig(connection.config) as any, safeDbName, previewSQL);
           if (result?.success) {
             const rows = Array.isArray(result.data) ? result.data : [];

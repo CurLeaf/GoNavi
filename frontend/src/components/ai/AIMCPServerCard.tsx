@@ -4,6 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
+import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
 
 interface AIMCPServerCardProps {
   server: AIMCPServerConfig;
@@ -86,7 +87,20 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
   onSave,
   onDelete,
 }) => {
+  const [rawCommandDraft, setRawCommandDraft] = React.useState('');
   const launchPreview = formatLaunchPreview(server.command, server.args);
+  const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
+
+  const handleApplyCommandDraft = () => {
+    if (!parsedCommandDraft.ok || !parsedCommandDraft.draft) {
+      return;
+    }
+    onChange({
+      command: parsedCommandDraft.draft.command,
+      args: parsedCommandDraft.draft.args,
+      env: parsedCommandDraft.draft.env,
+    });
+  };
 
   return (
     <div style={{ padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -96,6 +110,32 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
           启动命令只填可执行程序本身，不要把参数混在一起。常见形式：
           {' '}
           <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{MCP_COMMAND_EXAMPLES.join(' / ')}</code>
+        </div>
+      </div>
+
+      <div style={{ padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ ...labelStyle, color: overlayTheme.titleText }}>只有一条完整命令？</div>
+        <div style={hintStyle(overlayTheme.mutedText)}>
+          直接粘贴完整命令，GoNavi 会自动拆成“启动命令 / 命令参数 / 环境变量”三块，适合你只拿到 README 里的一整行示例时快速录入。
+        </div>
+        <Input.TextArea
+          rows={2}
+          value={rawCommandDraft}
+          onChange={(event) => setRawCommandDraft(event.target.value)}
+          placeholder={"直接粘贴完整命令，例如：\nOPENAI_API_KEY=... uvx mcp-server-fetch --stdio"}
+          style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ ...hintStyle(parsedCommandDraft.ok ? overlayTheme.mutedText : '#dc2626') }}>
+            {rawCommandDraft.trim()
+              ? parsedCommandDraft.ok && parsedCommandDraft.draft
+                ? `将解析为：命令 ${parsedCommandDraft.draft.command}，参数 ${parsedCommandDraft.draft.args.length} 个，环境变量 ${Object.keys(parsedCommandDraft.draft.env).length} 个。`
+                : parsedCommandDraft.error
+              : '支持带引号路径、带空格参数，以及命令前缀的 KEY=VALUE 环境变量。'}
+          </div>
+          <Button onClick={handleApplyCommandDraft} disabled={!parsedCommandDraft.ok} style={{ borderRadius: 10 }}>
+            自动拆分到下方字段
+          </Button>
         </div>
       </div>
 

@@ -28,6 +28,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合做索引优化、关系梳理、隐式副作用排查和 DDL 审查。',
   },
   {
+    title: '一键结构快照',
+    steps: 'inspect_table_bundle',
+    description: '适合一次带回字段、索引、外键、触发器和 DDL；必要时还能附带样例行，减少来回调用。',
+  },
+  {
     title: '理解样例数据',
     steps: 'get_columns → preview_table_rows',
     description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',

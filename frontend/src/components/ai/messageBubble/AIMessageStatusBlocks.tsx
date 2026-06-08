@@ -31,6 +31,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   get_foreign_keys: '梳理外键关系',
   get_triggers: '检查触发器逻辑',
   get_table_ddl: '提取建表语句',
+  inspect_table_bundle: '抓取完整表结构快照',
   execute_sql: '执行只读 SQL 验证',
 };
 
