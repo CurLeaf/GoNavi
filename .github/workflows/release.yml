@@ -542,12 +542,14 @@ jobs:
 
           prepare_duckdb_windows_library() {
             local lib_dir="$RUNNER_TEMP/duckdb-windows-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
+            local extract_dir="$RUNNER_TEMP/duckdb-windows-extract-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
             local zip_path="$RUNNER_TEMP/libduckdb-windows-amd64.zip"
             if [ -f "$lib_dir/duckdb.dll" ] && [ -f "$lib_dir/duckdb.lib" ]; then
               echo "$lib_dir"
               return 0
             fi
             mkdir -p "$lib_dir"
+            rm -rf "$extract_dir"
             rm -f "$zip_path"
             local attempt dll_path lib_path
             for attempt in 1 2 3; do
@@ -555,15 +557,18 @@ jobs:
               if curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 300 -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"; then
                 if unzip -tq "$zip_path" >/dev/null 2>&1; then
                   rm -rf "$lib_dir"
+                  rm -rf "$extract_dir"
                   mkdir -p "$lib_dir"
-                  unzip -qo "$zip_path" -d "$lib_dir"
-                  dll_path="$(find "$lib_dir" -type f -name duckdb.dll | head -n 1 || true)"
-                  lib_path="$(find "$lib_dir" -type f -name duckdb.lib | head -n 1 || true)"
+                  mkdir -p "$extract_dir"
+                  unzip -qo "$zip_path" -d "$extract_dir"
+                  dll_path="$(find "$extract_dir" -type f -name duckdb.dll | head -n 1 || true)"
+                  lib_path="$(find "$extract_dir" -type f -name duckdb.lib | head -n 1 || true)"
                   if [ -n "$dll_path" ] && [ -n "$lib_path" ]; then
                     cp "$dll_path" "$lib_dir/duckdb.dll"
                     cp "$lib_path" "$lib_dir/duckdb.lib"
                     cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
                     cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
+                    rm -rf "$extract_dir"
                     echo "$lib_dir"
                     return 0
                   fi
@@ -576,6 +581,7 @@ jobs:
               fi
               rm -f "$zip_path"
               rm -rf "$lib_dir"
+              rm -rf "$extract_dir"
               mkdir -p "$lib_dir"
               sleep $((attempt * 2))
             done
