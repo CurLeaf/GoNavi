@@ -49,6 +49,90 @@ describe('aiLocalToolExecutor', () => {
     });
   });
 
+  it('returns the current active tab snapshot so the model can inspect the editor draft directly', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_active_tab', {
+        includeContent: true,
+      }),
+      connections: [buildConnection()],
+      tabs: [{
+        id: 'tab-query-1',
+        title: '订单查询',
+        type: 'query',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        query: 'SELECT id, status FROM orders WHERE status = \'paid\'',
+        filePath: 'D:/sql/orders.sql',
+      }],
+      activeTabId: 'tab-query-1',
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"hasActiveTab":true');
+    expect(result.content).toContain('"type":"query"');
+    expect(result.content).toContain('"connectionName":"主库"');
+    expect(result.content).toContain('"contentKind":"sql"');
+    expect(result.content).toContain('SELECT id, status FROM orders');
+  });
+
+  it('returns a workspace tab overview so the model can inspect which editors are currently open', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_workspace_tabs', {
+        limit: 2,
+        includeContent: true,
+      }),
+      connections: [buildConnection()],
+      tabs: [
+        {
+          id: 'tab-query-1',
+          title: '订单查询',
+          type: 'query',
+          connectionId: 'conn-1',
+          dbName: 'crm',
+          query: 'SELECT * FROM orders WHERE status = \'paid\'',
+        },
+        {
+          id: 'tab-table-1',
+          title: 'users',
+          type: 'table',
+          connectionId: 'conn-1',
+          dbName: 'crm',
+          tableName: 'users',
+        },
+        {
+          id: 'tab-redis-1',
+          title: '缓存命令',
+          type: 'redis-command',
+          connectionId: 'conn-1',
+          query: 'GET order:1',
+          redisDB: 2,
+        },
+      ],
+      activeTabId: 'tab-query-1',
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"activeTabId":"tab-query-1"');
+    expect(result.content).toContain('"totalTabs":3');
+    expect(result.content).toContain('"returnedTabs":2');
+    expect(result.content).toContain('"truncated":true');
+    expect(result.content).toContain('"isActive":true');
+    expect(result.content).toContain('"title":"订单查询"');
+    expect(result.content).toContain('SELECT * FROM orders');
+  });
+
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {
     const query = vi.fn();
     const result = await executeLocalAIToolCall({

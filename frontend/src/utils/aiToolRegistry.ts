@@ -310,6 +310,51 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_active_tab",
+    icon: "📍",
+    desc: "查看当前活动页签上下文",
+    detail:
+      "返回当前活动页签的类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容（超长会截断）。适合用户说“看我当前这条 SQL”“优化这个编辑器里的语句”时，先让 AI 直接读取当前工作区上下文。",
+    params: "includeContent?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_active_tab",
+        description:
+          "获取当前活动页签的上下文快照，包括页签类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容。适用于用户提到当前页签、当前 SQL、当前编辑器、这条语句时，先读取真实界面上下文，避免让模型猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_workspace_tabs",
+    icon: "🗃️",
+    desc: "查看当前工作区打开的页签总览",
+    detail:
+      "返回当前工作区里打开的页签列表、哪个是活动页签，以及每个页签对应的连接、数据库、表名等上下文。适合用户说“我现在开了哪些 SQL”“看看我工作区里有哪些页签”“帮我对比这几个查询页签”时，先读取真实工作区布局再继续分析。",
+    params: "limit?(默认 12), includeContent?(默认 false)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_workspace_tabs",
+        description:
+          "获取当前工作区已打开页签的总览，包括活动页签、页签类型、连接、数据库、表名，以及可选的 SQL / 命令草稿内容。适用于用户提到当前工作区、打开了哪些页签、哪几个查询页签、想对比多个编辑器内容时，先读取真实界面状态，避免模型猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，最多返回多少个页签，默认 12，最大 30" },
+            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 false" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_recent_sql_logs",
     icon: "🧾",
     desc: "查看最近 SQL 执行日志",

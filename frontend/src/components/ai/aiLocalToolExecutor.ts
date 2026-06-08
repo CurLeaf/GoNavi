@@ -1,11 +1,16 @@
 import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
 
 import type { SqlLog } from '../../store';
-import type { AIChatMessage, AIMCPToolDescriptor, AIToolCall, SavedConnection } from '../../types';
+import type { AIChatMessage, AIMCPToolDescriptor, AIToolCall, SavedConnection, TabData } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
+import {
+  buildActiveTabSnapshot,
+  buildRecentSqlLogsSnapshot,
+  buildWorkspaceTabsSnapshot,
+} from './aiWorkspaceInsights';
 
 export interface AIToolContextEntry {
   connectionId: string;
@@ -30,6 +35,8 @@ interface AILocalToolRuntime {
 export interface ExecuteLocalAIToolCallOptions {
   toolCall: AIToolCall;
   connections: SavedConnection[];
+  tabs?: TabData[];
+  activeTabId?: string | null;
   mcpTools: AIMCPToolDescriptor[];
   toolContextMap: Map<string, AIToolContextEntry>;
   sqlLogs?: SqlLog[];
@@ -139,21 +146,6 @@ const normalizePerTableColumnLimit = (input: unknown): number => {
   return value;
 };
 
-const normalizeRecentSqlLogLimit = (input: unknown): number => {
-  const value = Math.floor(Number(input) || 20);
-  if (value < 1) return 1;
-  if (value > 100) return 100;
-  return value;
-};
-
-const normalizeSqlLogStatus = (input: unknown): 'all' | 'success' | 'error' => {
-  const value = String(input || 'all').trim().toLowerCase();
-  if (value === 'success' || value === 'error') {
-    return value;
-  }
-  return 'all';
-};
-
 const buildPreviewSQLForTable = (connection: SavedConnection, tableName: string, limit: number): string => {
   const dbType = String(connection.config?.type || '').trim();
   return buildPaginatedSelectSQL(
@@ -168,6 +160,8 @@ const buildPreviewSQLForTable = (connection: SavedConnection, tableName: string,
 export async function executeLocalAIToolCall({
   toolCall,
   connections,
+  tabs = [],
+  activeTabId = null,
   mcpTools,
   toolContextMap,
   sqlLogs = [],
@@ -181,6 +175,35 @@ export async function executeLocalAIToolCall({
   try {
     const args = JSON.parse(toolCall.function.arguments || '{}');
     switch (toolCall.function.name) {
+      case 'inspect_active_tab': {
+        try {
+          content = JSON.stringify(buildActiveTabSnapshot({
+            tabs,
+            activeTabId,
+            connections,
+            includeContent: args.includeContent !== false,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取当前活动页签失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'inspect_workspace_tabs': {
+        try {
+          content = JSON.stringify(buildWorkspaceTabsSnapshot({
+            tabs,
+            activeTabId,
+            connections,
+            includeContent: args.includeContent === true,
+            limit: args.limit,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取当前工作区页签失败: ${error?.message || error}`;
+        }
+        break;
+      }
       case 'get_connections': {
         const availableConnections = connections.map((connection) => ({
           id: connection.id,
@@ -576,28 +599,11 @@ export async function executeLocalAIToolCall({
       }
       case 'inspect_recent_sql_logs': {
         try {
-          const status = normalizeSqlLogStatus(args.status);
-          const limit = normalizeRecentSqlLogLimit(args.limit);
-          const filteredLogs = sqlLogs.filter((log) => status === 'all' || log.status === status);
-          const visibleLogs = filteredLogs.slice(0, limit).map((log) => ({
-            id: log.id,
-            timestamp: log.timestamp,
-            status: log.status,
-            duration: log.duration,
-            dbName: log.dbName || '',
-            affectedRows: typeof log.affectedRows === 'number' ? log.affectedRows : null,
-            sql: log.sql,
-            message: log.message || '',
+          content = JSON.stringify(buildRecentSqlLogsSnapshot({
+            sqlLogs,
+            limit: args.limit,
+            status: args.status,
           }));
-
-          content = JSON.stringify({
-            status,
-            limit,
-            totalMatched: filteredLogs.length,
-            successCount: filteredLogs.filter((log) => log.status === 'success').length,
-            errorCount: filteredLogs.filter((log) => log.status === 'error').length,
-            logs: visibleLogs,
-          });
           success = true;
         } catch (error: any) {
           content = `获取最近 SQL 日志失败: ${error?.message || error}`;

@@ -1209,12 +1209,14 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
 6. 如果是常规问答（不涉及数据库查询）则正常作答即可。
 
 SQL 生成规则（极重要，必须严格遵守）：
-7. 【字段精确性 - 绝对红线】生成 SQL 之前，必须先调用 get_columns 获取目标表的真实字段列表。SQL 中的每一个字段名必须与 get_columns 返回的 field 字段完全一致（区分大小写）。不得自行拼凑、缩写或联想字段名（例如字段是 channel 就必须写 channel，不得写成 pay_channel）。
-8. 如果用户在问索引优化、联表关系、触发器副作用、约束或 DDL 细节，在 get_columns 之后继续按需调用 get_indexes、get_foreign_keys、get_triggers、get_table_ddl，再给结论。
-9. 生成 SQL 时禁止使用 "database.table" 格式的限定前缀，只写表名本身。
-10. 报告结果时，连接名/ID 和数据库名必须严格来自同一个 get_tables 调用的实际参数。禁止将 A 连接的 connectionId 与 B 连接的 dbName 混搭。
-11. 如果有多个名称相似的数据库，请明确告诉用户目标表具体位于哪个数据库。
-12. 【关键】每个 SQL 代码块的第一行必须添加上下文声明注释，格式严格为：-- @context connectionId=<连接ID> dbName=<数据库名>。connectionId 和 dbName 必须来自同一个成功的 get_tables 调用（即你在该调用中传入的实际参数值）。示例：
+7. 如果用户提到“当前页签”“当前 SQL”“当前编辑器”“这条语句”，但消息里没有贴出具体内容，优先调用 inspect_active_tab 读取当前活动页签上下文，不要猜测当前工作区里打开的内容。
+8. 如果用户提到“当前开了哪些页签”“工作区里有哪些 tab”“我现在打开了哪些查询”，优先调用 inspect_workspace_tabs 盘点当前工作区，再决定深入哪个页签。
+9. 【字段精确性 - 绝对红线】生成 SQL 之前，必须先调用 get_columns 获取目标表的真实字段列表。SQL 中的每一个字段名必须与 get_columns 返回的 field 字段完全一致（区分大小写）。不得自行拼凑、缩写或联想字段名（例如字段是 channel 就必须写 channel，不得写成 pay_channel）。
+10. 如果用户在问索引优化、联表关系、触发器副作用、约束或 DDL 细节，在 get_columns 之后继续按需调用 get_indexes、get_foreign_keys、get_triggers、get_table_ddl，再给结论。
+11. 生成 SQL 时禁止使用 "database.table" 格式的限定前缀，只写表名本身。
+12. 报告结果时，连接名/ID 和数据库名必须严格来自同一个 get_tables 调用的实际参数。禁止将 A 连接的 connectionId 与 B 连接的 dbName 混搭。
+13. 如果有多个名称相似的数据库，请明确告诉用户目标表具体位于哪个数据库。
+14. 【关键】每个 SQL 代码块的第一行必须添加上下文声明注释，格式严格为：-- @context connectionId=<连接ID> dbName=<数据库名>。connectionId 和 dbName 必须来自同一个成功的 get_tables 调用（即你在该调用中传入的实际参数值）。示例：
 \`\`\`sql
 -- @context connectionId=1770778676549 dbName=mkefu_test
 SELECT * FROM users WHERE status = 1;
@@ -1262,6 +1264,8 @@ SELECT * FROM users WHERE status = 1;
             const execution = await executeLocalAIToolCall({
                 toolCall: tc,
                 connections: currentConnections,
+                tabs: useStore.getState().tabs,
+                activeTabId: useStore.getState().activeTabId,
                 mcpTools,
                 toolContextMap: toolContextMapRef.current,
                 sqlLogs: useStore.getState().sqlLogs,

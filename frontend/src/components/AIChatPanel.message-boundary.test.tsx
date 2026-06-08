@@ -30,6 +30,10 @@ describe('AIChatPanel message render isolation', () => {
 
   it('teaches the runtime to use deeper schema tools when analyzing structure details', () => {
     expect(source).toContain('get_indexes、get_foreign_keys、get_triggers、get_table_ddl');
+    expect(source).toContain('inspect_active_tab 读取当前活动页签上下文');
+    expect(source).toContain('inspect_workspace_tabs 盘点当前工作区');
+    expect(source).toContain('tabs: useStore.getState().tabs');
+    expect(source).toContain('activeTabId: useStore.getState().activeTabId');
     expect(source).toContain('toolContextMap: toolContextMapRef.current');
     expect(source).toContain('buildToolResultMessage');
   });

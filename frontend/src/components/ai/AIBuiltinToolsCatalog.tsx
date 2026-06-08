@@ -38,6 +38,16 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
   },
   {
+    title: '读取当前页签',
+    steps: 'inspect_active_tab → get_columns / get_indexes / execute_sql',
+    description: '适合先读取当前编辑器里的 SQL 草稿或当前表页签，再继续做字段核对、索引分析和只读验证。',
+  },
+  {
+    title: '盘点当前工作区',
+    steps: 'inspect_workspace_tabs → inspect_active_tab → get_columns / execute_sql',
+    description: '适合先看当前打开了哪些 SQL / 表 / 命令页签，再切到目标页签继续做字段核对、对比分析和只读验证。',
+  },
+  {
     title: '回看最近执行记录',
     steps: 'inspect_recent_sql_logs → get_columns / get_indexes / execute_sql',
     description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',

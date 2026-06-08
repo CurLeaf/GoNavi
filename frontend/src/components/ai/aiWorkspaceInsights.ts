@@ -1,0 +1,192 @@
+import type { SqlLog } from '../../store';
+import type { SavedConnection, TabData } from '../../types';
+
+const ACTIVE_TAB_CONTENT_LIMIT = 12000;
+const WORKSPACE_TAB_CONTENT_LIMIT = 4000;
+
+const normalizeWorkspaceTabLimit = (input: unknown): number => {
+  const value = Math.floor(Number(input) || 12);
+  if (value < 1) return 1;
+  if (value > 30) return 30;
+  return value;
+};
+
+const normalizeRecentSqlLogLimit = (input: unknown): number => {
+  const value = Math.floor(Number(input) || 20);
+  if (value < 1) return 1;
+  if (value > 100) return 100;
+  return value;
+};
+
+const normalizeSqlLogStatus = (input: unknown): 'all' | 'success' | 'error' => {
+  const value = String(input || 'all').trim().toLowerCase();
+  if (value === 'success' || value === 'error') {
+    return value;
+  }
+  return 'all';
+};
+
+const resolveContentKind = (tab: TabData, includeContent: boolean, trimmedContent: string): 'sql' | 'command' | 'text' | 'none' => {
+  if (!includeContent || !trimmedContent) {
+    return 'none';
+  }
+  if (tab.type === 'query') {
+    return 'sql';
+  }
+  if (tab.type === 'redis-command') {
+    return 'command';
+  }
+  return 'text';
+};
+
+const buildTabSnapshot = (params: {
+  tab: TabData;
+  activeTabId?: string | null;
+  connections: SavedConnection[];
+  includeContent: boolean;
+  contentLimit: number;
+}) => {
+  const { tab, activeTabId = null, connections, includeContent, contentLimit } = params;
+  const activeConnection = connections.find((connection) => connection.id === tab.connectionId);
+  const rawContent =
+    tab.type === 'query' || tab.type === 'redis-command'
+      ? String(tab.query || '')
+      : '';
+  const trimmedContent = rawContent.trim();
+  const visibleContent = includeContent ? trimmedContent.slice(0, contentLimit) : '';
+
+  return {
+    id: tab.id,
+    isActive: tab.id === activeTabId,
+    title: tab.title,
+    type: tab.type,
+    connectionId: tab.connectionId,
+    connectionName: activeConnection?.name || '',
+    connectionType: activeConnection?.config?.type || '',
+    dbName: tab.dbName || '',
+    tableName: tab.tableName || '',
+    filePath: tab.filePath || '',
+    readOnly: tab.readOnly === true,
+    queryMode: tab.queryMode || '',
+    providerMode: tab.providerMode || '',
+    resourcePath: tab.resourcePath || '',
+    resourceKind: tab.resourceKind || '',
+    redisDB: typeof tab.redisDB === 'number' ? tab.redisDB : null,
+    schemaName: tab.schemaName || '',
+    viewName: tab.viewName || '',
+    viewKind: tab.viewKind || '',
+    triggerName: tab.triggerName || '',
+    eventName: tab.eventName || '',
+    routineName: tab.routineName || '',
+    routineType: tab.routineType || '',
+    contentKind: resolveContentKind(tab, includeContent, trimmedContent),
+    content: visibleContent,
+    contentCharCount: trimmedContent.length,
+    contentTruncated: includeContent && trimmedContent.length > visibleContent.length,
+  };
+};
+
+export const buildActiveTabSnapshot = (params: {
+  tabs?: TabData[];
+  activeTabId?: string | null;
+  connections: SavedConnection[];
+  includeContent?: boolean;
+}) => {
+  const {
+    tabs = [],
+    activeTabId = null,
+    connections,
+    includeContent = true,
+  } = params;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  if (!activeTab) {
+    return {
+      hasActiveTab: false,
+      message: '当前没有活动页签',
+    };
+  }
+
+  return {
+    hasActiveTab: true,
+    tabId: activeTab.id,
+    ...buildTabSnapshot({
+      tab: activeTab,
+      activeTabId,
+      connections,
+      includeContent,
+      contentLimit: ACTIVE_TAB_CONTENT_LIMIT,
+    }),
+  };
+};
+
+export const buildWorkspaceTabsSnapshot = (params: {
+  tabs?: TabData[];
+  activeTabId?: string | null;
+  connections: SavedConnection[];
+  includeContent?: boolean;
+  limit?: unknown;
+}) => {
+  const {
+    tabs = [],
+    activeTabId = null,
+    connections,
+    includeContent = false,
+    limit,
+  } = params;
+  const safeLimit = normalizeWorkspaceTabLimit(limit);
+  const orderedTabs = [...tabs].sort((left, right) => {
+    if (left.id === activeTabId && right.id !== activeTabId) {
+      return -1;
+    }
+    if (right.id === activeTabId && left.id !== activeTabId) {
+      return 1;
+    }
+    return 0;
+  });
+  const visibleTabs = orderedTabs.slice(0, safeLimit);
+
+  return {
+    activeTabId,
+    totalTabs: orderedTabs.length,
+    returnedTabs: visibleTabs.length,
+    truncated: orderedTabs.length > visibleTabs.length,
+    tabs: visibleTabs.map((tab) =>
+      buildTabSnapshot({
+        tab,
+        activeTabId,
+        connections,
+        includeContent,
+        contentLimit: WORKSPACE_TAB_CONTENT_LIMIT,
+      })),
+  };
+};
+
+export const buildRecentSqlLogsSnapshot = (params: {
+  sqlLogs?: SqlLog[];
+  limit?: unknown;
+  status?: unknown;
+}) => {
+  const { sqlLogs = [], limit, status } = params;
+  const safeStatus = normalizeSqlLogStatus(status);
+  const safeLimit = normalizeRecentSqlLogLimit(limit);
+  const filteredLogs = sqlLogs.filter((log) => safeStatus === 'all' || log.status === safeStatus);
+  const visibleLogs = filteredLogs.slice(0, safeLimit).map((log) => ({
+    id: log.id,
+    timestamp: log.timestamp,
+    status: log.status,
+    duration: log.duration,
+    dbName: log.dbName || '',
+    affectedRows: typeof log.affectedRows === 'number' ? log.affectedRows : null,
+    sql: log.sql,
+    message: log.message || '',
+  }));
+
+  return {
+    status: safeStatus,
+    limit: safeLimit,
+    totalMatched: filteredLogs.length,
+    successCount: filteredLogs.filter((log) => log.status === 'success').length,
+    errorCount: filteredLogs.filter((log) => log.status === 'error').length,
+    logs: visibleLogs,
+  };
+};
