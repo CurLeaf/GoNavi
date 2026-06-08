@@ -38,6 +38,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_ai_chat_readiness');
     expect(markup).toContain('排查 MCP 接入状态');
     expect(markup).toContain('inspect_mcp_setup');
+    expect(markup).toContain('新增 MCP 填写指引');
+    expect(markup).toContain('inspect_mcp_authoring_guide');
     expect(markup).toContain('查看当前提示与 Skills');
     expect(markup).toContain('inspect_ai_guidance');
     expect(markup).toContain('查看当前 AI 上下文');
@@ -68,5 +70,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_sql_snippets');
     expect(markup).toContain('理解样例数据');
     expect(markup).toContain('preview_table_rows');
+    expect(markup).toContain('参数提示');
+    expect(markup).toContain('filePath');
+    expect(markup).toContain('正文预览最多返回多少字符');
   });
 });

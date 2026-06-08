@@ -173,6 +173,19 @@ const appendMCPSetupInspectionGuidance = (
   });
 };
 
+const appendMCPAuthoringInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_mcp_authoring_guide')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“新增 MCP 不知道 command/args/env/timeout 怎么填”“给我一个 node / uvx / python 模板”“为什么启动命令不能直接填整行”，优先调用 inspect_mcp_authoring_guide 读取真实新增指引和模板，再结合 inspect_mcp_setup 判断当前配置现状，不要凭记忆口述。',
+  });
+};
+
 const appendAIGuidanceInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -423,6 +436,7 @@ SELECT * FROM users WHERE status = 1;
   appendAIChatReadinessInspectionGuidance(systemMessages, availableToolNames);
   appendAIProviderInspectionGuidance(systemMessages, availableToolNames);
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
+  appendMCPAuthoringInspectionGuidance(systemMessages, availableToolNames);
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({

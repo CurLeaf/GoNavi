@@ -38,6 +38,9 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('小白用户可以按这个顺序填');
     expect(markup).toContain('字段速查');
     expect(markup).toContain('保存后显示给你和 AI 看的名字');
+    expect(markup).toContain('示例值：');
+    expect(markup).toContain('Filesystem / Browser / GitHub');
+    expect(markup).toContain('server.js / --stdio / -m / your_mcp_server');
     expect(markup).toContain('当前固定为 stdio');
     expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('必填');
@@ -60,5 +63,6 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('稍宽松 45 秒');
     expect(markup).toContain('慢启动 60 秒');
     expect(markup).toContain('node server.js --stdio');
+    expect(markup).toContain('OPENAI_API_KEY=... uvx mcp-server-fetch --stdio');
   });
 });

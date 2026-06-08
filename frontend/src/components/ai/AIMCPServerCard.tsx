@@ -6,6 +6,14 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
 import { formatMCPEnvDraft, parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
+import {
+  MCP_COMMAND_EXAMPLES,
+  MCP_COMMAND_PARSE_EXAMPLE,
+  MCP_FIELD_GUIDES,
+  MCP_SERVER_FILL_STEPS,
+  buildMCPLaunchPreview,
+  type MCPFieldState,
+} from '../../utils/mcpServerGuidance';
 import AIMCPCommandDraftPreview from './AIMCPCommandDraftPreview';
 
 interface AIMCPServerCardProps {
@@ -34,7 +42,7 @@ const hintStyle = (mutedText: string): React.CSSProperties => ({
   lineHeight: 1.6,
 });
 
-const buildFieldTone = (kind: 'required' | 'optional' | 'fixed', darkMode: boolean) => {
+const buildFieldTone = (kind: MCPFieldState, darkMode: boolean) => {
   switch (kind) {
     case 'required':
       return {
@@ -57,90 +65,12 @@ const buildFieldTone = (kind: 'required' | 'optional' | 'fixed', darkMode: boole
   }
 };
 
-const MCP_COMMAND_EXAMPLES = [
-  'uvx mcp-server-fetch',
-  'node server.js --stdio',
-  'python -m your_mcp_server',
-];
-
-const MCP_FIELD_GUIDES: Array<{
-  key: string;
-  title: string;
-  summary: string;
-  detail: string;
-  fieldState: 'required' | 'optional' | 'fixed';
-}> = [
-  {
-    key: 'name',
-    title: '服务名称',
-    summary: '保存后显示给你和 AI 看的名字。',
-    detail: '按用途命名，建议写成 Browser、GitHub、Filesystem 这类一眼能认出的名字。',
-    fieldState: 'required',
-  },
-  {
-    key: 'enabled',
-    title: '启用状态',
-    summary: '控制这条配置现在要不要参与工具发现和调用。',
-    detail: '禁用只是不使用，不会删除下面填好的配置。',
-    fieldState: 'optional',
-  },
-  {
-    key: 'transport',
-    title: '传输方式',
-    summary: 'GoNavi 用什么方式和这个 MCP Server 通信。',
-    detail: '当前固定为 stdio，表示本机直接启动进程并通过标准输入输出交互。',
-    fieldState: 'fixed',
-  },
-  {
-    key: 'command',
-    title: '启动命令',
-    summary: '只填程序名或启动器本身。',
-    detail: '常见是 node、uvx、python；脚本名和 --stdio 这类内容放到参数里。',
-    fieldState: 'required',
-  },
-  {
-    key: 'args',
-    title: '命令参数',
-    summary: '把脚本名、模块名、开关参数拆开逐项填写。',
-    detail: '例如 node server.js --stdio，要拆成 server.js 和 --stdio 两项。',
-    fieldState: 'optional',
-  },
-  {
-    key: 'env',
-    title: '环境变量',
-    summary: '给 MCP Server 传入 KEY=VALUE 形式的配置。',
-    detail: '通常用来放 API Key、服务地址、工作目录等；每行一条，不要写 export。',
-    fieldState: 'optional',
-  },
-  {
-    key: 'timeout',
-    title: '超时(秒)',
-    summary: '单次工具发现或调用最多等待多久。',
-    detail: '本机常规工具一般 20 秒就够，启动慢或远端链路再适当调大。',
-    fieldState: 'optional',
-  },
-];
-
-const quoteCommandPart = (value: string): string => {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-  return /[\s"]/u.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
-};
-
-const formatLaunchPreview = (command: string, args?: string[]): string =>
-  [command, ...(Array.isArray(args) ? args : [])]
-    .map((item) => quoteCommandPart(item))
-    .filter(Boolean)
-    .join(' ');
-
 const MCPHelpBlock: React.FC<{
   title: string;
   description: string;
   overlayTheme: OverlayWorkbenchTheme;
   darkMode: boolean;
-  fieldState: 'required' | 'optional' | 'fixed';
+  fieldState: MCPFieldState;
   example?: string;
   children: React.ReactNode;
 }> = ({ title, description, overlayTheme, darkMode, fieldState, example, children }) => {
@@ -191,7 +121,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
 }) => {
   const [rawCommandDraft, setRawCommandDraft] = React.useState('');
   const [envDraft, setEnvDraft] = React.useState(() => formatMCPEnvDraft(server.env));
-  const launchPreview = formatLaunchPreview(server.command, server.args);
+  const launchPreview = buildMCPLaunchPreview(server.command, server.args);
   const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
   const parsedEnvDraft = parseMCPEnvDraft(envDraft);
 
@@ -228,15 +158,9 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
           小白用户可以按这个顺序填：先选上面的模板或粘整行命令，再确认下面的必填项，最后只在需要时补参数、环境变量和超时。
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {[
-            '1. 模板 / 完整命令',
-            '2. 服务名称',
-            '3. 启动命令',
-            '4. 命令参数（可选）',
-            '5. 环境变量 / 超时（按需）',
-          ].map((item) => (
+          {MCP_SERVER_FILL_STEPS.map((item) => (
             <span
-              key={item}
+              key={item.step}
               style={{
                 padding: '4px 10px',
                 borderRadius: 999,
@@ -245,7 +169,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
                 background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
               }}
             >
-              {item}
+              {item.step}. {item.title}
             </span>
           ))}
         </div>
@@ -289,6 +213,13 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
                 </div>
                 <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>{item.summary}</div>
                 <div style={hintStyle(overlayTheme.mutedText)}>{item.detail}</div>
+                {item.example ? (
+                  <div style={hintStyle(overlayTheme.mutedText)}>
+                    示例值：
+                    {' '}
+                    <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -304,7 +235,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
           rows={2}
           value={rawCommandDraft}
           onChange={(event) => setRawCommandDraft(event.target.value)}
-          placeholder={"直接粘贴完整命令，例如：\nOPENAI_API_KEY=... uvx mcp-server-fetch --stdio"}
+          placeholder={`直接粘贴完整命令，例如：\n${MCP_COMMAND_PARSE_EXAMPLE}`}
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
         />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>

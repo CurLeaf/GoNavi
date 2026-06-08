@@ -2,7 +2,10 @@ import React from 'react';
 import { ToolOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
+import {
+  BUILTIN_AI_TOOL_INFO,
+  type AIBuiltinToolInfo,
+} from '../../utils/aiToolRegistry';
 
 interface AIBuiltinToolsCatalogProps {
   darkMode: boolean;
@@ -66,6 +69,11 @@ const BUILTIN_TOOL_FLOWS = [
     title: '排查 MCP 接入状态',
     steps: 'inspect_mcp_setup → inspect_ai_runtime',
     description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合运行时工具列表判断为什么某个工具没暴露出来。',
+  },
+  {
+    title: '新增 MCP 填写指引',
+    steps: 'inspect_mcp_authoring_guide → inspect_mcp_setup',
+    description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再结合当前 MCP 配置现状判断应该新增哪种启动方式。',
   },
   {
     title: '查看当前提示与 Skills',
@@ -149,6 +157,26 @@ const BUILTIN_TOOL_FLOWS = [
   },
 ];
 
+const describeToolParameters = (tool: AIBuiltinToolInfo) => {
+  const schema = tool.tool.function.parameters;
+  const properties = schema && typeof schema === 'object' && typeof schema.properties === 'object'
+    ? schema.properties
+    : {};
+  const required = new Set(
+    Array.isArray(schema?.required) ? schema.required.map((item) => String(item)) : [],
+  );
+
+  return Object.entries(properties).map(([name, config]) => {
+    const normalized = config && typeof config === 'object' ? config as Record<string, any> : {};
+    return {
+      name,
+      required: required.has(name),
+      description: typeof normalized.description === 'string' ? normalized.description : '',
+      enumValues: Array.isArray(normalized.enum) ? normalized.enum.map((item) => String(item)) : [],
+    };
+  });
+};
+
 export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
   darkMode,
   overlayTheme,
@@ -178,47 +206,97 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
         </div>
       ))}
     </div>
-    {BUILTIN_AI_TOOL_INFO.map((tool) => (
-      <div
-        key={tool.name}
-        style={{
-          padding: '14px 16px',
-          borderRadius: 14,
-          border: `1px solid ${cardBorder}`,
-          background: cardBg,
-          transition: 'all 0.2s ease',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <span style={{ fontSize: 20 }}>{tool.icon}</span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'var(--gn-font-mono)' }}>
-              {tool.name}
-            </div>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 2 }}>{tool.desc}</div>
-          </div>
-        </div>
+    {BUILTIN_AI_TOOL_INFO.map((tool) => {
+      const parameterDetails = describeToolParameters(tool);
+      return (
         <div
+          key={tool.name}
           style={{
-            fontSize: 13,
-            color: overlayTheme.mutedText,
-            lineHeight: 1.6,
-            padding: '8px 12px',
-            background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.02)',
-            borderRadius: 8,
+            padding: '14px 16px',
+            borderRadius: 14,
+            border: `1px solid ${cardBorder}`,
+            background: cardBg,
+            transition: 'all 0.2s ease',
           }}
         >
-          {tool.detail}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <span style={{ fontSize: 20 }}>{tool.icon}</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'var(--gn-font-mono)' }}>
+                {tool.name}
+              </div>
+              <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 2 }}>{tool.desc}</div>
+            </div>
+          </div>
+          <div
+            style={{
+              fontSize: 13,
+              color: overlayTheme.mutedText,
+              lineHeight: 1.6,
+              padding: '8px 12px',
+              background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.02)',
+              borderRadius: 8,
+            }}
+          >
+            {tool.detail}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ToolOutlined style={{ fontSize: 12 }} />
+            <span>参数：</span>
+            <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
+              {tool.params}
+            </code>
+          </div>
+          {parameterDetails.length > 0 && (
+            <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>参数提示</div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {parameterDetails.map((item) => (
+                  <div
+                    key={`${tool.name}-${item.name}`}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: `1px solid ${cardBorder}`,
+                      background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{item.name}</code>
+                      <span
+                        style={{
+                          padding: '1px 8px',
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: item.required ? '#b45309' : '#475569',
+                          background: item.required
+                            ? (darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)')
+                            : (darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.12)'),
+                        }}
+                      >
+                        {item.required ? '必填' : '可选'}
+                      </span>
+                      {item.enumValues.length > 0 && (
+                        <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>
+                          可选值：{item.enumValues.join(' / ')}
+                        </span>
+                      )}
+                    </div>
+                    {item.description && (
+                      <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{item.description}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ToolOutlined style={{ fontSize: 12 }} />
-          <span>参数：</span>
-          <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
-            {tool.params}
-          </code>
-        </div>
-      </div>
-    ))}
+      );
+    })}
   </div>
 );
 

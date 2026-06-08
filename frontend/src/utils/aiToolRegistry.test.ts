@@ -31,6 +31,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('外部客户端');
   });
 
+  it('registers the mcp-authoring-guide inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_authoring_guide');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('新增 MCP');
+    expect(info?.tool.function.description).toContain('command、args、env、timeout');
+  });
+
   it('registers the ai-provider inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_providers');
     expect(info).toBeTruthy();
@@ -125,6 +132,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_ai_providers')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_mcp_authoring_guide')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_guidance')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_connection_capabilities')).toBe(true);

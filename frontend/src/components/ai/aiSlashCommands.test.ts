@@ -13,12 +13,14 @@ describe('aiSlashCommands', () => {
     expect(commands.length).toBeGreaterThan(8);
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
   });
 
   it('supports filtering by chinese keywords in addition to command prefix', () => {
     const commands = filterAISlashCommands('体检');
 
     expect(commands.map((command) => command.cmd)).toContain('/health');
+    expect(commands.map((command) => command.cmd)).not.toContain('/mcpadd');
   });
 
   it('groups commands by configured category order', () => {
@@ -35,5 +37,6 @@ describe('aiSlashCommands', () => {
     expect(featured).toContain('/sql');
     expect(featured).toContain('/health');
     expect(featured).toContain('/mcp');
+    expect(featured).toContain('/mcpadd');
   });
 });

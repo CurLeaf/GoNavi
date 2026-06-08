@@ -49,6 +49,7 @@ export const DEFAULT_AI_SLASH_COMMANDS: AISlashCommandDefinition[] = [
   { cmd: '/index', label: '📊 索引建议', desc: '推荐最优索引方案', prompt: '请基于当前表结构和常见查询场景，推荐最优的索引方案并给出建表语句：', category: 'review', keywords: ['index', '索引', '慢查询'] },
   { cmd: '/health', label: '🩺 AI 配置体检', desc: '调用体检探针总览当前 AI 配置', prompt: '请先调用 inspect_ai_setup_health，对当前 GoNavi AI 配置做一次完整体检，然后总结 blockers、warnings 和 nextActions。', category: 'diagnose', featured: true, keywords: ['health', '体检', 'ai配置', '探针'] },
   { cmd: '/mcp', label: '🪛 排查 MCP 接入', desc: '检查 MCP 服务和外部客户端状态', prompt: '请先调用 inspect_mcp_setup，帮我盘点当前 MCP 服务、工具发现结果，以及 Claude Code / Codex 的接入状态。', category: 'diagnose', featured: true, keywords: ['mcp', 'codex', 'claude', '外部客户端'] },
+  { cmd: '/mcpadd', label: '🧭 新增 MCP 指引', desc: '查看 command、args、env 和模板怎么填', prompt: '请先调用 inspect_mcp_authoring_guide，再结合 inspect_mcp_setup，告诉我新增 GoNavi MCP 服务时 command、args、env、timeout 应该怎么填，以及最接近的模板应该选哪个。', category: 'diagnose', featured: true, keywords: ['mcp新增', 'command', 'args', 'env', '模板'] },
   { cmd: '/safety', label: '🛡️ 查看写入安全', desc: '确认只读/写入边界和 allowMutating', prompt: '请先调用 inspect_ai_safety，告诉我当前 AI 和 GoNavi MCP 的写入边界、是否只读，以及 execute_sql 是否需要 allowMutating。', category: 'diagnose', keywords: ['安全', '只读', 'allowmutating', 'ddl', 'dml'] },
   { cmd: '/activity', label: '🕘 最近 SQL 活动', desc: '总结最近执行、报错和热点', prompt: '请先调用 inspect_recent_sql_activity，帮我总结最近 SQL 活动、错误热点和主要读写类型。', category: 'diagnose', keywords: ['activity', 'sql日志', '最近执行', '报错'] },
 ];

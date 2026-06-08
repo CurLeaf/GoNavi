@@ -12,6 +12,7 @@ import { buildAIGuidanceSnapshot } from './aiPromptInsights';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import { buildAISafetySnapshot } from './aiSafetyInsights';
+import { buildMCPAuthoringGuideSnapshot } from './aiMCPAuthoringGuideInsights';
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import type {
@@ -162,6 +163,11 @@ export async function executeAIConfigSnapshotToolCall(
           success: true,
         };
       }
+      case 'inspect_mcp_authoring_guide':
+        return {
+          content: JSON.stringify(buildMCPAuthoringGuideSnapshot()),
+          success: true,
+        };
       case 'inspect_ai_guidance':
         return {
           content: JSON.stringify(buildAIGuidanceSnapshot({
@@ -181,6 +187,7 @@ export async function executeAIConfigSnapshotToolCall(
       inspect_ai_providers: '读取当前 AI 供应商配置失败',
       inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',
+      inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
     }[toolName] || '读取 AI 配置探针失败';
     return {

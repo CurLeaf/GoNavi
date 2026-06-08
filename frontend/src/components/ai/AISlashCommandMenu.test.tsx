@@ -21,6 +21,7 @@ describe('AISlashCommandMenu', () => {
     expect(markup).toContain('没有匹配的快捷命令');
     expect(markup).toContain('/sql');
     expect(markup).toContain('/health');
+    expect(markup).toContain('/mcpadd');
   });
 
   it('renders grouped slash command entries when matches exist', () => {

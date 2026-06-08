@@ -431,6 +431,27 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"launchCommandPreview":"gonavi-mcp-server stdio"');
   });
 
+  it('returns the builtin mcp authoring guide so the model can explain how to fill command, args, env, and templates', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_authoring_guide', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"supportsWholeCommandAutoSplit":true');
+    expect(result.content).toContain('"fullCommandPasteExample":"OPENAI_API_KEY=... uvx mcp-server-fetch --stdio"');
+    expect(result.content).toContain('"title":"启动命令"');
+    expect(result.content).toContain('"example":"node / uvx / python"');
+    expect(result.content).toContain('"title":"uvx 工具"');
+    expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
+  });
+
   it('returns the current ai guidance snapshot so the model can inspect active prompts and enabled skills', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_ai_guidance', {}),
