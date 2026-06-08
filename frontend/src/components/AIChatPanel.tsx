@@ -40,6 +40,7 @@ import {
     inferAIChatConnectionContext,
     resolveAIChatPanelMode,
 } from './ai/aiChatPanelDerivedState';
+import { dispatchAIChatPayload } from './ai/aiChatPayloadDispatch';
 import { buildAIChatReadinessSnapshot } from './ai/aiChatReadiness';
 import { buildAISystemContextMessages } from './ai/aiSystemContextMessages';
 import { useAIChatRuntimeResources } from './ai/useAIChatRuntimeResources';
@@ -598,40 +599,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     retryJVMDiagnosticPlanContext,
                 );
                 const allMessages = [...sysMessages, ...messagesPayload];
-                
-                const Service = (window as any).go?.aiservice?.Service;
-                if (Service?.AIChatStream) {
-                    await Service.AIChatStream(sid, allMessages, availableTools);
-                } else if (Service?.AIChatSend) {
-                     const result = await Service.AIChatSend(allMessages, availableTools);
-                     const errRaw = result?.error || '未知错误';
-                     const errClean = sanitizeErrorMsg(errRaw);
-                     addAIChatMessage(sid, {
-                         id: genId(), role: 'assistant', 
-                         content: result?.success ? result.content : `❌ ${errClean}`,
-                         thinking: result?.success ? result.reasoning_content : undefined,
-                         reasoning_content: result?.success ? result.reasoning_content : undefined,
-                         rawError: (!result?.success && errClean !== errRaw) ? errRaw : undefined,
-                         timestamp: Date.now(),
-                         jvmPlanContext: retryJVMPlanContext,
-                         jvmDiagnosticPlanContext: retryJVMDiagnosticPlanContext,
-                     });
-                     setSending(false);
-                } else {
-                    setSending(false);
-                }
-            } catch(e: any) {
-                const rawE = e?.message || String(e);
-                const cleanE = sanitizeErrorMsg(rawE);
-                addAIChatMessage(sid, {
-                    id: genId(),
-                    role: 'assistant',
-                    content: `❌ 发送失败: ${cleanE}`,
-                    rawError: cleanE !== rawE ? rawE : undefined,
-                    timestamp: Date.now(),
+                await dispatchAIChatPayload({
+                    sid,
+                    messages: allMessages,
+                    tools: availableTools,
+                    addAIChatMessage,
+                    setSending,
+                    nextMessageId: genId,
                     jvmPlanContext: retryJVMPlanContext,
                     jvmDiagnosticPlanContext: retryJVMDiagnosticPlanContext,
                 });
+            } catch {
                 setSending(false);
             }
         }
@@ -806,25 +784,16 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             const SOFT_LIMIT_ROUNDS = 10;
             const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : availableTools;
 
-            const Service = (window as any).go?.aiservice?.Service;
-            if (Service?.AIChatStream) {
-                await Service.AIChatStream(sid, allMessages, chainTools);
-            } else if (Service?.AIChatSend) {
-                const result = await Service.AIChatSend(allMessages, chainTools);
-                const errR = result?.error || '未知错误';
-                const errC = sanitizeErrorMsg(errR);
-                useStore.getState().addAIChatMessage(sid, {
-                    id: genId(), role: 'assistant',
-                    content: result?.success ? result.content : `❌ ${errC}`,
-                    thinking: result?.success ? result.reasoning_content : undefined,
-                    reasoning_content: result?.success ? result.reasoning_content : undefined,
-                    rawError: (!result?.success && errC !== errR) ? errR : undefined,
-                    timestamp: Date.now(),
-                    jvmPlanContext: inheritedJVMPlanContext,
-                    jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
-                });
-                setSending(false);
-            }
+            await dispatchAIChatPayload({
+                sid,
+                messages: allMessages,
+                tools: chainTools,
+                addAIChatMessage: (sessionId, message) => useStore.getState().addAIChatMessage(sessionId, message),
+                setSending,
+                nextMessageId: genId,
+                jvmPlanContext: inheritedJVMPlanContext,
+                jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
+            });
         } catch (e) {
             console.error('Failed to chain tool call', e);
             setSending(false);
@@ -923,56 +892,20 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         // 【过渡状态 4】最后一步，等待第一字节返回
         updateAIChatMessage(sid, connectingMsg.id, { content: '等待模型响应' });
 
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (Service?.AIChatStream) {
-                await Service.AIChatStream(sid, allMessages, availableTools);
-            } else if (Service?.AIChatSend) {
-                const result = await Service.AIChatSend(allMessages, availableTools);
-                const errR2 = result?.error || '未知错误';
-                const errC2 = sanitizeErrorMsg(errR2);
-                const assistantMsg: AIChatMessage = {
-                    id: genId(), role: 'assistant',
-                    content: result?.success ? result.content : `❌ ${errC2}`,
-                    thinking: result?.success ? result.reasoning_content : undefined,
-                    reasoning_content: result?.success ? result.reasoning_content : undefined,
-                    rawError: (!result?.success && errC2 !== errR2) ? errR2 : undefined,
-                    timestamp: Date.now(),
-                    jvmPlanContext: currentJVMPlanContext,
-                    jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
-                };
-                addAIChatMessage(sid, assistantMsg);
-                setSending(false);
-                
-                // auto-generate title fallback for non-stream
-                if (messages.length === 0) {
-                    generateTitleForSession(sid);
-                }
-            } else {
-                addAIChatMessage(sid, {
-                    id: genId(),
-                    role: 'assistant',
-                    content: '❌ AI Service 未就绪',
-                    timestamp: Date.now(),
-                    jvmPlanContext: currentJVMPlanContext,
-                    jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
-                });
-                setSending(false);
-            }
-        } catch (e: any) {
-            const rawE2 = e?.message || String(e);
-            const cleanE2 = sanitizeErrorMsg(rawE2);
-            addAIChatMessage(sid, {
-                id: genId(),
-                role: 'assistant',
-                content: `❌ 发送失败: ${cleanE2}`,
-                rawError: cleanE2 !== rawE2 ? rawE2 : undefined,
-                timestamp: Date.now(),
-                jvmPlanContext: currentJVMPlanContext,
-                jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
-            });
-            setSending(false);
-        }
+        await dispatchAIChatPayload({
+            sid,
+            messages: allMessages,
+            tools: availableTools,
+            addAIChatMessage,
+            setSending,
+            nextMessageId: genId,
+            jvmPlanContext: currentJVMPlanContext,
+            jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
+            unavailableContent: '❌ AI Service 未就绪',
+            onNonStreamSuccess: messages.length === 0
+                ? () => generateTitleForSession(sid)
+                : undefined,
+        });
     }, [
         input,
         draftImages,
