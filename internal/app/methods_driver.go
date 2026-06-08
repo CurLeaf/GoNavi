@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"GoNavi-Wails/internal/buildutil"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
@@ -4187,7 +4188,7 @@ func resolveDuckDBWindowsCGOToolchainBinFromCandidates(candidates []string) (str
 		}
 	}
 
-	installHint := `请先安装 MSYS2 UCRT64 工具链：winget install --id MSYS2.MSYS2 -e；然后执行 C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc"`
+	installHint := `请先安装 MSYS2 UCRT64 工具链：winget install --id MSYS2.MSYS2 -e；然后执行 C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-binutils"`
 	if len(checked) == 0 {
 		return "", fmt.Errorf("未找到可用的 gcc.exe/g++.exe；%s", installHint)
 	}
@@ -4266,7 +4267,6 @@ func prepareDuckDBWindowsDynamicLibraryForBuild() (string, func(), error) {
 
 	required := map[string]bool{
 		"duckdb.dll": false,
-		"duckdb.lib": false,
 	}
 	for _, file := range reader.File {
 		baseName := strings.ToLower(filepath.Base(filepath.ToSlash(file.Name)))
@@ -4291,13 +4291,24 @@ func prepareDuckDBWindowsDynamicLibraryForBuild() (string, func(), error) {
 		return "", nil, fmt.Errorf("DuckDB 官方动态库包缺少文件：%s", strings.Join(missing, ", "))
 	}
 
-	importLibPath := filepath.Join(workDir, "duckdb.lib")
-	for _, alias := range []string{"libduckdb.dll.a", "libduckdb.a"} {
-		aliasPath := filepath.Join(workDir, alias)
-		if err := copyOptionalDriverSupportFile(importLibPath, aliasPath); err != nil {
-			cleanup()
-			return "", nil, err
-		}
+	toolchainBin, err := resolveDuckDBWindowsCGOToolchainBin()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("定位 DuckDB Windows dlltool 失败：%w", err)
+	}
+	dllPath := filepath.Join(workDir, "duckdb.dll")
+	importLibPath := filepath.Join(workDir, "libduckdb.dll.a")
+	if err := buildutil.GenerateWindowsImportLibraryFromDLL(
+		dllPath,
+		filepath.Join(toolchainBin, "dlltool.exe"),
+		importLibPath,
+	); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if err := copyOptionalDriverSupportFile(importLibPath, filepath.Join(workDir, "libduckdb.a")); err != nil {
+		cleanup()
+		return "", nil, err
 	}
 
 	return workDir, cleanup, nil
