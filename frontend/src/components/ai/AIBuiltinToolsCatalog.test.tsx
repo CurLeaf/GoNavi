@@ -58,10 +58,14 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_active_tab');
     expect(markup).toContain('盘点当前工作区');
     expect(markup).toContain('inspect_workspace_tabs');
+    expect(markup).toContain('查看当前快捷键配置');
+    expect(markup).toContain('inspect_shortcuts');
     expect(markup).toContain('回看最近执行记录');
     expect(markup).toContain('inspect_recent_sql_logs');
     expect(markup).toContain('总结最近 SQL 活动');
     expect(markup).toContain('inspect_recent_sql_activity');
+    expect(markup).toContain('排查应用日志');
+    expect(markup).toContain('inspect_app_logs');
     expect(markup).toContain('复用历史 SQL');
     expect(markup).toContain('inspect_saved_queries');
     expect(markup).toContain('回看 AI 历史对话');

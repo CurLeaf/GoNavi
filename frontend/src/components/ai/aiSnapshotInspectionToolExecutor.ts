@@ -22,6 +22,7 @@ import {
 import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
 import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
 import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
+import { buildAppLogSnapshot } from './aiAppLogInsights';
 import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
 import {
   buildRecentSqlActivitySnapshot,
@@ -31,6 +32,7 @@ import {
   buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
 } from './aiWorkspaceInsights';
+import { buildShortcutSnapshot } from './aiShortcutInsights';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
 import type {
   AISnapshotInspectionRuntime,
@@ -247,6 +249,25 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_app_logs': {
+        const readResult = typeof runtime?.readAppLogTail === 'function'
+          ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
+          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        if (!readResult?.success) {
+          return {
+            content: `读取 GoNavi 应用日志失败: ${readResult?.message || '未知错误'}`,
+            success: false,
+          };
+        }
+        return {
+          content: JSON.stringify(buildAppLogSnapshot({
+            readResult,
+            keyword: args.keyword,
+            lineLimit: args.lineLimit,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_saved_queries':
         return {
           content: JSON.stringify(buildSavedQueriesSnapshot({
@@ -270,6 +291,27 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_shortcuts': {
+        const [shortcutOptions, currentPlatform] = await Promise.all([
+          typeof runtime?.getShortcutOptions === 'function'
+            ? runtime.getShortcutOptions()
+            : Promise.resolve(undefined),
+          typeof runtime?.getShortcutPlatform === 'function'
+            ? runtime.getShortcutPlatform()
+            : Promise.resolve(undefined),
+        ]);
+        return {
+          content: JSON.stringify(buildShortcutSnapshot({
+            shortcutOptions,
+            currentPlatform,
+            action: args.action,
+            keyword: args.keyword,
+            includeDisabled: args.includeDisabled !== false,
+            includeAllPlatforms: args.includeAllPlatforms !== false,
+          })),
+          success: true,
+        };
+      }
       default:
         return null;
     }
@@ -286,8 +328,10 @@ export async function executeSnapshotInspectionToolCall(
       inspect_ai_context: '读取当前 AI 上下文失败',
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
       inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
+      inspect_app_logs: '读取 GoNavi 应用日志失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
+      inspect_shortcuts: '读取快捷键配置失败',
     }[toolName] || '读取本地探针快照失败';
     return {
       content: `${label}: ${error?.message || error}`,

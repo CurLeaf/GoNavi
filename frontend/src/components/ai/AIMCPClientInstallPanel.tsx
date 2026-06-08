@@ -30,7 +30,7 @@ const hasStatusIssue = (status: AIMCPClientInstallStatus | undefined) =>
 const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: boolean) => {
   if (status?.matchesCurrent) {
     return {
-      label: '已接入',
+      label: '已写入',
       color: '#16a34a',
       bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
     };
@@ -50,7 +50,7 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
     };
   }
   return {
-    label: '未接入',
+    label: '未写入',
     color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
     bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
   };
@@ -67,7 +67,7 @@ const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) 
 const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '这个客户端';
   if (status?.matchesCurrent) {
-    return `${label} 已接入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
+    return `${label} 已写入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
   }
   if (status?.installed) {
     return `${label} 里已经有旧的 GoNavi 记录，更新后会切到当前这份 GoNavi。`;
@@ -75,12 +75,12 @@ const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
   if (hasStatusIssue(status)) {
     return `${label} 的接入状态读取失败，建议先刷新检测。`;
   }
-  return `当前还没有把 GoNavi MCP 写入 ${label}。`;
+  return `当前还没有把这份 GoNavi MCP 写入 ${label}。`;
 };
 
 const getClientOptionSummary = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return '当前 GoNavi MCP 已接入到这个客户端。';
+    return '当前这份 GoNavi MCP 已写入到这个客户端。';
   }
   if (status?.installed) {
     return '检测到旧的 GoNavi MCP 记录，建议更新为当前安装路径。';
@@ -88,7 +88,7 @@ const getClientOptionSummary = (status: AIMCPClientInstallStatus | undefined) =>
   if (hasStatusIssue(status)) {
     return '接入状态读取异常，建议先刷新再处理。';
   }
-  return '尚未接入 GoNavi MCP 配置。';
+  return '尚未写入 GoNavi MCP 配置。';
 };
 
 const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined) => {
@@ -102,7 +102,7 @@ const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined)
 
 const getSelectedClientStateLine = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return '已接入当前 GoNavi，无需重复写入';
+    return '已写入当前 GoNavi，无需重复写入';
   }
   if (status?.installed) {
     return '已存在旧记录，建议更新到当前 GoNavi 路径';
@@ -115,7 +115,7 @@ const getSelectedClientStateLine = (status: AIMCPClientInstallStatus | undefined
 
 const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   if (status?.matchesCurrent) {
-    return '当前已接入，无需重复写入';
+    return '当前已写入，无需重复写入';
   }
   if (status?.installed) {
     return '更新已选客户端配置';
@@ -164,17 +164,17 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-          这里是在给外部客户端接入 GoNavi MCP，不是给 GoNavi 自己安装 MCP。
+          这里是在把当前 GoNavi 的 MCP 启动配置写给外部客户端，不是给 GoNavi 自己安装 MCP。
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          你只需要选中 Claude Code 或 Codex 其中一个目标，GoNavi 就会把“如何启动当前这份 GoNavi MCP”的配置写入那个客户端的用户级配置文件。
+          你只需要选中 Claude Code 或 Codex 其中一个目标，GoNavi 就会把“如何启动当前这份 GoNavi MCP”的配置写入那个客户端的用户级配置文件，不会重装 GoNavi，也不会替换 GoNavi 自己的程序文件。
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
+        <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>写入外部客户端配置</div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          先选择 1 个目标客户端，再执行写入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe 或手动改配置。
+          先选择 1 个目标客户端，再执行写入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe，也不需要手动改配置。
         </div>
       </div>
       <div

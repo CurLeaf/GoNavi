@@ -62,13 +62,13 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('这里是在给外部客户端接入 GoNavi MCP');
-    expect(markup).toContain('接入外部客户端');
+    expect(markup).toContain('这里是在把当前 GoNavi 的 MCP 启动配置写给外部客户端');
+    expect(markup).toContain('写入外部客户端配置');
     expect(markup).toContain('目标客户端');
     expect(markup).toContain('选择目标客户端');
     expect(markup).toContain('写入当前 GoNavi 配置');
     expect(markup).toContain('重启对应客户端');
-    expect(markup).toContain('未接入');
+    expect(markup).toContain('未写入');
     expect(markup).toContain('需更新');
     expect(markup).toContain('复制配置路径');
     expect(markup).toContain('复制启动命令');
@@ -130,7 +130,7 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('写入到已选客户端');
     expect(markup).toContain('CLI 检测：未检测到 claude');
     expect(markup).toContain('未检测到本机 claude 命令');
-    expect(markup).toContain('已接入');
+    expect(markup).toContain('已写入');
   });
 
   it('makes repeated install avoidance explicit when the selected client already matches current GoNavi', () => {
@@ -181,8 +181,60 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('当前状态：已接入当前 GoNavi，无需重复写入');
-    expect(markup).toContain('当前已接入，无需重复写入');
+    expect(markup).toContain('当前状态：已写入当前 GoNavi，无需重复写入');
+    expect(markup).toContain('当前已写入，无需重复写入');
     expect(markup).toContain('下面的主按钮会自动禁用，避免重复写入');
+  });
+
+  it('prefers the client that already matches current GoNavi over another stale installed record', () => {
+    const markup = renderToStaticMarkup(
+      <AIMCPClientInstallPanel
+        statuses={[
+          {
+            client: 'claude-code',
+            displayName: 'Claude Code',
+            installed: true,
+            matchesCurrent: true,
+            clientDetected: true,
+            clientCommand: 'claude',
+            message: '已检测到 Claude Code 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致',
+          },
+          {
+            client: 'codex',
+            displayName: 'Codex',
+            installed: true,
+            matchesCurrent: false,
+            clientDetected: true,
+            clientCommand: 'codex',
+            message: '已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新',
+          },
+        ]}
+        selectedClient="claude-code"
+        selectedStatus={{
+          client: 'claude-code',
+          displayName: 'Claude Code',
+          installed: true,
+          matchesCurrent: true,
+          clientDetected: true,
+          clientCommand: 'claude',
+          message: '已检测到 Claude Code 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致',
+        }}
+        selectedCommandText="gonavi-mcp-server stdio"
+        darkMode={false}
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        cardBg="#fff"
+        cardBorder="rgba(0,0,0,0.08)"
+        loading={false}
+        statusLoading={false}
+        onSelectClient={() => {}}
+        onRefreshStatus={() => {}}
+        onCopyConfigPath={() => {}}
+        onCopyLaunchCommand={() => {}}
+        onInstall={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('Claude Code 状态');
+    expect(markup).toContain('当前状态：已写入当前 GoNavi，无需重复写入');
   });
 });

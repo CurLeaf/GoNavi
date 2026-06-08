@@ -1,4 +1,7 @@
-import { DBGetAllColumns, DBGetDatabases, DBGetTables, ReadSQLFile } from '../../../wailsjs/go/app/App';
+import { DBGetAllColumns, DBGetDatabases, DBGetTables, ReadAppLogTail, ReadSQLFile } from '../../../wailsjs/go/app/App';
+import { useStore } from '../../store';
+import { isMacLikePlatform } from '../../utils/appearance';
+import { getShortcutPlatform } from '../../utils/shortcuts';
 
 import type { AISnapshotInspectionRuntime } from './aiSnapshotInspectionToolTypes';
 
@@ -12,6 +15,7 @@ export interface AILocalToolRuntime extends AISnapshotInspectionRuntime {
   getDatabases: (config: any) => Promise<any>;
   getTables: (config: any, dbName: string) => Promise<any>;
   getAllColumns: (config: any, dbName: string) => Promise<any>;
+  readAppLogTail: (lineLimit: number, keyword: string) => Promise<any>;
   readSQLFile: (filePath: string) => Promise<any>;
   getColumns: (config: any, dbName: string, tableName: string) => Promise<any>;
   getIndexes: (config: any, dbName: string, tableName: string) => Promise<any>;
@@ -29,6 +33,7 @@ export const buildDefaultLocalToolRuntime = (): AILocalToolRuntime => ({
   getDatabases: DBGetDatabases,
   getTables: DBGetTables,
   getAllColumns: DBGetAllColumns,
+  readAppLogTail: (lineLimit, keyword) => ReadAppLogTail(lineLimit, String(keyword || '')),
   readSQLFile: ReadSQLFile,
   getColumns: async (config, dbName, tableName) => {
     const mod = await import('../../../wailsjs/go/app/App');
@@ -100,4 +105,6 @@ export const buildDefaultLocalToolRuntime = (): AILocalToolRuntime => ({
     }
     return service.AIGetMCPClientInstallStatuses();
   },
+  getShortcutOptions: async () => useStore.getState().shortcutOptions,
+  getShortcutPlatform: async () => getShortcutPlatform(isMacLikePlatform()),
 });

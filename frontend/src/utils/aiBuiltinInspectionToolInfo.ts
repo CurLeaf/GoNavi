@@ -1,0 +1,503 @@
+import type { AIBuiltinToolInfo } from "./aiBuiltinToolInfo.types";
+
+export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
+  {
+    name: "inspect_ai_setup_health",
+    icon: "🩺",
+    desc: "一键体检当前 AI 配置健康度",
+    detail:
+      "汇总当前 AI 供应商、聊天发送前置、MCP 服务与外部客户端接入、提示词与 Skills、上下文挂载情况，并给出阻塞项、告警项和下一步建议。适合用户说“AI 为什么不好用”“帮我看下 AI 整体有没有问题”“现在这套 AI 配置还缺什么”时先做一次总览诊断。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_setup_health",
+        description:
+          "体检当前 AI 配置健康度，返回供应商、模型、聊天发送前置、MCP 接入、提示词与 Skills、表结构上下文挂载等整体快照，并给出阻塞项、建议项和下一步动作。适用于用户提到 AI 为什么不好用、当前 AI 配置哪里还缺、是否已经能稳定工作时，优先读取这份总览诊断，不要拆成多次猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_runtime",
+    icon: "🎛️",
+    desc: "查看当前 AI 自身运行状态",
+    detail:
+      "返回当前启用的模型供应商、模型名、安全级别、上下文级别、启用的 Skills，以及当前已暴露的内置工具和 MCP 工具。适合用户问“你现在能调用什么”“当前用的哪个模型”“为什么不能执行写操作”时，先读真实运行状态再回答。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_runtime",
+        description:
+          "读取当前 AI 运行时快照，包括当前供应商、模型、安全级别、上下文级别、启用的 Skills、当前可用的内置工具与 MCP 工具。适用于用户询问当前 AI 能力边界、当前使用哪个模型、为什么不能执行某些操作时，先读取真实运行状态，避免模型猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_safety",
+    icon: "🛡️",
+    desc: "查看当前 AI 写入安全边界",
+    detail:
+      "返回当前 AI 安全级别对应的 SQL 允许范围、非只读语句是否仍需确认 / allowMutating，以及当前活动连接、页签或 JVM 诊断权限是否还叠加了只读限制。适合用户问“为什么现在不能写”“DDL 能不能执行”“allowMutating 要不要传”时先读真实边界。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_safety",
+        description:
+          "读取当前 AI 安全边界快照，包括当前安全级别允许的 SQL 范围、非查询语句的确认要求、MCP execute_sql 对 allowMutating 的要求，以及当前活动连接、结果页签或 JVM 诊断权限是否额外处于只读限制。适用于用户提到为什么现在不能写、当前是不是只读、DDL 能不能执行、allowMutating 是否必须传时，先读取真实边界再回答。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_providers",
+    icon: "🪪",
+    desc: "查看当前 AI 供应商与模型配置",
+    detail:
+      "返回当前配置了哪些 AI 供应商、哪个正在生效、各自的 baseUrl、已选模型、声明模型列表、密钥是否存在、自定义请求头 key，以及缺少密钥/模型/地址等待检查项。适合用户问“为什么没有模型”“API Key 有没有配”“当前到底配了哪些供应商”时先读真实配置。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_providers",
+        description:
+          "读取当前 AI 供应商配置快照，包括供应商列表、活动供应商、接口地址、已选模型、声明模型列表、是否存在密钥、自定义请求头 key，以及缺少密钥/模型/地址等待检查项。适用于用户提到当前供应商、模型列表为空、API Key 是否配置、为什么 AI 不能正常发起请求时，先读取真实配置再解释。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_chat_readiness",
+    icon: "🚦",
+    desc: "查看当前 AI 聊天是否具备发送条件",
+    detail:
+      "返回当前聊天输入区是否已经具备发送条件，包括有没有活动供应商、当前供应商是否缺密钥或接口地址、是否已选模型、当前连接/表结构上下文是否已挂载，以及下一步建议动作。适合用户问“为什么现在不能发送”“输入框到底缺什么配置”“当前 AI 聊天准备好了没有”时先读真实状态。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_chat_readiness",
+        description:
+          "读取当前 AI 聊天输入区的发送前置状态，包括活动供应商、密钥和接口地址是否完整、是否已选模型、当前连接上下文和已挂载表结构数量，以及建议的下一步动作。适用于用户提到为什么现在不能发送、为什么输入区还没准备好、当前到底缺什么配置时，先读取真实状态再回答。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_mcp_setup",
+    icon: "🪛",
+    desc: "查看当前 MCP 配置与外部接入状态",
+    detail:
+      "返回当前本地配置了哪些 MCP 服务、哪些已启用、每个服务声明了什么启动命令，以及 Claude Code / Codex 这类外部客户端的写入状态与命令检测结果。适合用户问“我现在配了哪些 MCP”“为什么外部客户端还用不了”“MCP 到底写没写进去”时先读真实状态。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_setup",
+        description:
+          "读取当前本地 MCP 配置快照，包括 MCP 服务列表、启用状态、启动命令、环境变量 key、已发现工具，以及外部客户端的 GoNavi MCP 写入状态与本机 CLI 检测结果。适用于用户提到 MCP 服务配置、Claude/Codex 是否已接入、为什么外部客户端用不了、当前到底启用了哪些 MCP 时，先读取真实配置再回答。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_mcp_authoring_guide",
+    icon: "🧭",
+    desc: "查看新增 MCP 的填写指引",
+    detail:
+      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 Node / uvx / Python / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 node / uvx / python 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_authoring_guide",
+        description:
+          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 Node / uvx / Python / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_guidance",
+    icon: "🧠",
+    desc: "查看当前 AI 提示词与 Skills 配置",
+    detail:
+      "返回当前用户自定义的全局/数据库/JVM 提示词，以及当前启用的 Skills、作用域、依赖工具和 skill prompt 内容。适合用户问“你现在到底带了哪些提示词”“为什么你会这样回答”“当前有哪些 Skills 在生效”时先读真实配置。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_guidance",
+        description:
+          "读取当前 AI 的提示与技能配置快照，包括用户自定义提示词、当前启用的 Skills、作用域、依赖工具和各自的 system prompt。适用于用户提到当前提示词、当前 Skill、为什么 AI 当前会这样回答、当前有哪些规则在生效时，先读取真实配置再解释。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_context",
+    icon: "🧷",
+    desc: "查看当前 AI 已关联的表结构上下文",
+    detail:
+      "返回当前对话已经挂载到 AI 上下文里的表清单、所属连接与数据库，以及每张表的 DDL 预览。适合用户说“看看我现在带了哪些表结构”“当前 AI 上下文是什么”时，先读取真实挂载状态再继续分析。",
+    params: "includeDDL?(默认 false), ddlLimit?(默认 4000)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_context",
+        description:
+          "读取当前对话已经关联到 AI 上下文里的表结构快照，包括连接、数据库、表名，以及可选的 DDL 内容。适用于用户提到当前 AI 上下文、当前关联表、当前挂载的表结构时，先读取真实状态，避免模型凭记忆复述。",
+        parameters: {
+          type: "object",
+          properties: {
+            includeDDL: { type: "boolean", description: "可选，是否附带每张表的 DDL 内容，默认 false" },
+            ddlLimit: { type: "number", description: "可选，DDL 截断长度，默认 4000，最大 12000" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_current_connection",
+    icon: "🛰️",
+    desc: "查看当前活动连接/数据源摘要",
+    detail:
+      "返回当前活动连接的类型、地址、端口、当前数据库、是否启用 SSH/代理/HTTP 隧道，以及当前活动页签绑定的表信息。适合用户问“我现在连的是哪个库”“这个连接走没走 SSH”“当前数据源是什么类型”时先读取真实连接状态。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_current_connection",
+        description:
+          "读取当前活动连接或当前页签对应数据源的真实摘要，包括连接类型、地址、端口、当前数据库、SSH/代理/HTTP 隧道状态，以及当前页签绑定的表上下文。适用于用户提到当前连接、当前数据源、当前库地址、是否走 SSH、当前连的是哪种数据库时，先读取真实界面上下文，避免模型猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_connection_capabilities",
+    icon: "🧱",
+    desc: "查看当前连接支持哪些前端能力",
+    detail:
+      "返回当前或指定连接的数据源能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否倾向手动总数或近似计数。适合用户问“为什么这里不能建库/删库”“这个数据源为什么结果不能编辑”“这个类型支持哪些操作”时，先读取真实能力边界。",
+    params: "connectionId?(默认取当前活动连接)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_connection_capabilities",
+        description:
+          "读取当前活动连接或指定 saved connection 的前端能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否适合手动总数或近似计数。适用于用户提到当前连接为什么不能建库、为什么结果集不能编辑、某种数据库类型到底支持哪些前端动作时，先读取真实能力配置，避免模型凭经验猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            connectionId: { type: "string", description: "可选，指定要查看的连接 ID；不传时默认读取当前活动连接" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_saved_connections",
+    icon: "🧭",
+    desc: "查看本地已保存连接清单",
+    detail:
+      "可按关键词或数据库类型过滤，返回本地保存的数据源列表、连接类型分布，以及每条连接的地址、当前库、SSH/代理/HTTP 隧道状态。适合用户问“我本地存了哪些连接”“帮我找 mysql / postgres 连接”“哪条连接配置了 SSH”时先读真实本地连接资产。",
+    params: "keyword?, type?, limit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_saved_connections",
+        description:
+          "读取本地已保存连接清单，可按关键词和数据库类型过滤，并返回每条连接的类型、地址、当前库、SSH/代理/HTTP 隧道等摘要。适用于用户提到本地保存了哪些连接、要找哪条 mysql/postgres 连接、哪条连接启用了 SSH 或代理时，先读取真实本地连接资产再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按连接名、ID、类型、主机、数据库名或 SSH/代理地址做关键词筛选" },
+            type: { type: "string", description: "可选，只看某种数据库类型，例如 mysql、postgres、redis、mongodb" },
+            limit: { type: "number", description: "可选，最多返回多少条连接，默认 20，最大 100" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_external_sql_directories",
+    icon: "🗂️",
+    desc: "查看本地外部 SQL 目录资产",
+    detail:
+      "可按关键词、连接或数据库过滤，返回本地配置的外部 SQL 目录、目录路径、绑定连接/数据库，以及当前是否已经打开这些目录里的 SQL 文件。适合用户提到“外部 SQL 目录”“某个脚本在哪个目录”“现在打开的 SQL 文件来自哪个外部目录”时，先读真实资产。",
+    params: "keyword?, connectionId?, dbName?, limit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_external_sql_directories",
+        description:
+          "读取本地配置的外部 SQL 目录清单，可按关键词、连接和数据库过滤，并返回目录路径、绑定连接/数据库，以及当前打开的外部 SQL 文件页签摘要。适用于用户提到外部 SQL 目录、某个 SQL 文件放在哪、当前打开的脚本来自哪个目录时，先读取真实本地资产再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按目录名、路径、连接名或数据库名做关键词筛选" },
+            connectionId: { type: "string", description: "可选，只看绑定到某个连接的外部 SQL 目录" },
+            dbName: { type: "string", description: "可选，只看绑定到某个数据库的外部 SQL 目录" },
+            limit: { type: "number", description: "可选，最多返回多少条目录，默认 20，最大 100" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_external_sql_file",
+    icon: "📄",
+    desc: "读取外部 SQL 文件内容",
+    detail:
+      "传入具体 filePath，读取已配置外部 SQL 目录中的 SQL 文件内容，并返回所属目录、绑定连接/数据库、是否已有打开页签，以及截断后的正文预览。适合用户提到“看一下这个目录里的某个脚本”“帮我解释 report.sql 在写什么”时，先读取真实文件内容再分析。",
+    params: "filePath, previewCharLimit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_external_sql_file",
+        description:
+          "读取指定外部 SQL 文件的内容预览，仅用于已配置外部 SQL 目录中的 SQL 文件。返回文件路径、所属目录、绑定连接/数据库、是否已在工作区打开，以及截断后的正文内容。适用于用户提到某个目录中的具体 SQL 脚本、想让 AI 直接解释脚本逻辑、或想确认某个外部 SQL 文件内容时，先读真实文件再回答。",
+        parameters: {
+          type: "object",
+          properties: {
+            filePath: { type: "string", description: "必填，要读取的 SQL 文件绝对路径，通常先通过 inspect_external_sql_directories 找到" },
+            previewCharLimit: { type: "number", description: "可选，正文预览最多返回多少字符，默认 12000，最大 40000" },
+          },
+          required: ["filePath"],
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_active_tab",
+    icon: "📍",
+    desc: "查看当前活动页签上下文",
+    detail:
+      "返回当前活动页签的类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容（超长会截断）。适合用户说“看我当前这条 SQL”“优化这个编辑器里的语句”时，先让 AI 直接读取当前工作区上下文。",
+    params: "includeContent?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_active_tab",
+        description:
+          "获取当前活动页签的上下文快照，包括页签类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容。适用于用户提到当前页签、当前 SQL、当前编辑器、这条语句时，先读取真实界面上下文，避免让模型猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_workspace_tabs",
+    icon: "🗃️",
+    desc: "查看当前工作区打开的页签总览",
+    detail:
+      "返回当前工作区里打开的页签列表、哪个是活动页签，以及每个页签对应的连接、数据库、表名等上下文。适合用户说“我现在开了哪些 SQL”“看看我工作区里有哪些页签”“帮我对比这几个查询页签”时，先读取真实工作区布局再继续分析。",
+    params: "limit?(默认 12), includeContent?(默认 false)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_workspace_tabs",
+        description:
+          "获取当前工作区已打开页签的总览，包括活动页签、页签类型、连接、数据库、表名，以及可选的 SQL / 命令草稿内容。适用于用户提到当前工作区、打开了哪些页签、哪几个查询页签、想对比多个编辑器内容时，先读取真实界面状态，避免模型猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，最多返回多少个页签，默认 12，最大 30" },
+            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 false" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_recent_sql_logs",
+    icon: "🧾",
+    desc: "查看最近 SQL 执行日志",
+    detail:
+      "传入可选 limit 和 status，返回最近 SQL 执行记录，包括数据库、耗时、成功/失败、报错、受影响行数和 SQL 文本。适合追查刚执行失败的语句、定位慢查询，并让 AI 基于真实执行历史给出解释或优化建议。",
+    params: "limit?, status?(all|success|error)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_recent_sql_logs",
+        description:
+          "获取最近 SQL 执行日志摘要，可按成功/失败过滤。适用于回看刚执行过的 SQL、排查失败原因、定位慢查询，以及让 AI 基于真实执行历史给出解释和优化建议。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，返回多少条日志，默认 20，最大 100" },
+            status: {
+              type: "string",
+              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              enum: ["all", "success", "error"],
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_recent_sql_activity",
+    icon: "📊",
+    desc: "总结最近 SQL 活动分布",
+    detail:
+      "可按 status、activityKind、dbName 和 keyword 过滤，返回最近 SQL 活动的结构化总结，包括读写/DDL 比例、语句类型分布、数据库分布、最近报错、最近写操作和最慢语句。适合用户提到“最近都执行了什么”“是不是刚删过数据”“哪个库最近报错最多”“最近主要在跑查询还是写入”时先读真实执行画像。",
+    params: "limit?, status?(all|success|error), activityKind?(all|read|write|ddl|transaction|session|other), dbName?, keyword?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_recent_sql_activity",
+        description:
+          "汇总最近 SQL 活动的结构化画像，可按执行状态、活动类型、数据库名和关键词过滤。适用于排查最近主要在执行哪些读写操作、某个库近期错误是否集中、是否发生过删除或 DDL、以及让 AI 基于真实执行现场先做全局判断。",
+        parameters: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "可选，最近活动样例最多返回多少条，默认 30，最大 100" },
+            status: {
+              type: "string",
+              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              enum: ["all", "success", "error"],
+            },
+            activityKind: {
+              type: "string",
+              description: "可选，按活动类型过滤，支持 all、read、write、ddl、transaction、session、other，默认 all",
+              enum: ["all", "read", "write", "ddl", "transaction", "session", "other"],
+            },
+            dbName: { type: "string", description: "可选，只看数据库名里包含该关键词的日志" },
+            keyword: { type: "string", description: "可选，按 SQL 文本、报错信息、语句类型或数据库名做关键词筛选" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_app_logs",
+    icon: "🪵",
+    desc: "查看 GoNavi 应用日志尾部",
+    detail:
+      "可按关键词过滤，返回最近一段 GoNavi 应用日志里的 INFO/WARN/ERROR 行、级别分布、日志文件路径，以及当前是否发生了日志窗口截断。适合用户提到“gonavi.log”“启动报错”“MCP 拉不起来”“数据库连接为什么失败”时，先读真实日志尾部再继续定位。",
+    params: "keyword?, lineLimit?(默认 80)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_app_logs",
+        description:
+          "读取 GoNavi 应用日志尾部，可按关键词过滤，并返回最近日志行、级别分布、日志路径和截断状态。适用于用户提到 gonavi.log、应用启动异常、MCP 启动失败、数据库连接报错或要求“看一下最近日志”时，优先读取真实应用日志，不要只凭界面现象推测。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按日志内容关键词过滤，例如 mcp、mysql、timeout、error" },
+            lineLimit: { type: "number", description: "可选，最多返回多少行日志，默认 80，最大 200" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_saved_queries",
+    icon: "💾",
+    desc: "查看本地已保存的 SQL 查询",
+    detail:
+      "可按关键词、连接或数据库过滤，返回保存查询的名称、所属连接、数据库和 SQL 预览。适合用户提到“我之前保存过的查询”“帮我找那条历史 SQL”时先从真实本地收藏里检索。",
+    params: "keyword?, connectionId?, dbName?, limit?, includeSql?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_saved_queries",
+        description:
+          "读取本地已保存的 SQL 查询列表，可按关键词、连接和数据库过滤，并返回每条查询的名称、所属连接、数据库与 SQL 预览。适用于用户想找历史查询、复用旧 SQL、核对保存脚本时，先读取真实本地记录。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按查询名称、SQL 文本、连接名或数据库名做关键词筛选" },
+            connectionId: { type: "string", description: "可选，只看某个连接下保存的查询" },
+            dbName: { type: "string", description: "可选，只看某个数据库下保存的查询" },
+            limit: { type: "number", description: "可选，最多返回多少条，默认 12，最大 50" },
+            includeSql: { type: "boolean", description: "可选，是否附带 SQL 预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_ai_sessions",
+    icon: "🗂️",
+    desc: "查看本地 AI 历史会话清单",
+    detail:
+      "可按关键词过滤，返回本地 AI 会话标题、更新时间、消息数量、是否是当前会话，以及首条用户提问和最近一条消息预览。适合用户提到“之前那条 AI 对话”“帮我找上次聊过的记录”“最近哪个会话讲过这个问题”时先读真实会话资产。",
+    params: "keyword?, limit?, includePreview?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_sessions",
+        description:
+          "读取本地 AI 历史会话清单，可按关键词过滤，并返回会话标题、更新时间、消息数量、是否是当前活动会话，以及首条用户问题和最近消息预览。适用于用户提到之前的 AI 对话、上次聊过的记录、最近哪个会话讲过某个问题时，先读取真实会话清单再继续定位。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按会话标题、会话 ID、首条用户问题或最近消息内容做关键词筛选" },
+            limit: { type: "number", description: "可选，最多返回多少条会话，默认 10，最大 50" },
+            includePreview: { type: "boolean", description: "可选，是否附带首条用户问题和最近消息预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_sql_snippets",
+    icon: "🧩",
+    desc: "查看 SQL 片段模板",
+    detail:
+      "返回本地 SQL 片段的 prefix、名称、说明和模板预览，可按关键词过滤。适合用户想找现成模板、补全片段、团队约定 SQL 模板时先读取真实片段库。",
+    params: "keyword?, limit?, includeBody?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_sql_snippets",
+        description:
+          "读取本地 SQL 片段模板列表，可按关键词过滤，并返回 prefix、名称、说明和模板预览。适用于用户想找 snippet、复用模板、核对 SQL 片段配置时，先读取真实本地片段库。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按 prefix、名称、描述或模板内容做关键词筛选" },
+            limit: { type: "number", description: "可选，最多返回多少条，默认 20，最大 80" },
+            includeBody: { type: "boolean", description: "可选，是否附带模板内容预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_shortcuts",
+    icon: "⌨️",
+    desc: "查看当前快捷键配置与平台差异",
+    detail:
+      "返回当前快捷键动作、当前平台绑定、Win/Mac 双平台组合键、是否被用户改过，以及默认值对照。适合用户问“当前这个快捷键是什么”“Win 和 Mac 分别怎么按”“我是不是改过默认快捷键”时先读真实配置。",
+    params: "action?, keyword?, includeDisabled?(默认 true), includeAllPlatforms?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_shortcuts",
+        description:
+          "读取当前 GoNavi 快捷键配置快照，可按动作名或关键词过滤，并返回当前平台绑定、Win/Mac 双平台组合键、默认值和是否被用户改过。适用于用户提到快捷键、Win/Mac 键位差异、当前结果区/AI/查询相关快捷键是什么时，先读取真实配置，不要凭记忆回答默认值。",
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", description: "可选，按动作 key 精确过滤，例如 toggleQueryResultsPanel、sendAIChatMessage、toggleAIPanel" },
+            keyword: { type: "string", description: "可选，按动作名、说明、作用域、组合键或默认值做关键词筛选" },
+            includeDisabled: { type: "boolean", description: "可选，是否包含当前被禁用的快捷键，默认 true" },
+            includeAllPlatforms: { type: "boolean", description: "可选，是否同时返回 Windows 和 macOS 两个平台绑定，默认 true" },
+          },
+        },
+      },
+    },
+  },
+];

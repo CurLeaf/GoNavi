@@ -83,6 +83,31 @@ describe('mcpClientInstallStatus helpers', () => {
     expect(pickPreferredMCPClient(statuses)).toBe('codex');
   });
 
+  it('prefers a client that already matches current GoNavi over another client with a stale config', () => {
+    const statuses: AIMCPClientInstallStatus[] = [
+      {
+        client: 'claude-code',
+        displayName: 'Claude Code',
+        installed: true,
+        matchesCurrent: true,
+        clientDetected: true,
+        clientCommand: 'claude',
+        message: '已检测到 Claude Code 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致',
+      },
+      {
+        client: 'codex',
+        displayName: 'Codex',
+        installed: true,
+        matchesCurrent: false,
+        clientDetected: true,
+        clientCommand: 'codex',
+        message: '已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新',
+      },
+    ];
+
+    expect(pickPreferredMCPClient(statuses)).toBe('claude-code');
+  });
+
   it('keeps the user-selected client when it is still present in the latest status list', () => {
     expect(pickPreferredMCPClient(EMPTY_MCP_CLIENT_STATUSES, 'codex')).toBe('codex');
   });

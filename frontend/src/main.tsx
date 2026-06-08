@@ -251,6 +251,37 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 SelectSQLDirectory: async (currentPath: string) => ({ success: false, message: currentPath ? '已取消' : '已取消' }),
                 ListSQLDirectory: async () => ({ success: true, data: [] }),
                 ReadSQLFile: async () => ({ success: false, message: '已取消' }),
+                ReadAppLogTail: async (lineLimit: number, keyword: string) => {
+                    const allLines = [
+                        '2026/06/09 10:10:00.000000 [INFO] 应用启动完成',
+                        '2026/06/09 10:10:05.000000 [WARN] MCP mock service slow start',
+                        '2026/06/09 10:10:09.000000 [ERROR] MySQL mock dial failed: connect timeout',
+                    ];
+                    const normalizedKeyword = String(keyword || '').trim().toLowerCase();
+                    const filtered = normalizedKeyword
+                        ? allLines.filter((line) => line.toLowerCase().includes(normalizedKeyword))
+                        : allLines;
+                    const safeLimit = Math.max(1, Math.min(Number(lineLimit) || 80, 200));
+                    const visibleLines = filtered.slice(-safeLimit);
+                    return {
+                        success: true,
+                        data: {
+                            logPath: 'C:/Users/mock/.GoNavi/Logs/gonavi.log',
+                            keyword: String(keyword || ''),
+                            requestedLineLimit: safeLimit,
+                            returnedLineCount: visibleLines.length,
+                            fileWindowTruncated: false,
+                            matchedLinesTruncated: filtered.length > visibleLines.length,
+                            levelBreakdown: {
+                                INFO: visibleLines.filter((line) => line.includes('[INFO]')).length,
+                                WARN: visibleLines.filter((line) => line.includes('[WARN]')).length,
+                                ERROR: visibleLines.filter((line) => line.includes('[ERROR]')).length,
+                                OTHER: visibleLines.filter((line) => !/\[(INFO|WARN|ERROR)\]/.test(line)).length,
+                            },
+                            lines: visibleLines,
+                        },
+                    };
+                },
                 CreateSQLFile: async (_directoryPath: string, _name: string) => ({ success: true, data: { filePath: '', name: _name } }),
                 CreateSQLDirectory: async (directoryPath: string, name: string) => ({ success: true, data: { directoryPath: `${directoryPath}/${name}`, name } }),
                 DeleteSQLFile: async (_filePath: string) => ({ success: true }),

@@ -199,6 +199,32 @@ const appendAIGuidanceInspectionGuidance = (
   });
 };
 
+const appendShortcutInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_shortcuts')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“快捷键是什么”“Win 和 Mac 分别怎么按”“结果区/AI 面板/执行 SQL 的组合键”“我是不是改过默认快捷键”，优先调用 inspect_shortcuts 读取真实快捷键配置和平台差异，不要凭记忆回答默认值。',
+  });
+};
+
+const appendAppLogInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_app_logs')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“gonavi.log”“最近日志”“启动报错”“MCP 拉不起来”“数据库连接为什么失败”，优先调用 inspect_app_logs 读取真实应用日志尾部；必要时再结合关键词继续筛选，不要只凭弹窗或提示文案猜测。',
+  });
+};
+
 const appendConnectionCapabilityInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -438,6 +464,8 @@ SELECT * FROM users WHERE status = 1;
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
   appendMCPAuthoringInspectionGuidance(systemMessages, availableToolNames);
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
+  appendShortcutInspectionGuidance(systemMessages, availableToolNames);
+  appendAppLogInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({
       role: 'system',

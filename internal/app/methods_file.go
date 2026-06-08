@@ -34,6 +34,9 @@ const sqlFileBatchMaxStatements = 1000
 const sqlFileBatchMaxBytes = 4 * 1024 * 1024
 const sqlFileProgressStatementInterval = 100
 const sqlFileProgressTimeInterval = time.Second
+const defaultAppLogTailLineLimit = 80
+const maxAppLogTailLineLimit = 200
+const appLogTailReadWindowBytes int64 = 256 * 1024
 
 var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
 
@@ -82,6 +85,17 @@ type SQLDirectoryEntry struct {
 	Path     string              `json:"path"`
 	IsDir    bool                `json:"isDir"`
 	Children []SQLDirectoryEntry `json:"children,omitempty"`
+}
+
+type appLogTailSnapshot struct {
+	LogPath              string            `json:"logPath"`
+	Keyword              string            `json:"keyword,omitempty"`
+	RequestedLineLimit   int               `json:"requestedLineLimit"`
+	ReturnedLineCount    int               `json:"returnedLineCount"`
+	FileWindowTruncated  bool              `json:"fileWindowTruncated"`
+	MatchedLinesTruncated bool             `json:"matchedLinesTruncated"`
+	LevelBreakdown       map[string]int    `json:"levelBreakdown"`
+	Lines                []string          `json:"lines"`
 }
 
 func normalizeSQLFileName(rawName string) (string, error) {
@@ -556,8 +570,135 @@ func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
 	return readSQLFileByPath(filePath)
 }
 
+func (a *App) ReadAppLogTail(lineLimit int, keyword string) connection.QueryResult {
+	return readAppLogTailByPath(logger.Path(), lineLimit, keyword)
+}
+
 func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
 	return writeSQLFileByPath(filePath, content)
+}
+
+func normalizeAppLogTailLineLimit(input int) int {
+	if input <= 0 {
+		return defaultAppLogTailLineLimit
+	}
+	if input > maxAppLogTailLineLimit {
+		return maxAppLogTailLineLimit
+	}
+	return input
+}
+
+func readAppLogTailWindow(filePath string, maxBytes int64) ([]byte, bool, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	size := fi.Size()
+	if size <= 0 {
+		return []byte{}, false, nil
+	}
+
+	offset := int64(0)
+	truncated := false
+	if maxBytes > 0 && size > maxBytes {
+		offset = size - maxBytes
+		truncated = true
+	}
+
+	buf := make([]byte, size-offset)
+	if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
+		return nil, false, err
+	}
+	if !truncated {
+		return buf, false, nil
+	}
+
+	text := string(buf)
+	if idx := strings.IndexByte(text, '\n'); idx >= 0 && idx+1 < len(text) {
+		return []byte(text[idx+1:]), true, nil
+	}
+	return []byte{}, true, nil
+}
+
+func buildAppLogLevelBreakdown(lines []string) map[string]int {
+	breakdown := map[string]int{
+		"INFO":  0,
+		"WARN":  0,
+		"ERROR": 0,
+		"OTHER": 0,
+	}
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "[INFO]"):
+			breakdown["INFO"]++
+		case strings.Contains(line, "[WARN]"):
+			breakdown["WARN"]++
+		case strings.Contains(line, "[ERROR]"):
+			breakdown["ERROR"]++
+		default:
+			breakdown["OTHER"]++
+		}
+	}
+	return breakdown
+}
+
+func readAppLogTailByPath(filePath string, lineLimit int, keyword string) connection.QueryResult {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return connection.QueryResult{Success: false, Message: "当前未找到 GoNavi 日志文件"}
+	}
+
+	if _, err := os.Stat(target); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	windowBytes, fileWindowTruncated, err := readAppLogTailWindow(target, appLogTailReadWindowBytes)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	normalizedKeyword := strings.ToLower(strings.TrimSpace(keyword))
+	normalizedLineLimit := normalizeAppLogTailLineLimit(lineLimit)
+	rawLines := strings.Split(strings.ReplaceAll(string(windowBytes), "\r\n", "\n"), "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, rawLine := range rawLines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	filteredLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if normalizedKeyword != "" && !strings.Contains(strings.ToLower(line), normalizedKeyword) {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+
+	matchedLinesTruncated := len(filteredLines) > normalizedLineLimit
+	if matchedLinesTruncated {
+		filteredLines = filteredLines[len(filteredLines)-normalizedLineLimit:]
+	}
+
+	snapshot := appLogTailSnapshot{
+		LogPath:               target,
+		Keyword:               strings.TrimSpace(keyword),
+		RequestedLineLimit:    normalizedLineLimit,
+		ReturnedLineCount:     len(filteredLines),
+		FileWindowTruncated:   fileWindowTruncated,
+		MatchedLinesTruncated: matchedLinesTruncated,
+		LevelBreakdown:        buildAppLogLevelBreakdown(filteredLines),
+		Lines:                 filteredLines,
+	}
+	return connection.QueryResult{Success: true, Data: snapshot}
 }
 
 func (a *App) CreateSQLFile(directoryPath string, name string) connection.QueryResult {

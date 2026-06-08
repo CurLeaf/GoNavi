@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_mcp_authoring_guide', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_mcp_setup', 'inspect_mcp_authoring_guide', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_app_logs', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -90,9 +90,11 @@ describe('buildAISystemContextMessages', () => {
     expect(joined).toContain('inspect_external_sql_directories');
     expect(joined).toContain('inspect_external_sql_file');
     expect(joined).toContain('inspect_recent_sql_activity');
+    expect(joined).toContain('inspect_app_logs 读取真实应用日志尾部');
     expect(joined).toContain('inspect_saved_queries');
     expect(joined).toContain('inspect_ai_sessions');
     expect(joined).toContain('inspect_sql_snippets');
+    expect(joined).toContain('inspect_shortcuts 读取真实快捷键配置和平台差异');
     expect(joined).toContain('当前连接');
     expect(joined).toContain('以下是当前用户的自定义补充提示词（全局）');
     expect(joined).toContain('以下是当前用户的自定义补充提示词（数据库会话）');

@@ -14,6 +14,8 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/applog')).toBe(true);
   });
 
   it('supports filtering by chinese keywords in addition to command prefix', () => {
@@ -21,6 +23,16 @@ describe('aiSlashCommands', () => {
 
     expect(commands.map((command) => command.cmd)).toContain('/health');
     expect(commands.map((command) => command.cmd)).not.toContain('/mcpadd');
+  });
+
+  it('supports filtering shortcut diagnostics by chinese keyword and command prefix', () => {
+    expect(filterAISlashCommands('快捷键').map((command) => command.cmd)).toContain('/shortcuts');
+    expect(filterAISlashCommands('/sho').map((command) => command.cmd)).toContain('/shortcuts');
+  });
+
+  it('supports filtering app-log diagnostics by chinese keyword and command prefix', () => {
+    expect(filterAISlashCommands('日志').map((command) => command.cmd)).toContain('/applog');
+    expect(filterAISlashCommands('/app').map((command) => command.cmd)).toContain('/applog');
   });
 
   it('groups commands by configured category order', () => {
@@ -38,5 +50,6 @@ describe('aiSlashCommands', () => {
     expect(featured).toContain('/health');
     expect(featured).toContain('/mcp');
     expect(featured).toContain('/mcpadd');
+    expect(featured).not.toContain('/shortcuts');
   });
 });

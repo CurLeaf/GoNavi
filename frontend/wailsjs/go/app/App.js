@@ -394,6 +394,10 @@ export function ReadSQLFile(arg1) {
   return window['go']['app']['App']['ReadSQLFile'](arg1);
 }
 
+export function ReadAppLogTail(arg1, arg2) {
+  return window['go']['app']['App']['ReadAppLogTail'](arg1, arg2);
+}
+
 export function RedisConnect(arg1) {
   return window['go']['app']['App']['RedisConnect'](arg1);
 }

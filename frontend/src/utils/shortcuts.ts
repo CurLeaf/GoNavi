@@ -4,6 +4,7 @@ export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
   | 'saveQuery'
+  | 'toggleQueryResultsPanel'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
@@ -91,6 +92,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
   'saveQuery',
+  'toggleQueryResultsPanel',
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
@@ -118,6 +120,12 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
   saveQuery: {
     label: '保存查询',
     description: '保存当前查询页；未命名查询会打开保存弹窗',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  toggleQueryResultsPanel: {
+    label: '切换结果区',
+    description: '在查询编辑器中显示或隐藏下方结果区域',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -195,6 +203,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   saveQuery: {
     mac: { combo: 'Meta+S', enabled: true },
     windows: { combo: 'Ctrl+S', enabled: true },
+  },
+  toggleQueryResultsPanel: {
+    mac: { combo: 'Meta+Shift+M', enabled: true },
+    windows: { combo: 'Ctrl+Shift+M', enabled: true },
   },
   sendAIChatMessage: {
     mac: { combo: 'Enter', enabled: true },

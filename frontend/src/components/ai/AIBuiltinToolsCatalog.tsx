@@ -121,6 +121,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看当前打开了哪些 SQL / 表 / 命令页签，再切到目标页签继续做字段核对、对比分析和只读验证。',
   },
   {
+    title: '查看当前快捷键配置',
+    steps: 'inspect_shortcuts → inspect_active_tab / inspect_workspace_tabs',
+    description: '适合先确认当前 Win / Mac 快捷键、是否改过默认值，以及结果区、AI 面板、查询执行等动作到底该怎么按，再结合当前页签解释具体使用场景。',
+  },
+  {
     title: '回看最近执行记录',
     steps: 'inspect_recent_sql_logs → get_columns / get_indexes / execute_sql',
     description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',
@@ -129,6 +134,11 @@ const BUILTIN_TOOL_FLOWS = [
     title: '总结最近 SQL 活动',
     steps: 'inspect_recent_sql_activity → inspect_recent_sql_logs → inspect_current_connection',
     description: '适合先看最近到底以读还是写为主、有没有 DDL 或删除、哪个库最近报错最多，再决定继续下钻哪条日志或哪个连接。',
+  },
+  {
+    title: '排查应用日志',
+    steps: 'inspect_app_logs → inspect_mcp_setup / inspect_saved_connections / inspect_current_connection',
+    description: '适合先回看 gonavi.log 尾部的 ERROR/WARN，再结合 MCP、连接和当前数据源状态继续定位启动异常、连接失败或外部工具拉起问题。',
   },
   {
     title: '复用历史 SQL',

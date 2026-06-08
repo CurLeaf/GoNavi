@@ -40,10 +40,10 @@ const hasStatusError = (status: AIMCPClientInstallStatus): boolean =>
   /失败|异常|错误|校验失败/u.test(String(status.message || ''));
 
 const getMCPClientPriority = (status: AIMCPClientInstallStatus): number => {
-  if (status.installed && !status.matchesCurrent) {
+  if (status.matchesCurrent) {
     return 0;
   }
-  if (status.matchesCurrent) {
+  if (status.installed && !status.matchesCurrent) {
     return 1;
   }
   if (status.clientDetected) {
