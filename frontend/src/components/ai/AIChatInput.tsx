@@ -1,24 +1,23 @@
 import React from 'react';
-import { Input, Tooltip, message, Button } from 'antd';
+import { Input, Tooltip, Button } from 'antd';
 import { CodeOutlined, DatabaseOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined } from '@ant-design/icons';
 import { useStore } from '../../store';
-import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice, AIComposerNoticeAction } from '../../utils/aiComposerNotice';
 import type { AIProviderConfig } from '../../types';
-import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
-import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
 import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shortcuts';
 import AIContextSelectorModal from './AIContextSelectorModal';
-import AISlashCommandMenu, { type AISlashCommandDefinition } from './AISlashCommandMenu';
+import AISlashCommandMenu from './AISlashCommandMenu';
 import AIChatComposerNotice from './AIChatComposerNotice';
 import AIChatComposerStatus from './AIChatComposerStatus';
 import AIChatAttachmentStrip from './AIChatAttachmentStrip';
 import AIChatContextPreview from './AIChatContextPreview';
 import AIChatProviderModelSelect from './AIChatProviderModelSelect';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
-import { filterAISlashCommands } from './aiSlashCommands';
+import { useAIChatContextBinding } from './useAIChatContextBinding';
+import { useAIChatDraftImages } from './useAIChatDraftImages';
+import { useAISlashCommandMenu } from './useAISlashCommandMenu';
 
 interface AIChatInputProps {
     input: string;
@@ -57,47 +56,6 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
-    const [contextOpen, setContextOpen] = React.useState(false);
-    const [contextLoading, setContextLoading] = React.useState(false);
-    const [contextTables, setContextTables] = React.useState<{name: string}[]>([]);
-    const [selectedTableKeys, setSelectedTableKeys] = React.useState<string[]>([]);
-    const [searchText, setSearchText] = React.useState('');
-    const [appendingContext, setAppendingContext] = React.useState(false);
-
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
-    const appendDraftImage = React.useCallback((blob: Blob) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            if (event.target?.result) {
-                setDraftImages(prev => [...prev, event.target!.result as string]);
-            }
-        };
-        reader.readAsDataURL(blob);
-    }, [setDraftImages]);
-
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(e.target.files || []);
-        files.forEach(file => {
-            if (file.type.indexOf('image') !== -1) {
-                appendDraftImage(file);
-            }
-        });
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
-
-    const [dbList, setDbList] = React.useState<string[]>([]);
-    const [selectedDbName, setSelectedDbName] = React.useState<string>('');
-
-    const filteredTables = contextTables.filter(t => t.name.toLowerCase().includes(searchText.toLowerCase()));
-    const [contextExpanded, setContextExpanded] = React.useState(false);
-
-    // Slash commands
-    const [showSlashMenu, setShowSlashMenu] = React.useState(false);
-    const [slashFilter, setSlashFilter] = React.useState('');
-    const filteredSlashCmds = React.useMemo(() => filterAISlashCommands(slashFilter), [slashFilter]);
-
     const aiContexts = useStore(state => state.aiContexts);
     const addAIContext = useStore(state => state.addAIContext);
     const removeAIContext = useStore(state => state.removeAIContext);
@@ -111,168 +69,51 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         activeContext,
         activeContextItems,
     }), [activeProvider, dynamicModels, loadingModels, activeContext, activeContextItems]);
+    const {
+        appendingContext,
+        contextExpanded,
+        contextLoading,
+        contextOpen,
+        dbList,
+        filteredTables,
+        handleAppendContext,
+        handleDbChange,
+        handleOpenContext,
+        handleRemoveContextItem,
+        searchText,
+        selectedDbName,
+        selectedTableKeys,
+        setContextExpanded,
+        setContextOpen,
+        setSearchText,
+        setSelectedTableKeys,
+    } = useAIChatContextBinding({
+        activeContext,
+        activeContextItems,
+        connectionKey,
+        addAIContext,
+        removeAIContext,
+    });
 
-    const fetchTablesForDb = async (dbName: string, connConfig: any) => {
-        setContextLoading(true);
-        setSelectedDbName(dbName);
-        try {
-            const res = await DBGetTables(buildRpcConnectionConfig(connConfig), dbName);
-            if (res.success && Array.isArray(res.data)) {
-                setContextTables(res.data.map(r => ({ name: Object.values(r)[0] as string })));
-            } else {
-                message.error('获取表格失败: ' + res.message);
-                setContextTables([]);
-            }
-        } catch (e: any) {
-            message.error(e.message);
-            setContextTables([]);
-        } finally {
-            setContextLoading(false);
-        }
-    };
+    const {
+        fileInputRef,
+        handleImageUpload,
+        handlePasteImages,
+        handleRemoveDraftImage,
+    } = useAIChatDraftImages({
+        setDraftImages,
+    });
 
-    const handleOpenContext = async () => {
-        if (!activeContext?.connectionId) {
-            message.warning('请先在左侧选择一个数据库作为所聊上下文');
-            return;
-        }
-        const conn = useStore.getState().connections.find(c => c.id === activeContext.connectionId);
-        if (!conn) return;
-
-        setContextOpen(true);
-        setContextLoading(true);
-        setSearchText('');
-        // Store dbName::tableName composite keys
-        setSelectedTableKeys(activeContextItems.map(c => `${c.dbName}::${c.tableName}`));
-        
-        try {
-            // Fetch databases
-            const dbRes = await DBGetDatabases(buildRpcConnectionConfig(conn.config) as any);
-            if (dbRes.success && Array.isArray(dbRes.data)) {
-                const databases = dbRes.data.map((r: any) => Object.values(r)[0] as string);
-                setDbList(databases);
-            }
-
-            // Fetch tables for the active contextual database
-            const initDbName = activeContext.dbName || '';
-            setSelectedDbName(initDbName);
-            const tablesRes = await DBGetTables(buildRpcConnectionConfig(conn.config) as any, initDbName);
-            if (tablesRes.success && Array.isArray(tablesRes.data)) {
-                setContextTables(tablesRes.data.map((r: any) => ({ name: Object.values(r)[0] as string })));
-            } else {
-                setContextTables([]);
-            }
-        } catch (e: any) {
-            message.error(e.message);
-        } finally {
-            setContextLoading(false);
-        }
-    };
-
-    const handleAppendContext = async () => {
-        if (!activeContext?.connectionId) {
-            return;
-        }
-        const conn = useStore.getState().connections.find(c => c.id === activeContext.connectionId);
-        if (!conn) return;
-
-        setAppendingContext(true);
-        try {
-            let addedCount = 0;
-            let removedCount = 0;
-
-            for (const cx of activeContextItems) {
-                const key = `${cx.dbName}::${cx.tableName}`;
-                if (!selectedTableKeys.includes(key)) {
-                    removeAIContext(connectionKey, cx.dbName, cx.tableName);
-                    removedCount++;
-                }
-            }
-
-            for (const key of selectedTableKeys) {
-                const [dbName, tableName] = key.split('::');
-                if (!dbName || !tableName) continue;
-
-                if (activeContextItems.find(c => c.dbName === dbName && c.tableName === tableName)) {
-                    continue;
-                }
-                const rpcConfig = buildRpcConnectionConfig(conn.config) as any;
-                const schemaResult = await resolveAITableSchemaToolResult({
-                    tableName,
-                    fetchDDL: () => DBShowCreateTable(rpcConfig, dbName, tableName),
-                    fetchColumns: () => DBGetColumns(rpcConfig, dbName, tableName),
-                });
-                if (!schemaResult.success) {
-                    message.error(`获取表 ${dbName}.${tableName} 结构失败: ${schemaResult.content}`);
-                }
-
-                if (schemaResult.success && schemaResult.content) {
-                    addAIContext(connectionKey, {
-                        dbName: dbName,
-                        tableName: tableName,
-                        ddl: schemaResult.content
-                    });
-                    addedCount++;
-                }
-            }
-            if (addedCount > 0 || removedCount > 0) {
-                if (addedCount > 0 && removedCount === 0) {
-                    message.success(`已添加 ${addedCount} 张表的结构到上下文`);
-                } else if (removedCount > 0 && addedCount === 0) {
-                    message.success(`已从上下文移除 ${removedCount} 张表的结构`);
-                } else {
-                    message.success(`上下文已同步更新：新增 ${addedCount}，移除 ${removedCount}`);
-                }
-                if (addedCount > 0) setContextExpanded(true);
-            } else {
-                message.info('选中的表未发生变化');
-            }
-            setContextOpen(false);
-        } catch (e: any) {
-            message.error(e.message);
-        } finally {
-            setAppendingContext(false);
-        }
-    };
-
-    const handlePasteImages = React.useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-        const items = event.clipboardData?.items;
-        if (!items) return;
-        for (let i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf('image') !== -1) {
-                event.preventDefault();
-                const blob = items[i].getAsFile();
-                if (blob) {
-                    appendDraftImage(blob);
-                }
-            }
-        }
-    }, [appendDraftImage]);
-
-    const handleComposerInputChange = React.useCallback((value: string) => {
-        setInput(value);
-        if (value.startsWith('/')) {
-            setSlashFilter(value.split(/\s/)[0]);
-            setShowSlashMenu(true);
-        } else {
-            setShowSlashMenu(false);
-            setSlashFilter('');
-        }
-    }, [setInput]);
-
-    const handleSelectSlashCommand = React.useCallback((command: AISlashCommandDefinition) => {
-        setInput(command.prompt);
-        setShowSlashMenu(false);
-        setSlashFilter('');
-        textareaRef.current?.focus();
-    }, [setInput, textareaRef]);
-
-    const handleOpenSlashMenu = React.useCallback(() => {
-        setInput('/');
-        setSlashFilter('/');
-        setShowSlashMenu(true);
-        textareaRef.current?.focus();
-    }, [setInput, textareaRef]);
+    const {
+        filteredSlashCmds,
+        handleComposerInputChange,
+        handleOpenSlashMenu,
+        handleSelectSlashCommand,
+        showSlashMenu,
+    } = useAISlashCommandMenu({
+        setInput,
+        textareaRef,
+    });
 
     const handleComposerNoticeAction = React.useCallback(() => {
         if (composerNotice?.action?.key && typeof onComposerAction === 'function') {
@@ -283,14 +124,6 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     const composerNoticeActionHandler = composerNotice?.action?.key && composerActionHandler
         ? handleComposerNoticeAction
         : undefined;
-
-    const handleRemoveDraftImage = React.useCallback((index: number) => {
-        setDraftImages(prev => prev.filter((_, currentIndex) => currentIndex !== index));
-    }, [setDraftImages]);
-
-    const handleRemoveContextItem = React.useCallback((dbName: string, tableName: string) => {
-        removeAIContext(connectionKey, dbName, tableName);
-    }, [connectionKey, removeAIContext]);
 
     if (!isV2Ui) {
         return (
@@ -485,10 +318,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     selectedTableKeys={selectedTableKeys}
                     onCancel={() => setContextOpen(false)}
                     onConfirm={handleAppendContext}
-                    onDbChange={(value) => {
-                        const connection = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
-                        if (connection) fetchTablesForDb(value, connection.config);
-                    }}
+                    onDbChange={handleDbChange}
                     onSearchTextChange={setSearchText}
                     onSelectedTableKeysChange={setSelectedTableKeys}
                 />
@@ -669,10 +499,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 selectedTableKeys={selectedTableKeys}
                 onCancel={() => setContextOpen(false)}
                 onConfirm={handleAppendContext}
-                onDbChange={(value) => {
-                    const connection = useStore.getState().connections.find(conn => conn.id === activeContext?.connectionId);
-                    if (connection) fetchTablesForDb(value, connection.config);
-                }}
+                onDbChange={handleDbChange}
                 onSearchTextChange={setSearchText}
                 onSelectedTableKeysChange={setSelectedTableKeys}
             />

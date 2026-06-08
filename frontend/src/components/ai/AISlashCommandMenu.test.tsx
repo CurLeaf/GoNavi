@@ -19,10 +19,11 @@ describe('AISlashCommandMenu', () => {
 
     expect(markup).toContain('data-ai-chat-slash-empty="true"');
     expect(markup).toContain('没有匹配的快捷命令');
-    expect(markup).toContain('/query');
+    expect(markup).toContain('/sql');
+    expect(markup).toContain('/health');
   });
 
-  it('renders slash command entries when matches exist', () => {
+  it('renders grouped slash command entries when matches exist', () => {
     const markup = renderToStaticMarkup(
       <AISlashCommandMenu
         visible
@@ -31,6 +32,7 @@ describe('AISlashCommandMenu', () => {
           label: '生成 SQL',
           desc: '描述需求自动生成语句',
           prompt: '请根据以下需求生成 SQL：',
+          category: 'generate',
         }]}
         darkMode={false}
         textColor="#162033"
@@ -41,6 +43,8 @@ describe('AISlashCommandMenu', () => {
 
     expect(markup).toContain('/sql');
     expect(markup).toContain('生成 SQL');
+    expect(markup).toContain('data-ai-chat-slash-group="generate"');
+    expect(markup).toContain('SQL 生成');
     expect(markup).not.toContain('没有匹配的快捷命令');
   });
 });
