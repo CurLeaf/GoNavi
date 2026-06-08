@@ -469,6 +469,86 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
   });
 
+  it('returns local saved queries so the model can reuse historical sql scripts', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_saved_queries', {
+        keyword: '支付',
+        connectionId: 'conn-1',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      savedQueries: [
+        {
+          id: 'saved-1',
+          name: '支付订单核对',
+          sql: 'SELECT * FROM orders WHERE status = \'paid\'',
+          connectionId: 'conn-1',
+          dbName: 'crm',
+          createdAt: 2,
+        },
+        {
+          id: 'saved-2',
+          name: '用户列表',
+          sql: 'SELECT * FROM users',
+          connectionId: 'conn-1',
+          dbName: 'crm',
+          createdAt: 1,
+        },
+      ],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('支付订单核对');
+    expect(result.content).toContain('"connectionName":"主库"');
+    expect(result.content).toContain('status = \'paid\'');
+  });
+
+  it('returns sql snippets so the model can inspect local query templates', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_sql_snippets', {
+        keyword: '支付',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      sqlSnippets: [
+        {
+          id: 'snippet-1',
+          prefix: 'sel',
+          name: 'SELECT 模板',
+          body: 'SELECT * FROM ${1:table};',
+          isBuiltin: true,
+          createdAt: 1,
+        },
+        {
+          id: 'snippet-2',
+          prefix: 'pay',
+          name: '支付模板',
+          description: '支付对账',
+          body: 'SELECT * FROM pay_orders WHERE created_at >= ${1:start};',
+          isBuiltin: false,
+          createdAt: 2,
+        },
+      ],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('"prefix":"pay"');
+    expect(result.content).toContain('"customCount":1');
+    expect(result.content).toContain('pay_orders');
+  });
+
   it('returns a database overview bundle with per-table column previews in one tool call', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_database_bundle', {

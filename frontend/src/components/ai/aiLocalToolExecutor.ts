@@ -1,13 +1,26 @@
 import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
 
 import type { SqlLog } from '../../store';
-import type { AIChatMessage, AIContextItem, AIMCPToolDescriptor, AIToolCall, SavedConnection, TabData } from '../../types';
+import type {
+  AIChatMessage,
+  AIContextItem,
+  AIMCPToolDescriptor,
+  AIToolCall,
+  SavedConnection,
+  SavedQuery,
+  SqlSnippet,
+  TabData,
+} from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
 import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
+import {
+  buildSavedQueriesSnapshot,
+  buildSqlSnippetsSnapshot,
+} from './aiSavedSqlInsights';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -44,6 +57,8 @@ export interface ExecuteLocalAIToolCallOptions {
   mcpTools: AIMCPToolDescriptor[];
   toolContextMap: Map<string, AIToolContextEntry>;
   sqlLogs?: SqlLog[];
+  savedQueries?: SavedQuery[];
+  sqlSnippets?: SqlSnippet[];
   runtime?: Partial<AILocalToolRuntime>;
 }
 
@@ -171,6 +186,8 @@ export async function executeLocalAIToolCall({
   mcpTools,
   toolContextMap,
   sqlLogs = [],
+  savedQueries = [],
+  sqlSnippets = [],
   runtime,
 }: ExecuteLocalAIToolCallOptions): Promise<ExecuteLocalAIToolCallResult> {
   const mergedRuntime = { ...buildDefaultRuntime(), ...(runtime || {}) };
@@ -642,6 +659,37 @@ export async function executeLocalAIToolCall({
           success = true;
         } catch (error: any) {
           content = `获取最近 SQL 日志失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'inspect_saved_queries': {
+        try {
+          content = JSON.stringify(buildSavedQueriesSnapshot({
+            savedQueries,
+            connections,
+            keyword: args.keyword,
+            connectionId: args.connectionId,
+            dbName: args.dbName,
+            limit: args.limit,
+            includeSql: args.includeSql !== false,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取已保存查询失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'inspect_sql_snippets': {
+        try {
+          content = JSON.stringify(buildSqlSnippetsSnapshot({
+            sqlSnippets,
+            keyword: args.keyword,
+            limit: args.limit,
+            includeBody: args.includeBody !== false,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取 SQL 片段失败: ${error?.message || error}`;
         }
         break;
       }

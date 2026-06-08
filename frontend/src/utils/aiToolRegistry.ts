@@ -422,6 +422,56 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_saved_queries",
+    icon: "💾",
+    desc: "查看本地已保存的 SQL 查询",
+    detail:
+      "可按关键词、连接或数据库过滤，返回保存查询的名称、所属连接、数据库和 SQL 预览。适合用户提到“我之前保存过的查询”“帮我找那条历史 SQL”时先从真实本地收藏里检索。",
+    params: "keyword?, connectionId?, dbName?, limit?, includeSql?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_saved_queries",
+        description:
+          "读取本地已保存的 SQL 查询列表，可按关键词、连接和数据库过滤，并返回每条查询的名称、所属连接、数据库与 SQL 预览。适用于用户想找历史查询、复用旧 SQL、核对保存脚本时，先读取真实本地记录。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按查询名称、SQL 文本、连接名或数据库名做关键词筛选" },
+            connectionId: { type: "string", description: "可选，只看某个连接下保存的查询" },
+            dbName: { type: "string", description: "可选，只看某个数据库下保存的查询" },
+            limit: { type: "number", description: "可选，最多返回多少条，默认 12，最大 50" },
+            includeSql: { type: "boolean", description: "可选，是否附带 SQL 预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
+    name: "inspect_sql_snippets",
+    icon: "🧩",
+    desc: "查看 SQL 片段模板",
+    detail:
+      "返回本地 SQL 片段的 prefix、名称、说明和模板预览，可按关键词过滤。适合用户想找现成模板、补全片段、团队约定 SQL 模板时先读取真实片段库。",
+    params: "keyword?, limit?, includeBody?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_sql_snippets",
+        description:
+          "读取本地 SQL 片段模板列表，可按关键词过滤，并返回 prefix、名称、说明和模板预览。适用于用户想找 snippet、复用模板、核对 SQL 片段配置时，先读取真实本地片段库。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按 prefix、名称、描述或模板内容做关键词筛选" },
+            limit: { type: "number", description: "可选，最多返回多少条，默认 20，最大 80" },
+            includeBody: { type: "boolean", description: "可选，是否附带模板内容预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "execute_sql",
     icon: "▶️",
     desc: "执行 SQL 查询并返回结果",

@@ -876,6 +876,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 mcpTools,
                 toolContextMap: toolContextMapRef.current,
                 sqlLogs: useStore.getState().sqlLogs,
+                savedQueries: useStore.getState().savedQueries,
+                sqlSnippets: useStore.getState().sqlSnippets,
             });
             const toolResultMsg: AIChatMessage = buildToolResultMessage({
                 id: genId(),

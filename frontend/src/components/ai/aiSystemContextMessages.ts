@@ -315,6 +315,18 @@ SELECT * FROM users WHERE status = 1;
       content: '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
     });
   }
+  if (availableToolNames.includes('inspect_saved_queries')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“保存过的查询”“历史 SQL”“之前写过的语句”“帮我找以前那条脚本”，优先调用 inspect_saved_queries 读取本地已保存查询，再决定是否继续核对字段或复用 SQL。',
+    });
+  }
+  if (availableToolNames.includes('inspect_sql_snippets')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“SQL 片段”“snippet”“模板前缀”“常用模板”，优先调用 inspect_sql_snippets 读取本地 SQL 片段库，不要凭记忆编造现有模板。',
+    });
+  }
 
   appendCustomPromptGroup(systemMessages, ['database'], userPromptSettings);
   appendSkillPromptGroup(systemMessages, ['database'], skills, availableToolNames);

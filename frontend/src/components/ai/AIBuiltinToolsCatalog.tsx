@@ -63,6 +63,16 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',
   },
   {
+    title: '复用历史 SQL',
+    steps: 'inspect_saved_queries → get_columns / execute_sql',
+    description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',
+  },
+  {
+    title: '查找模板片段',
+    steps: 'inspect_sql_snippets',
+    description: '适合先找团队已有的 SQL 片段模板、补全前缀和常用骨架，再决定是否继续改写。',
+  },
+  {
     title: '理解样例数据',
     steps: 'get_columns → preview_table_rows',
     description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',

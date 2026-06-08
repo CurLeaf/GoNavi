@@ -10,6 +10,16 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('SSH/代理/HTTP 隧道状态');
   });
 
+  it('registers the saved-query and sql-snippet inspectors as builtin tools', () => {
+    const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
+    const snippetTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_snippets');
+
+    expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
+    expect(savedQueryTool?.tool.function.description).toContain('历史查询');
+    expect(snippetTool?.desc).toContain('SQL 片段模板');
+    expect(snippetTool?.tool.function.description).toContain('片段模板');
+  });
+
   it('keeps builtin tools and MCP tools in the unified runtime tool chain', () => {
     const tools = buildAvailableAIChatTools([{
       alias: 'custom_probe',
@@ -27,6 +37,8 @@ describe('aiToolRegistry', () => {
     }]);
 
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);
     expect(tools.some((item) => item.function.name === 'custom_probe')).toBe(true);
   });
 });
