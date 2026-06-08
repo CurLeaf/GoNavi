@@ -18,6 +18,7 @@ import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import { buildAIGuidanceSnapshot } from './aiPromptInsights';
+import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import {
   buildSavedQueriesSnapshot,
@@ -104,6 +105,19 @@ export async function executeSnapshotInspectionToolCall(
             mcpTools,
             dynamicModels,
             builtinToolNames: BUILTIN_AI_TOOL_NAMES,
+          })),
+          success: true,
+        };
+      }
+      case 'inspect_ai_providers': {
+        const runtimeState = typeof runtime?.getAIRuntimeState === 'function'
+          ? await runtime.getAIRuntimeState()
+          : undefined;
+        return {
+          content: JSON.stringify(buildAIProviderSnapshot({
+            providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
+            activeProviderId: runtimeState?.activeProviderId || '',
+            dynamicModels,
           })),
           success: true,
         };
@@ -210,6 +224,7 @@ export async function executeSnapshotInspectionToolCall(
   } catch (error: any) {
     const label = {
       inspect_ai_runtime: '读取当前 AI 运行状态失败',
+      inspect_ai_providers: '读取当前 AI 供应商配置失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
       inspect_current_connection: '读取当前连接失败',

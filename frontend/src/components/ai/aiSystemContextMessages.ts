@@ -108,6 +108,19 @@ const appendAIRuntimeInspectionGuidance = (
   });
 };
 
+const appendAIProviderInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_providers')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“当前配了哪些供应商”“为什么模型列表为空”“API Key 有没有配”“为什么现在不能发送/没选中模型”，优先调用 inspect_ai_providers 读取真实供应商配置，不要凭记忆猜测。',
+  });
+};
+
 const appendMCPSetupInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -351,6 +364,7 @@ SELECT * FROM users WHERE status = 1;
     });
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
+  appendAIProviderInspectionGuidance(systemMessages, availableToolNames);
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {

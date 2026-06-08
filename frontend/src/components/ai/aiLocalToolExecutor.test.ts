@@ -224,6 +224,60 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"builtinToolCount":');
   });
 
+  it('returns the current ai provider snapshot so the model can inspect provider readiness and model selection', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_providers', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      dynamicModels: ['gpt-5.4', 'gpt-4.1-mini'],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          activeProviderId: 'provider-1',
+          providers: [
+            {
+              id: 'provider-1',
+              type: 'openai',
+              name: 'OpenAI 主账号',
+              apiKey: '',
+              hasSecret: true,
+              baseUrl: 'https://api.openai.com/v1',
+              model: 'gpt-5.4',
+              models: ['gpt-5.4', 'gpt-4.1'],
+              maxTokens: 32000,
+              temperature: 0.2,
+            },
+            {
+              id: 'provider-2',
+              type: 'custom',
+              name: '自建代理',
+              apiKey: '',
+              hasSecret: false,
+              baseUrl: '',
+              model: '',
+              models: [],
+              headers: {
+                Authorization: 'Bearer secret-token',
+              },
+              maxTokens: 16000,
+              temperature: 0.7,
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"providerCount":2');
+    expect(result.content).toContain('"missingSecretCount":1');
+    expect(result.content).toContain('"name":"OpenAI 主账号"');
+    expect(result.content).toContain('"name":"自建代理"');
+    expect(result.content).toContain('"issues":["missing_secret","missing_base_url","missing_selected_model","missing_declared_models"]');
+    expect(result.content).not.toContain('secret-token');
+  });
+
   it('returns the current mcp setup snapshot so the model can inspect configured servers and client install state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_setup', {}),

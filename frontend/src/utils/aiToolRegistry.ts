@@ -327,6 +327,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_providers",
+    icon: "🪪",
+    desc: "查看当前 AI 供应商与模型配置",
+    detail:
+      "返回当前配置了哪些 AI 供应商、哪个正在生效、各自的 baseUrl、已选模型、声明模型列表、密钥是否存在、自定义请求头 key，以及缺少密钥/模型/地址等待检查项。适合用户问“为什么没有模型”“API Key 有没有配”“当前到底配了哪些供应商”时先读真实配置。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_providers",
+        description:
+          "读取当前 AI 供应商配置快照，包括供应商列表、活动供应商、接口地址、已选模型、声明模型列表、是否存在密钥、自定义请求头 key，以及缺少密钥/模型/地址等待检查项。适用于用户提到当前供应商、模型列表为空、API Key 是否配置、为什么 AI 不能正常发起请求时，先读取真实配置再解释。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_setup",
     icon: "🪛",
     desc: "查看当前 MCP 配置与外部接入状态",
