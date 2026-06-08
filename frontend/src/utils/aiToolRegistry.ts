@@ -344,6 +344,23 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_guidance",
+    icon: "🧠",
+    desc: "查看当前 AI 提示词与 Skills 配置",
+    detail:
+      "返回当前用户自定义的全局/数据库/JVM 提示词，以及当前启用的 Skills、作用域、依赖工具和 skill prompt 内容。适合用户问“你现在到底带了哪些提示词”“为什么你会这样回答”“当前有哪些 Skills 在生效”时先读真实配置。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_guidance",
+        description:
+          "读取当前 AI 的提示与技能配置快照，包括用户自定义提示词、当前启用的 Skills、作用域、依赖工具和各自的 system prompt。适用于用户提到当前提示词、当前 Skill、为什么 AI 当前会这样回答、当前有哪些规则在生效时，先读取真实配置再解释。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_ai_context",
     icon: "🧷",
     desc: "查看当前 AI 已关联的表结构上下文",

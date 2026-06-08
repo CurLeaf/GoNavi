@@ -48,6 +48,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合运行时工具列表判断为什么某个工具没暴露出来。',
   },
   {
+    title: '查看当前提示与 Skills',
+    steps: 'inspect_ai_guidance → inspect_ai_runtime',
+    description: '适合先确认当前自定义提示词、启用的 Skills、依赖工具和生效范围，再解释为什么 AI 当前会这样回答或为什么某个规则没有触发。',
+  },
+  {
     title: '查看当前 AI 上下文',
     steps: 'inspect_ai_context → inspect_table_bundle / get_columns',
     description: '适合先确认这轮对话当前到底挂了哪些表结构，再继续做字段核对、表设计评审或 SQL 生成。',

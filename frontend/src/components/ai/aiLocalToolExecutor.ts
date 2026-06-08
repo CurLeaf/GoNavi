@@ -7,6 +7,7 @@ import type {
   AIMCPToolDescriptor,
   AISkillConfig,
   AIToolCall,
+  AIUserPromptSettings,
   SavedConnection,
   SavedQuery,
   SqlSnippet,
@@ -54,6 +55,7 @@ export interface ExecuteLocalAIToolCallOptions {
   savedQueries?: SavedQuery[];
   sqlSnippets?: SqlSnippet[];
   skills?: AISkillConfig[];
+  userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
   runtime?: Partial<AILocalToolRuntime>;
 }
@@ -217,6 +219,7 @@ export async function executeLocalAIToolCall({
   savedQueries = [],
   sqlSnippets = [],
   skills = [],
+  userPromptSettings,
   dynamicModels = [],
   runtime,
 }: ExecuteLocalAIToolCallOptions): Promise<ExecuteLocalAIToolCallResult> {
@@ -240,6 +243,7 @@ export async function executeLocalAIToolCall({
       savedQueries,
       sqlSnippets,
       skills,
+      userPromptSettings,
       dynamicModels,
       runtime: mergedRuntime,
     });

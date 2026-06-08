@@ -17,6 +17,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('外部客户端');
   });
 
+  it('registers the ai-guidance inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_guidance');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('提示词与 Skills');
+    expect(info?.tool.function.description).toContain('自定义提示词');
+  });
+
   it('registers the current-connection inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_current_connection');
     expect(info).toBeTruthy();
@@ -52,6 +59,7 @@ describe('aiToolRegistry', () => {
 
     expect(tools.some((item) => item.function.name === 'inspect_ai_runtime')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_guidance')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

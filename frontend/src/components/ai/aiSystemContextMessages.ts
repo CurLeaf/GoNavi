@@ -121,6 +121,19 @@ const appendMCPSetupInspectionGuidance = (
   });
 };
 
+const appendAIGuidanceInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_guidance')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“你现在带了哪些提示词”“当前生效的是哪些 Skills”“为什么你会这样回答”“当前数据库/JVM prompt 是什么”，优先调用 inspect_ai_guidance 读取真实提示与技能配置，不要凭记忆概括。',
+  });
+};
+
 const resolveDatabaseDisplayType = (config: ConnectionConfig | undefined): string => {
   const dbType = config?.type || 'unknown';
   return dbType === 'diros' ? 'Doris' : dbType.charAt(0).toUpperCase() + dbType.slice(1);
@@ -339,6 +352,7 @@ SELECT * FROM users WHERE status = 1;
   }
   appendAIRuntimeInspectionGuidance(systemMessages, availableToolNames);
   appendMCPSetupInspectionGuidance(systemMessages, availableToolNames);
+  appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({
       role: 'system',

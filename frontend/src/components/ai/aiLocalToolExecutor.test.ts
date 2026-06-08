@@ -280,6 +280,41 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"launchCommandPreview":"gonavi-mcp-server stdio"');
   });
 
+  it('returns the current ai guidance snapshot so the model can inspect active prompts and enabled skills', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_guidance', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      userPromptSettings: {
+        global: '回答前先核对上下文。',
+        database: '生成 SQL 时只读优先。',
+        jvm: '',
+        jvmDiagnostic: '',
+      },
+      skills: [{
+        id: 'skill-1',
+        name: '结构审查',
+        description: '优先核对字段',
+        systemPrompt: '先看字段和索引，再给结论。',
+        enabled: true,
+        scopes: ['database'],
+        requiredTools: ['get_columns'],
+      }],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"customPromptCount":2');
+    expect(result.content).toContain('"scope":"global"');
+    expect(result.content).toContain('回答前先核对上下文');
+    expect(result.content).toContain('"enabledSkillCount":1');
+    expect(result.content).toContain('"name":"结构审查"');
+  });
+
   it('returns the current connection snapshot so the model can inspect host, db, and ssh state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_current_connection', {}),

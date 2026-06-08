@@ -879,6 +879,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 savedQueries: useStore.getState().savedQueries,
                 sqlSnippets: useStore.getState().sqlSnippets,
                 skills,
+                userPromptSettings,
                 dynamicModels,
             });
             const toolResultMsg: AIChatMessage = buildToolResultMessage({
