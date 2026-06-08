@@ -13,16 +13,12 @@ import type {
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
 } from '../types';
-import { DownOutlined } from '@ant-design/icons';
 import './AIChatPanel.css';
 
 import { AIChatHeader } from './ai/AIChatHeader';
-import { AIChatWelcome } from './ai/AIChatWelcome';
-import { AIMessageBubble } from './ai/AIMessageBubble';
 import { AIChatInput } from './ai/AIChatInput';
 import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
-import AIMessageRenderBoundary from './ai/AIMessageRenderBoundary';
-import AIChatPanelModeContent, { type AIChatInsightItem } from './ai/AIChatPanelModeContent';
+import AIChatPanelConversationView from './ai/AIChatPanelConversationView';
 import type { AIComposerNotice, AIComposerNoticeAction } from '../utils/aiComposerNotice';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
@@ -42,6 +38,14 @@ import {
     executeLocalAIToolCall,
     type AIToolContextEntry,
 } from './ai/aiLocalToolExecutor';
+import {
+    buildAIChatInlineHistorySessions,
+    buildAIChatInsights,
+    calculateAIContextUsageChars,
+    collectAIChatContextTableNames,
+    inferAIChatConnectionContext,
+    resolveAIChatPanelMode,
+} from './ai/aiChatPanelDerivedState';
 import { buildAIChatReadinessSnapshot } from './ai/aiChatReadiness';
 import { buildAISystemContextMessages } from './ai/aiSystemContextMessages';
 
@@ -1247,32 +1251,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         };
     }, [isResizing, isV2Ui, onWidthChange]);
 
-    // 回推幽灵上下文：基于 get_tables 记录进行表级精确匹配（useMemo 缓存，避免每帧重算）
-    const { inferredConnectionId, inferredDbName } = useMemo(() => {
-        let connId = activeContext?.connectionId;
-        let dbName = activeContext?.dbName;
-
-        if (!connId || !dbName) {
-            const allMsgText = messages.map(m => m.content || '').join(' ');
-            let bestMatch: { connectionId: string; dbName: string } | null = null;
-            let bestScore = 0;
-            for (const entry of toolContextMapRef.current.values()) {
-                let score = 0;
-                for (const table of entry.tables) {
-                    if (allMsgText.includes(table)) score++;
-                }
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMatch = { connectionId: entry.connectionId, dbName: entry.dbName };
-                }
-            }
-            if (bestMatch) {
-                if (!connId) connId = bestMatch.connectionId;
-                if (!dbName) dbName = bestMatch.dbName;
-            }
-        }
-        return { inferredConnectionId: connId, inferredDbName: dbName };
-    }, [activeContext?.connectionId, activeContext?.dbName, messages.length]);
+    const { inferredConnectionId, inferredDbName } = useMemo(
+        () => inferAIChatConnectionContext({
+            activeConnectionId: activeContext?.connectionId,
+            activeDbName: activeContext?.dbName,
+            messages,
+            toolContextEntries: toolContextMapRef.current.values(),
+        }),
+        [activeContext?.connectionId, activeContext?.dbName, messages],
+    );
 
     // useMemo 缓存：避免内联闭包击穿子组件 memo
     const handleDeleteMessage = useCallback((id: string) => deleteAIChatMessage(sid, id), [sid, deleteAIChatMessage]);
@@ -1294,51 +1281,33 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const connection = connections.find(c => c.id === inferredConnectionId);
         return connection ? buildRpcConnectionConfig(connection.config) : undefined;
     }, [inferredConnectionId, connections]);
-    const contextUsageChars = useMemo(() =>
-        messages.reduce((sum, m) => sum + (m.content?.length || 0) + (m.reasoning_content?.length || 0) + JSON.stringify(m.tool_calls || []).length, 0),
-    [messages]);
-    const contextTableNames = useMemo(() => {
-        const ck = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
-        return (aiContexts[ck] || []).map(c => `${c.dbName}.${c.tableName}`);
-    }, [activeContext?.connectionId, activeContext?.dbName, aiContexts]);
-    const aiInsights = useMemo<AIChatInsightItem[]>(() => {
-        const recentLogs = sqlLogs.slice(0, 24);
-        const slowest = recentLogs
-            .filter((log) => log.status === 'success')
-            .sort((a, b) => b.duration - a.duration)[0];
-        const errors = recentLogs.filter((log) => log.status === 'error');
-        const writeCount = recentLogs.filter((log) => /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(log.sql)).length;
-        const contextCount = contextTableNames.length;
-        return [
-            {
-                tone: 'info',
-                title: contextCount > 0 ? `已关联 ${contextCount} 张表` : '尚未关联表结构',
-                body: contextCount > 0
-                    ? `当前对话会带上 ${contextTableNames.slice(0, 3).join('、')}${contextCount > 3 ? ' 等表' : ''} 的结构上下文。`
-                    : '在表页打开 AI 后会自动关联当前表，也可以在输入框上方手动添加上下文。',
-            },
-            {
-                tone: slowest && slowest.duration > 1000 ? 'warn' : 'accent',
-                title: slowest ? `最近最慢查询 ${Math.round(slowest.duration).toLocaleString()}ms` : '暂无查询耗时样本',
-                body: slowest ? slowest.sql.slice(0, 140) : '执行查询后这里会显示可用于优化分析的 SQL 线索。',
-            },
-            {
-                tone: errors.length > 0 ? 'warn' : 'info',
-                title: errors.length > 0 ? `${errors.length} 条最近查询失败` : '最近查询状态正常',
-                body: errors[0]?.message || (recentLogs.length > 0 ? `已记录 ${recentLogs.length} 条最近 SQL，可直接让 AI 解释或优化。` : '暂无 SQL 日志。'),
-            },
-            {
-                tone: writeCount > 0 ? 'warn' : 'accent',
-                title: writeCount > 0 ? `检测到 ${writeCount} 条写操作` : '当前以只读分析为主',
-                body: writeCount > 0 ? '涉及写入的 SQL 建议先生成预览与回滚语句，再执行提交。' : 'AI 默认优先解释、生成 SELECT、分析 Schema 与优化索引。',
-            },
-        ];
-    }, [contextTableNames, sqlLogs]);
+    const contextUsageChars = useMemo(
+        () => calculateAIContextUsageChars(messages),
+        [messages],
+    );
+    const contextTableNames = useMemo(
+        () => collectAIChatContextTableNames({
+            aiContexts,
+            activeConnectionId: activeContext?.connectionId,
+            activeDbName: activeContext?.dbName,
+        }),
+        [activeContext?.connectionId, activeContext?.dbName, aiContexts],
+    );
+    const aiInsights = useMemo(
+        () => buildAIChatInsights({
+            contextTableNames,
+            sqlLogs,
+        }),
+        [contextTableNames, sqlLogs],
+    );
     const panelHistorySessions = useMemo(
-        () => orderedAISessions.slice(0, 8),
+        () => buildAIChatInlineHistorySessions(orderedAISessions),
         [orderedAISessions],
     );
-    const effectivePanelMode = isV2Ui ? activePanelMode : 'chat';
+    const effectivePanelMode = useMemo(
+        () => resolveAIChatPanelMode(isV2Ui, activePanelMode),
+        [activePanelMode, isV2Ui],
+    );
 
     return (
         <div ref={panelRef} className={`ai-chat-panel${isV2Ui ? ' gn-v2-ai-panel' : ''}`} style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
@@ -1392,88 +1361,44 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 }}
             />
 
-            <div className="ai-chat-messages" onScroll={handleScrollMessages}>
-                {effectivePanelMode === 'chat' && (
-                    messages.length === 0 ? (
-                        <AIChatWelcome
-                            overlayTheme={overlayTheme}
-                            quickActionBg={quickActionBg}
-                            quickActionBorder={quickActionBorder}
-                            textColor={textColor}
-                            mutedColor={mutedColor}
-                            onQuickAction={(prompt: string, autoSend?: boolean) => {
-                                setInput(prompt);
-                                if (autoSend) {
-                                    // Use setTimeout to let setInput render, then trigger send
-                                    setTimeout(() => {
-                                        const el = textareaRef.current;
-                                        if (el) el.focus();
-                                        // Dispatch a synthetic enter to trigger handleSend
-                                        // Simpler: just call handleSend directly with the prompt
-                                    }, 50);
-                                }
-                            }}
-                            contextTableNames={contextTableNames}
-                            isV2Ui={isV2Ui}
-                        />
-                    ) : (
-                        messages.map(msg => (
-                            <AIMessageRenderBoundary
-                                key={msg.id}
-                                msg={msg}
-                                darkMode={darkMode}
-                                overlayTheme={overlayTheme}
-                                onDeleteMessage={handleDeleteMessage}
-                                onError={handleMessageRenderError}
-                            >
-                                <AIMessageBubble
-                                    msg={msg}
-                                    darkMode={darkMode}
-                                    overlayTheme={overlayTheme}
-                                    textColor={textColor}
-                                    onEdit={handleEditMessage}
-                                    onRetry={handleRetryMessage}
-                                    onDelete={handleDeleteMessage}
-                                    activeConnectionId={inferredConnectionId}
-                                    activeConnectionConfig={activeConnectionConfig}
-                                    activeDbName={inferredDbName}
-                                    allMessages={messages}
-                                />
-                            </AIMessageRenderBoundary>
-                        ))
-                    )
-                )}
-
-                <AIChatPanelModeContent
-                    mode={effectivePanelMode}
-                    insights={aiInsights}
-                    sessions={panelHistorySessions}
-                    activeSessionId={sid}
-                    onSelectSession={(sessionId) => {
-                        setAIActiveSessionId(sessionId);
-                        setActivePanelMode('chat');
-                    }}
-                />
-                 
-
-                <div ref={messagesEndRef} />
-            </div>
-
-            {showScrollBottom && (
-                <div 
-                    onClick={scrollToMessagesBottom}
-                    style={{
-                        position: 'absolute', bottom: 120, right: 20, width: 32, height: 32, borderRadius: '50%',
-                        background: darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)', backdropFilter: 'blur(8px)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                        color: textColor, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, transition: 'all 0.2s ease',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.1)'; e.currentTarget.style.background = darkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = darkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'; }}
-                >
-                    <DownOutlined style={{ fontSize: 14 }} />
-                </div>
-            )}
+            <AIChatPanelConversationView
+                mode={effectivePanelMode}
+                messages={messages}
+                darkMode={darkMode}
+                overlayTheme={overlayTheme}
+                textColor={textColor}
+                mutedColor={mutedColor}
+                quickActionBg={quickActionBg}
+                quickActionBorder={quickActionBorder}
+                showScrollBottom={showScrollBottom}
+                contextTableNames={contextTableNames}
+                isV2Ui={isV2Ui}
+                insights={aiInsights}
+                sessions={panelHistorySessions}
+                activeSessionId={sid}
+                activeConnectionId={inferredConnectionId}
+                activeConnectionConfig={activeConnectionConfig}
+                activeDbName={inferredDbName}
+                messagesEndRef={messagesEndRef}
+                onScrollMessages={handleScrollMessages}
+                onQuickAction={(prompt: string, autoSend?: boolean) => {
+                    setInput(prompt);
+                    if (autoSend) {
+                        window.setTimeout(() => {
+                            textareaRef.current?.focus();
+                        }, 50);
+                    }
+                }}
+                onSelectSession={(sessionId) => {
+                    setAIActiveSessionId(sessionId);
+                    setActivePanelMode('chat');
+                }}
+                onEditMessage={handleEditMessage}
+                onRetryMessage={handleRetryMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onMessageRenderError={handleMessageRenderError}
+                onScrollBottom={scrollToMessagesBottom}
+            />
 
             <AIChatInput
                 input={input}

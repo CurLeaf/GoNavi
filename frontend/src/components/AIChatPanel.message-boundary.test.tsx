@@ -3,18 +3,21 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./AIChatPanel.tsx', import.meta.url), 'utf8');
 const boundarySource = readFileSync(new URL('./ai/AIMessageRenderBoundary.tsx', import.meta.url), 'utf8');
+const conversationViewSource = readFileSync(new URL('./ai/AIChatPanelConversationView.tsx', import.meta.url), 'utf8');
+const derivedStateSource = readFileSync(new URL('./ai/aiChatPanelDerivedState.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
 const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
 
 describe('AIChatPanel message render isolation', () => {
   it('keeps per-message render failures scoped to the broken bubble', () => {
-    expect(source).toContain("import AIMessageRenderBoundary from './ai/AIMessageRenderBoundary';");
+    expect(source).toContain("import AIChatPanelConversationView from './ai/AIChatPanelConversationView';");
     expect(boundarySource).toContain('class AIMessageRenderBoundary extends React.Component');
     expect(source).toContain('[AI Message Render Error]');
+    expect(conversationViewSource).toContain("import AIMessageRenderBoundary from './AIMessageRenderBoundary';");
     expect(boundarySource).toContain('这条 AI 消息渲染失败，已自动隔离');
     expect(source).toContain('__gonaviLastAIMessageRenderError');
-    expect(source).toContain('<AIMessageRenderBoundary');
-    expect(source).toContain('onDeleteMessage={handleDeleteMessage}');
+    expect(conversationViewSource).toContain('<AIMessageRenderBoundary');
+    expect(conversationViewSource).toContain('onDeleteMessage={onDeleteMessage}');
   });
 
   it('loads user prompt settings and appends them as system messages', () => {
@@ -55,7 +58,9 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain('const orderedAISessions = useMemo(');
     expect(source).toContain('right.updatedAt - left.updatedAt');
     expect(source).toContain('const panelHistorySessions = useMemo(');
-    expect(source).toContain('orderedAISessions.slice(0, 8)');
+    expect(source).toContain('buildAIChatInlineHistorySessions(orderedAISessions)');
+    expect(derivedStateSource).toContain('export const buildAIChatInlineHistorySessions');
+    expect(derivedStateSource).toContain('sessions.slice(0, limit)');
     expect(source).toContain('sessions={panelHistorySessions}');
   });
 });
