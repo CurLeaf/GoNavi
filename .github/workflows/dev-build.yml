@@ -616,7 +616,10 @@ jobs:
             echo "🔧 构建 ${OUTPUT_PATH} (tags=${BUILD_TAGS})"
             if [ "$DRIVER" = "duckdb" ]; then
               if [ -n "$DUCKDB_LIB_DIR" ]; then
-                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="-L${DUCKDB_LIB_DIR} -lduckdb" PATH="${DUCKDB_LIB_DIR}:$PATH" go build \
+                DUCKDB_LIB_DIR_GCC="$(cygpath -m "$DUCKDB_LIB_DIR")"
+                DUCKDB_LIB_DIR_PATH="$(cygpath -u "$DUCKDB_LIB_DIR")"
+                DUCKDB_WINDOWS_CGO_LDFLAGS="-L${DUCKDB_LIB_DIR_GCC} -lduckdb -lstdc++ -lm -lws2_32 -lwsock32 -lrstrtmgr"
+                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="${DUCKDB_WINDOWS_CGO_LDFLAGS}" PATH="${DUCKDB_LIB_DIR_PATH}:$PATH" go build \
                   -tags "${BUILD_TAGS}" \
                   -trimpath \
                   -ldflags "-s -w" \

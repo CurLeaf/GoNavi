@@ -427,6 +427,23 @@ func TestDuckDBWindowsBuildUsesDynamicLibraryTag(t *testing.T) {
 	}
 }
 
+func TestDuckDBWindowsDynamicLibraryCGOLDFlagsIncludeSupportLibraries(t *testing.T) {
+	flags := duckDBWindowsDynamicLibraryCGOLDFlags(`C:\tmp\duckdb lib`)
+	for _, expected := range []string{
+		`-L"C:/tmp/duckdb lib"`,
+		"-lduckdb",
+		"-lstdc++",
+		"-lm",
+		"-lws2_32",
+		"-lwsock32",
+		"-lrstrtmgr",
+	} {
+		if !strings.Contains(flags, expected) {
+			t.Fatalf("expected flags %q to contain %q", flags, expected)
+		}
+	}
+}
+
 func TestInstallOptionalDriverAgentFromLocalZipExtractsDuckDBDLL(t *testing.T) {
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		t.Skip("DuckDB DLL support file is only required on windows/amd64")

@@ -3835,7 +3835,7 @@ func buildOptionalDriverAgentFromSource(definition driverDefinition, executableP
 		duckDBLibDir = libDir
 		cleanupDuckDBLib = cleanup
 		defer cleanupDuckDBLib()
-		env = withEnvValue(env, "CGO_LDFLAGS", fmt.Sprintf("-L\"%s\" -lduckdb", filepath.ToSlash(duckDBLibDir)))
+		env = withEnvValue(env, "CGO_LDFLAGS", duckDBWindowsDynamicLibraryCGOLDFlags(duckDBLibDir))
 		env = prependPathEnv(env, duckDBLibDir)
 	}
 	buildArgs = append(buildArgs, "-o", executablePath, "./cmd/optional-driver-agent")
@@ -4127,6 +4127,20 @@ func withEnvValue(env []string, key string, value string) []string {
 		}
 	}
 	return append(env, entry)
+}
+
+func duckDBWindowsDynamicLibraryCGOLDFlags(libDir string) string {
+	normalizedDir := filepath.ToSlash(strings.TrimSpace(libDir))
+	parts := []string{
+		fmt.Sprintf("-L\"%s\"", normalizedDir),
+		"-lduckdb",
+		"-lstdc++",
+		"-lm",
+		"-lws2_32",
+		"-lwsock32",
+		"-lrstrtmgr",
+	}
+	return strings.Join(parts, " ")
 }
 
 func envValue(env []string, key string) string {
