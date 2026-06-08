@@ -118,7 +118,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
       </div>
     </div>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-      <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时，保存后会自动进入 AI 工具列表。</div>
+      <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时；不确定怎么填时先看卡片里的“字段速查”，保存后会自动进入 AI 工具列表。</div>
       <Button icon={<PlusOutlined />} onClick={() => onAddServer()} style={{ borderRadius: 10 }}>新增 MCP 服务</Button>
     </div>
     {mcpServers.length === 0 && (

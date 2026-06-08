@@ -63,6 +63,64 @@ const MCP_COMMAND_EXAMPLES = [
   'python -m your_mcp_server',
 ];
 
+const MCP_FIELD_GUIDES: Array<{
+  key: string;
+  title: string;
+  summary: string;
+  detail: string;
+  fieldState: 'required' | 'optional' | 'fixed';
+}> = [
+  {
+    key: 'name',
+    title: '服务名称',
+    summary: '保存后显示给你和 AI 看的名字。',
+    detail: '按用途命名，建议写成 Browser、GitHub、Filesystem 这类一眼能认出的名字。',
+    fieldState: 'required',
+  },
+  {
+    key: 'enabled',
+    title: '启用状态',
+    summary: '控制这条配置现在要不要参与工具发现和调用。',
+    detail: '禁用只是不使用，不会删除下面填好的配置。',
+    fieldState: 'optional',
+  },
+  {
+    key: 'transport',
+    title: '传输方式',
+    summary: 'GoNavi 用什么方式和这个 MCP Server 通信。',
+    detail: '当前固定为 stdio，表示本机直接启动进程并通过标准输入输出交互。',
+    fieldState: 'fixed',
+  },
+  {
+    key: 'command',
+    title: '启动命令',
+    summary: '只填程序名或启动器本身。',
+    detail: '常见是 node、uvx、python；脚本名和 --stdio 这类内容放到参数里。',
+    fieldState: 'required',
+  },
+  {
+    key: 'args',
+    title: '命令参数',
+    summary: '把脚本名、模块名、开关参数拆开逐项填写。',
+    detail: '例如 node server.js --stdio，要拆成 server.js 和 --stdio 两项。',
+    fieldState: 'optional',
+  },
+  {
+    key: 'env',
+    title: '环境变量',
+    summary: '给 MCP Server 传入 KEY=VALUE 形式的配置。',
+    detail: '通常用来放 API Key、服务地址、工作目录等；每行一条，不要写 export。',
+    fieldState: 'optional',
+  },
+  {
+    key: 'timeout',
+    title: '超时(秒)',
+    summary: '单次工具发现或调用最多等待多久。',
+    detail: '本机常规工具一般 20 秒就够，启动慢或远端链路再适当调大。',
+    fieldState: 'optional',
+  },
+];
+
 const quoteCommandPart = (value: string): string => {
   const text = String(value || '').trim();
   if (!text) {
@@ -193,6 +251,50 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
         </div>
       </div>
 
+      <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ ...labelStyle, color: overlayTheme.titleText }}>字段速查</div>
+        <div style={hintStyle(overlayTheme.mutedText)}>
+          如果看到某个参数名不知道该填什么，先看这一块；下面每个字段也都有更具体的示例和注意事项。
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+          {MCP_FIELD_GUIDES.map((item) => {
+            const tone = buildFieldTone(item.fieldState, darkMode);
+            return (
+              <div
+                key={item.key}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.78)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.title}</div>
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: tone.color,
+                      background: tone.bg,
+                    }}
+                  >
+                    {tone.label}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>{item.summary}</div>
+                <div style={hintStyle(overlayTheme.mutedText)}>{item.detail}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div style={{ padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ ...labelStyle, color: overlayTheme.titleText }}>只有一条完整命令？</div>
         <div style={hintStyle(overlayTheme.mutedText)}>
@@ -271,6 +373,32 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
             placeholder="超时(秒)"
             style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
           />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[
+              { label: '默认 20 秒', value: 20 },
+              { label: '稍宽松 45 秒', value: 45 },
+              { label: '慢启动 60 秒', value: 60 },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onChange({ timeoutSeconds: option.value })}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: 999,
+                  border: `1px solid ${cardBorder}`,
+                  background: server.timeoutSeconds === option.value
+                    ? (darkMode ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.12)')
+                    : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.75)'),
+                  color: server.timeoutSeconds === option.value ? '#2563eb' : overlayTheme.mutedText,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </MCPHelpBlock>
       </div>
 

@@ -36,6 +36,10 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('启动命令只填可执行程序本身');
     expect(markup).toContain('推荐填写顺序');
     expect(markup).toContain('小白用户可以按这个顺序填');
+    expect(markup).toContain('字段速查');
+    expect(markup).toContain('保存后显示给你和 AI 看的名字');
+    expect(markup).toContain('当前固定为 stdio');
+    expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('必填');
     expect(markup).toContain('可选');
     expect(markup).toContain('固定');
@@ -52,6 +56,9 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('测试工具发现');
     expect(markup).toContain('不会保存配置');
     expect(markup).toContain('测试通过后，上方会显示这条服务实际发现到的工具');
+    expect(markup).toContain('默认 20 秒');
+    expect(markup).toContain('稍宽松 45 秒');
+    expect(markup).toContain('慢启动 60 秒');
     expect(markup).toContain('node server.js --stdio');
   });
 });
