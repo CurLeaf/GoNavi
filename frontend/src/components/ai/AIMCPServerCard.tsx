@@ -5,6 +5,7 @@ import { DeleteOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
+import { formatMCPEnvDraft, parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
 
 interface AIMCPServerCardProps {
   server: AIMCPServerConfig;
@@ -88,13 +89,20 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
   onDelete,
 }) => {
   const [rawCommandDraft, setRawCommandDraft] = React.useState('');
+  const [envDraft, setEnvDraft] = React.useState(() => formatMCPEnvDraft(server.env));
   const launchPreview = formatLaunchPreview(server.command, server.args);
   const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
+  const parsedEnvDraft = parseMCPEnvDraft(envDraft);
+
+  React.useEffect(() => {
+    setEnvDraft(formatMCPEnvDraft(server.env));
+  }, [server.id]);
 
   const handleApplyCommandDraft = () => {
     if (!parsedCommandDraft.ok || !parsedCommandDraft.draft) {
       return;
     }
+    setEnvDraft(formatMCPEnvDraft(parsedCommandDraft.draft.env));
     onChange({
       command: parsedCommandDraft.draft.command,
       args: parsedCommandDraft.draft.args,
@@ -211,28 +219,22 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
       <MCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。" overlayTheme={overlayTheme} example="OPENAI_API_KEY=...">
         <Input.TextArea
           rows={3}
-          value={Object.entries(server.env || {}).map(([key, value]) => `${key}=${value}`).join('\n')}
-          onChange={(event) => onChange({
-            env: event.target.value
-              .split(/\r?\n/u)
-              .map((line) => line.trim())
-              .filter(Boolean)
-              .reduce<Record<string, string>>((acc, line) => {
-                const separatorIndex = line.indexOf('=');
-                if (separatorIndex <= 0) {
-                  return acc;
-                }
-                const key = line.slice(0, separatorIndex).trim();
-                if (!key) {
-                  return acc;
-                }
-                acc[key] = line.slice(separatorIndex + 1);
-                return acc;
-              }, {}),
-          })}
+          value={envDraft}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setEnvDraft(nextValue);
+            onChange({ env: parseMCPEnvDraft(nextValue).env });
+          }}
           placeholder={"环境变量，每行一个 KEY=VALUE，例如：\nOPENAI_API_KEY=...\nGITHUB_TOKEN=..."}
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
         />
+        <div style={{ ...hintStyle(parsedEnvDraft.invalidLines.length > 0 ? '#d97706' : overlayTheme.mutedText) }}>
+          {envDraft.trim()
+            ? parsedEnvDraft.invalidLines.length > 0
+              ? `已识别 ${parsedEnvDraft.validLines} 条环境变量，另有 ${parsedEnvDraft.invalidLines.length} 行格式无效，本次不会保存：${parsedEnvDraft.invalidLines.slice(0, 2).join(' / ')}`
+              : `已识别 ${parsedEnvDraft.validLines} 条环境变量。`
+            : '每行都要写成 KEY=VALUE；没有等号或 key 含空格的行不会保存。'}
+        </div>
       </MCPHelpBlock>
 
       {serverTools.length > 0 && (

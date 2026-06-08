@@ -38,6 +38,7 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('自动拆分到下方字段');
     expect(markup).toContain('每个参数单独录入一个标签');
     expect(markup).toContain('每行一个 KEY=VALUE');
+    expect(markup).toContain('没有等号或 key 含空格的行不会保存');
     expect(markup).toContain('当前阶段只支持 stdio');
     expect(markup).toContain('实际启动命令预览');
     expect(markup).toContain('node server.js --stdio');
