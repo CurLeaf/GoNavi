@@ -133,6 +133,42 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('SELECT * FROM orders');
   });
 
+  it('returns the current linked AI context so the model can inspect which table schemas are already mounted', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_context', {
+        includeDDL: true,
+        ddlLimit: 80,
+      }),
+      connections: [buildConnection()],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      },
+      aiContexts: {
+        'conn-1:crm': [
+          {
+            dbName: 'crm',
+            tableName: 'orders',
+            ddl: 'CREATE TABLE orders (id bigint primary key, status varchar(32), amount decimal(10,2));',
+          },
+        ],
+      },
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"hasActiveContext":true');
+    expect(result.content).toContain('"connectionName":"主库"');
+    expect(result.content).toContain('"tableName":"orders"');
+    expect(result.content).toContain('"includeDDL":true');
+    expect(result.content).toContain('CREATE TABLE orders');
+  });
+
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {
     const query = vi.fn();
     const result = await executeLocalAIToolCall({

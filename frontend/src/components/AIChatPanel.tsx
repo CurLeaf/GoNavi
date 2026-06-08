@@ -1056,6 +1056,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             const execution = await executeLocalAIToolCall({
                 toolCall: tc,
                 connections: currentConnections,
+                activeContext: useStore.getState().activeContext,
+                aiContexts: useStore.getState().aiContexts,
                 tabs: useStore.getState().tabs,
                 activeTabId: useStore.getState().activeTabId,
                 mcpTools,

@@ -303,6 +303,13 @@ SELECT * FROM users WHERE status = 1;
     });
   }
 
+  if (availableToolNames.includes('inspect_ai_context')) {
+    systemMessages.push({
+      role: 'system',
+      content: '如果用户提到“当前 AI 上下文”“当前关联了哪些表”“现在带了哪些表结构”，优先调用 inspect_ai_context 读取当前挂载的表结构上下文，不要凭记忆复述。',
+    });
+  }
+
   appendCustomPromptGroup(systemMessages, ['database'], userPromptSettings);
   appendSkillPromptGroup(systemMessages, ['database'], skills, availableToolNames);
   return systemMessages;

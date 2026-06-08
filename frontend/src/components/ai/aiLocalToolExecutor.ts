@@ -1,11 +1,12 @@
 import { DBGetAllColumns, DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
 
 import type { SqlLog } from '../../store';
-import type { AIChatMessage, AIMCPToolDescriptor, AIToolCall, SavedConnection, TabData } from '../../types';
+import type { AIChatMessage, AIContextItem, AIMCPToolDescriptor, AIToolCall, SavedConnection, TabData } from '../../types';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildAIReadonlyPreviewSQL } from '../../utils/aiSqlLimit';
 import { buildPaginatedSelectSQL, quoteQualifiedIdent } from '../../utils/sql';
 import { resolveAITableSchemaToolResult } from '../../utils/aiTableSchemaTool';
+import { buildAIContextSnapshot } from './aiContextInsights';
 import {
   buildActiveTabSnapshot,
   buildRecentSqlLogsSnapshot,
@@ -35,6 +36,8 @@ interface AILocalToolRuntime {
 export interface ExecuteLocalAIToolCallOptions {
   toolCall: AIToolCall;
   connections: SavedConnection[];
+  activeContext?: { connectionId: string; dbName: string } | null;
+  aiContexts?: Record<string, AIContextItem[]>;
   tabs?: TabData[];
   activeTabId?: string | null;
   mcpTools: AIMCPToolDescriptor[];
@@ -160,6 +163,8 @@ const buildPreviewSQLForTable = (connection: SavedConnection, tableName: string,
 export async function executeLocalAIToolCall({
   toolCall,
   connections,
+  activeContext = null,
+  aiContexts = {},
   tabs = [],
   activeTabId = null,
   mcpTools,
@@ -201,6 +206,21 @@ export async function executeLocalAIToolCall({
           success = true;
         } catch (error: any) {
           content = `读取当前工作区页签失败: ${error?.message || error}`;
+        }
+        break;
+      }
+      case 'inspect_ai_context': {
+        try {
+          content = JSON.stringify(buildAIContextSnapshot({
+            activeContext,
+            aiContexts,
+            connections,
+            includeDDL: args.includeDDL === true,
+            ddlLimit: args.ddlLimit,
+          }));
+          success = true;
+        } catch (error: any) {
+          content = `读取当前 AI 上下文失败: ${error?.message || error}`;
         }
         break;
       }

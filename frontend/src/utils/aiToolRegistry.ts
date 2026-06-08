@@ -310,6 +310,29 @@ export const BUILTIN_AI_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_context",
+    icon: "🧷",
+    desc: "查看当前 AI 已关联的表结构上下文",
+    detail:
+      "返回当前对话已经挂载到 AI 上下文里的表清单、所属连接与数据库，以及每张表的 DDL 预览。适合用户说“看看我现在带了哪些表结构”“当前 AI 上下文是什么”时，先读取真实挂载状态再继续分析。",
+    params: "includeDDL?(默认 false), ddlLimit?(默认 4000)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_context",
+        description:
+          "读取当前对话已经关联到 AI 上下文里的表结构快照，包括连接、数据库、表名，以及可选的 DDL 内容。适用于用户提到当前 AI 上下文、当前关联表、当前挂载的表结构时，先读取真实状态，避免模型凭记忆复述。",
+        parameters: {
+          type: "object",
+          properties: {
+            includeDDL: { type: "boolean", description: "可选，是否附带每张表的 DDL 内容，默认 false" },
+            ddlLimit: { type: "number", description: "可选，DDL 截断长度，默认 4000，最大 12000" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_active_tab",
     icon: "📍",
     desc: "查看当前活动页签上下文",

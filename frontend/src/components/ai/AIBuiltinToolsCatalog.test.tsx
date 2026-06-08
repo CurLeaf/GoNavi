@@ -6,7 +6,7 @@ import AIBuiltinToolsCatalog from './AIBuiltinToolsCatalog';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 describe('AIBuiltinToolsCatalog', () => {
-  it('renders the workspace-tab flow, active-tab flow, sql log replay flow, and both snapshot tools', () => {
+  it('renders the AI-context flow, workspace-tab flow, sql log replay flow, and both snapshot tools', () => {
     const markup = renderToStaticMarkup(
       <AIBuiltinToolsCatalog
         darkMode={false}
@@ -26,6 +26,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_table_bundle');
     expect(markup).toContain('全库快速摸底');
     expect(markup).toContain('inspect_database_bundle');
+    expect(markup).toContain('查看当前 AI 上下文');
+    expect(markup).toContain('inspect_ai_context');
     expect(markup).toContain('读取当前页签');
     expect(markup).toContain('inspect_active_tab');
     expect(markup).toContain('盘点当前工作区');

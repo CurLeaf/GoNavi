@@ -68,13 +68,14 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_ai_context', 'get_columns'],
       skills,
       userPromptSettings,
     });
 
     const joined = messages.map((message) => message.content).join('\n');
     expect(joined).toContain('inspect_workspace_tabs 盘点当前工作区');
+    expect(joined).toContain('inspect_ai_context 读取当前挂载的表结构上下文');
     expect(joined).toContain('以下是当前用户的自定义补充提示词（全局）');
     expect(joined).toContain('以下是当前用户的自定义补充提示词（数据库会话）');
     expect(joined).toContain('以下是当前启用的 Skill「结构审查」');

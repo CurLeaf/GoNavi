@@ -1,6 +1,6 @@
 import React from 'react';
-import { Input, Select, Tooltip, message, Button, Tag } from 'antd';
-import { CodeOutlined, DatabaseOutlined, DownOutlined, PlusOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined, ExclamationCircleFilled } from '@ant-design/icons';
+import { Input, Select, Tooltip, message, Button } from 'antd';
+import { CodeOutlined, DatabaseOutlined, DownOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined } from '@ant-design/icons';
 import { useStore } from '../../store';
 import { DBGetTables, DBShowCreateTable, DBGetDatabases, DBGetColumns } from '../../../wailsjs/go/app/App';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
@@ -11,6 +11,10 @@ import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
 import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shortcuts';
 import AIContextSelectorModal from './AIContextSelectorModal';
 import AISlashCommandMenu, { type AISlashCommandDefinition } from './AISlashCommandMenu';
+import AIChatComposerNotice from './AIChatComposerNotice';
+import AIChatAttachmentStrip from './AIChatAttachmentStrip';
+import AIChatContextPreview from './AIChatContextPreview';
+import { filterAISlashCommands } from './aiSlashCommands';
 
 interface AIChatInputProps {
     input: string;
@@ -57,17 +61,21 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     const [appendingContext, setAppendingContext] = React.useState(false);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const appendDraftImage = React.useCallback((blob: Blob) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                setDraftImages(prev => [...prev, event.target!.result as string]);
+            }
+        };
+        reader.readAsDataURL(blob);
+    }, [setDraftImages]);
+
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
         files.forEach(file => {
             if (file.type.indexOf('image') !== -1) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    if (event.target?.result) {
-                        setDraftImages(prev => [...prev, event.target!.result as string]);
-                    }
-                };
-                reader.readAsDataURL(file);
+                appendDraftImage(file);
             }
         });
         if (fileInputRef.current) {
@@ -80,49 +88,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
     const filteredTables = contextTables.filter(t => t.name.toLowerCase().includes(searchText.toLowerCase()));
     const [contextExpanded, setContextExpanded] = React.useState(false);
-    const composerNoticePalette = React.useMemo(() => {
-        if (composerNotice?.tone === 'error') {
-            return darkMode
-                ? {
-                    background: 'rgba(255,120,117,0.12)',
-                    borderColor: 'rgba(255,120,117,0.24)',
-                    iconColor: '#ff7875',
-                }
-                : {
-                    background: 'rgba(255,77,79,0.08)',
-                    borderColor: 'rgba(255,77,79,0.16)',
-                    iconColor: '#ff4d4f',
-                };
-        }
-
-        return darkMode
-            ? {
-                background: 'rgba(250,173,20,0.12)',
-                borderColor: 'rgba(250,173,20,0.22)',
-                iconColor: '#ffd666',
-            }
-            : {
-                background: 'rgba(250,173,20,0.08)',
-                borderColor: 'rgba(250,173,20,0.18)',
-                iconColor: '#d48806',
-            };
-    }, [composerNotice, darkMode]);
-    const composerNoticeActionLabel = composerNotice?.action?.label;
 
     // Slash commands
     const [showSlashMenu, setShowSlashMenu] = React.useState(false);
     const [slashFilter, setSlashFilter] = React.useState('');
-    const slashCommands = React.useMemo<AISlashCommandDefinition[]>(() => [
-        { cmd: '/query',    label: '🔍 自然语言查询', desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
-        { cmd: '/sql',      label: '📝 生成 SQL',     desc: '描述需求自动生成语句', prompt: '请根据以下需求生成 SQL：' },
-        { cmd: '/explain',  label: '💡 解释 SQL',     desc: '解释选中 SQL 的逻辑',  prompt: '请解释以下 SQL 的执行逻辑和每一步的作用：\n```sql\n\n```' },
-        { cmd: '/optimize', label: '⚡ 优化分析',     desc: '分析 SQL 性能瓶颈',    prompt: '请分析以下 SQL 的性能问题，并给出优化后的版本：\n```sql\n\n```' },
-        { cmd: '/schema',   label: '🏗️ 表设计评审',   desc: '评审表结构设计质量',   prompt: '请全面评审当前关联表的设计，包括字段类型、范式、索引策略等方面的改进建议：' },
-        { cmd: '/index',    label: '📊 索引建议',     desc: '推荐最优索引方案',      prompt: '请基于当前表结构和常见查询场景，推荐最优的索引方案并给出建表语句：' },
-        { cmd: '/diff',     label: '🔄 表对比',       desc: '对比两表差异生成变更',  prompt: '请对比以下两张表的结构差异，并生成从旧版本迁移到新版本的 ALTER 语句：' },
-        { cmd: '/mock',     label: '🎲 造测试数据',   desc: '生成 INSERT 测试数据', prompt: '请为当前关联的表生成 10 条符合业务语义的测试数据 INSERT 语句：' },
-    ], []);
-    const filteredSlashCmds = slashCommands.filter(c => c.cmd.startsWith(slashFilter.toLowerCase()));
+    const filteredSlashCmds = React.useMemo(() => filterAISlashCommands(slashFilter), [slashFilter]);
 
     const aiContexts = useStore(state => state.aiContexts);
     const addAIContext = useStore(state => state.addAIContext);
@@ -259,17 +229,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 event.preventDefault();
                 const blob = items[i].getAsFile();
                 if (blob) {
-                    const reader = new FileReader();
-                    reader.onload = (loadEvent) => {
-                        if (loadEvent.target?.result) {
-                            setDraftImages(prev => [...prev, loadEvent.target!.result as string]);
-                        }
-                    };
-                    reader.readAsDataURL(blob);
+                    appendDraftImage(blob);
                 }
             }
         }
-    }, [setDraftImages]);
+    }, [appendDraftImage]);
 
     const handleComposerInputChange = React.useCallback((value: string) => {
         setInput(value);
@@ -296,6 +260,14 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         textareaRef.current?.focus();
     }, [setInput, textareaRef]);
 
+    const handleRemoveDraftImage = React.useCallback((index: number) => {
+        setDraftImages(prev => prev.filter((_, currentIndex) => currentIndex !== index));
+    }, [setDraftImages]);
+
+    const handleRemoveContextItem = React.useCallback((dbName: string, tableName: string) => {
+        removeAIContext(connectionKey, dbName, tableName);
+    }, [connectionKey, removeAIContext]);
+
     if (!isV2Ui) {
         return (
             <div className="ai-chat-input-area" style={{ borderTop: 'none', padding: '12px 16px 20px' }}>
@@ -309,73 +281,30 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     padding: '8px 4px 8px'
                 }}>
                     <div className="ai-chat-input-preview-area" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {activeContextItems.length > 0 && (
-                            <Tag
-                                onClick={() => setContextExpanded(!contextExpanded)}
-                                style={{ background: darkMode ? 'rgba(24, 144, 255, 0.15)' : 'rgba(24, 144, 255, 0.08)', border: 'none', color: '#1890ff', borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0, cursor: 'pointer', transition: 'all 0.3s' }}
-                            >
-                                <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <DatabaseOutlined /> 关联上下文 ({activeContextItems.length}) {contextExpanded ? '▴' : '▾'}
-                                </span>
-                            </Tag>
-                        )}
-
-                        {contextExpanded && activeContextItems.map((ctx, idx) => (
-                            <Tag
-                                key={`ctx-${idx}`}
-                                closable
-                                onClose={(e) => { e.preventDefault(); removeAIContext(connectionKey, ctx.dbName, ctx.tableName); }}
-                                style={{ background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)', border: 'none', color: textColor, borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0 }}
-                            >
-                                <span style={{ fontSize: 13 }}>🗄️ {ctx.tableName}</span>
-                            </Tag>
-                        ))}
-                        {draftImages.map((b64, i) => (
-                            <div key={i} style={{ position: 'relative', width: 60, height: 60, borderRadius: 6, overflow: 'hidden', border: overlayTheme.shellBorder }}>
-                                <img src={b64} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={`Draft ${i}`} />
-                                <div
-                                    onClick={() => setDraftImages(prev => prev.filter((_, idx) => idx !== i))}
-                                    style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.5)', color: '#fff', borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10 }}
-                                >
-                                    ✕
-                                </div>
-                            </div>
-                        ))}
+                        <AIChatContextPreview
+                            variant="legacy"
+                            activeContextItems={activeContextItems}
+                            contextExpanded={contextExpanded}
+                            darkMode={darkMode}
+                            textColor={textColor}
+                            onToggleExpanded={() => setContextExpanded(!contextExpanded)}
+                            onOpenContext={handleOpenContext}
+                            onRemoveContext={handleRemoveContextItem}
+                        />
+                        <AIChatAttachmentStrip
+                            variant="legacy"
+                            draftImages={draftImages}
+                            overlayTheme={overlayTheme}
+                            onRemove={handleRemoveDraftImage}
+                        />
                     </div>
-                    {composerNotice && (
-                        <div
-                            data-ai-chat-composer-notice="true"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'flex-start',
-                                gap: 8,
-                                padding: '8px 10px',
-                                borderRadius: 12,
-                                background: composerNoticePalette.background,
-                                border: `1px solid ${composerNoticePalette.borderColor}`,
-                            }}
-                        >
-                            <ExclamationCircleFilled style={{ color: composerNoticePalette.iconColor, fontSize: 14, marginTop: 1, flexShrink: 0 }} />
-                            <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: textColor, lineHeight: 1.4 }}>
-                                    {composerNotice.title}
-                                </div>
-                                <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
-                                    {composerNotice.description}
-                                </div>
-                                {composerNoticeActionLabel && typeof onComposerNoticeAction === 'function' && (
-                                    <Button
-                                        size="small"
-                                        type="default"
-                                        onClick={onComposerNoticeAction}
-                                        style={{ marginTop: 8, borderRadius: 8 }}
-                                    >
-                                        {composerNoticeActionLabel}
-                                    </Button>
-                                )}
-                            </div>
-                        </div>
-                    )}
+                    <AIChatComposerNotice
+                        composerNotice={composerNotice}
+                        darkMode={darkMode}
+                        textColor={textColor}
+                        mutedColor={mutedColor}
+                        onComposerNoticeAction={onComposerNoticeAction}
+                    />
                     <div data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                         <AISlashCommandMenu
                             visible={showSlashMenu}
@@ -557,96 +486,29 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 gap: 8,
                 padding: '8px 4px 8px'
             }}>
-                <div className="ai-chat-input-preview-area gn-v2-ai-context-row">
-                    <button
-                        type="button"
-                        className={`gn-v2-ai-context-toggle${contextExpanded ? ' is-expanded' : ''}`}
-                        onClick={() => setContextExpanded(!contextExpanded)}
-                        aria-expanded={contextExpanded}
-                    >
-                        <TableOutlined />
-                        <span>关联上下文</span>
-                        <strong>{activeContextItems.length}</strong>
-                        <DownOutlined />
-                    </button>
-                    <button
-                        type="button"
-                        className="gn-v2-ai-context-add"
-                        onClick={handleOpenContext}
-                    >
-                        <PlusOutlined />
-                        <span>添加</span>
-                    </button>
-                </div>
-
-                {contextExpanded && activeContextItems.length > 0 && (
-                    <div className="gn-v2-ai-context-detail" data-ai-context-detail="true">
-                        <div className="gn-v2-ai-context-detail-title">当前上下文 · {activeContextItems.length}</div>
-                        {activeContextItems.map((ctx, idx) => (
-                            <Tag
-                                key={`ctx-${idx}`}
-                                closable
-                                onClose={(e) => { e.preventDefault(); removeAIContext(connectionKey, ctx.dbName, ctx.tableName); }}
-                                className="gn-v2-ai-context-table-chip"
-                                style={{ margin: 0 }}
-                            >
-                                <TableOutlined />
-                                <span>{ctx.tableName}</span>
-                            </Tag>
-                        ))}
-                    </div>
-                )}
-
-                {draftImages.length > 0 && (
-                    <div className="gn-v2-ai-attachment-row">
-                        {draftImages.map((b64, i) => (
-                            <div key={i} className="gn-v2-ai-attachment-thumb">
-                                <img src={b64} alt={`Draft ${i}`} />
-                                <button
-                                    type="button"
-                                    onClick={() => setDraftImages(prev => prev.filter((_, idx) => idx !== i))}
-                                    aria-label="移除图片"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                )}
-                {composerNotice && (
-                    <div
-                        data-ai-chat-composer-notice="true"
-                        style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 8,
-                            padding: '8px 10px',
-                            borderRadius: 12,
-                            background: composerNoticePalette.background,
-                            border: `1px solid ${composerNoticePalette.borderColor}`,
-                        }}
-                    >
-                        <ExclamationCircleFilled style={{ color: composerNoticePalette.iconColor, fontSize: 14, marginTop: 1, flexShrink: 0 }} />
-                        <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: textColor, lineHeight: 1.4 }}>
-                                {composerNotice.title}
-                            </div>
-                            <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5, marginTop: 2, wordBreak: 'break-word' }}>
-                                {composerNotice.description}
-                            </div>
-                            {composerNoticeActionLabel && typeof onComposerNoticeAction === 'function' && (
-                                <Button
-                                    size="small"
-                                    type="default"
-                                    onClick={onComposerNoticeAction}
-                                    style={{ marginTop: 8, borderRadius: 8 }}
-                                >
-                                    {composerNoticeActionLabel}
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                )}
+                <AIChatContextPreview
+                    variant="v2"
+                    activeContextItems={activeContextItems}
+                    contextExpanded={contextExpanded}
+                    darkMode={darkMode}
+                    textColor={textColor}
+                    onToggleExpanded={() => setContextExpanded(!contextExpanded)}
+                    onOpenContext={handleOpenContext}
+                    onRemoveContext={handleRemoveContextItem}
+                />
+                <AIChatAttachmentStrip
+                    variant="v2"
+                    draftImages={draftImages}
+                    overlayTheme={overlayTheme}
+                    onRemove={handleRemoveDraftImage}
+                />
+                <AIChatComposerNotice
+                    composerNotice={composerNotice}
+                    darkMode={darkMode}
+                    textColor={textColor}
+                    mutedColor={mutedColor}
+                    onComposerNoticeAction={onComposerNoticeAction}
+                />
                 <div className="gn-v2-ai-input-box" data-ai-chat-composer-input="true" style={{ position: 'relative' }}>
                     <AISlashCommandMenu
                         visible={showSlashMenu}
