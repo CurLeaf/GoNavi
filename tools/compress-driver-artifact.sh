@@ -67,6 +67,56 @@ case "$goos/$goarch" in
     ;;
 esac
 
+host_platform="$(go env GOOS)/$(go env GOARCH)"
+
+is_driver_agent_binary() {
+  local artifact_name
+  artifact_name="$(basename "$artifact_path")"
+  [[ "$artifact_name" == *"-driver-agent-"* ]]
+}
+
+can_smoke_test_driver_agent() {
+  is_driver_agent_binary && [[ "$host_platform" == "$platform" ]]
+}
+
+smoke_test_driver_agent_metadata() {
+  local stdout_file stderr_file
+  stdout_file="$(mktemp "${TMPDIR:-/tmp}/gonavi-driver-agent-stdout.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/gonavi-driver-agent-stderr.XXXXXX")"
+
+  if ! printf '%s\n' '{"id":1,"method":"metadata"}' | "$artifact_path" >"$stdout_file" 2>"$stderr_file"; then
+    [[ -s "$stderr_file" ]] && cat "$stderr_file" >&2
+    rm -f "$stdout_file" "$stderr_file"
+    return 1
+  fi
+
+  if ! python3 - "$stdout_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+lines = [line.strip() for line in Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+if not lines:
+    raise SystemExit(1)
+
+payload = json.loads(lines[0])
+if not payload.get("success"):
+    raise SystemExit(1)
+
+data = payload.get("data") or {}
+if not str(data.get("agentRevision") or "").strip():
+    raise SystemExit(1)
+PY
+  then
+    [[ -s "$stderr_file" ]] && cat "$stderr_file" >&2
+    rm -f "$stdout_file" "$stderr_file"
+    return 1
+  fi
+
+  rm -f "$stdout_file" "$stderr_file"
+  return 0
+}
+
 if ! command -v upx >/dev/null 2>&1; then
   if [[ "$mode" == "required" ]]; then
     echo "❌ 未找到 upx，无法压缩：$label" >&2
@@ -122,6 +172,18 @@ if ! upx -t "$artifact_path" >/dev/null 2>&1; then
   fi
   echo "⚠️  UPX 校验失败，已恢复原文件：$label"
   exit 0
+fi
+
+if can_smoke_test_driver_agent; then
+  if ! smoke_test_driver_agent_metadata; then
+    cp "$backup_path" "$artifact_path"
+    if [[ "$mode" == "required" ]]; then
+      echo "❌ UPX 压缩后 driver-agent metadata 自检失败：$label" >&2
+      exit 1
+    fi
+    echo "⚠️  UPX 压缩后 driver-agent metadata 自检失败，已恢复原文件：$label"
+    exit 0
+  fi
 fi
 
 after_bytes="$(file_size_bytes "$artifact_path")"
