@@ -28,7 +28,6 @@ import {
   buildRecentSqlActivitySnapshot,
   buildRecentSqlLogsSnapshot,
 } from './aiSqlLogInsights';
-import { buildSqlRiskSnapshot } from './aiSqlRiskInsights';
 import {
   buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
@@ -41,6 +40,7 @@ import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
 } from './aiSnapshotInspectionToolTypes';
+import { executeSqlRiskInspectionToolCall } from './aiSnapshotInspectionSqlRiskToolExecutor';
 
 interface ExecuteSnapshotInspectionToolCallOptions {
   toolName: string;
@@ -105,6 +105,18 @@ export async function executeSnapshotInspectionToolCall(
     });
     if (aiConfigResult) {
       return aiConfigResult;
+    }
+
+    const sqlRiskResult = await executeSqlRiskInspectionToolCall({
+      toolName,
+      args,
+      connections,
+      tabs,
+      activeTabId,
+      runtime,
+    });
+    if (sqlRiskResult) {
+      return sqlRiskResult;
     }
 
     switch (toolName) {
@@ -252,26 +264,6 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
-      case 'inspect_sql_risk': {
-        const candidateSql = String(args.sql || '').trim();
-        const activeTab = tabs.find((tab) => tab.id === activeTabId);
-        const activeTabSql = activeTab?.type === 'query' ? String(activeTab.query || '').trim() : '';
-        const sqlForCheck = candidateSql || activeTabSql;
-        const safetyCheck = sqlForCheck && typeof runtime?.checkSQL === 'function'
-          ? await runtime.checkSQL(sqlForCheck)
-          : undefined;
-        return {
-          content: JSON.stringify(buildSqlRiskSnapshot({
-            sql: candidateSql,
-            previewCharLimit: args.previewCharLimit,
-            tabs,
-            activeTabId,
-            connections,
-            safetyCheck,
-          })),
-          success: true,
-        };
-      }
       case 'inspect_app_logs': {
         const readResult = typeof runtime?.readAppLogTail === 'function'
           ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
