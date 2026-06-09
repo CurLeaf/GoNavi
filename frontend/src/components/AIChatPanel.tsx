@@ -48,6 +48,7 @@ import { useAIChatAutoContext } from './ai/useAIChatAutoContext';
 import { useAIChatPanelResize } from './ai/useAIChatPanelResize';
 import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';
 import { useAIChatSessionState } from './ai/useAIChatSessionState';
+import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';
 
 interface AIChatPanelProps {
     width?: number;
@@ -199,30 +200,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         return () => window.removeEventListener('gonavi:ai:inject-prompt', handler);
     }, []);
 
-    const generateTitleForSession = async (currentSid: string) => {
-        try {
-            const Service = (window as any).go?.aiservice?.Service;
-            const historyLocal = useStore.getState().aiChatHistory[currentSid] || [];
-            if (!Service?.AIChatSend || historyLocal.length < 2) return;
-            
-            const firstUserMsg = historyLocal.find(m => m.role === 'user');
-            if (firstUserMsg) {
-                // 取用前 50 个字符截断，防止太长的查询消耗过多 Token
-                const snippet = firstUserMsg.content.slice(0, 50);
-                const titleReq = [
-                    { role: 'system', content: 'You are a summarizer. Provide a short 3-6 word title for this prompt. Do not use quotes, punctuation, or explain. Just the title in the same language as the prompt.' },
-                    { role: 'user', content: snippet }
-                ];
-                const res = await Service.AIChatSend(titleReq);
-                if (res?.success && res.content) {
-                    const cleanTitle = res.content.trim().replace(/^["']|["']$/g, '');
-                    updateAISessionTitle(currentSid, cleanTitle);
-                }
-            }
-        } catch (e) {
-            console.warn('Failed to auto-generate title', e);
-        }
-    };
+    const generateTitleForSession = useAIChatSessionTitleGenerator({ updateAISessionTitle });
 
     const handleScrollMessages = useCallback((e: React.UIEvent<HTMLDivElement>) => {
         const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
@@ -625,6 +603,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         availableTools,
         buildSystemContextMessages,
         dynamicModels,
+        generateTitleForSession,
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
         loadingModels,

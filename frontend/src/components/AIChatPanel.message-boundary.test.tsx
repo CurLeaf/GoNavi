@@ -11,6 +11,7 @@ const planContextSource = readFileSync(new URL('./ai/useAIChatPlanContexts.ts', 
 const resizeSource = readFileSync(new URL('./ai/useAIChatPanelResize.ts', import.meta.url), 'utf8');
 const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
 const sessionStateSource = readFileSync(new URL('./ai/useAIChatSessionState.ts', import.meta.url), 'utf8');
+const titleGeneratorSource = readFileSync(new URL('./ai/useAIChatSessionTitleGenerator.ts', import.meta.url), 'utf8');
 const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
 const inspectionGuidanceSource = readFileSync(new URL('./ai/aiSystemInspectionGuidance.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
@@ -86,14 +87,17 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain('sessions={panelHistorySessions}');
   });
 
-  it('extracts plan-context, auto-context, and resize hooks so the panel file stays focused on orchestration', () => {
+  it('extracts plan-context, auto-context, title, and resize hooks so the panel file stays focused on orchestration', () => {
     expect(source).toContain("import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';");
     expect(source).toContain("import { useAIChatAutoContext } from './ai/useAIChatAutoContext';");
+    expect(source).toContain("import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';");
     expect(source).toContain("import { useAIChatPanelResize } from './ai/useAIChatPanelResize';");
     expect(planContextSource).toContain('export const useAIChatPlanContexts');
     expect(planContextSource).toContain('pendingJVMPlanContextRef');
     expect(autoContextSource).toContain('export const useAIChatAutoContext');
     expect(autoContextSource).toContain('DBShowCreateTable');
+    expect(titleGeneratorSource).toContain('export const useAIChatSessionTitleGenerator');
+    expect(titleGeneratorSource).toContain('Failed to auto-generate title');
     expect(resizeSource).toContain('export const useAIChatPanelResize');
     expect(resizeSource).toContain('document.body.style.pointerEvents = \'none\'');
   });
