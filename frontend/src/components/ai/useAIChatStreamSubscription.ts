@@ -45,6 +45,35 @@ interface UseAIChatStreamSubscriptionOptions {
   pendingJVMDiagnosticPlanContextRef: MutableRefObject<JVMDiagnosticPlanContext | undefined>;
 }
 
+interface AIChatStreamState {
+  sid: string;
+  assistantMsgId: string;
+  isFirstCompletion: boolean;
+  streamBuffer: {
+    thinking: string;
+    reasoningContent: string;
+    content: string;
+  };
+  flushPending: boolean;
+}
+
+const createAIChatStreamState = (sid: string): AIChatStreamState => ({
+  sid,
+  assistantMsgId: '',
+  isFirstCompletion: false,
+  streamBuffer: { thinking: '', reasoningContent: '', content: '' },
+  flushPending: false,
+});
+
+const resetAIChatStreamProgress = (state: AIChatStreamState) => {
+  state.assistantMsgId = '';
+  state.isFirstCompletion = false;
+  state.streamBuffer.thinking = '';
+  state.streamBuffer.reasoningContent = '';
+  state.streamBuffer.content = '';
+  state.flushPending = false;
+};
+
 export const useAIChatStreamSubscription = ({
   sid,
   sending,
@@ -61,6 +90,7 @@ export const useAIChatStreamSubscription = ({
   pendingJVMDiagnosticPlanContextRef,
 }: UseAIChatStreamSubscriptionOptions) => {
   const sendingRef = useRef(sending);
+  const streamStateRef = useRef(createAIChatStreamState(sid));
 
   useEffect(() => {
     sendingRef.current = sending;
@@ -68,17 +98,19 @@ export const useAIChatStreamSubscription = ({
 
   useEffect(() => {
     const eventName = `ai:stream:${sid}`;
-    let assistantMsgId = '';
-    let isFirstCompletion = false;
+    if (streamStateRef.current.sid !== sid) {
+      streamStateRef.current = createAIChatStreamState(sid);
+    }
+    const streamState = streamStateRef.current;
 
     // 缓冲高频 token，避免把流式吞吐直接转成同步重绘风暴
-    const streamBuffer = { thinking: '', reasoningContent: '', content: '' };
-    let flushPending = false;
+    const streamBuffer = streamState.streamBuffer;
 
     const flushStreamBuffer = () => {
-      if (!assistantMsgId) return;
+      streamState.flushPending = false;
+      if (!streamState.assistantMsgId) return;
       const current = useStore.getState().aiChatHistory[sid];
-      const existing = current?.find((message) => message.id === assistantMsgId);
+      const existing = current?.find((message) => message.id === streamState.assistantMsgId);
       if (!existing) return;
 
       const updates: Partial<AIChatMessage> = {};
@@ -98,26 +130,25 @@ export const useAIChatStreamSubscription = ({
       }
 
       if (Object.keys(updates).length > 0) {
-        updateAIChatMessage(sid, assistantMsgId, updates);
+        updateAIChatMessage(sid, streamState.assistantMsgId, updates);
       }
-      flushPending = false;
     };
 
     const handler = (data: AIChatStreamChunk) => {
-      if (!assistantMsgId) {
+      if (!streamState.assistantMsgId) {
         const history = useStore.getState().aiChatHistory[sid] || [];
         const lastMsg = history[history.length - 1];
         if (lastMsg && lastMsg.role === 'assistant' && lastMsg.loading && lastMsg.phase === 'connecting') {
-          assistantMsgId = lastMsg.id;
-          updateAIChatMessage(sid, assistantMsgId, { content: '' });
+          streamState.assistantMsgId = lastMsg.id;
+          updateAIChatMessage(sid, streamState.assistantMsgId, { content: '' });
         }
       }
 
       if (data.error) {
         const cleanErr = sanitizeErrorMsg(data.error);
         const rawErr = cleanErr !== data.error ? data.error : undefined;
-        if (assistantMsgId) {
-          updateAIChatMessage(sid, assistantMsgId, {
+        if (streamState.assistantMsgId) {
+          updateAIChatMessage(sid, streamState.assistantMsgId, {
             content: `❌ 错误: ${cleanErr}`,
             phase: 'idle',
             loading: false,
@@ -135,18 +166,18 @@ export const useAIChatStreamSubscription = ({
             jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
           });
         }
-        assistantMsgId = '';
+        resetAIChatStreamProgress(streamState);
         setSending(false);
         return;
       }
 
       if (data.tool_calls && data.tool_calls.length > 0) {
-        if (assistantMsgId) {
-          updateAIChatMessage(sid, assistantMsgId, { tool_calls: data.tool_calls, phase: 'tool_calling' });
+        if (streamState.assistantMsgId) {
+          updateAIChatMessage(sid, streamState.assistantMsgId, { tool_calls: data.tool_calls, phase: 'tool_calling' });
         } else {
-          assistantMsgId = nextMessageId();
+          streamState.assistantMsgId = nextMessageId();
           addAIChatMessage(sid, {
-            id: assistantMsgId,
+            id: streamState.assistantMsgId,
             role: 'assistant',
             phase: 'tool_calling',
             content: '',
@@ -161,10 +192,10 @@ export const useAIChatStreamSubscription = ({
 
       const displayThinking = data.thinking || data.reasoning_content || '';
       if (displayThinking || data.reasoning_content) {
-        if (!assistantMsgId) {
-          assistantMsgId = nextMessageId();
+        if (!streamState.assistantMsgId) {
+          streamState.assistantMsgId = nextMessageId();
           addAIChatMessage(sid, {
-            id: assistantMsgId,
+            id: streamState.assistantMsgId,
             role: 'assistant',
             phase: 'thinking',
             content: '',
@@ -186,10 +217,10 @@ export const useAIChatStreamSubscription = ({
       }
 
       if (data.content) {
-        if (!assistantMsgId) {
-          assistantMsgId = nextMessageId();
+        if (!streamState.assistantMsgId) {
+          streamState.assistantMsgId = nextMessageId();
           addAIChatMessage(sid, {
-            id: assistantMsgId,
+            id: streamState.assistantMsgId,
             role: 'assistant',
             phase: 'generating',
             content: data.content,
@@ -200,7 +231,7 @@ export const useAIChatStreamSubscription = ({
           });
           setSending(false);
           const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-          if (currentHistory.length <= 1) isFirstCompletion = true;
+          if (currentHistory.length <= 1) streamState.isFirstCompletion = true;
         } else {
           streamBuffer.content += data.content;
           if (sendingRef.current) setSending(false);
@@ -208,8 +239,8 @@ export const useAIChatStreamSubscription = ({
       }
 
       if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
-        if (!flushPending) {
-          flushPending = true;
+        if (!streamState.flushPending) {
+          streamState.flushPending = true;
           requestAnimationFrame(flushStreamBuffer);
         }
       }
@@ -218,9 +249,9 @@ export const useAIChatStreamSubscription = ({
         if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
           flushStreamBuffer();
         }
-        const doneAssistantId = assistantMsgId;
-        const doneIsFirst = isFirstCompletion;
-        assistantMsgId = '';
+        const doneAssistantId = streamState.assistantMsgId;
+        const doneIsFirst = streamState.isFirstCompletion;
+        resetAIChatStreamProgress(streamState);
         setTimeout(() => {
           const currentMsgs = useStore.getState().aiChatHistory[sid] || [];
           for (const msg of currentMsgs) {

@@ -12,6 +12,7 @@ const resizeSource = readFileSync(new URL('./ai/useAIChatPanelResize.ts', import
 const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
 const sessionStateSource = readFileSync(new URL('./ai/useAIChatSessionState.ts', import.meta.url), 'utf8');
 const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
+const inspectionGuidanceSource = readFileSync(new URL('./ai/aiSystemInspectionGuidance.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
 const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
 
@@ -48,9 +49,9 @@ describe('AIChatPanel message render isolation', () => {
     expect(systemContextSource).toContain('get_indexes、get_foreign_keys、get_triggers、get_table_ddl');
     expect(systemContextSource).toContain('inspect_active_tab 读取当前活动页签上下文');
     expect(systemContextSource).toContain('inspect_workspace_tabs 盘点当前工作区');
-    expect(systemContextSource).toContain('inspect_current_connection');
-    expect(systemContextSource).toContain('inspect_external_sql_directories');
-    expect(systemContextSource).toContain('inspect_external_sql_file');
+    expect(inspectionGuidanceSource).toContain('inspect_current_connection');
+    expect(inspectionGuidanceSource).toContain('inspect_external_sql_directories');
+    expect(inspectionGuidanceSource).toContain('inspect_external_sql_file');
     expect(source).toContain('tabs: useStore.getState().tabs');
     expect(source).toContain('activeTabId: useStore.getState().activeTabId');
     expect(source).toContain('externalSQLDirectories: useStore.getState().externalSQLDirectories');
