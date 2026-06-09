@@ -96,6 +96,21 @@ describe('sidebarLocate', () => {
     })).toBeNull();
   });
 
+  it('keeps table-style view tabs on the views branch', () => {
+    expect(normalizeSidebarLocateObjectRequestFromTab({
+      id: 'legacy-view-tab-id',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      objectType: 'view',
+    })).toMatchObject({
+      tabId: 'legacy-view-tab-id',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    });
+  });
+
   it('builds locate requests from trigger and routine tabs', () => {
     expect(normalizeSidebarLocateObjectRequestFromTab({
       id: 'trigger-conn-1-main-audit.users_bi',
@@ -687,6 +702,52 @@ describe('sidebarLocate', () => {
       'conn-1-SYSDBA',
       'conn-1-SYSDBA-views',
       'conn-1-SYSDBA-view-generated-key',
+    ]);
+  });
+
+  it('finds a schema-qualified view request by visual title when the node has no schema metadata', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'SYSDBA.V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-generated-key',
     ]);
   });
 

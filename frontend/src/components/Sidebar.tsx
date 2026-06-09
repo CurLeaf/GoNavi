@@ -2790,7 +2790,7 @@ const Sidebar: React.FC<{
           });
           return;
       } else if (node.type === 'view' || node.type === 'materialized-view') {
-          const { viewName, dbName, id } = node.dataRef;
+          const { viewName, dbName, id, schemaName } = node.dataRef;
           addTab({
               id: node.key,
               title: viewName,
@@ -2799,6 +2799,8 @@ const Sidebar: React.FC<{
               dbName,
               tableName: viewName,
               objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
           });
           return;
       } else if (node.type === 'saved-query') {
@@ -4346,7 +4348,7 @@ const Sidebar: React.FC<{
 
   // --- 视图操作 ---
   const openViewDefinition = (node: any) => {
-      const { viewName, dbName, id } = node.dataRef;
+      const { viewName, dbName, id, schemaName } = node.dataRef;
       const isMaterialized = node.type === 'materialized-view' || node.dataRef?.objectKind === 'materialized-view';
       addTab({
           id: `view-def-${id}-${dbName}-${viewName}`,
@@ -4356,6 +4358,8 @@ const Sidebar: React.FC<{
           dbName,
           viewName,
           viewKind: isMaterialized ? 'materialized' : 'view',
+          schemaName,
+          sidebarLocateKey: String(node.key || ''),
       });
   };
 

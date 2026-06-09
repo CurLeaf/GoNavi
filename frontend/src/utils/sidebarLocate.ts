@@ -60,6 +60,7 @@ export interface SidebarLocateTabLike {
   schemaName?: string;
   sidebarLocateKey?: string;
   filePath?: string;
+  objectType?: string;
 }
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
@@ -167,7 +168,11 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
     schemaName: tab.schemaName,
     objectGroup: tab.type === 'view-def'
       ? (tab.viewKind === 'materialized' ? 'materializedViews' : 'views')
-      : (tab.type === 'trigger' ? 'triggers' : (tab.type === 'routine-def' ? 'routines' : undefined)),
+      : (tab.type === 'trigger'
+        ? 'triggers'
+        : (tab.type === 'routine-def'
+          ? 'routines'
+          : (tab.objectType === 'materialized-view' ? 'materializedViews' : (tab.objectType === 'view' ? 'views' : undefined)))),
   });
 };
 
@@ -273,6 +278,14 @@ const matchesLocateObjectName = (
     resolvedTargetSchema
     && !resolvedNodeSchema
     && normalizeLocateName(resolvedTargetSchema) === normalizeLocateName(target.dbName)
+    && normalizeLocateName(nodeObject) === normalizeLocateName(targetObject)
+  ) {
+    return true;
+  }
+
+  if (
+    options.allowUnqualifiedSchemaMatch
+    && !resolvedNodeSchema
     && normalizeLocateName(nodeObject) === normalizeLocateName(targetObject)
   ) {
     return true;
