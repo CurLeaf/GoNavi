@@ -47,6 +47,12 @@ export const normalizeSidebarViewName = (dialect: string, dbName: string, schema
   return `${normalizedSchemaName}.${normalizedViewName}`;
 };
 
+export const isSidebarViewTableType = (tableType: unknown): boolean => {
+  const normalizedType = String(tableType ?? '').trim().toUpperCase();
+  if (!normalizedType) return true;
+  return normalizedType.includes('VIEW') && !normalizedType.includes('MATERIALIZED');
+};
+
 export const resolveSidebarRuntimeDatabase = (
   type: string,
   driver: string,

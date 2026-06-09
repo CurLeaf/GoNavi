@@ -63,7 +63,7 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
@@ -1399,6 +1399,11 @@ const Sidebar: React.FC<{
                           ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
                           : '',
                   },
+                  {
+                      sql: safeDbName
+                          ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE table_schema = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%VIEW%' ORDER BY TABLE_NAME`
+                          : '',
+                  },
                   { sql: dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '' },
                   { sql: `SHOW FULL TABLES` },
               ]);
@@ -1610,7 +1615,7 @@ const Sidebar: React.FC<{
       results.forEach((queryResult) => {
           queryResult.rows.forEach((row) => {
               const tableType = getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']);
-              if (tableType && tableType.toUpperCase() !== 'VIEW') return;
+              if (!isSidebarViewTableType(tableType)) return;
               const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']);
               const viewName =
                   getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])

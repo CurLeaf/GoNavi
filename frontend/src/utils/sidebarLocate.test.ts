@@ -557,6 +557,51 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds a view node by title when the tree node is missing object metadata', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-views',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-views',
+      'conn-1-SYSDBA-view-generated-key',
+    ]);
+  });
+
   it('falls back from a schema-qualified view request to a bare table-like node in the same database', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'stale-view-tab-id',

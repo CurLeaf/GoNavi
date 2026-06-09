@@ -40,6 +40,7 @@ export interface SidebarLocateTarget {
 
 export interface SidebarLocateTreeNodeLike {
   key: string | number;
+  title?: unknown;
   type?: string;
   dataRef?: Record<string, any>;
   children?: SidebarLocateTreeNodeLike[];
@@ -372,6 +373,65 @@ const collectSidebarNodePathsForLocateByObject = (
   return paths;
 };
 
+const getVisualNodeObjectName = (
+  node: SidebarLocateTreeNodeLike,
+  target: SidebarLocateTarget,
+): string => {
+  const title = toTrimmedString(node.title);
+  if (title && title !== '[object Object]') return title;
+
+  const nodeKey = toTrimmedString(node.key);
+  const keyPrefixes = target.objectGroup === 'materializedViews'
+    ? [`${target.databaseKey}-materialized-view-`]
+    : target.objectGroup === 'views'
+      ? [`${target.databaseKey}-view-`]
+      : target.objectGroup === 'triggers'
+        ? [`${target.databaseKey}-trigger-`]
+        : target.objectGroup === 'routines'
+          ? [`${target.databaseKey}-routine-`]
+          : [`${target.databaseKey}-`];
+
+  const matchedPrefix = keyPrefixes.find((prefix) => nodeKey.startsWith(prefix));
+  return matchedPrefix ? nodeKey.slice(matchedPrefix.length) : '';
+};
+
+const matchesLocateObjectNodeByVisualIdentity = (
+  node: SidebarLocateTreeNodeLike,
+  target: SidebarLocateTarget,
+  path: string[],
+): boolean => {
+  if (!path.includes(target.databaseKey)) return false;
+
+  if (target.objectGroup === 'views' && node.type !== 'view') return false;
+  if (target.objectGroup === 'materializedViews' && node.type !== 'materialized-view') return false;
+  if (target.objectGroup === 'triggers' && node.type !== 'db-trigger') return false;
+  if (target.objectGroup === 'routines' && node.type !== 'routine') return false;
+  if (target.objectGroup === 'tables' && node.type !== 'table') return false;
+  if (target.objectGroup === 'externalSqlFiles') return false;
+
+  const schemaName = toTrimmedString(node.dataRef?.schemaName);
+  return matchesLocateObjectName(target, getVisualNodeObjectName(node, target), schemaName, { allowUnqualifiedSchemaMatch: true });
+};
+
+const collectSidebarNodePathsForLocateByVisualIdentity = (
+  nodes: SidebarLocateTreeNodeLike[],
+  target: SidebarLocateTarget,
+  ancestorPath: string[] = [],
+): string[][] => {
+  const paths: string[][] = [];
+  for (const node of nodes) {
+    const nodeKey = String(node.key);
+    const path = [...ancestorPath, nodeKey];
+    if (matchesLocateObjectNodeByVisualIdentity(node, target, path)) {
+      paths.push(path);
+    }
+    if (node.children) {
+      paths.push(...collectSidebarNodePathsForLocateByVisualIdentity(node.children, target, path));
+    }
+  }
+  return paths;
+};
+
 const hasLocateTargetSchema = (target: SidebarLocateTarget): boolean => {
   if (target.objectGroup === 'externalSqlFiles') return true;
   return Boolean(toTrimmedString(target.schemaName) || splitSidebarQualifiedName(target.tableName).schemaName);
@@ -390,6 +450,9 @@ export const findSidebarNodePathForLocate = (
 
   const strictPath = findSidebarNodePathForLocateByObject(nodes, target);
   if (strictPath) return strictPath;
+
+  const visualIdentityPaths = collectSidebarNodePathsForLocateByVisualIdentity(nodes, target);
+  if (visualIdentityPaths.length === 1) return visualIdentityPaths[0];
 
   if (shouldFallbackViewLocateToTableNode(target)) {
     const tableLikeTarget = { ...target, objectGroup: 'tables' as const };
