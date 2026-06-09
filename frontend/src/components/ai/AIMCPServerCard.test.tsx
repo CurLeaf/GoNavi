@@ -57,6 +57,9 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('不要写 export');
     expect(markup).toContain('当前阶段只支持 stdio');
     expect(markup).toContain('实际启动命令预览');
+    expect(markup).toContain('配置检查');
+    expect(markup).toContain('服务名称为空');
+    expect(markup).toContain('建议检查');
     expect(markup).toContain('操作说明');
     expect(markup).toContain('测试工具发现');
     expect(markup).toContain('不会保存配置');
@@ -66,5 +69,37 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('慢启动 60 秒');
     expect(markup).toContain('node server.js --stdio');
     expect(markup).toContain('$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio');
+  });
+
+  it('renders actionable validation when command and args are mixed together', () => {
+    const markup = renderToStaticMarkup(
+      <AIMCPServerCard
+        server={{
+          id: 'mcp-1',
+          name: 'Node MCP',
+          transport: 'stdio',
+          command: 'node server.js --stdio',
+          args: [],
+          env: {},
+          enabled: true,
+          timeoutSeconds: 20,
+        }}
+        serverTools={[]}
+        cardBg="#fff"
+        cardBorder="rgba(0,0,0,0.08)"
+        inputBg="#fff"
+        darkMode={false}
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        loading={false}
+        onChange={() => {}}
+        onTest={() => {}}
+        onSave={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('启动命令可能填成了整行命令');
+    expect(markup).toContain('把脚本名、模块名、--stdio 和环境变量拆到命令参数或环境变量里');
+    expect(markup).toContain('命令参数可能缺少脚本或模块名');
   });
 });

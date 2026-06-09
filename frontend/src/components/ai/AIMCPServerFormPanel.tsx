@@ -5,7 +5,9 @@ import { DeleteOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { ParsedMCPEnvDraft } from '../../utils/mcpEnvDraft';
+import type { MCPServerDraftValidation } from '../../utils/mcpServerValidation';
 import AIMCPHelpBlock, { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
+import AIMCPServerValidationPanel from './AIMCPServerValidationPanel';
 
 interface AIMCPServerFormPanelProps {
   server: AIMCPServerConfig;
@@ -13,6 +15,7 @@ interface AIMCPServerFormPanelProps {
   launchPreview: string;
   envDraft: string;
   parsedEnvDraft: ParsedMCPEnvDraft;
+  validation: MCPServerDraftValidation;
   cardBorder: string;
   inputBg: string;
   darkMode: boolean;
@@ -31,6 +34,7 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
   launchPreview,
   envDraft,
   parsedEnvDraft,
+  validation,
   cardBorder,
   inputBg,
   darkMode,
@@ -155,6 +159,13 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </div>
     </AIMCPHelpBlock>
 
+    <AIMCPServerValidationPanel
+      validation={validation}
+      cardBorder={cardBorder}
+      darkMode={darkMode}
+      overlayTheme={overlayTheme}
+    />
+
     {serverTools.length > 0 && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>已发现工具</div>
@@ -182,8 +193,8 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
     </div>
 
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-      <Button onClick={onTest} loading={loading} style={{ borderRadius: 10 }}>测试工具发现</Button>
-      <Button type="primary" onClick={onSave} loading={loading} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
+      <Button onClick={onTest} loading={loading} disabled={!validation.canTest} style={{ borderRadius: 10 }}>测试工具发现</Button>
+      <Button type="primary" onClick={onSave} loading={loading} disabled={!validation.canSave} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
       <Popconfirm title="删除这个 MCP 服务？" okText="删除" cancelText="取消" onConfirm={onDelete}>
         <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
       </Popconfirm>

@@ -5,6 +5,7 @@ import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
 import { formatMCPEnvDraft, parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import { buildMCPLaunchPreview } from '../../utils/mcpServerGuidance';
+import { validateMCPServerDraft } from '../../utils/mcpServerValidation';
 import AIMCPServerFormPanel from './AIMCPServerFormPanel';
 import AIMCPServerGuidePanel from './AIMCPServerGuidePanel';
 
@@ -42,6 +43,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
   const launchPreview = buildMCPLaunchPreview(server.command, server.args);
   const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
   const parsedEnvDraft = parseMCPEnvDraft(envDraft);
+  const validation = validateMCPServerDraft(server, parsedEnvDraft);
 
   React.useEffect(() => {
     setEnvDraft(formatMCPEnvDraft(server.env));
@@ -82,6 +84,7 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
         launchPreview={launchPreview}
         envDraft={envDraft}
         parsedEnvDraft={parsedEnvDraft}
+        validation={validation}
         cardBorder={cardBorder}
         inputBg={inputBg}
         darkMode={darkMode}
