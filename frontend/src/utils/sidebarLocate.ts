@@ -494,6 +494,9 @@ export const findSidebarNodePathForLocate = (
     const tableLikePaths = collectSidebarNodePathsForLocateByObject(nodes, tableLikeTarget);
     const tableLikePath = selectPreferredSidebarLocatePath(tableLikePaths, target);
     if (tableLikePath) return tableLikePath;
+    const visualTableLikePaths = collectSidebarNodePathsForLocateByVisualIdentity(nodes, tableLikeTarget);
+    const visualTableLikePath = selectPreferredSidebarLocatePath(visualTableLikePaths, target);
+    if (visualTableLikePath) return visualTableLikePath;
     if (!hasLocateTargetSchema(target)) {
       const relaxedTableLikePaths = collectSidebarNodePathsForLocateByObject(
         nodes,

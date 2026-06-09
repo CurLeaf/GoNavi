@@ -6321,6 +6321,7 @@ const Sidebar: React.FC<{
       }
       if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
           void locateObjectInSidebar({
+              tabId: String(node.key || ''),
               connectionId: dataRef.id,
               dbName: dataRef.dbName,
               tableName: dataRef.tableName || dataRef.viewName,

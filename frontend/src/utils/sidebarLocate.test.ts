@@ -512,6 +512,52 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds a bare mysql-compatible view node when the locate request keeps a different schema name', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                      viewName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-V_ACCOUNT',
+    ]);
+  });
+
   it('falls back to a table-like node when a view is only present in the tables branch', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'stale-view-tab-id',
@@ -540,6 +586,48 @@ describe('sidebarLocate', () => {
                       dbName: 'SYSDBA',
                       tableName: 'V_ACCOUNT',
                     },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a visual table-like node when view metadata is not present on the node', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    title: 'V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {},
                   },
                 ],
               },

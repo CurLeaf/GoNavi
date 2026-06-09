@@ -503,6 +503,16 @@ describe('Sidebar locate toolbar', () => {
     expect(locateActionIndex).toBeGreaterThan(externalSqlActionIndex);
   });
 
+  it('passes the exact tree key when locating a command-search object node', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const commandSearchRunSource = source.slice(
+      source.indexOf("if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view')"),
+      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine')"),
+    );
+
+    expect(commandSearchRunSource).toContain("tabId: String(node.key || '')");
+  });
+
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
     const loadTablesSource = source.slice(
