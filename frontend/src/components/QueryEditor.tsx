@@ -1432,6 +1432,16 @@ export const resolveQueryEditorNavigationTarget = (
             && meta.normalizedRawObjectName === exactQualifiedName
         );
         if (exact) {
+            if (!normalizedSchemaName && !exact.normalizedSchemaName) {
+                const schemaQualifiedMatches = metas.filter((meta) =>
+                    meta.normalizedDbName === normalizedDbName
+                    && meta.normalizedObjectName === normalizedObjectName
+                    && Boolean(meta.normalizedSchemaName)
+                );
+                if (schemaQualifiedMatches.length === 1) {
+                    return schemaQualifiedMatches[0];
+                }
+            }
             return exact;
         }
 

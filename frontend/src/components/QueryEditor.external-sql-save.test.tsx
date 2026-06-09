@@ -867,6 +867,30 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('prefers the unique schema-qualified view target when metadata also contains a bare view name', () => {
+    const views = [
+      { dbName: 'SYSDBA', viewName: 'V_ACCOUNT', schemaName: undefined },
+      { dbName: 'SYSDBA', viewName: 'SYSDBA.V_ACCOUNT', schemaName: 'SYSDBA' },
+    ];
+
+    expect(resolveQueryEditorNavigationTarget(
+      'select * from V_ACCOUNT',
+      'select * from V_ACCOUNT'.length + 1,
+      'SYSDBA',
+      ['SYSDBA'],
+      [],
+      views,
+      [],
+      [],
+      [],
+    )).toEqual({
+      type: 'view',
+      dbName: 'SYSDBA',
+      viewName: 'SYSDBA.V_ACCOUNT',
+      schemaName: 'SYSDBA',
+    });
+  });
+
   it('opens a table tab on ctrl left click inside the editor', async () => {
     editorState.value = 'select * from analytics.events where id = 1';
     autoFetchState.visible = true;
