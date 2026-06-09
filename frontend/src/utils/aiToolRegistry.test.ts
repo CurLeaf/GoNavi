@@ -108,9 +108,17 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('gonavi.log');
   });
 
+  it('registers the ai-render-error inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('渲染异常');
+    expect(info?.tool.function.description).toContain('消息渲染异常');
+  });
+
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
     const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
     const appLogTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_app_logs');
+    const renderErrorTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
     const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
     const snippetTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_snippets');
@@ -119,6 +127,8 @@ describe('aiToolRegistry', () => {
     expect(recentActivityTool?.tool.function.description).toContain('最近 SQL 活动');
     expect(appLogTool?.desc).toContain('GoNavi 应用日志');
     expect(appLogTool?.tool.function.description).toContain('应用日志');
+    expect(renderErrorTool?.desc).toContain('渲染异常记录');
+    expect(renderErrorTool?.tool.function.description).toContain('气泡局部报错');
     expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
     expect(savedQueryTool?.tool.function.description).toContain('历史查询');
     expect(aiSessionsTool?.desc).toContain('AI 历史会话');
@@ -158,6 +168,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_file')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_sql_activity')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_app_logs')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_last_render_error')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

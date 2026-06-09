@@ -5,8 +5,12 @@ const source = readFileSync(new URL('./AIChatPanel.tsx', import.meta.url), 'utf8
 const boundarySource = readFileSync(new URL('./ai/AIMessageRenderBoundary.tsx', import.meta.url), 'utf8');
 const conversationViewSource = readFileSync(new URL('./ai/AIChatPanelConversationView.tsx', import.meta.url), 'utf8');
 const derivedStateSource = readFileSync(new URL('./ai/aiChatPanelDerivedState.ts', import.meta.url), 'utf8');
+const autoContextSource = readFileSync(new URL('./ai/useAIChatAutoContext.ts', import.meta.url), 'utf8');
 const payloadDispatchSource = readFileSync(new URL('./ai/aiChatPayloadDispatch.ts', import.meta.url), 'utf8');
+const planContextSource = readFileSync(new URL('./ai/useAIChatPlanContexts.ts', import.meta.url), 'utf8');
+const resizeSource = readFileSync(new URL('./ai/useAIChatPanelResize.ts', import.meta.url), 'utf8');
 const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
+const sessionStateSource = readFileSync(new URL('./ai/useAIChatSessionState.ts', import.meta.url), 'utf8');
 const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
 const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
@@ -71,12 +75,25 @@ describe('AIChatPanel message render isolation', () => {
   });
 
   it('keeps the v2 history mode sorted by the latest updated session first', () => {
-    expect(source).toContain('const orderedAISessions = useMemo(');
-    expect(source).toContain('right.updatedAt - left.updatedAt');
+    expect(source).toContain("import { useAIChatSessionState } from './ai/useAIChatSessionState';");
     expect(source).toContain('const panelHistorySessions = useMemo(');
+    expect(sessionStateSource).toContain('right.updatedAt - left.updatedAt');
+    expect(sessionStateSource).toContain("const sid = aiActiveSessionId || 'session-fallback';");
     expect(source).toContain('buildAIChatInlineHistorySessions(orderedAISessions)');
     expect(derivedStateSource).toContain('export const buildAIChatInlineHistorySessions');
     expect(derivedStateSource).toContain('sessions.slice(0, limit)');
     expect(source).toContain('sessions={panelHistorySessions}');
+  });
+
+  it('extracts plan-context, auto-context, and resize hooks so the panel file stays focused on orchestration', () => {
+    expect(source).toContain("import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';");
+    expect(source).toContain("import { useAIChatAutoContext } from './ai/useAIChatAutoContext';");
+    expect(source).toContain("import { useAIChatPanelResize } from './ai/useAIChatPanelResize';");
+    expect(planContextSource).toContain('export const useAIChatPlanContexts');
+    expect(planContextSource).toContain('pendingJVMPlanContextRef');
+    expect(autoContextSource).toContain('export const useAIChatAutoContext');
+    expect(autoContextSource).toContain('DBShowCreateTable');
+    expect(resizeSource).toContain('export const useAIChatPanelResize');
+    expect(resizeSource).toContain('document.body.style.pointerEvents = \'none\'');
   });
 });

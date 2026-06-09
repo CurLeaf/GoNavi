@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useStore, loadAISessionsFromBackend, loadAISessionFromBackend } from '../store';
+import { useStore } from '../store';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
@@ -44,6 +44,10 @@ import { dispatchAIChatPayload } from './ai/aiChatPayloadDispatch';
 import { buildAIChatReadinessSnapshot } from './ai/aiChatReadiness';
 import { buildAISystemContextMessages } from './ai/aiSystemContextMessages';
 import { useAIChatRuntimeResources } from './ai/useAIChatRuntimeResources';
+import { useAIChatAutoContext } from './ai/useAIChatAutoContext';
+import { useAIChatPanelResize } from './ai/useAIChatPanelResize';
+import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';
+import { useAIChatSessionState } from './ai/useAIChatSessionState';
 
 interface AIChatPanelProps {
     width?: number;
@@ -64,8 +68,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const [draftImages, setDraftImages] = useState<string[]>([]);
     const [sending, setSending] = useState(false);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
-    const [panelWidth, setPanelWidth] = useState(width);
-    const [isResizing, setIsResizing] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [activePanelMode, setActivePanelMode] = useState<'chat' | 'insights' | 'history'>('chat');
     const {
@@ -85,20 +87,15 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const resizeStartX = useRef(0);
-    const resizeStartWidth = useRef(0);
     const toolCallRoundRef = useRef(0); // 连续失败轮次计数
     const totalToolRoundRef = useRef(0); // 全局工具调用总轮次计数（防止无限循环）
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
-    const panelRef = useRef<HTMLDivElement>(null); // 面板 DOM ref，用于拖拽时直接操作宽度
-    const dragWidthRef = useRef(0); // 拖拽过程中的实时宽度（不触发 React 重渲染）
-    const pendingJVMPlanContextRef = useRef<JVMAIPlanContext | undefined>(undefined);
-    const pendingJVMDiagnosticPlanContextRef = useRef<JVMDiagnosticPlanContext | undefined>(undefined);
-
-    useEffect(() => {
-        setPanelWidth(width);
-        dragWidthRef.current = width;
-    }, [width]);
+    const {
+        getCurrentJVMPlanContext,
+        getCurrentJVMDiagnosticPlanContext,
+        pendingJVMPlanContextRef,
+        pendingJVMDiagnosticPlanContextRef,
+    } = useAIChatPlanContexts();
 
     const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
@@ -116,11 +113,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const tabs = useStore(state => state.tabs);
     const activeTabId = useStore(state => state.activeTabId);
     const sqlLogs = useStore(state => state.sqlLogs);
-    const aiChatSessions = useStore(state => state.aiChatSessions);
     const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
     const aiPanelVisible = useStore(state => state.aiPanelVisible);
     const isV2Ui = appearance.uiVersion === 'v2';
     const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
+    const {
+        ghostRef,
+        handleResizeStart,
+        isResizing,
+        panelRect,
+        panelRef,
+        panelWidth,
+    } = useAIChatPanelResize({
+        width,
+        isV2Ui,
+        onWidthChange,
+    });
     const availableTools = useMemo(
         () => buildAvailableAIChatTools(mcpTools),
         [mcpTools],
@@ -130,111 +138,17 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         'sendAIChatMessage',
         activeShortcutPlatform,
     ));
-    const orderedAISessions = useMemo(
-        () => [...aiChatSessions].sort((left, right) => right.updatedAt - left.updatedAt),
-        [aiChatSessions],
-    );
+    const { sid, messages, orderedAISessions } = useAIChatSessionState({
+        aiActiveSessionId,
+        aiPanelVisible,
+        createNewAISession,
+    });
 
-    const getCurrentJVMPlanContext = useCallback((): JVMAIPlanContext | undefined => {
-        const state = useStore.getState();
-        const activeTab = state.tabs.find(t => t.id === state.activeTabId);
-        if (!activeTab || activeTab.type !== 'jvm-resource') {
-            return undefined;
-        }
-
-        const activeConnection = state.connections.find(c => c.id === activeTab.connectionId);
-        if (activeConnection?.config?.type !== 'jvm') {
-            return undefined;
-        }
-
-        const resourcePath = String(activeTab.resourcePath || '').trim();
-        if (!resourcePath) {
-            return undefined;
-        }
-
-        return {
-            tabId: activeTab.id,
-            connectionId: activeTab.connectionId,
-            providerMode: (activeTab.providerMode || activeConnection.config.jvm?.preferredMode || 'jmx') as JVMAIPlanContext['providerMode'],
-            resourcePath,
-        };
-    }, []);
-
-    const getCurrentJVMDiagnosticPlanContext = useCallback((): JVMDiagnosticPlanContext | undefined => {
-        const state = useStore.getState();
-        const activeTab = state.tabs.find(t => t.id === state.activeTabId);
-        if (!activeTab || activeTab.type !== 'jvm-diagnostic') {
-            return undefined;
-        }
-
-        const activeConnection = state.connections.find(c => c.id === activeTab.connectionId);
-        if (activeConnection?.config?.type !== 'jvm') {
-            return undefined;
-        }
-
-        return {
-            tabId: activeTab.id,
-            connectionId: activeTab.connectionId,
-            transport: activeConnection.config.jvm?.diagnostic?.transport || 'agent-bridge',
-        };
-    }, []);
-
-    // Auto-Context Injection Hook
-    useEffect(() => {
-        if (!aiPanelVisible) return;
-        const activeTab = tabs.find(t => t.id === activeTabId);
-        if (activeTab && (activeTab.type === 'table' || activeTab.type === 'design')) {
-            const { connectionId, dbName, tableName } = activeTab;
-            if (connectionId && dbName && tableName) {
-                const connKey = `${connectionId}:${dbName}`;
-                const currentContexts = useStore.getState().aiContexts[connKey] || [];
-                if (!currentContexts.find(c => c.dbName === dbName && c.tableName === tableName)) {
-                    const conn = useStore.getState().connections.find(c => c.id === connectionId);
-                    if (conn) {
-                        import('../../wailsjs/go/app/App').then(({ DBShowCreateTable }) => {
-                            DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, dbName, tableName).then(res => {
-                                if (res.success && res.data) {
-                                    let createSql = '';
-                                    if (typeof res.data === 'string') createSql = res.data;
-                                    else if (Array.isArray(res.data) && res.data.length > 0) {
-                                        const row = res.data[0];
-                                        createSql = (Object.values(row).find(v => typeof v === 'string' && (v.toUpperCase().includes('CREATE TABLE') || v.toUpperCase().includes('CREATE'))) || Object.values(row)[1] || Object.values(row)[0]) as string;
-                                    }
-                                    if (createSql) {
-                                        useStore.getState().addAIContext(connKey, { dbName: dbName, tableName, ddl: createSql });
-                                    }
-                                }
-                            });
-                        }).catch(err => console.error("Failed to auto-fetch table context", err));
-                    }
-                }
-            }
-        }
-    }, [aiPanelVisible, activeTabId, tabs]);
-
-    useEffect(() => {
-        if (!aiActiveSessionId) {
-            createNewAISession();
-        }
-    }, [aiActiveSessionId, createNewAISession]);
-
-    const sid = aiActiveSessionId || 'session-fallback';
-
-    // 面板首次可见时从后端加载会话列表
-    const sessionsLoadedRef = useRef(false);
-    useEffect(() => {
-        if (!aiPanelVisible || sessionsLoadedRef.current) return;
-        sessionsLoadedRef.current = true;
-        loadAISessionsFromBackend();
-    }, [aiPanelVisible]);
-
-    // 切换会话时按需从后端加载消息
-    useEffect(() => {
-        if (sid && sid !== 'session-fallback') {
-            loadAISessionFromBackend(sid);
-        }
-    }, [sid]);
-    const messages = aiChatHistory[sid] || [];
+    useAIChatAutoContext({
+        aiPanelVisible,
+        activeTabId,
+        tabs,
+    });
 
     const getConnectionName = useCallback(() => {
         let connectionId = activeContext?.connectionId;
@@ -732,74 +646,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         setSending(false);
     }, [sid]);
 
-    const ghostRef = useRef<HTMLDivElement>(null);
-    const panelRect = useRef<{top: number, bottom: number, left: number} | null>(null);
-
-    const handleResizeStart = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        setIsResizing(true);
-        resizeStartX.current = e.clientX;
-        resizeStartWidth.current = panelWidth;
-        dragWidthRef.current = panelWidth;
-        if (panelRef.current) {
-            const rect = panelRef.current.getBoundingClientRect();
-            panelRect.current = {
-                top: rect.top,
-                bottom: window.innerHeight - rect.bottom,
-                left: rect.left
-            };
-        }
-    }, [panelWidth]);
-
-    useEffect(() => {
-        if (!isResizing) return;
-        let animationFrameId: number;
-        const handleMouseMove = (e: MouseEvent) => {
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-            }
-            animationFrameId = requestAnimationFrame(() => {
-                const delta = resizeStartX.current - e.clientX;
-                const minWidth = isV2Ui ? 300 : 280;
-                const maxWidth = isV2Ui ? 520 : 700;
-                const newWidth = Math.min(Math.max(resizeStartWidth.current + delta, minWidth), maxWidth);
-                dragWidthRef.current = newWidth;
-                
-                // 仅更新 ghost 虚线位置，通过绝对定位规避重排
-                if (ghostRef.current && panelRect.current) {
-                    const actualDelta = newWidth - resizeStartWidth.current;
-                    ghostRef.current.style.left = `${panelRect.current.left - actualDelta}px`;
-                }
-            });
-        };
-        const handleMouseUp = () => {
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
-            }
-            setIsResizing(false);
-            // 拖拽结束时才提交最终宽度到 React state 和外层回调
-            setPanelWidth(dragWidthRef.current);
-            onWidthChange?.(dragWidthRef.current);
-        };
-        
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-        
-        // 拖拽期间关闭指针事件以避免下方 Monaco Editor 捕获 hover 或重绘，极大提升性能
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        document.body.style.pointerEvents = 'none'; // 关键性能优化
-        
-        return () => {
-            if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            document.body.style.pointerEvents = '';
-        };
-    }, [isResizing, isV2Ui, onWidthChange]);
-
     const { inferredConnectionId, inferredDbName } = useMemo(
         () => inferAIChatConnectionContext({
             activeConnectionId: activeContext?.connectionId,
@@ -814,17 +660,24 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const handleDeleteMessage = useCallback((id: string) => deleteAIChatMessage(sid, id), [sid, deleteAIChatMessage]);
     const handleMessageRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo, msg: AIChatMessage) => {
         console.error('[AI Message Render Error]', msg.id, error, errorInfo);
+        const renderErrorPayload = {
+            messageId: msg.id,
+            role: msg.role,
+            contentPreview: String(msg.content || '').slice(0, 240),
+            message: error.message,
+            stack: error.stack,
+            componentStack: errorInfo.componentStack,
+            recordedAt: Date.now(),
+        };
         if (typeof window !== 'undefined') {
-            (window as any).__gonaviLastAIMessageRenderError = {
-                messageId: msg.id,
-                role: msg.role,
-                contentPreview: String(msg.content || '').slice(0, 240),
-                message: error.message,
-                stack: error.stack,
-                componentStack: errorInfo.componentStack,
-            };
+            (window as any).__gonaviLastAIMessageRenderError = renderErrorPayload;
         }
+        (globalThis as any).__gonaviLastAIMessageRenderError = renderErrorPayload;
     }, []);
+    const currentSessionTitle = useMemo(
+        () => orderedAISessions.find((session) => session.id === sid)?.title || '新对话',
+        [orderedAISessions, sid],
+    );
     const activeConnectionConfig = useMemo(() => {
         if (!inferredConnectionId) return undefined;
         const connection = connections.find(c => c.id === inferredConnectionId);
@@ -899,7 +752,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 onSettingsClick={handleOpenSettingsFromPanel}
                 onClose={onClose}
                 messages={messages}
-                sessionTitle={useStore.getState().aiChatSessions.find(s => s.id === sid)?.title || '新对话'}
+                sessionTitle={currentSessionTitle}
                 activeMode={effectivePanelMode}
                 onModeChange={(mode) => {
                     if (!isV2Ui) return;

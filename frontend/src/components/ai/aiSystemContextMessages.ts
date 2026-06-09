@@ -225,6 +225,19 @@ const appendAppLogInspectionGuidance = (
   });
 };
 
+const appendAILastRenderErrorInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_ai_last_render_error')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“AI 某条消息空白了”“某个气泡渲染失败”“消息块局部报错但面板没全挂”，优先调用 inspect_ai_last_render_error 读取最近一次被隔离的前端渲染异常记录，不要只凭截图现象猜测。',
+  });
+};
+
 const appendConnectionCapabilityInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -466,6 +479,7 @@ SELECT * FROM users WHERE status = 1;
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
   appendShortcutInspectionGuidance(systemMessages, availableToolNames);
   appendAppLogInspectionGuidance(systemMessages, availableToolNames);
+  appendAILastRenderErrorInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {
     systemMessages.push({
       role: 'system',

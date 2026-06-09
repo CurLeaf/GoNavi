@@ -402,6 +402,23 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_last_render_error",
+    icon: "🧯",
+    desc: "查看最近一次 AI 消息渲染异常记录",
+    detail:
+      "返回最近一次被前端隔离下来的 AI 消息渲染异常，包括是哪条消息、消息内容预览、错误摘要和组件栈摘要。适合用户提到“AI 某条回复空白了”“某个气泡渲染失败”“消息块报错但面板没全挂”时，先读这份真实前端异常快照。",
+    params: "无参数",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_last_render_error",
+        description:
+          "读取最近一次 AI 消息渲染异常的本地快照，包括消息 ID、角色、内容预览、错误摘要、组件栈摘要和下一步排查建议。适用于用户提到 AI 消息空白、某条回复渲染失败、气泡局部报错但面板仍然存活时，先读取真实前端异常记录，不要只凭现象猜测。",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
     name: "inspect_saved_queries",
     icon: "💾",
     desc: "查看本地已保存的 SQL 查询",

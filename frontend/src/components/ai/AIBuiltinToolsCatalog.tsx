@@ -141,6 +141,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先回看 gonavi.log 尾部的 ERROR/WARN，再结合 MCP、连接和当前数据源状态继续定位启动异常、连接失败或外部工具拉起问题。',
   },
   {
+    title: '排查 AI 气泡渲染异常',
+    steps: 'inspect_ai_last_render_error → inspect_active_tab / inspect_ai_runtime',
+    description: '适合用户反馈 AI 某条消息空白、气泡局部报错但整个面板没挂时，先拿到最近一次被隔离的渲染异常快照，再回到具体会话和运行时上下文继续缩小范围。',
+  },
+  {
     title: '复用历史 SQL',
     steps: 'inspect_saved_queries → get_columns / execute_sql',
     description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',

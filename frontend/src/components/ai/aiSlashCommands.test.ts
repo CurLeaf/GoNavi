@@ -16,6 +16,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
     expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
     expect(commands.some((command) => command.cmd === '/applog')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/airender')).toBe(true);
   });
 
   it('supports filtering by chinese keywords in addition to command prefix', () => {
@@ -33,6 +34,11 @@ describe('aiSlashCommands', () => {
   it('supports filtering app-log diagnostics by chinese keyword and command prefix', () => {
     expect(filterAISlashCommands('日志').map((command) => command.cmd)).toContain('/applog');
     expect(filterAISlashCommands('/app').map((command) => command.cmd)).toContain('/applog');
+  });
+
+  it('supports filtering ai-render diagnostics by chinese keyword and command prefix', () => {
+    expect(filterAISlashCommands('气泡空白').map((command) => command.cmd)).toContain('/airender');
+    expect(filterAISlashCommands('/air').map((command) => command.cmd)).toContain('/airender');
   });
 
   it('groups commands by configured category order', () => {

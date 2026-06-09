@@ -33,6 +33,7 @@ import {
   buildWorkspaceTabsSnapshot,
 } from './aiWorkspaceInsights';
 import { buildShortcutSnapshot } from './aiShortcutInsights';
+import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
 import type {
   AISnapshotInspectionRuntime,
@@ -268,6 +269,11 @@ export async function executeSnapshotInspectionToolCall(
           success: true,
         };
       }
+      case 'inspect_ai_last_render_error':
+        return {
+          content: JSON.stringify(buildAILastRenderErrorSnapshot()),
+          success: true,
+        };
       case 'inspect_saved_queries':
         return {
           content: JSON.stringify(buildSavedQueriesSnapshot({
@@ -329,6 +335,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
       inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
       inspect_app_logs: '读取 GoNavi 应用日志失败',
+      inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
       inspect_shortcuts: '读取快捷键配置失败',
