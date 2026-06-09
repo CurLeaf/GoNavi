@@ -5,6 +5,16 @@ import { CheckCircleFilled, CopyOutlined, ReloadOutlined } from '@ant-design/ico
 import type { AIMCPClientInstallStatus } from '../../types';
 import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import {
+  getMCPClientDetectionSummary,
+  getMCPClientInstallStateLabel,
+  getMCPClientOptionSummary,
+  getMCPClientStatusSummary,
+  getMCPClientStatusTone,
+  getSelectedMCPClientStateLine,
+  resolveMCPClientCommandName,
+  resolveMCPClientInstallActionLabel,
+} from './mcpClientInstallPanelState';
 
 interface AIMCPClientInstallPanelProps {
   statuses: AIMCPClientInstallStatus[];
@@ -23,119 +33,6 @@ interface AIMCPClientInstallPanelProps {
   onCopyLaunchCommand: () => void;
   onInstall: () => void;
 }
-
-const hasStatusIssue = (status: AIMCPClientInstallStatus | undefined) =>
-  /失败|异常|错误/u.test(String(status?.message || ''));
-
-const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: boolean) => {
-  if (status?.matchesCurrent) {
-    return {
-      label: '已接入',
-      color: '#16a34a',
-      bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
-    };
-  }
-  if (status?.installed) {
-    return {
-      label: '需更新',
-      color: '#d97706',
-      bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
-    };
-  }
-  if (hasStatusIssue(status)) {
-    return {
-      label: '状态异常',
-      color: '#dc2626',
-      bg: darkMode ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
-    };
-  }
-  return {
-    label: '未接入',
-    color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
-    bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
-  };
-};
-
-const getInstallStateLabel = (status: AIMCPClientInstallStatus | undefined) => {
-  if (status?.matchesCurrent) {
-    return '外部工具接入状态：已接入当前 GoNavi';
-  }
-  if (status?.installed) {
-    return '外部工具接入状态：已存在旧配置，需更新';
-  }
-  if (hasStatusIssue(status)) {
-    return '外部工具接入状态：读取失败';
-  }
-  return '外部工具接入状态：未接入';
-};
-
-const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) => {
-  const command = String(status?.clientCommand || '').trim();
-  if (command) {
-    return command;
-  }
-  return status?.client === 'codex' ? 'codex' : 'claude';
-};
-
-const getStatusSummary = (status: AIMCPClientInstallStatus | undefined) => {
-  const label = status?.displayName || '这个客户端';
-  if (status?.matchesCurrent) {
-    return `${label} 已接入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
-  }
-  if (status?.installed) {
-    return `${label} 里已经有旧的 GoNavi 接入记录，更新后会切到当前这份 GoNavi。`;
-  }
-  if (hasStatusIssue(status)) {
-    return `${label} 的接入状态读取失败，建议先刷新检测。`;
-  }
-  return `当前还没有把这份 GoNavi MCP 接入 ${label}。`;
-};
-
-const getClientOptionSummary = (status: AIMCPClientInstallStatus | undefined) => {
-  if (status?.matchesCurrent) {
-    return '当前这份 GoNavi MCP 已接入到这个客户端。';
-  }
-  if (status?.installed) {
-    return '检测到旧的 GoNavi 接入记录，建议更新为当前安装路径。';
-  }
-  if (hasStatusIssue(status)) {
-    return '接入状态读取异常，建议先刷新再处理。';
-  }
-  return '尚未把当前 GoNavi MCP 接入到这里。';
-};
-
-const getClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined) => {
-  const label = status?.displayName || '这个客户端';
-  const commandName = resolveClientCommandName(status);
-  if (status?.clientDetected) {
-    return `已检测到本机 ${commandName} 命令，接入或更新后重启 ${label} 即可验证。`;
-  }
-  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先写入 ${label} 的接入配置，稍后再重启验证。`;
-};
-
-const getSelectedClientStateLine = (status: AIMCPClientInstallStatus | undefined) => {
-  if (status?.matchesCurrent) {
-    return '已接入当前 GoNavi，无需重复操作';
-  }
-  if (status?.installed) {
-    return '已存在旧接入记录，建议更新到当前 GoNavi 路径';
-  }
-  if (hasStatusIssue(status)) {
-    return '状态读取异常，建议先刷新检测';
-  }
-  return '当前还没有接入 GoNavi MCP';
-};
-
-const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
-  const label = status?.displayName || '目标客户端';
-  if (status?.matchesCurrent) {
-    return `${label} 已接入，无需重复安装`;
-  }
-  if (status?.installed) {
-    return `更新 ${label} 接入配置`;
-  }
-  return `安装到 ${label}（外部工具）`;
-};
 
 const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
   statuses,
@@ -250,7 +147,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           {statuses.map((status) => {
             const client = status.client === 'codex' ? 'codex' : 'claude-code';
             const active = selectedClient === client;
-            const tone = getStatusTone(status, darkMode);
+            const tone = getMCPClientStatusTone(status, darkMode);
             return (
               <button
                 key={status.client}
@@ -313,10 +210,10 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
-                  {getClientOptionSummary(status)}
+                  {getMCPClientOptionSummary(status)}
                 </div>
                 <div style={{ fontSize: 12, color: active ? overlayTheme.selectedText : overlayTheme.mutedText, lineHeight: 1.6, fontWeight: 700 }}>
-                  {getInstallStateLabel(status)}
+                  {getMCPClientInstallStateLabel(status)}
                 </div>
                 <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
                   {active ? '当前已选中，将只对这个客户端执行写入或更新。' : '点击后切换到这个客户端。'}
@@ -347,7 +244,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-              {getStatusSummary(selectedStatus)}
+              {getMCPClientStatusSummary(selectedStatus)}
             </div>
             {selectedStatus && (
               <div
@@ -356,22 +253,22 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                   borderRadius: 999,
                   fontSize: 11,
                   fontWeight: 700,
-                  color: getStatusTone(selectedStatus, darkMode).color,
-                  background: getStatusTone(selectedStatus, darkMode).bg,
+                  color: getMCPClientStatusTone(selectedStatus, darkMode).color,
+                  background: getMCPClientStatusTone(selectedStatus, darkMode).bg,
                 }}
               >
-                {getStatusTone(selectedStatus, darkMode).label}
+                {getMCPClientStatusTone(selectedStatus, darkMode).label}
               </div>
             )}
           </div>
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          当前状态：{getSelectedClientStateLine(selectedStatus)}
+          当前状态：{getSelectedMCPClientStateLine(selectedStatus)}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           CLI 检测：{selectedStatus?.clientDetected
-            ? `已检测到 ${resolveClientCommandName(selectedStatus)}`
-            : `未检测到 ${resolveClientCommandName(selectedStatus)}，仍可先写配置`}
+            ? `已检测到 ${resolveMCPClientCommandName(selectedStatus)}`
+            : `未检测到 ${resolveMCPClientCommandName(selectedStatus)}，仍可先写配置`}
         </div>
         {selectedStatus?.clientPath && (
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
@@ -424,7 +321,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-          {getClientDetectionSummary(selectedStatus)}
+          {getMCPClientDetectionSummary(selectedStatus)}
           {' '}
           已经接入当前这份 GoNavi 时，下面的主按钮会自动禁用，避免重复写入。
         </div>
@@ -435,7 +332,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           disabled={Boolean(selectedStatus?.matchesCurrent)}
           style={{ borderRadius: 10, fontWeight: 600, width: 208, maxWidth: '100%', height: 40 }}
         >
-          {resolveActionLabel(selectedStatus)}
+          {resolveMCPClientInstallActionLabel(selectedStatus)}
         </Button>
       </div>
     </div>
