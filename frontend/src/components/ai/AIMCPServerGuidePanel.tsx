@@ -8,6 +8,7 @@ import {
   MCP_COMMAND_PARSE_EXAMPLE,
   MCP_FIELD_GUIDES,
   MCP_SERVER_FILL_STEPS,
+  MCP_TROUBLESHOOTING_GUIDES,
 } from '../../utils/mcpServerGuidance';
 import AIMCPCommandDraftPreview from './AIMCPCommandDraftPreview';
 import { buildMCPFieldTone, buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
@@ -114,6 +115,42 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
             </div>
           );
         })}
+      </div>
+    </div>
+
+    <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>常见填错现象</div>
+      <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
+        如果测试失败，先按这里反查要改哪个字段；大多数问题都不是 MCP 坏了，而是命令、参数或环境变量拆错了。
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+        {MCP_TROUBLESHOOTING_GUIDES.map((item) => (
+          <div
+            key={item.key}
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: `1px solid ${cardBorder}`,
+              background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.78)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.symptom}</div>
+            <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>
+              常见原因：{item.likelyCause}
+            </div>
+            <div style={buildMCPHintStyle(overlayTheme.mutedText)}>处理方式：{item.fix}</div>
+            {item.example ? (
+              <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
+                示例：
+                {' '}
+                <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
+              </div>
+            ) : null}
+          </div>
+        ))}
       </div>
     </div>
 

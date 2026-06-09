@@ -138,7 +138,7 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </div>
     )}
 
-    <AIMCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。这里只填变量本身，不要写 export，也不要把它和启动命令混成一整行。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="OPENAI_API_KEY=...">
+    <AIMCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。这里会保存到本机配置，并在启动 MCP 进程时作为环境变量传入；不要写 export，也不要把密钥写进聊天内容。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="OPENAI_API_KEY=...">
       <Input.TextArea
         rows={3}
         value={envDraft}

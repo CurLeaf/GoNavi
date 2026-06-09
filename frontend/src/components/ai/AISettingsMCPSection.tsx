@@ -11,7 +11,7 @@ import AIMCPServerCard from './AIMCPServerCard';
 
 export type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 
-interface AISettingsMCPSectionProps {
+export interface AISettingsMCPSectionProps {
   mcpClientStatuses: AIMCPClientInstallStatus[];
   selectedMCPClient: MCPClientKey;
   selectedMCPClientStatus?: AIMCPClientInstallStatus;

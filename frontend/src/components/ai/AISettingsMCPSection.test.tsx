@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import AISettingsMCPSection from './AISettingsMCPSection';
+import type { AISettingsMCPSectionProps } from './AISettingsMCPSection';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 const flattenElementText = (node: any): string => {
@@ -37,62 +38,65 @@ const findElement = (node: any, predicate: (element: any) => boolean): any => {
   return findElement(node.props?.children, predicate);
 };
 
+const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): AISettingsMCPSectionProps => ({
+  mcpClientStatuses: [
+    {
+      client: 'claude-code',
+      displayName: 'Claude Code',
+      installed: false,
+      matchesCurrent: false,
+      clientDetected: false,
+      clientCommand: 'claude',
+      message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
+    },
+    {
+      client: 'codex',
+      displayName: 'Codex',
+      installed: false,
+      matchesCurrent: false,
+      clientDetected: true,
+      clientCommand: 'codex',
+      clientPath: 'C:/Users/mock/AppData/Roaming/npm/codex.cmd',
+      message: '未检测到 Codex 用户级 GoNavi MCP 配置',
+    },
+  ],
+  selectedMCPClient: 'claude-code',
+  selectedMCPClientStatus: {
+    client: 'claude-code',
+    displayName: 'Claude Code',
+    installed: false,
+    matchesCurrent: false,
+    clientDetected: false,
+    clientCommand: 'claude',
+    message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
+  },
+  selectedMCPClientCommandText: '',
+  mcpServers: [],
+  mcpTools: [],
+  darkMode: false,
+  overlayTheme: buildOverlayWorkbenchTheme(false),
+  cardBg: '#fff',
+  cardBorder: 'rgba(0,0,0,0.08)',
+  inputBg: '#fff',
+  loading: false,
+  mcpClientStatusLoading: false,
+  onSelectClient: () => {},
+  onRefreshStatus: () => {},
+  onCopyConfigPath: () => {},
+  onCopyLaunchCommand: () => {},
+  onInstallSelectedClient: () => {},
+  onAddServer: () => {},
+  onUpdateServerDraft: () => {},
+  onTestServer: () => {},
+  onSaveServer: () => {},
+  onDeleteServer: () => {},
+  ...patch,
+});
+
 describe('AISettingsMCPSection', () => {
   it('renders the extracted MCP client installer and server management entry point', () => {
     const markup = renderToStaticMarkup(
-      <AISettingsMCPSection
-        mcpClientStatuses={[
-          {
-            client: 'claude-code',
-            displayName: 'Claude Code',
-            installed: false,
-            matchesCurrent: false,
-            clientDetected: false,
-            clientCommand: 'claude',
-            message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
-          },
-          {
-            client: 'codex',
-            displayName: 'Codex',
-            installed: false,
-            matchesCurrent: false,
-            clientDetected: true,
-            clientCommand: 'codex',
-            clientPath: 'C:/Users/mock/AppData/Roaming/npm/codex.cmd',
-            message: '未检测到 Codex 用户级 GoNavi MCP 配置',
-          },
-        ]}
-        selectedMCPClient="claude-code"
-        selectedMCPClientStatus={{
-          client: 'claude-code',
-          displayName: 'Claude Code',
-          installed: false,
-          matchesCurrent: false,
-          clientDetected: false,
-          clientCommand: 'claude',
-          message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
-        }}
-        selectedMCPClientCommandText=""
-        mcpServers={[]}
-        mcpTools={[]}
-        darkMode={false}
-        overlayTheme={buildOverlayWorkbenchTheme(false)}
-        cardBg="#fff"
-        cardBorder="rgba(0,0,0,0.08)"
-        inputBg="#fff"
-        loading={false}
-        mcpClientStatusLoading={false}
-        onSelectClient={() => {}}
-        onRefreshStatus={() => {}}
-        onCopyConfigPath={() => {}}
-        onCopyLaunchCommand={() => {}}
-        onInstallSelectedClient={() => {}}
-        onAddServer={() => {}}
-        onUpdateServerDraft={() => {}}
-        onTestServer={() => {}}
-        onSaveServer={() => {}}
-        onDeleteServer={() => {}}
-      />,
+      <AISettingsMCPSection {...buildMCPSectionProps()} />,
     );
 
     expect(markup).toContain('接入外部客户端');
@@ -103,33 +107,38 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('还没有 MCP 服务');
   });
 
+  it('renders troubleshooting hints when a server draft exists', () => {
+    const markup = renderToStaticMarkup(
+      <AISettingsMCPSection
+        {...buildMCPSectionProps({
+          mcpServers: [{
+            id: 'mcp-local',
+            name: 'Local MCP',
+            transport: 'stdio',
+            command: 'node',
+            args: ['server.js', '--stdio'],
+            env: {},
+            enabled: true,
+            timeoutSeconds: 20,
+          }],
+        })}
+      />,
+    );
+
+    expect(markup).toContain('常见填错现象');
+    expect(markup).toContain('测试提示找不到命令');
+    expect(markup).toContain('认证失败、401 或 403');
+    expect(markup).toContain('当前只支持 stdio');
+    expect(markup).toContain('不要把密钥写进聊天内容');
+  });
+
   it('seeds a new draft when a launch template is selected', () => {
     const onAddServer = vi.fn();
-    const tree = AISettingsMCPSection({
+    const tree = AISettingsMCPSection(buildMCPSectionProps({
       mcpClientStatuses: [],
-      selectedMCPClient: 'claude-code',
       selectedMCPClientStatus: undefined,
-      selectedMCPClientCommandText: '',
-      mcpServers: [],
-      mcpTools: [],
-      darkMode: false,
-      overlayTheme: buildOverlayWorkbenchTheme(false),
-      cardBg: '#fff',
-      cardBorder: 'rgba(0,0,0,0.08)',
-      inputBg: '#fff',
-      loading: false,
-      mcpClientStatusLoading: false,
-      onSelectClient: () => {},
-      onRefreshStatus: () => {},
-      onCopyConfigPath: () => {},
-      onCopyLaunchCommand: () => {},
-      onInstallSelectedClient: () => {},
       onAddServer,
-      onUpdateServerDraft: () => {},
-      onTestServer: () => {},
-      onSaveServer: () => {},
-      onDeleteServer: () => {},
-    });
+    }));
 
     const nodeTemplateButton = findElement(
       tree,

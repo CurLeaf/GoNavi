@@ -15,6 +15,14 @@ export interface MCPFillStep {
   detail: string;
 }
 
+export interface MCPTroubleshootingGuide {
+  key: string;
+  symptom: string;
+  likelyCause: string;
+  fix: string;
+  example?: string;
+}
+
 export const MCP_COMMAND_EXAMPLES = [
   'uvx mcp-server-fetch',
   'node server.js --stdio',
@@ -94,7 +102,39 @@ export const MCP_AUTHORING_NOTES = [
   '启动命令只填程序本身，不要把脚本名、模块名和 --stdio 混进去。',
   '如果 README 里只给了一整行命令，优先粘到完整命令框自动拆分。',
   '环境变量每行一条 KEY=VALUE，不要写 export，也不要和启动命令混成一行保存。',
+  '密钥类环境变量会保存到本机配置，并只在启动 MCP 进程时作为进程环境传入；不要把密钥写进聊天内容。',
   '测试工具发现只会临时启动一次做探测，不会自动保存配置。',
+];
+
+export const MCP_TROUBLESHOOTING_GUIDES: MCPTroubleshootingGuide[] = [
+  {
+    key: 'command-not-found',
+    symptom: '测试提示找不到命令',
+    likelyCause: '启动命令填了整串命令、命令没加入 PATH，或 Windows 路径里有空格但没有用真实 exe 路径。',
+    fix: '启动命令只填可执行程序本身；脚本名和 --stdio 放到命令参数里。命令不在 PATH 时，直接填绝对路径。',
+    example: 'command=node, args=server.js / --stdio',
+  },
+  {
+    key: 'timeout-or-no-tools',
+    symptom: '测试超时或发现 0 个工具',
+    likelyCause: '服务启动慢、缺少 stdio 参数，或填成了只支持 HTTP/SSE 的 MCP 服务。',
+    fix: '先确认这个服务支持 stdio，再补齐 --stdio 等参数；启动慢时把超时调到 45 或 60 秒。',
+    example: 'args=--stdio, timeout=45',
+  },
+  {
+    key: 'auth-failed',
+    symptom: '认证失败、401 或 403',
+    likelyCause: 'API Key、Token、服务地址等环境变量没有填，或 KEY=VALUE 格式无效。',
+    fix: '在环境变量里每行写一条 KEY=VALUE，不要写 export，也不要把环境变量和启动命令混到同一行保存。',
+    example: 'GITHUB_TOKEN=...',
+  },
+  {
+    key: 'stdio-only',
+    symptom: 'README 只给了 URL 或 SSE 配置',
+    likelyCause: '这类配置通常不是本机 stdio 进程，当前 GoNavi 新增 MCP 服务暂不直接支持。',
+    fix: '优先找该服务的 stdio 启动方式；如果只有 HTTP/SSE，请先用官方网关或本机包装器转成 stdio。',
+    example: '当前只支持 stdio',
+  },
 ];
 
 const quoteCommandPart = (value: string): string => {
