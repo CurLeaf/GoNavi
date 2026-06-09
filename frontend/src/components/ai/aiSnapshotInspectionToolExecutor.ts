@@ -36,6 +36,7 @@ import { buildShortcutSnapshot } from './aiShortcutInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsights';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
+import { executeAppHealthSnapshotToolCall } from './aiSnapshotInspectionAppHealthToolExecutor';
 import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
@@ -90,6 +91,24 @@ export async function executeSnapshotInspectionToolCall(
   } = options;
 
   try {
+    const appHealthResult = await executeAppHealthSnapshotToolCall({
+      toolName,
+      args,
+      activeContext,
+      aiContexts,
+      connections,
+      tabs,
+      activeTabId,
+      mcpTools,
+      skills,
+      userPromptSettings,
+      dynamicModels,
+      runtime,
+    });
+    if (appHealthResult) {
+      return appHealthResult;
+    }
+
     const aiConfigResult = await executeAIConfigSnapshotToolCall({
       toolName,
       activeContext,
@@ -374,6 +393,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
       inspect_shortcuts: '读取快捷键配置失败',
+      inspect_app_health: '读取 AI 应用健康总览失败',
     }[toolName] || '读取本地探针快照失败';
     return {
       content: `${label}: ${error?.message || error}`,

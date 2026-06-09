@@ -2,6 +2,31 @@ import type { AIBuiltinToolInfo } from "./aiBuiltinToolInfo.types";
 
 export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
   {
+    name: "inspect_app_health",
+    icon: "🧭",
+    desc: "一键查看 AI 应用健康总览",
+    detail:
+      "汇总 AI 配置、供应商发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却和当前工作区页签，给出阻塞项、运行期异常信号和下一步探针建议。适合用户说“AI 不稳定”“整体帮我看看”“连接和 MCP 一起排查”时先做一次全局摸底。",
+    params: "keyword?, connectionKeyword?, lineLimit?(默认 120), includeLogLines?(默认 false)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_app_health",
+        description:
+          "读取 GoNavi AI 应用健康总览，汇总 AI 供应商与发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却和当前工作区页签，并返回阻塞项、运行期异常信号与下一步探针建议。适用于用户提到 AI 不稳定、整体不成熟、连接/MCP/日志需要一起排查或要求先看全局状态时，优先调用该工具。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，读取应用日志时按关键词过滤，例如 ai、mcp、mysql、error；不传则读取最近日志窗口" },
+            connectionKeyword: { type: "string", description: "可选，分析连接失败日志时按连接类型、地址或错误关键词过滤；不传时复用 keyword" },
+            lineLimit: { type: "number", description: "可选，每次最多分析多少行日志，默认 120，最大 240" },
+            includeLogLines: { type: "boolean", description: "可选，是否在结果里附带日志原文行，默认 false；需要引用原文时再开启" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_ai_setup_health",
     icon: "🩺",
     desc: "一键体检当前 AI 配置健康度",

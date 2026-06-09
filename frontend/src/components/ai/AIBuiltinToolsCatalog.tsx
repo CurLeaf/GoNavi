@@ -41,6 +41,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
   },
   {
+    title: 'AI 应用健康总览',
+    steps: 'inspect_app_health → inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures',
+    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、或需要先看整体健康状态时，一次汇总配置、日志、连接失败和工作区现场。',
+  },
+  {
     title: '一键体检 AI 配置',
     steps: 'inspect_ai_setup_health → inspect_ai_providers / inspect_mcp_setup / inspect_ai_guidance',
     description: '适合先拿到一份 AI 配置健康快照，看清当前是供应商没配好、聊天发送前置没满足、MCP 没接入，还是提示词 / Skills / 上下文还不完整，再决定往哪条探针继续下钻。',
