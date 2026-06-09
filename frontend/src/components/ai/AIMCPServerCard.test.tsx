@@ -48,6 +48,8 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('固定');
     expect(markup).toContain('直接粘贴完整命令');
     expect(markup).toContain('自动拆分到下方字段');
+    expect(markup).toContain('$env:KEY=VALUE;');
+    expect(markup).toContain('set KEY=VALUE &amp;&amp;');
     expect(markup).toContain('每个参数单独录入一个标签');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('没有等号或 key 含空格的行不会保存');
@@ -63,6 +65,6 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('稍宽松 45 秒');
     expect(markup).toContain('慢启动 60 秒');
     expect(markup).toContain('node server.js --stdio');
-    expect(markup).toContain('OPENAI_API_KEY=... uvx mcp-server-fetch --stdio');
+    expect(markup).toContain('$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio');
   });
 });

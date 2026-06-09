@@ -157,7 +157,7 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
     <div style={{ padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>只有一条完整命令？</div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        直接粘贴完整命令，GoNavi 会自动拆成“启动命令 / 命令参数 / 环境变量”三块，适合你只拿到 README 里的一整行示例时快速录入。
+        直接粘贴完整命令，GoNavi 会自动拆成“启动命令 / 命令参数 / 环境变量”三块；支持 Unix 的 KEY=VALUE，也支持 Windows PowerShell 的 $env:KEY=VALUE; 和 cmd 的 set KEY=VALUE && 写法。
       </div>
       <Input.TextArea
         rows={2}
@@ -172,7 +172,7 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
             ? parsedCommandDraft.ok && parsedCommandDraft.draft
               ? `将解析为：命令 ${parsedCommandDraft.draft.command}，参数 ${parsedCommandDraft.draft.args.length} 个，环境变量 ${Object.keys(parsedCommandDraft.draft.env).length} 个。`
               : parsedCommandDraft.error
-            : '支持带引号路径、带空格参数，以及命令前缀的 KEY=VALUE 环境变量。'}
+            : '支持带引号路径、带空格参数，以及 KEY=VALUE / $env:KEY=VALUE; / set KEY=VALUE && 环境变量前缀。'}
         </div>
         <Button onClick={onApplyCommandDraft} disabled={!parsedCommandDraft.ok} style={{ borderRadius: 10 }}>
           自动拆分到下方字段

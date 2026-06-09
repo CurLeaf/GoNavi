@@ -31,6 +31,45 @@ describe('mcpCommandDraft helpers', () => {
     });
   });
 
+  it('parses PowerShell env prefixes before the MCP command', () => {
+    const result = parseMCPCommandDraft('$env:GITHUB_TOKEN="ghp test"; uvx mcp-server-github --stdio');
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({
+      command: 'uvx',
+      args: ['mcp-server-github', '--stdio'],
+      env: {
+        GITHUB_TOKEN: 'ghp test',
+      },
+    });
+  });
+
+  it('parses Windows cmd set prefixes before the MCP command', () => {
+    const result = parseMCPCommandDraft('set GITHUB_TOKEN=ghp_test && node server.js --stdio');
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({
+      command: 'node',
+      args: ['server.js', '--stdio'],
+      env: {
+        GITHUB_TOKEN: 'ghp_test',
+      },
+    });
+  });
+
+  it('parses env launcher style prefixes before the MCP command', () => {
+    const result = parseMCPCommandDraft('env OPENAI_API_KEY=sk-test uvx mcp-server-fetch --stdio');
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({
+      command: 'uvx',
+      args: ['mcp-server-fetch', '--stdio'],
+      env: {
+        OPENAI_API_KEY: 'sk-test',
+      },
+    });
+  });
+
   it('reports unclosed quotes instead of producing a broken parse', () => {
     expect(splitShellLikeCommand('uvx "broken command')).toEqual({
       tokens: ['uvx'],

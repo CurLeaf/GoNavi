@@ -20,7 +20,11 @@ describe('mcpServerGuidance', () => {
   });
 
   it('warns users to keep secrets in local env config instead of chat content', () => {
-    expect(MCP_AUTHORING_NOTES.join('\n')).toContain('本机配置');
-    expect(MCP_AUTHORING_NOTES.join('\n')).toContain('不要把密钥写进聊天内容');
+    const notes = MCP_AUTHORING_NOTES.join('\n');
+
+    expect(notes).toContain('本机配置');
+    expect(notes).toContain('不要把密钥写进聊天内容');
+    expect(notes).toContain('PowerShell $env:KEY=VALUE;');
+    expect(notes).toContain('Windows set KEY=VALUE &&');
   });
 });

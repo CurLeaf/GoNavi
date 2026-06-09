@@ -11,6 +11,7 @@ export interface ParseMCPCommandDraftResult {
 }
 
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=.*/u;
+const POWERSHELL_ENV_ASSIGNMENT_RE = /^\$env:([A-Za-z_][A-Za-z0-9_]*)=(.*)$/iu;
 
 const pushToken = (tokens: string[], current: string) => {
   if (current) {
@@ -53,6 +54,19 @@ export const splitShellLikeCommand = (input: string): { tokens: string[]; error?
       continue;
     }
 
+    if (char === ';') {
+      pushToken(tokens, current);
+      current = '';
+      continue;
+    }
+
+    if (char === '&' && text[index + 1] === '&') {
+      pushToken(tokens, current);
+      current = '';
+      index += 1;
+      continue;
+    }
+
     if (/\s/u.test(char)) {
       pushToken(tokens, current);
       current = '';
@@ -82,6 +96,61 @@ export const splitShellLikeCommand = (input: string): { tokens: string[]; error?
   return { tokens };
 };
 
+const consumeEnvAssignmentToken = (token: string, env: Record<string, string>): boolean => {
+  const text = String(token || '').trim();
+  if (!text) return false;
+
+  const powershellMatch = text.match(POWERSHELL_ENV_ASSIGNMENT_RE);
+  if (powershellMatch) {
+    env[powershellMatch[1]] = powershellMatch[2] || '';
+    return true;
+  }
+
+  if (!ENV_ASSIGNMENT_RE.test(text)) return false;
+  const separatorIndex = text.indexOf('=');
+  const key = text.slice(0, separatorIndex).trim();
+  if (!key) return false;
+  env[key] = text.slice(separatorIndex + 1);
+  return true;
+};
+
+const isEnvAssignmentToken = (token: string): boolean => {
+  const text = String(token || '').trim();
+  return Boolean(text.match(POWERSHELL_ENV_ASSIGNMENT_RE)) || ENV_ASSIGNMENT_RE.test(text);
+};
+
+const consumeLeadingEnvAssignments = (tokens: string[], env: Record<string, string>): number => {
+  let commandIndex = 0;
+
+  while (commandIndex < tokens.length) {
+    const token = tokens[commandIndex];
+    const normalizedToken = String(token || '').trim().toLowerCase();
+
+    if (normalizedToken === 'set' && tokens[commandIndex + 1] && isEnvAssignmentToken(tokens[commandIndex + 1])) {
+      consumeEnvAssignmentToken(tokens[commandIndex + 1], env);
+      commandIndex += 2;
+      continue;
+    }
+
+    if (normalizedToken === 'env' && tokens[commandIndex + 1] && isEnvAssignmentToken(tokens[commandIndex + 1])) {
+      commandIndex += 1;
+      while (commandIndex < tokens.length && consumeEnvAssignmentToken(tokens[commandIndex], env)) {
+        commandIndex += 1;
+      }
+      continue;
+    }
+
+    if (consumeEnvAssignmentToken(token, env)) {
+      commandIndex += 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return commandIndex;
+};
+
 export const parseMCPCommandDraft = (input: string): ParseMCPCommandDraftResult => {
   const { tokens, error } = splitShellLikeCommand(input);
   if (error) {
@@ -92,17 +161,7 @@ export const parseMCPCommandDraft = (input: string): ParseMCPCommandDraftResult 
   }
 
   const env: Record<string, string> = {};
-  let commandIndex = 0;
-
-  while (commandIndex < tokens.length && ENV_ASSIGNMENT_RE.test(tokens[commandIndex])) {
-    const token = tokens[commandIndex];
-    const separatorIndex = token.indexOf('=');
-    const key = token.slice(0, separatorIndex).trim();
-    if (key) {
-      env[key] = token.slice(separatorIndex + 1);
-    }
-    commandIndex += 1;
-  }
+  const commandIndex = consumeLeadingEnvAssignments(tokens, env);
 
   const command = String(tokens[commandIndex] || '').trim();
   if (!command) {

@@ -29,7 +29,7 @@ export const MCP_COMMAND_EXAMPLES = [
   'python -m your_mcp_server',
 ];
 
-export const MCP_COMMAND_PARSE_EXAMPLE = 'OPENAI_API_KEY=... uvx mcp-server-fetch --stdio';
+export const MCP_COMMAND_PARSE_EXAMPLE = '$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio';
 
 export const MCP_SERVER_FILL_STEPS: MCPFillStep[] = [
   { step: '1', title: '模板 / 完整命令', detail: '优先选最接近的模板，或先粘一整行命令让 GoNavi 自动拆分。' },
@@ -100,7 +100,7 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
 
 export const MCP_AUTHORING_NOTES = [
   '启动命令只填程序本身，不要把脚本名、模块名和 --stdio 混进去。',
-  '如果 README 里只给了一整行命令，优先粘到完整命令框自动拆分。',
+  '如果 README 里只给了一整行命令，优先粘到完整命令框自动拆分；支持 KEY=VALUE、env KEY=VALUE、PowerShell $env:KEY=VALUE; 和 Windows set KEY=VALUE && 这几类前缀环境变量写法。',
   '环境变量每行一条 KEY=VALUE，不要写 export，也不要和启动命令混成一行保存。',
   '密钥类环境变量会保存到本机配置，并只在启动 MCP 进程时作为进程环境传入；不要把密钥写进聊天内容。',
   '测试工具发现只会临时启动一次做探测，不会自动保存配置。',
