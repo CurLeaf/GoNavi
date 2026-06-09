@@ -702,13 +702,14 @@ describe('Sidebar locate toolbar', () => {
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-tree-status is-${status}');
     expect(source).toContain('data-sidebar-tree-folder-icon="true"');
     expect(source).toContain("overflow: 'hidden'");
     expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
     expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
-    expect(source).toContain('const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;');
+    expect(utilsSource).toContain('export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;');
     expect(source).toContain('const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth');
     expect(source).toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
     expect(source).toContain('height={effectiveTreeHeight}');
@@ -869,6 +870,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('reorders dragged connections instead of only moving them between groups', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('const reorderConnections = useStore(state => state.reorderConnections);');
     expect(source).toContain('reorderConnections(');
@@ -876,7 +878,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('const domDropNode = resolveSidebarDropNodeFromDomEvent(info?.event);');
     expect(source).toContain('const dropTargetMetrics = resolveSidebarDropTargetMetricsFromDomEvent(info?.event);');
     expect(source).toContain("findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key)");
-    expect(source).toContain("const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;");
+    expect(utilsSource).toContain("const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;");
     expect(source).toContain('insertBefore,');
   });
 
