@@ -111,6 +111,18 @@ func TestNormalizeMySQLRawDSNCompatibilityParamsPreservesExplicitMultiStatements
 	}
 }
 
+func TestNormalizeMySQLRawDSNCompatibilityParamsPreservesCharsetFallbackComma(t *testing.T) {
+	got := normalizeMySQLRawDSNCompatibilityParams(
+		"root:pass@tcp(127.0.0.1:3306)/app?charset=utf8mb4,utf8&allowMultiQueries=true",
+	)
+	if strings.Contains(got, "%2C") || strings.Contains(got, "%2c") {
+		t.Fatalf("charset fallback comma should stay unescaped for mysql driver, got %q", got)
+	}
+	if !strings.Contains(got, "charset=utf8mb4,utf8") {
+		t.Fatalf("charset fallback list should be preserved, got %q", got)
+	}
+}
+
 func TestCustomDBOnlyNormalizesBuiltInMySQLDriverDSN(t *testing.T) {
 	customMySQLDSNRecordingLastDSN = ""
 	rawDSN := "root:pass@tcp(127.0.0.1:3306)/app?allowMultiQueries=true"

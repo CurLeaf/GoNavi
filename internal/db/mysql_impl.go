@@ -372,10 +372,44 @@ func buildMySQLCompatibleDSNWithOptions(config connection.ConnectionConfig, prot
 		mergeMySQLConnectionParams(params, parsed.Query())
 	}
 	mergeMySQLConnectionParams(params, mysqlConnectionParamsFromText(config.ConnectionParams))
+	encodedParams := encodeMySQLDSNQuery(params)
 	return fmt.Sprintf(
 		"%s:%s@%s(%s)/%s?%s",
-		config.User, config.Password, protocol, address, database, params.Encode(),
+		config.User, config.Password, protocol, address, database, encodedParams,
 	), nil
+}
+
+func encodeMySQLDSNQuery(params url.Values) string {
+	if len(params) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	for _, key := range keys {
+		escapedKey := url.QueryEscape(key)
+		values := params[key]
+		for _, value := range values {
+			if builder.Len() > 0 {
+				builder.WriteByte('&')
+			}
+			builder.WriteString(escapedKey)
+			builder.WriteByte('=')
+			escapedValue := url.QueryEscape(value)
+			if strings.EqualFold(strings.TrimSpace(key), "charset") {
+				escapedValue = strings.ReplaceAll(escapedValue, "%2C", ",")
+				escapedValue = strings.ReplaceAll(escapedValue, "%2c", ",")
+			}
+			builder.WriteString(escapedValue)
+		}
+	}
+
+	return builder.String()
 }
 
 func buildMySQLCompatibleDSN(config connection.ConnectionConfig, protocol, address, database string) (string, error) {
@@ -475,7 +509,7 @@ func normalizeMySQLRawDSNCompatibilityParams(raw string) string {
 	if !changed {
 		return raw
 	}
-	encoded := values.Encode()
+	encoded := encodeMySQLDSNQuery(values)
 	if encoded == "" {
 		return prefix + suffix
 	}

@@ -827,8 +827,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 	defer closeExecTarget()
 
-	// 全部为写操作且驱动支持批量 Exec → 一次性发送，大幅减少网络往返
-	// 适用于 MySQL/MariaDB/Doris/PostgreSQL/SQLite/DuckDB 等支持多语句 Exec 的驱动
+	// 单条写语句且驱动支持批量 Exec 时，可复用批量路径。
+	// 多条写语句必须逐条返回结果；部分驱动对多语句 Exec 仅暴露最后一条 RowsAffected，
+	// 会导致前面语句已成功执行但结果页只剩一个写入结果。
 	if !allReadOnly {
 		allWrite := true
 		containsPLSQLBlock := false
@@ -840,7 +841,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				containsPLSQLBlock = true
 			}
 		}
-		if allWrite && !containsPLSQLBlock {
+		if allWrite && !containsPLSQLBlock && len(statements) == 1 {
 			batcher := sessionBatchTarget
 			if batcher == nil {
 				if fallbackBatcher, ok := dbInst.(db.BatchWriteExecer); ok {
@@ -987,8 +988,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 		}
 		resultSets = append(resultSets, connection.ResultSetData{
-			Rows:    []map[string]interface{}{{"affectedRows": affected}},
-			Columns: []string{"affectedRows"},
+			Rows:           []map[string]interface{}{{"affectedRows": affected}},
+			Columns:        []string{"affectedRows"},
+			StatementIndex: idx + 1,
 		})
 	}
 

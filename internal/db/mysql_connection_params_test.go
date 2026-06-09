@@ -3,10 +3,13 @@ package db
 import (
 	"database/sql"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+
+	mysql "github.com/go-sql-driver/mysql"
 )
 
 func parseMySQLDSNQueryForTest(t *testing.T, dsn string) url.Values {
@@ -20,6 +23,26 @@ func parseMySQLDSNQueryForTest(t *testing.T, dsn string) url.Values {
 		t.Fatalf("parse dsn query: %v", err)
 	}
 	return values
+}
+
+func parseMySQLDriverCharsetsForTest(t *testing.T, dsn string) []string {
+	t.Helper()
+
+	cfg, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("mysql ParseDSN failed: %v", err)
+	}
+
+	field := reflect.ValueOf(cfg).Elem().FieldByName("charsets")
+	if !field.IsValid() {
+		t.Fatal("mysql.Config missing internal charsets field")
+	}
+
+	charsets := make([]string, field.Len())
+	for i := 0; i < field.Len(); i++ {
+		charsets[i] = field.Index(i).String()
+	}
+	return charsets
 }
 
 func TestMySQLDSN_MergesConnectionParamsWithDefaults(t *testing.T) {
@@ -396,6 +419,27 @@ func TestMySQLDSN_AsiaShanghaiLocationAcceptedByDriver(t *testing.T) {
 		t.Fatalf("mysql driver should accept loc=Asia/Shanghai: %v", err)
 	}
 	_ = db.Close()
+}
+
+func TestMySQLDSN_DefaultCharsetFallbackListRemainsDriverCompatible(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Host:     "127.0.0.1",
+		Port:     3306,
+		User:     "root",
+		Database: "app",
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	got := parseMySQLDriverCharsetsForTest(t, dsn)
+	want := []string{"utf8mb4", "utf8"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("driver should parse charset fallback list, got=%v want=%v dsn=%q", got, want, dsn)
+	}
 }
 
 func TestMySQLDSN_URIParamsAndExplicitParamsPrecedence(t *testing.T) {
