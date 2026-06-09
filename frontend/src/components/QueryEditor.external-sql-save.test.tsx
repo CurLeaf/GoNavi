@@ -3189,7 +3189,7 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('keeps query result tabs compact, centered, and readable in v2 UI', () => {
-    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain('.query-result-tabs .ant-tabs-tab {');
