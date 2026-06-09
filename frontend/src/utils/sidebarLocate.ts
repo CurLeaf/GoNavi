@@ -402,7 +402,7 @@ const getVisualNodeObjectName = (
         ? [`${target.databaseKey}-trigger-`]
         : target.objectGroup === 'routines'
           ? [`${target.databaseKey}-routine-`]
-          : [`${target.databaseKey}-`];
+          : [`${target.databaseKey}-table-`, `${target.databaseKey}-`];
 
   const matchedPrefix = keyPrefixes.find((prefix) => nodeKey.startsWith(prefix));
   return matchedPrefix ? nodeKey.slice(matchedPrefix.length) : '';

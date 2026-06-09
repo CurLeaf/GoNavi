@@ -1452,5 +1452,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;');
     expect(source).toContain('attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS');
     expect(source).toContain('window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS)');
+    expect(source).toContain('return !loadingNodesRef.current.has(loadKey);');
+    expect(source).toContain('对象仍在加载中');
   });
 });

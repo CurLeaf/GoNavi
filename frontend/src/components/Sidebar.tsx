@@ -2445,10 +2445,11 @@ const Sidebar: React.FC<{
 
   const locateObjectInSidebarRef = useRef<(detail: unknown) => Promise<void>>(async () => {});
 
-  const waitForSidebarLoadKey = async (loadKey: string) => {
+  const waitForSidebarLoadKey = async (loadKey: string): Promise<boolean> => {
       for (let attempt = 0; attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS && loadingNodesRef.current.has(loadKey); attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS));
       }
+      return !loadingNodesRef.current.has(loadKey);
   };
 
   const locateObjectInSidebar = async (detail: unknown) => {
@@ -2511,7 +2512,11 @@ const Sidebar: React.FC<{
               return;
           }
           if (loadingNodesRef.current.has(dbLoadKey)) {
-              await waitForSidebarLoadKey(dbLoadKey);
+              const loaded = await waitForSidebarLoadKey(dbLoadKey);
+              if (!loaded) {
+                  message.info(`数据库节点仍在加载中：${request.dbName}，请稍后再试`);
+                  return;
+              }
           } else {
               await loadDatabases(connectionNode);
           }
@@ -2526,7 +2531,11 @@ const Sidebar: React.FC<{
       path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
       if (!path) {
           if (loadingNodesRef.current.has(tableLoadKey)) {
-              await waitForSidebarLoadKey(tableLoadKey);
+              const loaded = await waitForSidebarLoadKey(tableLoadKey);
+              if (!loaded) {
+                  message.info(`${objectLabel}所在数据库对象仍在加载中：${request.dbName}，请稍后再试`);
+                  return;
+              }
           } else {
               await loadTables(dbNode);
           }
