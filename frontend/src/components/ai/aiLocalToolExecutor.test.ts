@@ -445,9 +445,10 @@ describe('aiLocalToolExecutor', () => {
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('"supportsWholeCommandAutoSplit":true');
-    expect(result.content).toContain('"fullCommandPasteExample":"OPENAI_API_KEY=... uvx mcp-server-fetch --stdio"');
+    expect(result.content).toContain('"fullCommandPasteExample":"$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio"');
     expect(result.content).toContain('"title":"启动命令"');
     expect(result.content).toContain('"example":"node / uvx / python"');
+    expect(result.content).toContain('PowerShell $env:KEY=VALUE;');
     expect(result.content).toContain('"title":"uvx 工具"');
     expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
   });

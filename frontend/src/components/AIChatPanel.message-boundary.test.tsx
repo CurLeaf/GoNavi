@@ -12,6 +12,7 @@ const resizeSource = readFileSync(new URL('./ai/useAIChatPanelResize.ts', import
 const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
 const sessionStateSource = readFileSync(new URL('./ai/useAIChatSessionState.ts', import.meta.url), 'utf8');
 const titleGeneratorSource = readFileSync(new URL('./ai/useAIChatSessionTitleGenerator.ts', import.meta.url), 'utf8');
+const localToolsSource = readFileSync(new URL('./ai/useAIChatLocalTools.ts', import.meta.url), 'utf8');
 const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
 const inspectionGuidanceSource = readFileSync(new URL('./ai/aiSystemInspectionGuidance.ts', import.meta.url), 'utf8');
 const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
@@ -41,7 +42,8 @@ describe('AIChatPanel message render isolation', () => {
   it('loads MCP tools and skills into the runtime tool chain', () => {
     expect(runtimeResourcesSource).toContain('AIListMCPTools');
     expect(runtimeResourcesSource).toContain('AIGetSkills');
-    expect(source).toContain('executeLocalAIToolCall');
+    expect(source).toContain("import { useAIChatLocalTools } from './ai/useAIChatLocalTools';");
+    expect(localToolsSource).toContain('executeLocalAIToolCall');
     expect(systemContextSource).toContain('以下是当前启用的 Skill');
     expect(source).toContain('buildAvailableAIChatTools');
   });
@@ -53,11 +55,11 @@ describe('AIChatPanel message render isolation', () => {
     expect(inspectionGuidanceSource).toContain('inspect_current_connection');
     expect(inspectionGuidanceSource).toContain('inspect_external_sql_directories');
     expect(inspectionGuidanceSource).toContain('inspect_external_sql_file');
-    expect(source).toContain('tabs: useStore.getState().tabs');
-    expect(source).toContain('activeTabId: useStore.getState().activeTabId');
-    expect(source).toContain('externalSQLDirectories: useStore.getState().externalSQLDirectories');
-    expect(source).toContain('toolContextMap: toolContextMapRef.current');
-    expect(source).toContain('buildToolResultMessage');
+    expect(localToolsSource).toContain('tabs: currentState.tabs');
+    expect(localToolsSource).toContain('activeTabId: currentState.activeTabId');
+    expect(localToolsSource).toContain('externalSQLDirectories: currentState.externalSQLDirectories');
+    expect(localToolsSource).toContain('toolContextMap: toolContextMapRef.current');
+    expect(localToolsSource).toContain('buildToolResultMessage');
   });
 
   it('extracts chat runtime helpers so context compression and error cleanup stay out of the panel file', () => {
@@ -65,11 +67,14 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain("import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';");
     expect(source).toContain('compressContextIfNeeded, getDynamicMaxContextChars');
     expect(source).toContain('useAIChatStreamSubscription({');
+    expect(source).toContain('useAIChatLocalTools({');
     expect(runtimeSource).toContain('export const getDynamicMaxContextChars');
     expect(runtimeSource).toContain('export const compressContextIfNeeded');
     expect(runtimeSource).toContain('export const sanitizeErrorMsg');
     expect(payloadDispatchSource).toContain('export const dispatchAIChatPayload');
     expect(payloadDispatchSource).toContain('sanitizeErrorMsg');
+    expect(localToolsSource).toContain('compressContextIfNeeded');
+    expect(localToolsSource).toContain('dispatchAIChatPayload');
     expect(streamSubscriptionSource).toContain('EventsOn(eventName, handler);');
     expect(streamSubscriptionSource).toContain('请直接使用 function call 调用工具执行操作');
     expect(streamSubscriptionSource).toContain('executeLocalTools(existing.tool_calls!, doneAssistantId)');
@@ -92,6 +97,7 @@ describe('AIChatPanel message render isolation', () => {
     expect(source).toContain("import { useAIChatAutoContext } from './ai/useAIChatAutoContext';");
     expect(source).toContain("import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';");
     expect(source).toContain("import { useAIChatPanelResize } from './ai/useAIChatPanelResize';");
+    expect(source).toContain("import { useAIChatLocalTools } from './ai/useAIChatLocalTools';");
     expect(planContextSource).toContain('export const useAIChatPlanContexts');
     expect(planContextSource).toContain('pendingJVMPlanContextRef');
     expect(autoContextSource).toContain('export const useAIChatAutoContext');
@@ -100,5 +106,7 @@ describe('AIChatPanel message render isolation', () => {
     expect(titleGeneratorSource).toContain('Failed to auto-generate title');
     expect(resizeSource).toContain('export const useAIChatPanelResize');
     expect(resizeSource).toContain('document.body.style.pointerEvents = \'none\'');
+    expect(localToolsSource).toContain('export const useAIChatLocalTools');
+    expect(localToolsSource).toContain('MAX_TOOL_CALL_ROUNDS');
   });
 });

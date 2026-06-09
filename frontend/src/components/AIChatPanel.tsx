@@ -4,7 +4,6 @@ import { useStore } from '../store';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
     AIChatMessage,
-    AIToolCall,
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
 } from '../types';
@@ -28,11 +27,6 @@ import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts'
 import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
 import {
-    buildToolResultMessage,
-    executeLocalAIToolCall,
-    type AIToolContextEntry,
-} from './ai/aiLocalToolExecutor';
-import {
     buildAIChatInlineHistorySessions,
     buildAIChatInsights,
     calculateAIContextUsageChars,
@@ -49,6 +43,7 @@ import { useAIChatPanelResize } from './ai/useAIChatPanelResize';
 import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';
 import { useAIChatSessionState } from './ai/useAIChatSessionState';
 import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';
+import { useAIChatLocalTools } from './ai/useAIChatLocalTools';
 
 interface AIChatPanelProps {
     width?: number;
@@ -88,8 +83,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const toolCallRoundRef = useRef(0); // 连续失败轮次计数
-    const totalToolRoundRef = useRef(0); // 全局工具调用总轮次计数（防止无限循环）
     const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
     const {
         getCurrentJVMPlanContext,
@@ -219,6 +212,45 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         setTimeout(() => textareaRef.current?.focus(), 50);
     }, [sid, truncateAIChatMessages, deleteAIChatMessage]);
 
+    const buildSystemContextMessages = useCallback((
+        overrideJVMPlanContext?: JVMAIPlanContext,
+        overrideJVMDiagnosticPlanContext?: JVMDiagnosticPlanContext,
+    ) => {
+        const { activeContext, aiContexts, connections, tabs, activeTabId } = useStore.getState();
+        return buildAISystemContextMessages({
+            activeContext,
+            aiContexts,
+            connections,
+            tabs,
+            activeTabId,
+            availableToolNames: availableTools.map((tool) => tool.function.name),
+            skills,
+            userPromptSettings,
+            overrideJVMPlanContext,
+            overrideJVMDiagnosticPlanContext,
+        });
+    }, [availableTools, skills, userPromptSettings]);
+
+    const {
+        executeLocalTools,
+        resetToolCallState,
+        toolContextMapRef,
+    } = useAIChatLocalTools({
+        sid,
+        activeProviderModel: activeProvider?.model,
+        availableTools,
+        buildSystemContextMessages,
+        dynamicModels,
+        mcpTools,
+        nextMessageId: genId,
+        pendingJVMPlanContextRef,
+        pendingJVMDiagnosticPlanContextRef,
+        setSending,
+        skills,
+        updateAIChatMessage,
+        userPromptSettings,
+    });
+
     const handleRetryMessage = useCallback(async (msg: AIChatMessage) => {
         const historyLocal = useStore.getState().aiChatHistory[sid] || [];
         const aiIndex = historyLocal.findIndex(m => m.id === msg.id);
@@ -236,9 +268,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             const userMsg = historyLocal[lastUserMsgIndex];
             truncateAIChatMessages(sid, userMsg.id); 
 
-            // 重置计数器（与 handleSend 保持一致）
-            toolCallRoundRef.current = 0;
-            totalToolRoundRef.current = 0;
+            resetToolCallState();
             nudgeCountRef.current = 0;
             const retryJVMPlanContext = msg.jvmPlanContext || getCurrentJVMPlanContext();
             const retryJVMDiagnosticPlanContext =
@@ -282,191 +312,14 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
     }, [
         sid,
+        availableTools,
+        buildSystemContextMessages,
         truncateAIChatMessages,
         addAIChatMessage,
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
+        resetToolCallState,
     ]);
-
-    const buildSystemContextMessages = useCallback((
-        overrideJVMPlanContext?: JVMAIPlanContext,
-        overrideJVMDiagnosticPlanContext?: JVMDiagnosticPlanContext,
-    ) => {
-        const { activeContext, aiContexts, connections, tabs, activeTabId } = useStore.getState();
-        return buildAISystemContextMessages({
-            activeContext,
-            aiContexts,
-            connections,
-            tabs,
-            activeTabId,
-            availableToolNames: availableTools.map((tool) => tool.function.name),
-            skills,
-            userPromptSettings,
-            overrideJVMPlanContext,
-            overrideJVMDiagnosticPlanContext,
-        });
-    }, [availableTools, skills, userPromptSettings]);
-
-    // 记录所有成功的 get_tables 调用结果，用于表级精确匹配
-    const toolContextMapRef = useRef<Map<string, AIToolContextEntry>>(new Map());
-
-    const executeLocalTools = useCallback(async (toolCalls: AIToolCall[], currentAsstMsgId: string) => {
-        const currentAsstMsg = (useStore.getState().aiChatHistory[sid] || []).find(m => m.id === currentAsstMsgId);
-        const inheritedJVMPlanContext = currentAsstMsg?.jvmPlanContext || pendingJVMPlanContextRef.current;
-        const inheritedJVMDiagnosticPlanContext =
-            currentAsstMsg?.jvmDiagnosticPlanContext || pendingJVMDiagnosticPlanContextRef.current;
-        pendingJVMPlanContextRef.current = inheritedJVMPlanContext;
-        pendingJVMDiagnosticPlanContextRef.current = inheritedJVMDiagnosticPlanContext;
-
-        // 【全局轮次熔断】防止模型（如 DeepSeek）在已生成答案后仍无限循环调用工具
-        const MAX_TOOL_CALL_ROUNDS = 15;
-        totalToolRoundRef.current += 1;
-        if (totalToolRoundRef.current > MAX_TOOL_CALL_ROUNDS) {
-            updateAIChatMessage(sid, currentAsstMsgId, { loading: false, phase: 'idle' });
-            useStore.getState().addAIChatMessage(sid, {
-                id: genId(), role: 'assistant',
-                content: `⚠️ 工具调用已达 ${MAX_TOOL_CALL_ROUNDS} 轮上限，自动终止循环。如需继续探索，请发送新的消息。`,
-                timestamp: Date.now(),
-                jvmPlanContext: inheritedJVMPlanContext,
-                jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
-            });
-            setSending(false);
-            return;
-        }
-
-        const results: AIChatMessage[] = [];
-        const currentConnections = useStore.getState().connections;
-        // 【串行逐条执行 + 实时写入 store】
-        for (const tc of toolCalls) {
-            const execution = await executeLocalAIToolCall({
-                toolCall: tc,
-                connections: currentConnections,
-                activeContext: useStore.getState().activeContext,
-                aiContexts: useStore.getState().aiContexts,
-                aiChatHistory: useStore.getState().aiChatHistory,
-                aiChatSessions: useStore.getState().aiChatSessions,
-                activeSessionId: sid,
-                tabs: useStore.getState().tabs,
-                activeTabId: useStore.getState().activeTabId,
-                mcpTools,
-                toolContextMap: toolContextMapRef.current,
-                sqlLogs: useStore.getState().sqlLogs,
-                savedQueries: useStore.getState().savedQueries,
-                sqlSnippets: useStore.getState().sqlSnippets,
-                externalSQLDirectories: useStore.getState().externalSQLDirectories,
-                skills,
-                userPromptSettings,
-                dynamicModels,
-            });
-            const toolResultMsg: AIChatMessage = buildToolResultMessage({
-                id: genId(),
-                timestamp: Date.now(),
-                toolCall: tc,
-                execution,
-            });
-            results.push(toolResultMsg);
-
-            // 【实时写入】每执行完一条立即写入 store，让 UI 能实时看到进度打勾
-            useStore.getState().addAIChatMessage(sid, toolResultMsg);
-
-            // 延迟 150ms，给 UI 渲染时间，创造“逐个完成”的视觉节奏
-            await new Promise(resolve => setTimeout(resolve, 150));
-        }
-
-        // 智能熔断：只计连续失败轮次，成功则重置
-        const anySuccess = results.some(r => r.success === true);
-        if (anySuccess) {
-            toolCallRoundRef.current = 0;
-        } else {
-            toolCallRoundRef.current += 1;
-            if (toolCallRoundRef.current >= 3) {
-                useStore.getState().addAIChatMessage(sid, {
-                    id: genId(), role: 'assistant',
-                    content: '⚠️ 探针连续 3 轮执行失败，自动终止。请检查连接状态后重试。',
-                    timestamp: Date.now(),
-                    jvmPlanContext: inheritedJVMPlanContext,
-                    jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
-                });
-                setSending(false);
-                return;
-            }
-        }
-        try {
-            // 【过渡状态】工具执行完毕，将上一条消息的 loading 关闭（消除闪烁光标）
-            updateAIChatMessage(sid, currentAsstMsgId, { loading: false, phase: 'idle' });
-
-            // 插入过渡气泡
-            const chainConnectingMsg: AIChatMessage = {
-                id: genId(), role: 'assistant', phase: 'connecting', 
-                content: '汇总探针执行结果中',
-                timestamp: Date.now(), loading: true,
-                jvmPlanContext: inheritedJVMPlanContext,
-                jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
-            };
-            useStore.getState().addAIChatMessage(sid, chainConnectingMsg);
-            
-            // 模拟人类视角的平滑多段过渡
-            const safeUpdateTransition = (text: string) => {
-                const currentMsg = useStore.getState().aiChatHistory[sid]?.find(m => m.id === chainConnectingMsg.id);
-                // 只有当消息仍然处于连接过渡态时才允许修改文本；如果模型已经开始吐出思考、正文、工具或结束，直接退出
-                if (currentMsg && currentMsg.phase === 'connecting' && currentMsg.loading) {
-                    updateAIChatMessage(sid, chainConnectingMsg.id, { content: text });
-                }
-            };
-
-            setTimeout(() => safeUpdateTransition('向模型回传运行时数据'), 200);
-            setTimeout(() => safeUpdateTransition('模型大脑深度推理中'), 500);
-            setTimeout(() => safeUpdateTransition('等待下发操作指令'), 1200);
-            setTimeout(() => safeUpdateTransition('正在深度思考链路与逻辑'), 3000);
-
-            setSending(true);
-            const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-            // 过滤掉 connecting 占位消息，不发给模型
-            const messagesPayload = currentHistory.filter(m => m.phase !== 'connecting').map(toAIRequestMessage);
-            const sysMessages = await buildSystemContextMessages(
-                inheritedJVMPlanContext,
-                inheritedJVMDiagnosticPlanContext,
-            );
-
-            let finalMessagesPayload = messagesPayload;
-            // 在这里加入长度检查和自动摘要（带上动态限额）
-            const dynamicMaxLimit = getDynamicMaxContextChars(activeProvider?.model);
-            const summary = await compressContextIfNeeded(sid, messagesPayload, dynamicMaxLimit);
-            if (summary) {
-                 const compressedMsg: AIChatMessage = {
-                     id: genId(), role: 'assistant', content: `【自动记忆重塑】已将超长历史探针数据和对话压缩为摘要：\n\n${summary}`, timestamp: Date.now() - 1000
-                 };
-                 const continueMsg: AIChatMessage = {
-                     id: genId(), role: 'user', content: '请根据上述最新状态与探索结果，继续完成你先前未竟的分析或执行下一步。', timestamp: Date.now() - 500
-                 };
-                 useStore.getState().replaceAIChatHistory(sid, [compressedMsg, continueMsg, chainConnectingMsg]);
-                 finalMessagesPayload = [
-                     { role: 'assistant', content: compressedMsg.content },
-                     { role: 'user', content: continueMsg.content }
-                 ];
-            }
-
-            const allMessages = [...sysMessages, ...finalMessagesPayload];
-
-            // 【软收敛】超过 10 轮工具调用后，不再传递 tools 参数，从物理层面强制模型只能用文本回答
-            const SOFT_LIMIT_ROUNDS = 10;
-            const chainTools = totalToolRoundRef.current >= SOFT_LIMIT_ROUNDS ? [] : availableTools;
-
-            await dispatchAIChatPayload({
-                sid,
-                messages: allMessages,
-                tools: chainTools,
-                addAIChatMessage: (sessionId, message) => useStore.getState().addAIChatMessage(sessionId, message),
-                setSending,
-                nextMessageId: genId,
-                jvmPlanContext: inheritedJVMPlanContext,
-                jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
-            });
-        } catch (e) {
-            console.error('Failed to chain tool call', e);
-            setSending(false);
-        }
-    }, [availableTools, buildSystemContextMessages, dynamicModels, mcpTools, sid, skills]);
 
     useAIChatStreamSubscription({
         sid,
@@ -512,8 +365,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }
         setComposerNotice(null);
 
-        toolCallRoundRef.current = 0; // 重置工具调用轮次计数
-        totalToolRoundRef.current = 0; // 重置总轮次计数
+        resetToolCallState();
         nudgeCountRef.current = 0;     // 重置催促计数
         const currentJVMPlanContext = getCurrentJVMPlanContext();
         const currentJVMDiagnosticPlanContext = getCurrentJVMDiagnosticPlanContext();
