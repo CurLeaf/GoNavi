@@ -36,7 +36,12 @@ const storeState = vi.hoisted(() => ({
   appearance: { uiVersion: 'legacy' as 'legacy' | 'v2' },
   sqlFormatOptions: { keywordCase: 'upper' as const },
   setSqlFormatOptions: vi.fn(),
-  queryOptions: { maxRows: 5000 },
+  queryOptions: {
+    maxRows: 5000,
+    showColumnComment: true,
+    showColumnType: true,
+    showQueryResultsPanel: false,
+  },
   setQueryOptions: vi.fn(),
   shortcutOptions: {
     runQuery: {
@@ -50,6 +55,10 @@ const storeState = vi.hoisted(() => ({
     saveQuery: {
       mac: { enabled: true, combo: 'Meta+S' },
       windows: { enabled: true, combo: 'Ctrl+S' },
+    },
+    toggleQueryResultsPanel: {
+      mac: { enabled: true, combo: 'Meta+Shift+M' },
+      windows: { enabled: true, combo: 'Ctrl+Shift+M' },
     },
   },
   activeTabId: 'tab-1',
@@ -250,7 +259,7 @@ vi.mock('@monaco-editor/react', () => ({
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256 },
-        KeyCode: { KeyQ: 81, KeyS: 83 },
+        KeyCode: { KeyM: 77, KeyQ: 81, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -298,7 +307,11 @@ vi.mock('@monaco-editor/react', () => ({
 vi.mock('./DataGrid', () => ({
   default: (props: any) => {
     dataGridState.latestProps = props;
-    return <div data-grid="true" />;
+    return (
+      <div data-grid="true">
+        {props.toolbarExtraActions ?? null}
+      </div>
+    );
   },
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
@@ -314,6 +327,8 @@ vi.mock('@ant-design/icons', () => {
     StopOutlined: Icon,
     RobotOutlined: Icon,
     DatabaseOutlined: Icon,
+    EyeOutlined: Icon,
+    EyeInvisibleOutlined: Icon,
   };
 });
 
@@ -352,24 +367,27 @@ vi.mock('antd', () => {
     ),
     Tooltip: ({ children }: any) => <>{children}</>,
     Select: () => null,
-    Tabs: ({ activeKey, items, onChange }: any) => {
+    Tabs: ({ activeKey, items, onChange, tabBarExtraContent }: any) => {
       const resolvedActiveKey = tabsState.activeKey ?? activeKey ?? items?.[0]?.key;
       const activeItem = items?.find((item: any) => item.key === resolvedActiveKey) || items?.[0];
       return (
         <div>
-          <div>{items?.map((item: any) => (
-            <button
-              key={item.key}
-              type="button"
-              data-tab-key={item.key}
-              onClick={() => {
-                tabsState.activeKey = item.key;
-                onChange?.(item.key);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}</div>
+          <div>
+            {items?.map((item: any) => (
+              <button
+                key={item.key}
+                type="button"
+                data-tab-key={item.key}
+                onClick={() => {
+                  tabsState.activeKey = item.key;
+                  onChange?.(item.key);
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+            {tabBarExtraContent?.right ?? null}
+          </div>
           <div>{activeItem?.children}</div>
         </div>
       );
@@ -425,6 +443,34 @@ describe('QueryEditor external SQL save', () => {
     storeState.saveQuery.mockReset();
     storeState.savedQueries = [];
     storeState.activeTabId = 'tab-1';
+    storeState.queryOptions = {
+      maxRows: 5000,
+      showColumnComment: true,
+      showColumnType: true,
+      showQueryResultsPanel: false,
+    };
+    storeState.shortcutOptions = {
+      runQuery: {
+        mac: { enabled: false, combo: '' },
+        windows: { enabled: false, combo: '' },
+      },
+      selectCurrentStatement: {
+        mac: { enabled: false, combo: '' },
+        windows: { enabled: false, combo: '' },
+      },
+      saveQuery: {
+        mac: { enabled: true, combo: 'Meta+S' },
+        windows: { enabled: true, combo: 'Ctrl+S' },
+      },
+      toggleQueryResultsPanel: {
+        mac: { enabled: true, combo: 'Meta+Shift+M' },
+        windows: { enabled: true, combo: 'Ctrl+Shift+M' },
+      },
+    };
+    storeState.setQueryOptions.mockReset();
+    storeState.setQueryOptions.mockImplementation((options: Record<string, unknown>) => {
+      storeState.queryOptions = { ...storeState.queryOptions, ...options };
+    });
     messageApi.success.mockReset();
     messageApi.error.mockReset();
     messageApi.warning.mockReset();
@@ -484,6 +530,173 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('keeps the query results panel hidden by default on first entry', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+  });
+
+  it('shows the empty query results panel after toggling the results button', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    await act(async () => {
+      findButton(renderer, '结果').props.onClick();
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
+    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ showQueryResultsPanel: true });
+  });
+
+  it('hides the expanded empty query results panel from the inline hide action', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    await act(async () => {
+      findButton(renderer, '结果').props.onClick();
+    });
+    expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
+
+    await act(async () => {
+      findButton(renderer, '隐藏').props.onClick();
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+    expect(storeState.setQueryOptions).toHaveBeenLastCalledWith({ showQueryResultsPanel: false });
+  });
+
+  it('auto expands the query results panel after a successful execution returns rows', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['value'], rows: [{ value: 1 }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT 1 AS value' })} />);
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('结果 1');
+
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('结果 1');
+    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ showQueryResultsPanel: true });
+  });
+
+  it('keeps the inline hide action available after query results render rows', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['value'], rows: [{ value: 1 }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT 1 AS value' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('结果 1');
+
+    await act(async () => {
+      findButton(renderer, '隐藏').props.onClick();
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('结果 1');
+    expect(storeState.setQueryOptions).toHaveBeenLastCalledWith({ showQueryResultsPanel: false });
+  });
+
+  it('toggles the query results panel with Ctrl/Cmd+Shift+M', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    const toggleAction = editorState.editor.addAction.mock.calls
+      .map((call: any[]) => call[0])
+      .find((action: any) => action?.id === 'gonavi.toggleQueryResultsPanel');
+    expect(toggleAction).toMatchObject({
+      label: 'GoNavi: 切换结果区',
+    });
+    expect(toggleAction?.keybindings?.[0]).toBeGreaterThan(0);
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const createToggleEvent = () => ({
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: true,
+      key: 'm',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    });
+
+    const firstEvent = createToggleEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(firstEvent));
+    });
+
+    expect(firstEvent.preventDefault).toHaveBeenCalled();
+    expect(firstEvent.stopPropagation).toHaveBeenCalled();
+    expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
+
+    const secondEvent = createToggleEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(secondEvent));
+    });
+
+    expect(secondEvent.preventDefault).toHaveBeenCalled();
+    expect(secondEvent.stopPropagation).toHaveBeenCalled();
+    expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
   });
 
   it('keeps table name completion available after typing in a fresh query tab', async () => {
@@ -3033,6 +3246,7 @@ describe('QueryEditor external SQL save', () => {
     const moveListeners: Array<(event: MouseEvent) => void> = [];
     const upListeners: Array<() => void> = [];
     const frameCallbacks: FrameRequestCallback[] = [];
+    storeState.queryOptions.showQueryResultsPanel = true;
     vi.mocked(document.addEventListener).mockImplementation((type: string, listener: any) => {
       if (type === 'mousemove') moveListeners.push(listener);
       if (type === 'mouseup') upListeners.push(listener);

@@ -1226,6 +1226,7 @@ interface DataGridProps {
     onApplyQuickWhereCondition?: (condition: string) => void;
     scrollSnapshot?: { top: number; left: number };
     onScrollSnapshotChange?: (snapshot: { top: number; left: number }) => void;
+    toolbarExtraActions?: React.ReactNode;
 }
 
 type GridFilterCondition = FilterCondition & {
@@ -1487,7 +1488,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -7432,6 +7433,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             aiShortcutLabel={aiShortcutLabel}
             legacyAiButtonStyle={legacyAiButtonStyle}
             paginationTotalCountLoading={pagination?.totalCountLoading}
+            toolbarExtraActions={toolbarExtraActions}
             filterConditions={filterConditions}
             sortInfo={sortInfo}
             displayColumnNames={displayColumnNames}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select, Tabs } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, CloseOutlined, StopOutlined, RobotOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
@@ -1977,6 +1977,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
+  const toggleQueryResultsPanelActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastEditorCursorPositionRef = useRef<any>(null);
   const lastHoverTargetPositionRef = useRef<{ lineNumber: number; column: number } | null>(null);
@@ -2021,6 +2022,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const [isResultPanelVisible, setIsResultPanelVisible] = useState(Boolean(queryOptions?.showQueryResultsPanel));
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -2035,10 +2037,28 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'saveQuery', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
+  const toggleQueryResultsPanelShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'toggleQueryResultsPanel', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
   const primaryShortcutModifierLabel = useMemo(
       () => getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform),
       [activeShortcutPlatform],
   );
+  useEffect(() => {
+      setIsResultPanelVisible(Boolean(queryOptions?.showQueryResultsPanel));
+  }, [queryOptions?.showQueryResultsPanel]);
+  const updateResultPanelVisibility = useCallback((visible: boolean) => {
+      setIsResultPanelVisible(visible);
+      setQueryOptions({ showQueryResultsPanel: visible });
+  }, [setQueryOptions]);
+  const toggleResultPanelVisibility = useCallback(() => {
+      setIsResultPanelVisible((previousVisible) => {
+          const nextVisible = !previousVisible;
+          setQueryOptions({ showQueryResultsPanel: nextVisible });
+          return nextVisible;
+      });
+  }, [setQueryOptions]);
   const autoFetchVisible = useAutoFetchVisibility();
 
   const currentSavedQuery = useMemo(() => {
@@ -3116,6 +3136,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       }
 
+      const toggleResultsBinding = toggleQueryResultsPanelShortcutBinding;
+      if (toggleResultsBinding?.enabled && toggleResultsBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              toggleResultsBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              toggleQueryResultsPanelActionRef.current = editor.addAction({
+                  id: 'gonavi.toggleQueryResultsPanel',
+                  label: 'GoNavi: 切换结果区',
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: toggleResultPanelVisibility,
+              });
+          }
+      }
+
       // HMR 重载或测试重置时，以全局状态为准，避免本地闭包状态和 provider 列表不同步。
       sqlCompletionRegistered = Boolean(_g.__gonaviSqlCompletionState.registered);
       sqlCompletionDisposables = _g.__gonaviSqlCompletionState.disposables;
@@ -4109,6 +4144,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
                         const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                        updateResultPanelVisibility(true);
                         setExecutionError(formatSqlExecutionError(shellConvert.error, { prefix }));
                         setResultSets([]);
                         setActiveResultKey('');
@@ -4148,6 +4184,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 });
                 if (!res.success) {
                     const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                    updateResultPanelVisibility(true);
                     setExecutionError(formatSqlExecutionError(res.message, { prefix }));
                     setResultSets([]);
                     setActiveResultKey('');
@@ -4213,6 +4250,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         });
                     }
                 }
+            }
+            if (nextResultSets.length > 0) {
+                updateResultPanelVisibility(true);
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
             setResultSets(prev => {
@@ -4313,6 +4353,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     return;
                 }
 
+                updateResultPanelVisibility(true);
                 setExecutionError(formatSqlExecutionError(res.message));
                 setResultSets([]);
                 setActiveResultKey('');
@@ -4424,6 +4465,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 });
             }
 
+            if (nextResultSets.length > 0) {
+                updateResultPanelVisibility(true);
+            }
             const shouldReplaceAllResults = didExecuteWholeEditor;
             setResultSets(prev => {
                 const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
@@ -4461,6 +4505,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             message: e.message,
             dbName: currentDb
         });
+        updateResultPanelVisibility(true);
         setExecutionError(formattedError);
         setResultSets([]);
         setActiveResultKey('');
@@ -4658,6 +4703,37 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       };
   }, [saveQueryShortcutBinding]);
+
+  useEffect(() => {
+      if (toggleQueryResultsPanelActionRef.current) {
+          toggleQueryResultsPanelActionRef.current.dispose();
+          toggleQueryResultsPanelActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = toggleQueryResultsPanelShortcutBinding;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          toggleQueryResultsPanelActionRef.current = editor.addAction({
+              id: 'gonavi.toggleQueryResultsPanel',
+              label: 'GoNavi: 切换结果区',
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: toggleResultPanelVisibility,
+          });
+      }
+
+      return () => {
+          if (toggleQueryResultsPanelActionRef.current) {
+              toggleQueryResultsPanelActionRef.current.dispose();
+              toggleQueryResultsPanelActionRef.current = null;
+          }
+      };
+  }, [toggleQueryResultsPanelShortcutBinding, toggleResultPanelVisibility]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
@@ -4908,6 +4984,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, saveQueryShortcutBinding, handleQuickSave]);
 
   useEffect(() => {
+      const binding = toggleQueryResultsPanelShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleToggleResultsShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          toggleResultPanelVisibility();
+      };
+
+      window.addEventListener('keydown', handleToggleResultsShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleToggleResultsShortcut, true);
+      };
+  }, [isActive, toggleQueryResultsPanelShortcutBinding, toggleResultPanelVisibility]);
+
+  useEffect(() => {
       const handleSaveActiveQuery = () => {
           if (!isActive) {
               return;
@@ -5012,6 +5121,65 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       },
   ];
 
+  const resolvedActiveResultKey = activeResultKey || resultSets[0]?.key || '';
+  const activeResultSet = resultSets.find((rs) => rs.key === resolvedActiveResultKey) || null;
+  const activeResultUsesDataGrid = Boolean(
+      activeResultSet &&
+      activeResultSet.resultType !== 'message' &&
+      !(activeResultSet.columns.length === 1 && activeResultSet.columns[0] === 'affectedRows')
+  );
+  const toggleQueryResultsPanelShortcutLabel =
+      toggleQueryResultsPanelShortcutBinding.enabled && toggleQueryResultsPanelShortcutBinding.combo
+          ? getShortcutDisplayLabel(toggleQueryResultsPanelShortcutBinding.combo, activeShortcutPlatform)
+          : '';
+  const resultPanelHideTooltipTitle = toggleQueryResultsPanelShortcutLabel
+      ? `隐藏结果区（${toggleQueryResultsPanelShortcutLabel}）`
+      : '隐藏结果区';
+
+  const resultPanelHideButton = (
+      <Tooltip
+          title={resultPanelHideTooltipTitle}
+      >
+          <Button
+              className="query-result-panel-hide"
+              type="text"
+              size="small"
+              icon={<EyeInvisibleOutlined />}
+              onClick={() => updateResultPanelVisibility(false)}
+          >
+              隐藏
+          </Button>
+      </Tooltip>
+  );
+
+  const resultPanelTabsHideButton = (
+      <Tooltip title={resultPanelHideTooltipTitle}>
+          <Button
+              aria-label="隐藏结果区"
+              className="query-result-panel-hide query-result-panel-hide-compact"
+              type="text"
+              size="small"
+              icon={<EyeInvisibleOutlined />}
+              onClick={() => updateResultPanelVisibility(false)}
+          />
+      </Tooltip>
+  );
+
+  const resultPanelToolbarHideButton = (
+      <Tooltip title={resultPanelHideTooltipTitle}>
+          <Button
+              className={isV2Ui ? 'gn-v2-query-result-toolbar-hide' : undefined}
+              icon={<EyeInvisibleOutlined />}
+              onClick={() => updateResultPanelVisibility(false)}
+          >
+              <span>隐藏</span>
+              {isV2Ui && toggleQueryResultsPanelShortcutLabel && (
+                  <span className="gn-v2-toolbar-kbd">{toggleQueryResultsPanelShortcutLabel}</span>
+              )}
+          </Button>
+      </Tooltip>
+  );
+
   return (
     <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <style>{`
@@ -5026,10 +5194,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           flex: 0 0 auto;
           margin: 0;
           min-height: 38px;
+          padding-right: 8px;
         }
         .query-result-tabs .ant-tabs-nav-wrap {
           flex: 0 1 auto;
           min-width: 0;
+        }
+        .query-result-tabs .ant-tabs-extra-content {
+          display: inline-flex;
+          align-items: center;
+          padding-left: 8px;
         }
         .query-result-tabs .ant-tabs-nav-list {
           align-items: center;
@@ -5141,8 +5315,38 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           background: rgba(0, 0, 0, 0.06);
           color: #666;
         }
+        .query-result-panel-header {
+          flex: 0 0 auto;
+          min-height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 0 12px;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+          background: rgba(255, 255, 255, 0.9);
+        }
+        .query-result-panel-header-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #666;
+        }
+        .query-result-panel-hide {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .query-result-panel-hide-compact {
+          min-width: 28px;
+          padding: 0 6px;
+          justify-content: center;
+        }
       `}</style>
-      <div ref={editorPaneRef} className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}>
+      <div
+        ref={editorPaneRef}
+        className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}
+        style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: isResultPanelVisible ? '0 0 auto' : '1 1 auto' }}
+      >
       <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <div
           className={isV2Ui ? 'gn-v2-query-toolbar-selects' : undefined}
@@ -5233,6 +5437,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               </Dropdown>
           </Button.Group>
 
+          <Tooltip
+              title={
+                  toggleQueryResultsPanelShortcutBinding.enabled && toggleQueryResultsPanelShortcutBinding.combo
+                      ? `${isResultPanelVisible ? '隐藏结果区' : '显示结果区'}（${getShortcutDisplayLabel(toggleQueryResultsPanelShortcutBinding.combo, activeShortcutPlatform)}）`
+                      : (isResultPanelVisible ? '隐藏结果区' : '显示结果区')
+              }
+          >
+              <Button
+                  icon={isResultPanelVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                  onClick={toggleResultPanelVisibility}
+              >
+                  结果
+              </Button>
+          </Tooltip>
+
           <Dropdown menu={{ items: [
               { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
               { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
@@ -5245,7 +5464,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         </div>
       </div>
       
-      <div ref={editorShellRef} className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined} style={{ height: editorHeight, minHeight: '100px' }}>
+      <div
+        ref={editorShellRef}
+        className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined}
+        style={isResultPanelVisible ? { height: editorHeight, minHeight: '100px' } : { flex: '1 1 auto', minHeight: 0 }}
+      >
         <Editor 
           height="100%" 
           gonaviTypography="code"
@@ -5273,28 +5496,32 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         />
       </div>
 
-      <div 
-        className={isV2Ui ? 'gn-v2-query-resizer' : undefined}
-        onMouseDown={handleMouseDown}
-        style={{ 
-            height: '5px', 
-            cursor: 'row-resize', 
-            background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-            flexShrink: 0,
-            zIndex: 10 
-        }} 
-        title="拖动调整高度"
-      />
+      {isResultPanelVisible && (
+        <div
+          className={isV2Ui ? 'gn-v2-query-resizer' : undefined}
+          onMouseDown={handleMouseDown}
+          style={{
+              height: '5px',
+              cursor: 'row-resize',
+              background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+              flexShrink: 0,
+              zIndex: 10
+          }}
+          title="拖动调整高度"
+        />
+      )}
       </div>
 
-      <div className={isV2Ui ? 'gn-v2-query-results' : undefined} style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+      {isResultPanelVisible && (
+      <div className={isV2Ui ? 'gn-v2-query-results' : undefined} style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
         {resultSets.length > 0 ? (
           <Tabs
               className="query-result-tabs"
-              activeKey={activeResultKey || resultSets[0]?.key}
+              activeKey={resolvedActiveResultKey}
               onChange={setActiveResultKey}
               animated={false}
               style={{ flex: 1, minHeight: 0 }}
+              tabBarExtraContent={!activeResultUsesDataGrid ? { right: resultPanelTabsHideButton } : undefined}
               items={resultSets.map((rs, idx) => ({
                   key: rs.key,
                   label: (
@@ -5427,6 +5654,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                   editLocator={rs.editLocator}
                                   onReload={() => handleReloadResult(rs.key, rs.sql)}
                                   readOnly={rs.readOnly}
+                                  toolbarExtraActions={resolvedActiveResultKey === rs.key ? resultPanelToolbarHideButton : null}
                               />
                           </div>
                       );
@@ -5434,6 +5662,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }))}
           />
         ) : executionError ? (
+          <>
+          <div className={isV2Ui ? 'query-result-panel-header gn-v2-query-result-panel-header' : 'query-result-panel-header'}>
+              <span className="query-result-panel-header-title">结果区</span>
+              {resultPanelHideButton}
+          </div>
           <div className={isV2Ui ? 'gn-v2-query-error' : undefined} style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
               <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <CloseOutlined />
@@ -5462,7 +5695,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   </Button>
               </div>
           </div>
+          </>
         ) : (
+          <>
+          <div className={isV2Ui ? 'query-result-panel-header gn-v2-query-result-panel-header' : 'query-result-panel-header'}>
+              <span className="query-result-panel-header-title">结果区</span>
+              {resultPanelHideButton}
+          </div>
           <div className={isV2Ui ? 'gn-v2-query-empty' : undefined} style={{ flex: 1, minHeight: 0 }}>
             {isV2Ui && (
               <div>
@@ -5471,8 +5710,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               </div>
             )}
           </div>
+          </>
         )}
       </div>
+      )}
 
       <Modal 
         title={saveModalMode === 'rename' ? '重命名查询' : '保存查询'}

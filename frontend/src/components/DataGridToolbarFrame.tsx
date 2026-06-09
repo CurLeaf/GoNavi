@@ -73,6 +73,7 @@ export interface DataGridToolbarFrameProps {
   aiShortcutLabel: string;
   legacyAiButtonStyle?: React.CSSProperties;
   paginationTotalCountLoading?: boolean;
+  toolbarExtraActions?: React.ReactNode;
   filterConditions: GridFilterCondition[];
   sortInfo: GridSortInfo[];
   displayColumnNames: string[];
@@ -166,6 +167,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   aiShortcutLabel,
   legacyAiButtonStyle,
   paginationTotalCountLoading,
+  toolbarExtraActions,
   filterConditions,
   sortInfo,
   displayColumnNames,
@@ -409,6 +411,13 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
             </Button>
           </Tooltip>
         </>
+
+        {toolbarExtraActions && (
+          <>
+            {renderToolbarDivider()}
+            {toolbarExtraActions}
+          </>
+        )}
 
         {prefersManualTotalCount && (
           <>

@@ -1111,6 +1111,7 @@ export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
   showColumnType: boolean;
+  showQueryResultsPanel: boolean;
 }
 
 interface AppState {
@@ -1581,13 +1582,16 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
+  const showQueryResultsPanel =
+    typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showColumnType };
+    return { maxRows: 5000, showColumnComment, showColumnType, showQueryResultsPanel };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
     showColumnType,
+    showQueryResultsPanel,
   };
 };
 
@@ -1975,6 +1979,7 @@ export const useStore = create<AppState>()(
         maxRows: 5000,
         showColumnComment: true,
         showColumnType: true,
+        showQueryResultsPanel: false,
       },
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
