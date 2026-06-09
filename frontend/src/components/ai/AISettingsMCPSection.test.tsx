@@ -101,6 +101,15 @@ describe('AISettingsMCPSection', () => {
 
     expect(markup).toContain('接入外部客户端');
     expect(markup).toContain('尚未把当前 GoNavi MCP 接入到这里');
+    expect(markup).toContain('新增 MCP 参数速查');
+    expect(markup).toContain('command');
+    expect(markup).toContain('args');
+    expect(markup).toContain('env');
+    expect(markup).toContain('timeout');
+    expect(markup).toContain('只填程序名或启动器本身');
+    expect(markup).toContain('把脚本名、模块名、开关参数拆开逐项填写');
+    expect(markup).toContain('给 MCP Server 传入 KEY=VALUE 形式的配置');
+    expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('常见启动方式模板');
     expect(markup).toContain('Node 脚本');
     expect(markup).toContain('新增 MCP 服务');
