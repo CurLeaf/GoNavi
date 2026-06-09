@@ -379,6 +379,29 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_sql_risk",
+    icon: "🛑",
+    desc: "检查当前或指定 SQL 的执行风险",
+    detail:
+      "读取传入 SQL 或当前活动查询页签内容，识别多语句、写入、DDL、DELETE/UPDATE 无 WHERE、DROP/TRUNCATE 等风险，并结合当前 AI 安全策略返回是否允许执行。适合用户让 AI 执行、解释风险、确认能不能跑某条 SQL 前先做一次安全体检。",
+    params: "sql?(默认读取当前活动查询页签), previewCharLimit?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_sql_risk",
+        description:
+          "检查传入 SQL 或当前活动查询页签 SQL 的执行风险，返回语句数量、活动类型、风险级别、危险点、是否需要用户确认，以及当前 AI 安全策略检查结果。适用于用户要求执行、删除、更新、DDL、批量 SQL、或询问某条 SQL 能不能跑时，先读取这份风险快照再回答或继续执行。",
+        parameters: {
+          type: "object",
+          properties: {
+            sql: { type: "string", description: "可选，要检查的 SQL；不传时默认读取当前活动查询页签的 SQL 草稿" },
+            previewCharLimit: { type: "number", description: "可选，SQL 预览最多返回多少字符，默认 12000，最大 40000" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_app_logs",
     icon: "🪵",
     desc: "查看 GoNavi 应用日志尾部",

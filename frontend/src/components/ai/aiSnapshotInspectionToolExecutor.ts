@@ -28,6 +28,7 @@ import {
   buildRecentSqlActivitySnapshot,
   buildRecentSqlLogsSnapshot,
 } from './aiSqlLogInsights';
+import { buildSqlRiskSnapshot } from './aiSqlRiskInsights';
 import {
   buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
@@ -251,6 +252,26 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_sql_risk': {
+        const candidateSql = String(args.sql || '').trim();
+        const activeTab = tabs.find((tab) => tab.id === activeTabId);
+        const activeTabSql = activeTab?.type === 'query' ? String(activeTab.query || '').trim() : '';
+        const sqlForCheck = candidateSql || activeTabSql;
+        const safetyCheck = sqlForCheck && typeof runtime?.checkSQL === 'function'
+          ? await runtime.checkSQL(sqlForCheck)
+          : undefined;
+        return {
+          content: JSON.stringify(buildSqlRiskSnapshot({
+            sql: candidateSql,
+            previewCharLimit: args.previewCharLimit,
+            tabs,
+            activeTabId,
+            connections,
+            safetyCheck,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_app_logs': {
         const readResult = typeof runtime?.readAppLogTail === 'function'
           ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
@@ -354,6 +375,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_ai_context: '读取当前 AI 上下文失败',
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
       inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
+      inspect_sql_risk: '检查 SQL 风险失败',
       inspect_app_logs: '读取 GoNavi 应用日志失败',
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',

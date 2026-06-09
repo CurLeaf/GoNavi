@@ -63,6 +63,7 @@ export interface SidebarLocateTabLike {
 }
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
+const normalizeLocateName = (value: string): string => toTrimmedString(value).toLowerCase();
 
 const normalizeExternalSQLLocatePath = (value: unknown): string => toTrimmedString(value).replace(/\\/g, '/');
 
@@ -265,28 +266,27 @@ const matchesLocateObjectName = (
   const targetObject = targetParsed.objectName || target.tableName;
   const resolvedNodeSchema = toTrimmedString(nodeSchemaName) || nodeParsed.schemaName;
   const resolvedTargetSchema = toTrimmedString(target.schemaName) || targetParsed.schemaName;
-  const normalize = (value: string): string => toTrimmedString(value).toLowerCase();
 
-  if (normalize(normalizedNodeName) === normalize(target.tableName)) return true;
+  if (normalizeLocateName(normalizedNodeName) === normalizeLocateName(target.tableName)) return true;
 
   if (
     resolvedTargetSchema
     && !resolvedNodeSchema
-    && normalize(resolvedTargetSchema) === normalize(target.dbName)
-    && normalize(nodeObject) === normalize(targetObject)
+    && normalizeLocateName(resolvedTargetSchema) === normalizeLocateName(target.dbName)
+    && normalizeLocateName(nodeObject) === normalizeLocateName(targetObject)
   ) {
     return true;
   }
 
   if (!resolvedTargetSchema) {
     if (options.allowUnqualifiedSchemaMatch) {
-      return normalize(nodeObject) === normalize(targetObject);
+      return normalizeLocateName(nodeObject) === normalizeLocateName(targetObject);
     }
-    return !resolvedNodeSchema && normalize(nodeObject) === normalize(targetObject);
+    return !resolvedNodeSchema && normalizeLocateName(nodeObject) === normalizeLocateName(targetObject);
   }
 
-  return normalize(resolvedNodeSchema) === normalize(resolvedTargetSchema)
-    && normalize(nodeObject) === normalize(targetObject);
+  return normalizeLocateName(resolvedNodeSchema) === normalizeLocateName(resolvedTargetSchema)
+    && normalizeLocateName(nodeObject) === normalizeLocateName(targetObject);
 };
 
 const matchesLocateObjectNode = (
@@ -441,6 +441,40 @@ const shouldFallbackViewLocateToTableNode = (target: SidebarLocateTarget): boole
   target.objectGroup === 'views' || target.objectGroup === 'materializedViews'
 );
 
+const selectPreferredSidebarLocatePath = (
+  paths: string[][],
+  target: SidebarLocateTarget,
+): string[] | null => {
+  if (paths.length === 1) return paths[0];
+  if (paths.length === 0 || target.objectGroup === 'externalSqlFiles') return null;
+
+  const targetParsed = splitSidebarQualifiedName(target.tableName);
+  const targetObjectName = normalizeLocateName(targetParsed.objectName || target.tableName);
+  const schemaCandidates = [
+    toTrimmedString(target.schemaName),
+    targetParsed.schemaName,
+    target.dbName,
+  ].filter(Boolean);
+  const normalizedSchemas = Array.from(new Set(schemaCandidates.map(normalizeLocateName)));
+
+  for (const normalizedSchema of normalizedSchemas) {
+    const preferredSchemaKey = `${normalizeLocateName(target.databaseKey)}-schema-${normalizedSchema}`;
+    const bySchemaGroup = paths.filter((path) =>
+      path.some((key) => normalizeLocateName(key) === preferredSchemaKey),
+    );
+    if (bySchemaGroup.length === 1) return bySchemaGroup[0];
+
+    const qualifiedSuffix = `${normalizedSchema}.${targetObjectName}`;
+    const byQualifiedLeafKey = paths.filter((path) => {
+      const leafKey = normalizeLocateName(path[path.length - 1] || '');
+      return leafKey.endsWith(qualifiedSuffix);
+    });
+    if (byQualifiedLeafKey.length === 1) return byQualifiedLeafKey[0];
+  }
+
+  return null;
+};
+
 export const findSidebarNodePathForLocate = (
   nodes: SidebarLocateTreeNodeLike[],
   target: SidebarLocateTarget,
@@ -452,24 +486,27 @@ export const findSidebarNodePathForLocate = (
   if (strictPath) return strictPath;
 
   const visualIdentityPaths = collectSidebarNodePathsForLocateByVisualIdentity(nodes, target);
-  if (visualIdentityPaths.length === 1) return visualIdentityPaths[0];
+  const visualIdentityPath = selectPreferredSidebarLocatePath(visualIdentityPaths, target);
+  if (visualIdentityPath) return visualIdentityPath;
 
   if (shouldFallbackViewLocateToTableNode(target)) {
     const tableLikeTarget = { ...target, objectGroup: 'tables' as const };
     const tableLikePaths = collectSidebarNodePathsForLocateByObject(nodes, tableLikeTarget);
-    if (tableLikePaths.length === 1) return tableLikePaths[0];
+    const tableLikePath = selectPreferredSidebarLocatePath(tableLikePaths, target);
+    if (tableLikePath) return tableLikePath;
     if (!hasLocateTargetSchema(target)) {
       const relaxedTableLikePaths = collectSidebarNodePathsForLocateByObject(
         nodes,
         tableLikeTarget,
         { allowUnqualifiedSchemaMatch: true },
       );
-      if (relaxedTableLikePaths.length === 1) return relaxedTableLikePaths[0];
+      const relaxedTableLikePath = selectPreferredSidebarLocatePath(relaxedTableLikePaths, target);
+      if (relaxedTableLikePath) return relaxedTableLikePath;
     }
   }
 
   if (hasLocateTargetSchema(target)) return null;
 
   const relaxedPaths = collectSidebarNodePathsForLocateByObject(nodes, target, { allowUnqualifiedSchemaMatch: true });
-  return relaxedPaths.length === 1 ? relaxedPaths[0] : null;
+  return selectPreferredSidebarLocatePath(relaxedPaths, target);
 };

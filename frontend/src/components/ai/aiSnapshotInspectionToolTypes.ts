@@ -24,6 +24,7 @@ export interface AISnapshotInspectionRuntime {
   getShortcutPlatform?: () => Promise<ShortcutPlatform | undefined>;
   readAppLogTail?: (lineLimit: number, keyword: string) => Promise<any>;
   readSQLFile?: (filePath: string) => Promise<any>;
+  checkSQL?: (sql: string) => Promise<{ allowed?: boolean; operationType?: string } | undefined>;
 }
 
 export interface SnapshotInspectionResult {
