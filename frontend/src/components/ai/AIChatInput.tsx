@@ -1,6 +1,6 @@
 import React from 'react';
-import { Input, Tooltip, Button } from 'antd';
-import { CodeOutlined, DatabaseOutlined, SendOutlined, StopOutlined, TableOutlined, PictureOutlined } from '@ant-design/icons';
+import { Input, Tooltip } from 'antd';
+import { DatabaseOutlined } from '@ant-design/icons';
 import { useStore } from '../../store';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice, AIComposerNoticeAction } from '../../utils/aiComposerNotice';
@@ -11,6 +11,7 @@ import AIContextSelectorModal from './AIContextSelectorModal';
 import AISlashCommandMenu from './AISlashCommandMenu';
 import AIChatComposerNotice from './AIChatComposerNotice';
 import AIChatComposerStatus from './AIChatComposerStatus';
+import AIChatComposerActions from './AIChatComposerActions';
 import AIChatAttachmentStrip from './AIChatAttachmentStrip';
 import AIChatContextPreview from './AIChatContextPreview';
 import AIChatProviderModelSelect from './AIChatProviderModelSelect';
@@ -241,66 +242,21 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             )}
                         </div>
 
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                ref={fileInputRef}
-                                style={{ display: 'none' }}
-                                onChange={handleImageUpload}
-                            />
-                            <Tooltip title="上传图片/截图">
-                                <Button
-                                    type="text"
-                                    icon={<PictureOutlined style={{ fontSize: 16 }} />}
-                                    onClick={() => fileInputRef.current?.click()}
-                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }}
-                                    onMouseEnter={e => e.currentTarget.style.color = textColor}
-                                    onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText}
-                                />
-                            </Tooltip>
-                            <Tooltip title="关联附带数据库表上下文">
-                                <Button
-                                    type="text"
-                                    icon={<TableOutlined style={{ fontSize: 16 }} />}
-                                    onClick={handleOpenContext}
-                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent', padding: '0 4px', height: 26 }}
-                                    onMouseEnter={e => e.currentTarget.style.color = textColor}
-                                    onMouseLeave={e => e.currentTarget.style.color = overlayTheme.mutedText}
-                                />
-                            </Tooltip>
-                            {sending ? (
-                                <button
-                                    className="ai-chat-send-btn ai-chat-stop-btn"
-                                    onClick={onStop}
-                                    title="停止生成"
-                                    style={{
-                                        background: 'rgba(255,77,79,0.1)',
-                                        color: '#ff4d4f', border: '1px solid rgba(255,77,79,0.2)',
-                                        width: 26, height: 26, borderRadius: 6, padding: 0,
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0
-                                    }}
-                                >
-                                    <div style={{ width: 10, height: 10, background: 'currentColor', borderRadius: 2 }} />
-                                </button>
-                            ) : (
-                                <button
-                                    className="ai-chat-send-btn"
-                                    onClick={() => onSend()}
-                                    disabled={!input.trim() && draftImages.length === 0}
-                                    title="发送"
-                                    style={{
-                                        background: (input.trim() || draftImages.length > 0) ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
-                                        color: (input.trim() || draftImages.length > 0) ? overlayTheme.iconColor : mutedColor,
-                                        width: 26, height: 26, borderRadius: 6, border: 'none', padding: 0,
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: (input.trim() || draftImages.length > 0) ? 'pointer' : 'not-allowed', flexShrink: 0
-                                    }}
-                                >
-                                    <SendOutlined />
-                                </button>
-                            )}
-                        </div>
+                        <AIChatComposerActions
+                            variant="legacy"
+                            input={input}
+                            draftImageCount={draftImages.length}
+                            sending={sending}
+                            darkMode={darkMode}
+                            textColor={textColor}
+                            mutedColor={mutedColor}
+                            overlayTheme={overlayTheme}
+                            fileInputRef={fileInputRef}
+                            onImageUpload={handleImageUpload}
+                            onOpenContext={handleOpenContext}
+                            onSend={onSend}
+                            onStop={onStop}
+                        />
                     </div>
                 </div>
 
@@ -394,60 +350,22 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             autoSize={{ minRows: 1, maxRows: 8 }}
                             style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
                         />
-                        <div className="gn-v2-ai-input-actions">
-                            <input
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                ref={fileInputRef}
-                                style={{ display: 'none' }}
-                                onChange={handleImageUpload}
-                            />
-                            <Tooltip title="上传图片/截图">
-                                <Button
-                                    type="text"
-                                    icon={<PictureOutlined />}
-                                    onClick={() => fileInputRef.current?.click()}
-                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
-                                />
-                            </Tooltip>
-                            <Tooltip title="关联附带数据库表上下文">
-                                <Button
-                                    type="text"
-                                    icon={<TableOutlined />}
-                                    onClick={handleOpenContext}
-                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
-                                />
-                            </Tooltip>
-                            <Tooltip title="快捷命令">
-                                <Button
-                                    type="text"
-                                    icon={<CodeOutlined />}
-                                    onClick={handleOpenSlashMenu}
-                                    style={{ color: overlayTheme.mutedText, border: 'none', background: 'transparent' }}
-                                />
-                            </Tooltip>
-                            {sending ? (
-                                <button
-                                    type="button"
-                                    className="ai-chat-send-btn ai-chat-stop-btn gn-v2-ai-send"
-                                    onClick={onStop}
-                                    title="停止生成"
-                                >
-                                    <StopOutlined />
-                                </button>
-                            ) : (
-                                <button
-                                    type="button"
-                                    className="ai-chat-send-btn gn-v2-ai-send"
-                                    onClick={() => onSend()}
-                                    disabled={!input.trim() && draftImages.length === 0}
-                                    title="发送"
-                                >
-                                    <SendOutlined />
-                                </button>
-                            )}
-                        </div>
+                        <AIChatComposerActions
+                            variant="v2"
+                            input={input}
+                            draftImageCount={draftImages.length}
+                            sending={sending}
+                            darkMode={darkMode}
+                            textColor={textColor}
+                            mutedColor={mutedColor}
+                            overlayTheme={overlayTheme}
+                            fileInputRef={fileInputRef}
+                            onImageUpload={handleImageUpload}
+                            onOpenContext={handleOpenContext}
+                            onOpenSlashMenu={handleOpenSlashMenu}
+                            onSend={onSend}
+                            onStop={onStop}
+                        />
                     </div>
                 </div>
                 <div className="gn-v2-ai-model-bar">

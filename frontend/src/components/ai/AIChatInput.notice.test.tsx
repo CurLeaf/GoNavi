@@ -188,6 +188,15 @@ describe('AIChatInput notice layout', () => {
     expect(sendButton).not.toContain('disabled');
   });
 
+  it('keeps v2 composer action controls available after rendering the input', () => {
+    const markup = renderAIChatInput({ input: 'select 1' });
+
+    expect(markup).toContain('gn-v2-ai-input-actions');
+    expect(markup).toContain('aria-label="picture"');
+    expect(markup).toContain('aria-label="table"');
+    expect(markup).toContain('aria-label="code"');
+  });
+
   it('keeps the legacy composer free of v2-only layout classes by default', () => {
     const markup = renderAIChatInput({ isV2Ui: false, input: 'select 1' });
 
