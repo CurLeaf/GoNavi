@@ -225,6 +225,19 @@ const appendAppLogInspectionGuidance = (
   });
 };
 
+const appendConnectionFailureInspectionGuidance = (
+  messages: AISystemContextMessage[],
+  availableToolNames: string[],
+) => {
+  if (!availableToolNames.includes('inspect_recent_connection_failures')) {
+    return;
+  }
+  messages.push({
+    role: 'system',
+    content: '如果用户提到“为什么连接不上”“连接最近失败，正在冷却中”“验证失败”“SSH 隧道是不是有问题”“multiStatements / 参数兼容异常”，优先调用 inspect_recent_connection_failures 读取真实连接失败总结，再决定是否继续下钻 inspect_current_connection、inspect_saved_connections 或 inspect_app_logs。',
+  });
+};
+
 const appendAILastRenderErrorInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
@@ -478,6 +491,7 @@ SELECT * FROM users WHERE status = 1;
   appendMCPAuthoringInspectionGuidance(systemMessages, availableToolNames);
   appendAIGuidanceInspectionGuidance(systemMessages, availableToolNames);
   appendShortcutInspectionGuidance(systemMessages, availableToolNames);
+  appendConnectionFailureInspectionGuidance(systemMessages, availableToolNames);
   appendAppLogInspectionGuidance(systemMessages, availableToolNames);
   appendAILastRenderErrorInspectionGuidance(systemMessages, availableToolNames);
   if (availableToolNames.includes('inspect_current_connection')) {

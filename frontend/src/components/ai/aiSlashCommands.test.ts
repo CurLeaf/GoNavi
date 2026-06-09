@@ -14,6 +14,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/connfail')).toBe(true);
     expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
     expect(commands.some((command) => command.cmd === '/applog')).toBe(true);
     expect(commands.some((command) => command.cmd === '/airender')).toBe(true);
@@ -29,6 +30,11 @@ describe('aiSlashCommands', () => {
   it('supports filtering shortcut diagnostics by chinese keyword and command prefix', () => {
     expect(filterAISlashCommands('快捷键').map((command) => command.cmd)).toContain('/shortcuts');
     expect(filterAISlashCommands('/sho').map((command) => command.cmd)).toContain('/shortcuts');
+  });
+
+  it('supports filtering connection-failure diagnostics by chinese keyword and command prefix', () => {
+    expect(filterAISlashCommands('连接失败').map((command) => command.cmd)).toContain('/connfail');
+    expect(filterAISlashCommands('/conn').map((command) => command.cmd)).toContain('/connfail');
   });
 
   it('supports filtering app-log diagnostics by chinese keyword and command prefix', () => {
@@ -56,6 +62,7 @@ describe('aiSlashCommands', () => {
     expect(featured).toContain('/health');
     expect(featured).toContain('/mcp');
     expect(featured).toContain('/mcpadd');
+    expect(featured).toContain('/connfail');
     expect(featured).not.toContain('/shortcuts');
   });
 });

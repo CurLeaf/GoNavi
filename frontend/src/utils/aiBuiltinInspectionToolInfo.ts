@@ -402,6 +402,29 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_recent_connection_failures",
+    icon: "🧯",
+    desc: "总结最近数据库连接失败与冷却原因",
+    detail:
+      "从最近一段 gonavi.log 里提取数据库连接失败、连接验证失败、SSH 隧道异常和连接冷却命中记录，自动归类主要问题类型、最新地址、最新根因和下一步建议。适合用户提到“为什么连接不上”“连接最近失败正在冷却”“验证失败”“SSH 隧道是不是有问题”时，先读这份结构化总结，而不是人工翻整段日志。",
+    params: "keyword?, lineLimit?(默认 120)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_recent_connection_failures",
+        description:
+          "汇总最近 GoNavi 应用日志中的数据库连接失败、连接验证失败、SSH 隧道失败和冷却命中记录，并返回主要异常类别、最新地址、最新根因与建议动作。适用于用户提到为什么连接不上、最近一直命中连接冷却、服务端验证失败、multiStatements 或参数兼容异常时，优先读取这份结构化连接失败总结，不要直接让模型肉眼翻整段日志。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按连接类型、地址或异常关键词过滤，例如 mysql、ssh、timeout、127.0.0.1" },
+            lineLimit: { type: "number", description: "可选，最多分析多少行日志，默认 120，最大 240" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_ai_last_render_error",
     icon: "🧯",
     desc: "查看最近一次 AI 消息渲染异常记录",

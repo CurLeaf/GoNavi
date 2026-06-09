@@ -34,6 +34,7 @@ import {
 } from './aiWorkspaceInsights';
 import { buildShortcutSnapshot } from './aiShortcutInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
+import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsights';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
 import type {
   AISnapshotInspectionRuntime,
@@ -269,6 +270,25 @@ export async function executeSnapshotInspectionToolCall(
           success: true,
         };
       }
+      case 'inspect_recent_connection_failures': {
+        const readResult = typeof runtime?.readAppLogTail === 'function'
+          ? await runtime.readAppLogTail(Number(args.lineLimit) || 120, String(args.keyword || ''))
+          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        if (!readResult?.success) {
+          return {
+            content: `读取最近连接失败记录失败: ${readResult?.message || '未知错误'}`,
+            success: false,
+          };
+        }
+        return {
+          content: JSON.stringify(buildRecentConnectionFailureSnapshot({
+            readResult,
+            keyword: args.keyword,
+            lineLimit: args.lineLimit,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_ai_last_render_error':
         return {
           content: JSON.stringify(buildAILastRenderErrorSnapshot()),
@@ -335,6 +355,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
       inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
       inspect_app_logs: '读取 GoNavi 应用日志失败',
+      inspect_recent_connection_failures: '汇总最近连接失败记录失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',

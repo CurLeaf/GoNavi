@@ -108,6 +108,13 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('gonavi.log');
   });
 
+  it('registers the recent-connection-failure inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_connection_failures');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('连接失败');
+    expect(info?.tool.function.description).toContain('multiStatements');
+  });
+
   it('registers the ai-render-error inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
     expect(info).toBeTruthy();
@@ -118,6 +125,7 @@ describe('aiToolRegistry', () => {
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
     const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
     const appLogTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_app_logs');
+    const connectionFailureTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_connection_failures');
     const renderErrorTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
     const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
@@ -127,6 +135,8 @@ describe('aiToolRegistry', () => {
     expect(recentActivityTool?.tool.function.description).toContain('最近 SQL 活动');
     expect(appLogTool?.desc).toContain('GoNavi 应用日志');
     expect(appLogTool?.tool.function.description).toContain('应用日志');
+    expect(connectionFailureTool?.desc).toContain('连接失败');
+    expect(connectionFailureTool?.tool.function.description).toContain('连接冷却');
     expect(renderErrorTool?.desc).toContain('渲染异常记录');
     expect(renderErrorTool?.tool.function.description).toContain('气泡局部报错');
     expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
@@ -168,6 +178,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_file')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_sql_activity')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_app_logs')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_recent_connection_failures')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_last_render_error')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
