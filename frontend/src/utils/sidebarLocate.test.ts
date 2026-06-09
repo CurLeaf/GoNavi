@@ -466,6 +466,149 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds a unique bare view node when metadata supplies schema separately', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-views',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-view-V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      viewName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-views',
+      'conn-1-SYSDBA-view-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a table-like node when a view is only present in the tables branch', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      tableName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a unique schema-qualified table-like node for an unqualified view request', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-SYSDBA',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-SYSDBA-tables',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-SYSDBA.V_ACCOUNT',
+                        type: 'table',
+                        dataRef: {
+                          id: 'conn-1',
+                          dbName: 'SYSDBA',
+                          tableName: 'SYSDBA.V_ACCOUNT',
+                          schemaName: 'SYSDBA',
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA-tables',
+      'conn-1-SYSDBA-SYSDBA.V_ACCOUNT',
+    ]);
+  });
+
   it('does not guess a schema-qualified view when an unqualified locate request is ambiguous', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'conn-1-SYSDBA-view-V_ACCOUNT',

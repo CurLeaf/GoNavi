@@ -368,6 +368,10 @@ const hasLocateTargetSchema = (target: SidebarLocateTarget): boolean => {
   return Boolean(toTrimmedString(target.schemaName) || splitSidebarQualifiedName(target.tableName).schemaName);
 };
 
+const shouldFallbackViewLocateToTableNode = (target: SidebarLocateTarget): boolean => (
+  target.objectGroup === 'views' || target.objectGroup === 'materializedViews'
+);
+
 export const findSidebarNodePathForLocate = (
   nodes: SidebarLocateTreeNodeLike[],
   target: SidebarLocateTarget,
@@ -377,6 +381,20 @@ export const findSidebarNodePathForLocate = (
 
   const strictPath = findSidebarNodePathForLocateByObject(nodes, target);
   if (strictPath) return strictPath;
+
+  if (shouldFallbackViewLocateToTableNode(target)) {
+    const tableLikeTarget = { ...target, objectGroup: 'tables' as const };
+    const tableLikePaths = collectSidebarNodePathsForLocateByObject(nodes, tableLikeTarget);
+    if (tableLikePaths.length === 1) return tableLikePaths[0];
+    if (!hasLocateTargetSchema(target)) {
+      const relaxedTableLikePaths = collectSidebarNodePathsForLocateByObject(
+        nodes,
+        tableLikeTarget,
+        { allowUnqualifiedSchemaMatch: true },
+      );
+      if (relaxedTableLikePaths.length === 1) return relaxedTableLikePaths[0];
+    }
+  }
 
   if (hasLocateTargetSchema(target)) return null;
 
