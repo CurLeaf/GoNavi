@@ -63,13 +63,17 @@ describe('AIMCPClientInstallPanel', () => {
     );
 
     expect(markup).toContain('这里是在把 GoNavi MCP 接入 Claude Code / Codex');
+    expect(markup).toContain('给外部工具调用');
+    expect(markup).toContain('这里的“安装”只会写入外部 CLI 的用户级 MCP 配置');
     expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('目标客户端');
+    expect(markup).toContain('选择外部客户端（二选一）');
     expect(markup).toContain('选择目标客户端');
     expect(markup).toContain('写入接入配置');
     expect(markup).toContain('重启目标客户端');
     expect(markup).toContain('未接入');
     expect(markup).toContain('需更新');
+    expect(markup).toContain('外部工具接入状态：已存在旧配置，需更新');
+    expect(markup).toContain('外部工具接入状态：未接入');
     expect(markup).toContain('复制配置路径');
     expect(markup).toContain('复制启动命令');
     expect(markup).toContain('更新 Codex 接入配置');
@@ -127,7 +131,7 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('接入到 Claude Code');
+    expect(markup).toContain('安装到 Claude Code（外部工具）');
     expect(markup).toContain('CLI 检测：未检测到 claude');
     expect(markup).toContain('未检测到本机 claude 命令');
     expect(markup).toContain('已接入');
@@ -182,8 +186,8 @@ describe('AIMCPClientInstallPanel', () => {
     );
 
     expect(markup).toContain('当前状态：已接入当前 GoNavi，无需重复操作');
-    expect(markup).toContain('Claude Code 已接入当前 GoNavi');
-    expect(markup).toContain('下面的主按钮会自动禁用，避免重复操作');
+    expect(markup).toContain('Claude Code 已接入，无需重复安装');
+    expect(markup).toContain('下面的主按钮会自动禁用，避免重复写入');
   });
 
   it('prefers the client that already matches current GoNavi over another stale installed record', () => {

@@ -56,6 +56,19 @@ const getStatusTone = (status: AIMCPClientInstallStatus | undefined, darkMode: b
   };
 };
 
+const getInstallStateLabel = (status: AIMCPClientInstallStatus | undefined) => {
+  if (status?.matchesCurrent) {
+    return '外部工具接入状态：已接入当前 GoNavi';
+  }
+  if (status?.installed) {
+    return '外部工具接入状态：已存在旧配置，需更新';
+  }
+  if (hasStatusIssue(status)) {
+    return '外部工具接入状态：读取失败';
+  }
+  return '外部工具接入状态：未接入';
+};
+
 const resolveClientCommandName = (status: AIMCPClientInstallStatus | undefined) => {
   const command = String(status?.clientCommand || '').trim();
   if (command) {
@@ -116,12 +129,12 @@ const getSelectedClientStateLine = (status: AIMCPClientInstallStatus | undefined
 const resolveActionLabel = (status: AIMCPClientInstallStatus | undefined) => {
   const label = status?.displayName || '目标客户端';
   if (status?.matchesCurrent) {
-    return `${label} 已接入当前 GoNavi`;
+    return `${label} 已接入，无需重复安装`;
   }
   if (status?.installed) {
     return `更新 ${label} 接入配置`;
   }
-  return `接入到 ${label}`;
+  return `安装到 ${label}（外部工具）`;
 };
 
 const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
@@ -165,17 +178,17 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         }}
       >
         <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-          这里是在把 GoNavi MCP 接入 Claude Code / Codex，不是给 GoNavi 自己安装插件。
+          这里是在把 GoNavi MCP 接入 Claude Code / Codex，给外部工具调用，不是给 GoNavi 自己安装插件。
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          你只需要选中 Claude Code 或 Codex 其中一个目标，GoNavi 就会把“如何启动当前这份 GoNavi MCP”的信息写入那个客户端的用户级配置文件，不会重装 GoNavi，也不会替换 GoNavi 自己的程序文件。
+          这里的“安装”只会写入外部 CLI 的用户级 MCP 配置，让它知道如何启动当前这份 GoNavi MCP；不会重装 GoNavi，也不会替换 GoNavi 自己的程序文件。
         </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          先选择 1 个目标客户端，再执行接入或更新。GoNavi 会自动把当前安装路径写入它的用户级 MCP 配置文件，不需要你自己找本机 exe，也不需要手动改配置。
+          先在 Claude Code 和 Codex 中选择 1 个目标客户端，再执行安装或更新。每个选项会直接显示是否已接入当前 GoNavi，已接入时主按钮会禁用，避免重复写入。
         </div>
       </div>
       <div
@@ -228,8 +241,12 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>目标客户端</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>选择外部客户端（二选一）</div>
+        <div
+          role="radiogroup"
+          aria-label="选择要安装 GoNavi MCP 的外部客户端"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}
+        >
           {statuses.map((status) => {
             const client = status.client === 'codex' ? 'codex' : 'claude-code';
             const active = selectedClient === client;
@@ -238,6 +255,8 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
               <button
                 key={status.client}
                 type="button"
+                role="radio"
+                aria-checked={active}
                 onClick={() => onSelectClient(client)}
                 style={{
                   padding: '14px 16px',
@@ -295,6 +314,9 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                 </div>
                 <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
                   {getClientOptionSummary(status)}
+                </div>
+                <div style={{ fontSize: 12, color: active ? overlayTheme.selectedText : overlayTheme.mutedText, lineHeight: 1.6, fontWeight: 700 }}>
+                  {getInstallStateLabel(status)}
                 </div>
                 <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
                   {active ? '当前已选中，将只对这个客户端执行写入或更新。' : '点击后切换到这个客户端。'}
@@ -404,7 +426,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
           {getClientDetectionSummary(selectedStatus)}
           {' '}
-          已经接入当前这份 GoNavi 时，下面的主按钮会自动禁用，避免重复操作。
+          已经接入当前这份 GoNavi 时，下面的主按钮会自动禁用，避免重复写入。
         </div>
         <Button
           type={selectedStatus?.matchesCurrent ? 'default' : 'primary'}
