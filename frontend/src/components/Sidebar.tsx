@@ -186,6 +186,8 @@ type SidebarContextMenuState = {
 const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
 const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
 const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
+const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
+const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;
 type ExternalSQLFileModalMode = 'create' | 'rename' | 'create-directory' | 'rename-directory';
 
 const isExternalSQLDirectoryModalMode = (mode: ExternalSQLFileModalMode): boolean =>
@@ -2439,8 +2441,8 @@ const Sidebar: React.FC<{
   const locateObjectInSidebarRef = useRef<(detail: unknown) => Promise<void>>(async () => {});
 
   const waitForSidebarLoadKey = async (loadKey: string) => {
-      for (let attempt = 0; attempt < 30 && loadingNodesRef.current.has(loadKey); attempt += 1) {
-          await new Promise(resolve => window.setTimeout(resolve, 50));
+      for (let attempt = 0; attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS && loadingNodesRef.current.has(loadKey); attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS));
       }
   };
 

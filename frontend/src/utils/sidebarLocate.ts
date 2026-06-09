@@ -268,6 +268,15 @@ const matchesLocateObjectName = (
 
   if (normalize(normalizedNodeName) === normalize(target.tableName)) return true;
 
+  if (
+    resolvedTargetSchema
+    && !resolvedNodeSchema
+    && normalize(resolvedTargetSchema) === normalize(target.dbName)
+    && normalize(nodeObject) === normalize(targetObject)
+  ) {
+    return true;
+  }
+
   if (!resolvedTargetSchema) {
     if (options.allowUnqualifiedSchemaMatch) {
       return normalize(nodeObject) === normalize(targetObject);

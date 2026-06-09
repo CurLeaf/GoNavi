@@ -557,6 +557,52 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('falls back from a schema-qualified view request to a bare table-like node in the same database', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'SYSDBA.V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      tableName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
   it('falls back to a unique schema-qualified table-like node for an unqualified view request', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'stale-view-tab-id',

@@ -1434,4 +1434,13 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('void loadTables(dbNode);');
     expect(source).toContain("window.removeEventListener('gonavi:sidebar-table-pin-changed'");
   });
+
+  it('waits long enough for slow object-tree loads before reporting locate misses', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;');
+    expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;');
+    expect(source).toContain('attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS');
+    expect(source).toContain('window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS)');
+  });
 });
