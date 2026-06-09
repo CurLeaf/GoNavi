@@ -28,7 +28,7 @@ const AI_SETTINGS_NAV_ITEMS: Array<{
   { key: 'providers', title: '模型供应商', description: '配置大模型接口与秘钥', icon: <ApiOutlined /> },
   { key: 'safety', title: '安全控制', description: '限制 AI 操作风险级别', icon: <SafetyCertificateOutlined /> },
   { key: 'context', title: '上下文', description: '配置携带的数据架构信息', icon: <RobotOutlined /> },
-  { key: 'mcp', title: 'MCP 服务', description: '接入外部工具源', icon: <AppstoreOutlined /> },
+  { key: 'mcp', title: 'MCP 服务', description: '把 GoNavi 接入外部客户端并管理工具源', icon: <AppstoreOutlined /> },
   { key: 'skills', title: 'Skills', description: '配置可复用提示模块', icon: <ExperimentOutlined /> },
   { key: 'tools', title: '内置工具', description: '查看 AI 可调用的数据探针', icon: <ToolOutlined /> },
   { key: 'prompts', title: '内置提示词', description: '查看系统预设的底层要求', icon: <ExperimentOutlined /> },
