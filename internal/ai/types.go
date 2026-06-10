@@ -150,6 +150,7 @@ type MCPClientInstallResult struct {
 type MCPClientInstallStatus struct {
 	Client         string   `json:"client"`
 	DisplayName    string   `json:"displayName"`
+	InstallMode    string   `json:"installMode,omitempty"`
 	Installed      bool     `json:"installed"`
 	MatchesCurrent bool     `json:"matchesCurrent"`
 	ClientDetected bool     `json:"clientDetected"`

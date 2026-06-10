@@ -66,6 +66,8 @@ func (s *Service) AIGetMCPClientInstallStatuses() []ai.MCPClientInstallStatus {
 	return []ai.MCPClientInstallStatus{
 		inspectClaudeCodeMCPInstallStatus(command, args, resolveErr),
 		inspectCodexMCPInstallStatus(command, args, resolveErr),
+		buildRemoteMCPClientInstallStatus("openclaw", "OpenClaw"),
+		buildRemoteMCPClientInstallStatus("hermans", "Hermans"),
 	}
 }
 
@@ -192,6 +194,7 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 	status := ai.MCPClientInstallStatus{
 		Client:         "claude-code",
 		DisplayName:    "Claude Code",
+		InstallMode:    "auto",
 		ClientDetected: clientDetected,
 		ClientCommand:  claudeCodeClientCommandName,
 		ClientPath:     clientPath,
@@ -242,6 +245,7 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 	status := ai.MCPClientInstallStatus{
 		Client:         "codex",
 		DisplayName:    "Codex",
+		InstallMode:    "auto",
 		ClientDetected: clientDetected,
 		ClientCommand:  codexClientCommandName,
 		ClientPath:     clientPath,
@@ -284,6 +288,16 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 
 	status.Message = "已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新"
 	return status
+}
+
+func buildRemoteMCPClientInstallStatus(client string, displayName string) ai.MCPClientInstallStatus {
+	return ai.MCPClientInstallStatus{
+		Client:         client,
+		DisplayName:    displayName,
+		InstallMode:    "remote",
+		ClientDetected: false,
+		Message:        fmt.Sprintf("%s 通常部署在云端或远端环境；请通过远程 MCP 桥接接入 Windows GoNavi，数据库密码仍保存在 GoNavi 本机。", displayName),
+	}
 }
 
 func readClaudeCodeMCPServerConfig(configPath string, serverID string) (claudeCodeMCPServerConfig, bool, error) {

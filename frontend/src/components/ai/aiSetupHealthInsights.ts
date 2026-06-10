@@ -112,8 +112,8 @@ export const buildAISetupHealthSnapshot = (params: {
   mcpSnapshot.warnings.forEach((warning) => appendUnique(warnings, warning));
   mcpSnapshot.nextActions.forEach((action) => appendUnique(nextActions, action));
   if (mcpSnapshot.currentClientCount === 0) {
-    appendUnique(warnings, 'Claude Code / Codex 还没有任何客户端接入当前 GoNavi MCP');
-    appendUnique(nextActions, '如需让外部 CLI 使用 GoNavi MCP，先把当前 GoNavi 接入 Claude Code 或 Codex');
+    appendUnique(warnings, 'Claude Code / Codex 还没有本机客户端接入当前 GoNavi MCP，OpenClaw/Hermans 需要远程桥接');
+    appendUnique(nextActions, '如需让外部 Agent 使用 GoNavi MCP，本机客户端可接入 Claude Code/Codex，云端 Agent 先配置远程 MCP 桥接');
   }
   if (mcpSnapshot.enabledServerCount > 0 && runtimeSnapshot.mcpToolCount === 0) {
     appendUnique(warnings, '已启用 MCP 服务，但当前还没有发现可用 MCP 工具');

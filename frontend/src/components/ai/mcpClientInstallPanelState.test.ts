@@ -66,4 +66,21 @@ describe('mcpClientInstallPanelState', () => {
     expect(getMCPClientDetectionSummary(status)).toContain('CLI 还没加入 PATH');
     expect(resolveMCPClientInstallActionLabel(status)).toBe('安装到 Claude Code（外部工具）');
   });
+
+  it('treats OpenClaw as a remote bridge target instead of a local install', () => {
+    const status = buildStatus({
+      client: 'openclaw',
+      displayName: 'OpenClaw',
+      installMode: 'remote',
+      clientCommand: 'openclaw',
+      message: 'OpenClaw 通常部署在云端 Linux；请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+    });
+
+    expect(getMCPClientStatusTone(status, false).label).toBe('远程桥接');
+    expect(getMCPClientInstallStateLabel(status)).toBe('外部工具接入状态：需配置远程 MCP 桥接');
+    expect(getMCPClientOptionSummary(status)).toContain('不复制数据库密码');
+    expect(getMCPClientDetectionSummary(status)).toContain('本机无需检测 openclaw 命令');
+    expect(getSelectedMCPClientStateLine(status)).toContain('数据库密码仍留在 GoNavi 本机');
+    expect(resolveMCPClientInstallActionLabel(status)).toBe('复制 OpenClaw 远程接入说明');
+  });
 });

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { AIMCPClientInstallStatus } from '../types';
 import {
+  buildRemoteMCPClientGuide,
   EMPTY_MCP_CLIENT_STATUSES,
   formatMCPLaunchCommand,
+  isRemoteMCPClientStatus,
   normalizeMCPClientStatuses,
   pickPreferredMCPClient,
 } from './mcpClientInstallStatus';
@@ -25,6 +27,7 @@ describe('mcpClientInstallStatus helpers', () => {
       {
         client: 'codex',
         displayName: 'Codex',
+        installMode: 'auto',
         installed: true,
         matchesCurrent: true,
         clientDetected: false,
@@ -33,6 +36,8 @@ describe('mcpClientInstallStatus helpers', () => {
         message: '已检测到 Codex 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致',
         args: [],
       },
+      EMPTY_MCP_CLIENT_STATUSES[2],
+      EMPTY_MCP_CLIENT_STATUSES[3],
     ]);
   });
 
@@ -110,6 +115,7 @@ describe('mcpClientInstallStatus helpers', () => {
 
   it('keeps the user-selected client when it is still present in the latest status list', () => {
     expect(pickPreferredMCPClient(EMPTY_MCP_CLIENT_STATUSES, 'codex')).toBe('codex');
+    expect(pickPreferredMCPClient(EMPTY_MCP_CLIENT_STATUSES, 'openclaw')).toBe('openclaw');
   });
 
   it('formats quoted launch commands for display and clipboard use', () => {
@@ -117,5 +123,16 @@ describe('mcpClientInstallStatus helpers', () => {
       command: 'C:/Program Files/GoNavi/GoNavi.exe',
       args: ['mcp-server', '--stdio'],
     })).toBe('"C:/Program Files/GoNavi/GoNavi.exe" mcp-server --stdio');
+  });
+
+  it('marks OpenClaw and Hermans as remote bridge clients and builds a safe guide', () => {
+    const openClaw = EMPTY_MCP_CLIENT_STATUSES.find((item) => item.client === 'openclaw');
+
+    expect(isRemoteMCPClientStatus(openClaw)).toBe(true);
+    const guide = buildRemoteMCPClientGuide(openClaw);
+    expect(guide).toContain('GoNavi MCP 远程接入说明 - OpenClaw');
+    expect(guide).toContain('云端 Agent 不需要保存数据库密码');
+    expect(guide).toContain('不能直接使用 Windows 本地 stdio 命令');
+    expect(guide).toContain('allowMutating=true');
   });
 });

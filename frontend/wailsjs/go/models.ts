@@ -25,6 +25,7 @@ export namespace ai {
 	export class MCPClientInstallStatus {
 	    client: string;
 	    displayName: string;
+	    installMode?: string;
 	    installed: boolean;
 	    matchesCurrent: boolean;
 	    clientDetected: boolean;
@@ -43,6 +44,7 @@ export namespace ai {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.client = source["client"];
 	        this.displayName = source["displayName"];
+	        this.installMode = source["installMode"];
 	        this.installed = source["installed"];
 	        this.matchesCurrent = source["matchesCurrent"];
 	        this.clientDetected = source["clientDetected"];

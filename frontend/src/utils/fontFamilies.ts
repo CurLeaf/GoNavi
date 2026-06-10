@@ -1,7 +1,7 @@
 export const DEFAULT_UI_FONT_FAMILY =
-  '"Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif';
+  '"Inter", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Ubuntu", sans-serif';
 export const DEFAULT_MONO_FONT_FAMILY =
-  '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  '"JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
 
 const MAX_FONT_FAMILY_LENGTH = 512;
 
@@ -17,9 +17,9 @@ export type InstalledFontFamily = {
 };
 
 const UI_FONT_FALLBACK_STACK =
-  '-apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "PingFang SC", sans-serif';
+  '-apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", "Ubuntu", sans-serif';
 const MONO_FONT_FALLBACK_STACK =
-  'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  'ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono CJK SC", "Noto Sans Mono", "DejaVu Sans Mono", monospace';
 
 const MONO_FONT_PRIORITY_HINTS = [
   'mono',
@@ -83,10 +83,12 @@ const MAC_MONO_FONTS: FontFamilyOption[] = [
 ];
 
 const LINUX_UI_FONTS: FontFamilyOption[] = [
-  { value: '"Noto Sans", "Noto Sans CJK SC", sans-serif', label: 'Noto Sans', keywords: ['linux', 'default'] },
-  { value: '"Ubuntu", "Noto Sans", sans-serif', label: 'Ubuntu', keywords: ['linux', 'ubuntu'] },
-  { value: '"DejaVu Sans", "Noto Sans", sans-serif', label: 'DejaVu Sans', keywords: ['linux'] },
-  { value: '"Liberation Sans", "Noto Sans", sans-serif', label: 'Liberation Sans', keywords: ['linux'] },
+  { value: '"Noto Sans", "Noto Sans CJK SC", "Noto Sans SC", sans-serif', label: 'Noto Sans', keywords: ['linux', 'default'] },
+  { value: '"Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", sans-serif', label: 'Noto Sans CJK SC', keywords: ['linux', 'cjk', '中文'] },
+  { value: '"Source Han Sans SC", "Noto Sans CJK SC", sans-serif', label: 'Source Han Sans SC', keywords: ['linux', 'cjk', '思源黑体'] },
+  { value: '"Ubuntu", "Noto Sans CJK SC", "Noto Sans", sans-serif', label: 'Ubuntu', keywords: ['linux', 'ubuntu'] },
+  { value: '"DejaVu Sans", "Noto Sans CJK SC", "Noto Sans", sans-serif', label: 'DejaVu Sans', keywords: ['linux'] },
+  { value: '"Liberation Sans", "Noto Sans CJK SC", "Noto Sans", sans-serif', label: 'Liberation Sans', keywords: ['linux'] },
   { value: '"WenQuanYi Micro Hei", "Noto Sans CJK SC", sans-serif', label: 'WenQuanYi Micro Hei', keywords: ['linux', '文泉驿'] },
 ];
 
@@ -103,6 +105,7 @@ const SHARED_UI_FONTS: FontFamilyOption[] = [
   { value: '"PingFang SC", sans-serif', label: 'PingFang SC', keywords: ['shared', '苹方'] },
   { value: '"Microsoft YaHei", sans-serif', label: 'Microsoft YaHei', keywords: ['shared', '雅黑'] },
   { value: '"Noto Sans CJK SC", sans-serif', label: 'Noto Sans CJK SC', keywords: ['shared', 'noto'] },
+  { value: '"Source Han Sans SC", sans-serif', label: 'Source Han Sans SC', keywords: ['shared', 'source han', '思源黑体'] },
 ];
 
 const SHARED_MONO_FONTS: FontFamilyOption[] = [

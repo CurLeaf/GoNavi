@@ -21,8 +21,8 @@
 
 /* ─── Light tokens ─────────────────────────────────────── */
 body[data-ui-version="v2"][data-theme="light"] {
-  --gn-font-sans: "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
-  --gn-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --gn-font-sans: "Inter", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Ubuntu", sans-serif;
+  --gn-font-mono: "JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
 
   --gn-bg-app:      #f6f6f4;
   --gn-bg-chrome:   #ececea;
@@ -63,8 +63,8 @@ body[data-ui-version="v2"][data-theme="light"] {
 
 /* ─── Dark tokens ──────────────────────────────────────── */
 body[data-ui-version="v2"][data-theme="dark"] {
-  --gn-font-sans: "Inter", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
-  --gn-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --gn-font-sans: "Inter", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", "Ubuntu", sans-serif;
+  --gn-font-mono: "JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
 
   --gn-bg-app:      #0c0e12;
   --gn-bg-chrome:   #14171c;

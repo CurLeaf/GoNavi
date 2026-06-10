@@ -67,6 +67,7 @@ export const buildMCPSetupSnapshot = (params: {
     .map((status) => ({
       client: status.client,
       displayName: status.displayName,
+      installMode: status.installMode || 'auto',
       installed: status.installed,
       matchesCurrent: status.matchesCurrent,
       clientDetected: status.clientDetected === true,

@@ -116,14 +116,14 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     icon: "🪛",
     desc: "查看当前 MCP 配置与外部接入状态",
     detail:
-      "返回当前本地配置了哪些 MCP 服务、哪些已启用、每个服务声明了什么启动命令，以及 Claude Code / Codex 这类外部客户端的写入状态与命令检测结果。适合用户问“我现在配了哪些 MCP”“为什么外部客户端还用不了”“MCP 到底写没写进去”时先读真实状态。",
+      "返回当前本地配置了哪些 MCP 服务、哪些已启用、每个服务声明了什么启动命令，以及 Claude Code / Codex 本机客户端写入状态、OpenClaw / Hermans 远程 Agent 接入边界与命令检测结果。适合用户问“我现在配了哪些 MCP”“为什么外部客户端还用不了”“MCP 到底写没写进去”时先读真实状态。",
     params: "无参数",
     tool: {
       type: "function",
       function: {
         name: "inspect_mcp_setup",
         description:
-          "读取当前本地 MCP 配置快照，包括 MCP 服务列表、启用状态、启动命令、环境变量 key、已发现工具，以及外部客户端的 GoNavi MCP 写入状态与本机 CLI 检测结果。适用于用户提到 MCP 服务配置、Claude/Codex 是否已接入、为什么外部客户端用不了、当前到底启用了哪些 MCP 时，先读取真实配置再回答。",
+          "读取当前本地 MCP 配置快照，包括 MCP 服务列表、启用状态、启动命令、环境变量 key、已发现工具，以及外部客户端的 GoNavi MCP 写入状态、本机 CLI 检测结果和远程 Agent 接入边界。适用于用户提到 MCP 服务配置、Claude/Codex/OpenClaw/Hermans 是否已接入、为什么外部客户端用不了、当前到底启用了哪些 MCP 时，先读取真实配置再回答。",
         parameters: { type: "object", properties: {} },
       },
     },

@@ -596,6 +596,7 @@ export interface AIMCPToolCallResult {
 export interface AIMCPClientInstallStatus {
   client: string;
   displayName: string;
+  installMode?: 'auto' | 'remote';
   installed: boolean;
   matchesCurrent: boolean;
   clientDetected?: boolean;

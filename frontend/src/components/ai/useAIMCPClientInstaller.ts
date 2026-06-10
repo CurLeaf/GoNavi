@@ -2,8 +2,10 @@ import { useCallback, useMemo, useState } from 'react';
 
 import type { AIMCPClientInstallStatus } from '../../types';
 import {
+  buildRemoteMCPClientGuide,
   EMPTY_MCP_CLIENT_STATUSES,
   formatMCPLaunchCommand,
+  isRemoteMCPClientStatus,
   normalizeMCPClientStatuses,
   pickPreferredMCPClient,
   type MCPClientKey,
@@ -104,8 +106,24 @@ export const useAIMCPClientInstaller = ({
   }, [messageApi, resolveAIService, syncMCPClientStatuses]);
 
   const handleInstallSelectedMCPClient = useCallback(async () => {
+    const remoteClient = isRemoteMCPClientStatus(selectedMCPClientStatus);
     const targetClient = selectedMCPClientStatus?.client === 'codex' ? 'codex' : 'claude-code';
     const targetLabel = selectedMCPClientStatus?.displayName || (targetClient === 'codex' ? 'Codex' : 'Claude Code');
+    if (remoteClient) {
+      try {
+        onBeforeInstall?.();
+        setMCPClientSelectionTouched(true);
+        await copyTextToClipboard(
+          buildRemoteMCPClientGuide(selectedMCPClientStatus),
+          `${targetLabel} 远程接入说明已复制`,
+        );
+      } catch (error: any) {
+        void messageApi.error(error?.message || `复制 ${targetLabel} 远程接入说明失败`);
+      } finally {
+        onAfterInstall?.();
+      }
+      return;
+    }
     if (selectedMCPClientStatus?.matchesCurrent) {
       void messageApi.success(`${targetLabel} 已接入当前 GoNavi MCP，无需重复写入`);
       return;
@@ -134,7 +152,7 @@ export const useAIMCPClientInstaller = ({
     } finally {
       onAfterInstall?.();
     }
-  }, [loadMCPClientStatuses, messageApi, onAfterInstall, onBeforeInstall, onConfigChanged, resolveAIService, selectedMCPClientStatus]);
+  }, [copyTextToClipboard, loadMCPClientStatuses, messageApi, onAfterInstall, onBeforeInstall, onConfigChanged, resolveAIService, selectedMCPClientStatus]);
 
   const handleCopySelectedMCPConfigPath = useCallback(async () => {
     const configPath = String(selectedMCPClientStatus?.configPath || '').trim();

@@ -62,14 +62,14 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('这里是在把 GoNavi MCP 接入 Claude Code / Codex');
+    expect(markup).toContain('这里是在把 GoNavi MCP 接入 Claude Code / Codex / OpenClaw / Hermans');
     expect(markup).toContain('给外部工具调用');
-    expect(markup).toContain('这里的“安装”只会写入外部 CLI 的用户级 MCP 配置');
+    expect(markup).toContain('OpenClaw、Hermans 这类云端 Agent 会提供远程接入说明');
     expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('选择外部客户端（二选一）');
+    expect(markup).toContain('选择外部客户端');
     expect(markup).toContain('选择目标客户端');
-    expect(markup).toContain('写入接入配置');
-    expect(markup).toContain('重启目标客户端');
+    expect(markup).toContain('写入或复制配置');
+    expect(markup).toContain('重启或配置目标端');
     expect(markup).toContain('未接入');
     expect(markup).toContain('需更新');
     expect(markup).toContain('外部工具接入状态：已存在旧配置，需更新');
@@ -135,6 +135,65 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('CLI 检测：未检测到 claude');
     expect(markup).toContain('未检测到本机 claude 命令');
     expect(markup).toContain('已接入');
+  });
+
+  it('renders remote Agent clients as bridge guidance instead of local installs', () => {
+    const markup = renderToStaticMarkup(
+      <AIMCPClientInstallPanel
+        statuses={[
+          {
+            client: 'openclaw',
+            displayName: 'OpenClaw',
+            installMode: 'remote',
+            installed: false,
+            matchesCurrent: false,
+            clientDetected: false,
+            clientCommand: 'openclaw',
+            message: 'OpenClaw 通常部署在云端 Linux；请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+          },
+          {
+            client: 'hermans',
+            displayName: 'Hermans',
+            installMode: 'remote',
+            installed: false,
+            matchesCurrent: false,
+            clientDetected: false,
+            clientCommand: 'hermans',
+            message: 'Hermans 这类远程 Agent 请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+          },
+        ]}
+        selectedClient="openclaw"
+        selectedStatus={{
+          client: 'openclaw',
+          displayName: 'OpenClaw',
+          installMode: 'remote',
+          installed: false,
+          matchesCurrent: false,
+          clientDetected: false,
+          clientCommand: 'openclaw',
+          message: 'OpenClaw 通常部署在云端 Linux；请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+        }}
+        selectedCommandText=""
+        darkMode={false}
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        cardBg="#fff"
+        cardBorder="rgba(0,0,0,0.08)"
+        loading={false}
+        statusLoading={false}
+        onSelectClient={() => {}}
+        onRefreshStatus={() => {}}
+        onCopyConfigPath={() => {}}
+        onCopyLaunchCommand={() => {}}
+        onInstall={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('远程桥接');
+    expect(markup).toContain('当前已选中，将复制远程接入说明');
+    expect(markup).toContain('远程接入边界');
+    expect(markup).toContain('云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL');
+    expect(markup).toContain('CLI 检测：远程 Agent 不需要检测本机 openclaw 命令');
+    expect(markup).toContain('复制 OpenClaw 远程接入说明');
   });
 
   it('makes repeated install avoidance explicit when the selected client already matches current GoNavi', () => {

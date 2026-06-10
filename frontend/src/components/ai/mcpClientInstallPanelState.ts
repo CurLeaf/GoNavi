@@ -1,4 +1,5 @@
 import type { AIMCPClientInstallStatus } from '../../types';
+import { isRemoteMCPClientStatus } from '../../utils/mcpClientInstallStatus';
 
 export interface MCPClientInstallStatusTone {
   label: string;
@@ -27,6 +28,13 @@ export const getMCPClientStatusTone = (
       bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
     };
   }
+  if (isRemoteMCPClientStatus(status)) {
+    return {
+      label: '远程桥接',
+      color: '#0284c7',
+      bg: darkMode ? 'rgba(56,189,248,0.16)' : 'rgba(14,165,233,0.10)',
+    };
+  }
   if (hasMCPClientStatusIssue(status)) {
     return {
       label: '状态异常',
@@ -51,6 +59,9 @@ export const getMCPClientInstallStateLabel = (status: AIMCPClientInstallStatus |
   if (hasMCPClientStatusIssue(status)) {
     return '外部工具接入状态：读取失败';
   }
+  if (isRemoteMCPClientStatus(status)) {
+    return '外部工具接入状态：需配置远程 MCP 桥接';
+  }
   return '外部工具接入状态：未接入';
 };
 
@@ -73,6 +84,9 @@ export const getMCPClientStatusSummary = (status: AIMCPClientInstallStatus | und
   if (hasMCPClientStatusIssue(status)) {
     return `${label} 的接入状态读取失败，建议先刷新检测。`;
   }
+  if (isRemoteMCPClientStatus(status)) {
+    return `${label} 通常运行在云端或远端机器，需要通过远程 MCP 桥接调用当前 GoNavi。`;
+  }
   return `当前还没有把这份 GoNavi MCP 接入 ${label}。`;
 };
 
@@ -86,12 +100,18 @@ export const getMCPClientOptionSummary = (status: AIMCPClientInstallStatus | und
   if (hasMCPClientStatusIssue(status)) {
     return '接入状态读取异常，建议先刷新再处理。';
   }
+  if (isRemoteMCPClientStatus(status)) {
+    return '适合云端 Agent：通过远程 MCP 桥接读取 GoNavi 表结构，不复制数据库密码。';
+  }
   return '尚未把当前 GoNavi MCP 接入到这里。';
 };
 
 export const getMCPClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined): string => {
   const label = status?.displayName || '这个客户端';
   const commandName = resolveMCPClientCommandName(status);
+  if (isRemoteMCPClientStatus(status)) {
+    return `${label} 通常不在这台 Windows 上运行，本机无需检测 ${commandName} 命令；请在云端配置远程 MCP 桥接地址。`;
+  }
   if (status?.clientDetected) {
     return `已检测到本机 ${commandName} 命令，接入或更新后重启 ${label} 即可验证。`;
   }
@@ -108,6 +128,9 @@ export const getSelectedMCPClientStateLine = (status: AIMCPClientInstallStatus |
   if (hasMCPClientStatusIssue(status)) {
     return '状态读取异常，建议先刷新检测';
   }
+  if (isRemoteMCPClientStatus(status)) {
+    return '需要配置远程 MCP 桥接，数据库密码仍留在 GoNavi 本机';
+  }
   return '当前还没有接入 GoNavi MCP';
 };
 
@@ -118,6 +141,9 @@ export const resolveMCPClientInstallActionLabel = (status: AIMCPClientInstallSta
   }
   if (status?.installed) {
     return `更新 ${label} 接入配置`;
+  }
+  if (isRemoteMCPClientStatus(status)) {
+    return `复制 ${label} 远程接入说明`;
   }
   return `安装到 ${label}（外部工具）`;
 };

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -78,10 +79,31 @@ func runSpecialMode(args []string) bool {
 		return false
 	}
 
-	if err := mcpserver.RunAppStdioServer(context.Background()); err != nil {
+	if err := runMCPServerMode(context.Background(), args[1:]); err != nil {
 		logger.Error(err, "GoNavi MCP Server 退出")
 	}
 	return true
+}
+
+func runMCPServerMode(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return mcpserver.RunAppStdioServer(ctx)
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(args[0]))
+	switch mode {
+	case "stdio", "--stdio":
+		return mcpserver.RunAppStdioServer(ctx)
+	case "http", "--http", "streamable-http", "--streamable-http":
+		options, err := mcpserver.ParseHTTPServerOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		logger.Infof("GoNavi MCP Streamable HTTP Server 启动：addr=%s path=%s", options.Addr, options.Path)
+		return mcpserver.RunAppStreamableHTTPServer(ctx, options)
+	default:
+		return fmt.Errorf("未知 MCP server 模式: %s（支持 stdio/http）", args[0])
+	}
 }
 
 func shouldRunMCPServerMode(args []string) bool {
