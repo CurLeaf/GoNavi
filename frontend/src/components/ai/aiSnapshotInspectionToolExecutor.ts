@@ -114,6 +114,7 @@ export async function executeSnapshotInspectionToolCall(
 
     const aiConfigResult = await executeAIConfigSnapshotToolCall({
       toolName,
+      args,
       activeContext,
       aiContexts,
       connections,

@@ -95,6 +95,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_mcp_tool_schema',
+    '如果用户提到“某个 MCP 工具参数怎么填”“MCP 工具调用报参数错误”“这个 MCP tool 的 arguments JSON 怎么写”，优先调用 inspect_mcp_tool_schema 读取真实 inputSchema；如果不知道 alias，先调用 inspect_mcp_setup 找到当前发现的工具 alias。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_ai_guidance',
     '如果用户提到“你现在带了哪些提示词”“当前生效的是哪些 Skills”“为什么你会这样回答”“当前数据库/JVM prompt 是什么”，优先调用 inspect_ai_guidance 读取真实提示与技能配置，不要凭记忆概括。',
   );

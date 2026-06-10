@@ -14,6 +14,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/mcptool')).toBe(true);
     expect(commands.some((command) => command.cmd === '/connfail')).toBe(true);
     expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
     expect(commands.some((command) => command.cmd === '/applog')).toBe(true);
@@ -45,6 +46,12 @@ describe('aiSlashCommands', () => {
   it('supports filtering ai-render diagnostics by chinese keyword and command prefix', () => {
     expect(filterAISlashCommands('气泡空白').map((command) => command.cmd)).toContain('/airender');
     expect(filterAISlashCommands('/air').map((command) => command.cmd)).toContain('/airender');
+  });
+
+  it('supports filtering mcp tool schema diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('arguments').map((command) => command.cmd)).toContain('/mcptool');
+    expect(filterAISlashCommands('MCP工具参数').map((command) => command.cmd)).toContain('/mcptool');
+    expect(filterAISlashCommands('/mcpt').map((command) => command.cmd)).toContain('/mcptool');
   });
 
   it('groups commands by configured category order', () => {

@@ -146,6 +146,32 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_mcp_tool_schema",
+    icon: "🧩",
+    desc: "查看 MCP 工具参数怎么传",
+    detail:
+      "按 alias、serverId 或关键词查看当前已发现 MCP 工具的 inputSchema，返回必填参数、字段类型、枚举值、嵌套对象路径和调用前提示。适合新增 MCP 成功后，用户或 AI 不知道某个 MCP 工具到底该传哪些参数时先读真实 schema。",
+    params: "alias?, serverId?, keyword?, includeSchema?(默认 false), limit?(默认 8)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_tool_schema",
+        description:
+          "读取当前已发现 MCP 工具的参数 schema 摘要，可按 alias、serverId 或关键词过滤，并返回必填字段、类型、枚举值、嵌套参数路径和调用前提示。适用于用户问某个 MCP 工具参数怎么填、AI 准备调用外部 MCP 工具但不确定 arguments JSON 怎么写、或工具调用报参数错误时，先读取真实 inputSchema 再继续。",
+        parameters: {
+          type: "object",
+          properties: {
+            alias: { type: "string", description: "可选，按 MCP 工具 alias 精确查询，例如 github_create_issue；优先通过 inspect_mcp_setup 获取真实 alias" },
+            serverId: { type: "string", description: "可选，只看某个 MCP serverId 下发现的工具" },
+            keyword: { type: "string", description: "可选，按工具 alias、原始名称、标题、描述或服务名做关键词筛选" },
+            includeSchema: { type: "boolean", description: "可选，是否附带完整原始 inputSchema，默认 false；需要深查复杂嵌套 schema 时再开启" },
+            limit: { type: "number", description: "可选，最多返回多少个匹配工具，默认 8，最大 30" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_ai_guidance",
     icon: "🧠",
     desc: "查看当前 AI 提示词与 Skills 配置",

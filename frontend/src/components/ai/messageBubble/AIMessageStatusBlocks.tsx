@@ -29,6 +29,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_ai_chat_readiness: '读取当前 AI 聊天发送前置状态',
   inspect_mcp_setup: '读取当前 MCP 配置状态',
   inspect_mcp_authoring_guide: '读取 MCP 新增填写指引',
+  inspect_mcp_tool_schema: '读取 MCP 工具参数 schema',
   inspect_ai_guidance: '读取当前 AI 提示与技能配置',
   get_connections: '获取可用连接信息',
   get_databases: '扫描数据库列表',

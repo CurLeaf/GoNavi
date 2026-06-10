@@ -323,6 +323,45 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
   });
 
+  it('returns mcp tool input schemas so the model can build arguments from discovered tool metadata', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_tool_schema', {
+        alias: 'github_create_issue',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'github_create_issue',
+        originalName: 'create_issue',
+        serverId: 'github-server',
+        serverName: 'GitHub',
+        title: '创建 Issue',
+        description: 'Create a GitHub issue',
+        inputSchema: {
+          type: 'object',
+          required: ['owner', 'repo', 'title'],
+          properties: {
+            owner: { type: 'string', description: '仓库 owner' },
+            repo: { type: 'string', description: '仓库名' },
+            title: { type: 'string', description: 'Issue 标题' },
+            state: { type: 'string', enum: ['open', 'closed'] },
+          },
+        },
+      }],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"alias":"github_create_issue"');
+    expect(result.content).toContain('"requiredParameters":["owner","repo","title"]');
+    expect(result.content).toContain('"path":"state"');
+    expect(result.content).toContain('"enumValues":["open","closed"]');
+    expect(result.content).toContain('调用 github_create_issue 前必须提供：owner, repo, title');
+  });
+
   it('returns the current ai guidance snapshot so the model can inspect active prompts and enabled skills', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_ai_guidance', {}),

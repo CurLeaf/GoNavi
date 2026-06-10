@@ -81,6 +81,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再结合当前 MCP 配置现状判断应该新增哪种启动方式。',
   },
   {
+    title: '查看 MCP 工具参数',
+    steps: 'inspect_mcp_setup → inspect_mcp_tool_schema',
+    description: '适合先找到当前真实发现到的 MCP 工具 alias，再读取对应 inputSchema、必填字段、枚举和嵌套参数路径，避免调用外部 MCP 工具时乱填 arguments。',
+  },
+  {
     title: '查看当前提示与 Skills',
     steps: 'inspect_ai_guidance → inspect_ai_runtime',
     description: '适合先确认当前自定义提示词、启用的 Skills、依赖工具和生效范围，再解释为什么 AI 当前会这样回答或为什么某个规则没有触发。',
