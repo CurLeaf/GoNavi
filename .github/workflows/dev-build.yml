@@ -1087,23 +1087,32 @@ jobs:
 
       - name: Create Dev Driver Agents Pre-release
         if: steps.driver_assets.outputs.has_driver_assets == 'true'
-        uses: softprops/action-gh-release@v3
-        with:
-          repository: Syngnat/GoNavi-DriverAgents
-          tag_name: dev-latest
-          name: "GoNavi Driver Agents (${{ steps.version.outputs.version }})"
-          files: driver-release-assets/*
-          fail_on_unmatched_files: true
-          prerelease: true
-          draft: false
-          make_latest: false
-          body: |
+        env:
+          GH_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t DRIVER_RELEASE_ASSETS < <(find driver-release-assets -maxdepth 1 -type f | sort)
+          if [ ${#DRIVER_RELEASE_ASSETS[@]} -eq 0 ]; then
+            echo "未找到 driver release assets"
+            exit 1
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/dev-driver-release-notes.md"
+          cat > "$NOTES_FILE" <<'EOF'
             GoNavi dev driver-agent assets.
 
             **版本**: `${{ steps.version.outputs.version }}`
             **来源仓库**: `${{ github.repository }}`
             **提交**: [`${{ github.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
-          token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+          EOF
+
+          gh release create dev-latest "${DRIVER_RELEASE_ASSETS[@]}" \
+            --repo Syngnat/GoNavi-DriverAgents \
+            --title "GoNavi Driver Agents (${{ steps.version.outputs.version }})" \
+            --notes-file "$NOTES_FILE" \
+            --prerelease \
+            --latest=false
 
       - name: Create Dev Pre-release
         uses: softprops/action-gh-release@v3

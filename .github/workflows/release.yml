@@ -1031,18 +1031,28 @@ jobs:
           sha256sum "${FILES[@]}" > SHA256SUMS
 
       - name: Create Driver Agents Release
-        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/') && steps.driver_assets.outputs.has_driver_assets == 'true'
-        with:
-          repository: Syngnat/GoNavi-DriverAgents
-          tag_name: ${{ github.ref_name }}
-          name: "GoNavi Driver Agents ${{ github.ref_name }}"
-          files: driver-release-assets/*
-          fail_on_unmatched_files: true
-          make_latest: true
-          body: |
+        env:
+          GH_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t DRIVER_RELEASE_ASSETS < <(find driver-release-assets -maxdepth 1 -type f | sort)
+          if [ ${#DRIVER_RELEASE_ASSETS[@]} -eq 0 ]; then
+            echo "未找到 driver release assets"
+            exit 1
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/driver-release-notes.md"
+          cat > "$NOTES_FILE" <<'EOF'
             GoNavi driver-agent assets for `${{ github.ref_name }}`.
-          token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+          EOF
+
+          gh release create "${{ github.ref_name }}" "${DRIVER_RELEASE_ASSETS[@]}" \
+            --repo Syngnat/GoNavi-DriverAgents \
+            --title "GoNavi Driver Agents ${{ github.ref_name }}" \
+            --notes-file "$NOTES_FILE" \
+            --latest
 
       - name: Checkout code for changelog
         uses: actions/checkout@v5
