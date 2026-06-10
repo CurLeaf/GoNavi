@@ -138,6 +138,31 @@ describe('AISettingsMCPSection', () => {
             enabled: true,
             timeoutSeconds: 20,
           }],
+          mcpTools: [
+            {
+              alias: 'execute_sql',
+              serverId: 'mcp-local',
+              serverName: 'Local MCP',
+              originalName: 'execute_sql',
+              description: '执行 SQL',
+              inputSchema: {
+                type: 'object',
+                required: ['connectionId', 'sql'],
+                properties: {
+                  connectionId: { type: 'string', description: '连接 ID' },
+                  dbName: { type: 'string', description: '数据库名' },
+                  sql: { type: 'string', description: 'SQL 文本' },
+                  allowMutating: { type: 'boolean', description: '显式允许写操作' },
+                },
+              },
+            },
+            {
+              alias: 'legacy_tool',
+              serverId: 'mcp-local',
+              serverName: 'Local MCP',
+              originalName: 'legacy_tool',
+            },
+          ],
         })}
       />,
     );
@@ -147,6 +172,14 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('认证失败、401 或 403');
     expect(markup).toContain('当前只支持 stdio');
     expect(markup).toContain('不要把密钥写进聊天内容');
+    expect(markup).toContain('已发现工具和参数提示');
+    expect(markup).toContain('execute_sql');
+    expect(markup).toContain('参数 4 个，必填 2 个');
+    expect(markup).toContain('connectionId*: string');
+    expect(markup).toContain('sql*: string');
+    expect(markup).toContain('allowMutating: boolean');
+    expect(markup).toContain('legacy_tool');
+    expect(markup).toContain('未声明 inputSchema');
   });
 
   it('seeds a new draft when a launch template is selected', () => {

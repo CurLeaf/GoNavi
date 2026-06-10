@@ -8,6 +8,7 @@ import type { ParsedMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import type { MCPServerDraftValidation } from '../../utils/mcpServerValidation';
 import AIMCPHelpBlock, { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
 import AIMCPServerValidationPanel from './AIMCPServerValidationPanel';
+import AIMCPToolSchemaSummary from './AIMCPToolSchemaSummary';
 
 interface AIMCPServerFormPanelProps {
   server: AIMCPServerConfig;
@@ -166,18 +167,12 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       overlayTheme={overlayTheme}
     />
 
-    {serverTools.length > 0 && (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>已发现工具</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {serverTools.map((tool) => (
-            <span key={tool.alias} style={{ padding: '4px 8px', borderRadius: 999, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', fontSize: 12, color: overlayTheme.mutedText }}>
-              {tool.alias}
-            </span>
-          ))}
-        </div>
-      </div>
-    )}
+    <AIMCPToolSchemaSummary
+      tools={serverTools}
+      cardBorder={cardBorder}
+      darkMode={darkMode}
+      overlayTheme={overlayTheme}
+    />
 
     <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)' }}>
       <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>操作说明</div>
