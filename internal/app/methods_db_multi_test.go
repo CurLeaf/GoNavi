@@ -584,6 +584,46 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 }
 
+func TestDBQueryMultiTransactionalTreatsWithDMLAsManagedWrite(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	stmt := "WITH target AS (SELECT id FROM users WHERE active = 1) UPDATE users SET synced = 1 WHERE id IN (SELECT id FROM target)"
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{
+			stmt: 2,
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "postgres", Host: "127.0.0.1", Port: 5432, User: "postgres"}
+
+	result := app.DBQueryMultiTransactional(config, "main", stmt, "with-dml-query")
+	if !result.Success {
+		t.Fatalf("expected transactional WITH DML success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil || fakeDB.session.closed {
+		t.Fatal("expected WITH DML transaction session to stay open")
+	}
+	wantExecs := []string{"BEGIN", stmt}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected exec queries %#v, got %#v", wantExecs, fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+}
+
 func TestDBQueryMultiTransactionalRollsBackAndClosesOnDMLFailure(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

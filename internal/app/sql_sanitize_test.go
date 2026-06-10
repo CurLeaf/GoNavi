@@ -69,9 +69,24 @@ func TestIsReadOnlySQLQuery_DoesNotTreatExecAsReadOnly(t *testing.T) {
 	}
 }
 
+func TestIsReadOnlySQLQuery_ClassifiesWithByTopLevelOperation(t *testing.T) {
+	readQuery := "WITH target AS (SELECT id FROM users WHERE active = 1) SELECT * FROM target"
+	if !isReadOnlySQLQuery("postgres", readQuery) {
+		t.Fatal("WITH ... SELECT should stay read-only")
+	}
+
+	writeQuery := "WITH target AS (SELECT id FROM users WHERE active = 1) UPDATE users SET synced = 1 WHERE id IN (SELECT id FROM target)"
+	if isReadOnlySQLQuery("postgres", writeQuery) {
+		t.Fatal("WITH ... UPDATE should not be treated as read-only")
+	}
+}
+
 func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
 	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
 		t.Fatal("expected INSERT to be treated as batchable write")
+	}
+	if !isBatchableWriteSQLStatement("postgres", "WITH target AS (SELECT id FROM users) DELETE FROM users WHERE id IN (SELECT id FROM target)") {
+		t.Fatal("expected WITH ... DELETE to be treated as batchable write")
 	}
 	if isBatchableWriteSQLStatement("sqlserver", "EXEC sp_who2") {
 		t.Fatal("EXEC should not be treated as batchable write")

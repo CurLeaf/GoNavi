@@ -2182,6 +2182,81 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.root)).not.toContain('事务待提交');
   });
 
+  it('runs SQL editor WITH DML through a pending managed transaction', async () => {
+    const sql = 'WITH target AS (SELECT id FROM users WHERE active = 1) UPDATE users SET synced = 1 WHERE id IN (SELECT id FROM target)';
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-with-dml',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 2 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('WITH target AS'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(textContent(renderer!.root)).toContain('事务待提交');
+
+    await act(async () => {
+      await findExactButton(renderer!, '提交').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-with-dml');
+  });
+
+  it('keeps SQL editor WITH SELECT on the regular query path', async () => {
+    const sql = 'WITH target AS (SELECT id FROM users WHERE active = 1) SELECT * FROM target';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { columns: ['id'], rows: [{ id: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('WITH target AS'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
+  });
+
   it('auto commits SQL editor DML transactions after the configured delay', async () => {
     vi.useFakeTimers();
     storeState.sqlEditorTransactionOptions = {
@@ -3446,6 +3521,9 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain('gn-v2-query-toolbar-max-rows-select');
     expect(source).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(source).toContain('gn-v2-query-toolbar-transaction-delay-select');
+    expect(source).toContain('这里仅选择该事务执行成功后的提交方式');
+    expect(source).toContain("label: '提交：手动'");
+    expect(source).toContain("label: '提交：自动'");
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 150 }}');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');

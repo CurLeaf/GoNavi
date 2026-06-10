@@ -18,6 +18,7 @@ import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart } from '../utils/sql';
 import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
+import { shouldUseSqlEditorManagedTransaction } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
@@ -750,59 +751,12 @@ const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => 
     && left.every((statement, index) => normalizeExecutedSqlKey(statement) === normalizeExecutedSqlKey(right[index]))
 );
 
-const SQL_EDITOR_DML_KEYWORDS = new Set(['insert', 'update', 'delete', 'replace', 'merge', 'upsert']);
-const SQL_EDITOR_READ_KEYWORDS = new Set(['select', 'with', 'show', 'describe', 'desc', 'explain', 'pragma', 'values']);
-const SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS = new Set(['begin', 'commit', 'rollback', 'savepoint', 'release']);
 const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = [
     { value: 3000, label: '3 秒' },
     { value: 5000, label: '5 秒' },
     { value: 10000, label: '10 秒' },
     { value: 30000, label: '30 秒' },
 ];
-
-const resolveLeadingSqlKeyword = (statement: string): string => {
-    let text = String(statement || '').trim();
-    while (text) {
-        if (text.startsWith('--') || text.startsWith('#')) {
-            const lineBreak = text.indexOf('\n');
-            if (lineBreak < 0) return '';
-            text = text.slice(lineBreak + 1).trimStart();
-            continue;
-        }
-        if (text.startsWith('/*')) {
-            const blockEnd = text.indexOf('*/');
-            if (blockEnd < 0) return '';
-            text = text.slice(blockEnd + 2).trimStart();
-            continue;
-        }
-        break;
-    }
-    const match = text.match(/^([A-Za-z0-9_]+)/);
-    return match?.[1]?.toLowerCase() || '';
-};
-
-const isSqlEditorTransactionControlStatement = (statement: string): boolean => {
-    const keyword = resolveLeadingSqlKeyword(statement);
-    if (SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS.has(keyword)) return true;
-    return keyword === 'start' && /\btransaction\b/i.test(statement);
-};
-
-const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean => {
-    let hasManagedWrite = false;
-    for (const statement of statements) {
-        const trimmed = String(statement || '').trim();
-        if (!trimmed) continue;
-        if (isSqlEditorTransactionControlStatement(trimmed)) return false;
-        const keyword = resolveLeadingSqlKeyword(trimmed);
-        if (SQL_EDITOR_READ_KEYWORDS.has(keyword)) continue;
-        if (SQL_EDITOR_DML_KEYWORDS.has(keyword)) {
-            hasManagedWrite = true;
-            continue;
-        }
-        return false;
-    }
-    return hasManagedWrite;
-};
 
 type PendingSqlEditorTransaction = {
     id: string;
@@ -5369,15 +5323,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ]}
               />
           </Tooltip>
-          <Tooltip title="SQL 编辑器直接执行 INSERT/UPDATE/DELETE 等增删改语句时启用事务；手动提交更安全，自动提交会在执行成功后按所选时间提交。">
+          <Tooltip title="SQL 编辑器执行 INSERT/UPDATE/DELETE 等 DML 时始终启用事务；这里仅选择该事务执行成功后的提交方式。">
               <Select
                   className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
                   style={isV2Ui ? undefined : { width: 128 }}
                   value={sqlEditorCommitMode}
                   onChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode === 'auto' ? 'auto' : 'manual' })}
                   options={[
-                      { label: '事务：手动', value: 'manual' },
-                      { label: '事务：自动', value: 'auto' },
+                      { label: '提交：手动', value: 'manual' },
+                      { label: '提交：自动', value: 'auto' },
                   ]}
               />
           </Tooltip>
