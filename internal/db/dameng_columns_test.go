@@ -15,6 +15,11 @@ func TestBuildDamengColumnsQuery_IncludesPrimaryKeyMetadata(t *testing.T) {
 	if !strings.Contains(ownerQuery, "AS column_key") {
 		t.Fatalf("owner query 应返回 column_key, got=%s", ownerQuery)
 	}
+	for _, want := range []string{"c.data_length", "c.char_length", "c.data_precision", "c.data_scale"} {
+		if !strings.Contains(ownerQuery, want) {
+			t.Fatalf("owner query 应返回字段类型长度信息 %q, got=%s", want, ownerQuery)
+		}
+	}
 	if !strings.Contains(ownerQuery, "WHERE c.owner = 'BIZ' AND c.table_name = 'ORDERS'") {
 		t.Fatalf("owner query 应按 owner/table 过滤, got=%s", ownerQuery)
 	}
@@ -42,22 +47,36 @@ func TestBuildDamengColumnDefinitions_MarksPrimaryKeyColumns(t *testing.T) {
 		{
 			"COLUMN_NAME":  "NAME",
 			"DATA_TYPE":    "VARCHAR2",
+			"DATA_LENGTH":  128,
+			"CHAR_LENGTH":  64,
 			"NULLABLE":     "Y",
 			"DATA_DEFAULT": "guest",
 			"COLUMN_KEY":   "",
 		},
+		{
+			"COLUMN_NAME":    "AMOUNT",
+			"DATA_TYPE":      "NUMBER",
+			"DATA_PRECISION": 10,
+			"DATA_SCALE":     2,
+			"NULLABLE":       "N",
+			"DATA_DEFAULT":   nil,
+			"COLUMN_KEY":     "",
+		},
 	})
 
-	if len(columns) != 2 {
+	if len(columns) != 3 {
 		t.Fatalf("unexpected column count: %d", len(columns))
 	}
-	if columns[0].Name != "ID" || columns[0].Key != "PRI" {
+	if columns[0].Name != "ID" || columns[0].Key != "PRI" || columns[0].Nullable != "NO" {
 		t.Fatalf("主键列未正确标记: %+v", columns[0])
 	}
-	if columns[1].Name != "NAME" || columns[1].Key != "" {
+	if columns[1].Name != "NAME" || columns[1].Type != "VARCHAR2(64)" || columns[1].Nullable != "YES" || columns[1].Key != "" {
 		t.Fatalf("非主键列标记异常: %+v", columns[1])
 	}
 	if columns[1].Default == nil || *columns[1].Default != "guest" {
 		t.Fatalf("默认值未保留: %+v", columns[1])
+	}
+	if columns[2].Name != "AMOUNT" || columns[2].Type != "NUMBER(10,2)" || columns[2].Nullable != "NO" {
+		t.Fatalf("数值字段定义异常: %+v", columns[2])
 	}
 }

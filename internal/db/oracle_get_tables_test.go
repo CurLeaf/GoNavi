@@ -104,10 +104,56 @@ func TestOracleGetColumnsIncludesColumnComments(t *testing.T) {
 	if len(queries) == 0 || !strings.Contains(queries[0], "all_col_comments") {
 		t.Fatalf("expected GetColumns to join all_col_comments, queries=%v", queries)
 	}
-	for _, want := range []string{`AS "COLUMN_NAME"`, `AS "DATA_TYPE"`, `AS "COMMENT"`} {
+	for _, want := range []string{`AS "COLUMN_NAME"`, `AS "DATA_TYPE"`, `AS "DATA_LENGTH"`, `AS "CHAR_LENGTH"`, `AS "DATA_PRECISION"`, `AS "DATA_SCALE"`, `AS "COMMENT"`} {
 		if !strings.Contains(queries[0], want) {
 			t.Fatalf("expected GetColumns query to contain stable alias %q, got %s", want, queries[0])
 		}
+	}
+}
+
+func TestFormatOracleColumnTypeIncludesLengthAndPrecision(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		row  map[string]interface{}
+		want string
+	}{
+		{
+			name: "varchar2 char length",
+			row: map[string]interface{}{
+				"DATA_TYPE":   "VARCHAR2",
+				"DATA_LENGTH": 256,
+				"CHAR_LENGTH": 128,
+			},
+			want: "VARCHAR2(128)",
+		},
+		{
+			name: "number precision scale",
+			row: map[string]interface{}{
+				"DATA_TYPE":      "NUMBER",
+				"DATA_PRECISION": 10,
+				"DATA_SCALE":     2,
+			},
+			want: "NUMBER(10,2)",
+		},
+		{
+			name: "date remains plain",
+			row: map[string]interface{}{
+				"DATA_TYPE": "DATE",
+			},
+			want: "DATE",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := formatOracleColumnType(tc.row); got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
 	}
 }
 

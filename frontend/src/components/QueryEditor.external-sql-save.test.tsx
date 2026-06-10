@@ -741,6 +741,15 @@ describe('QueryEditor external SQL save', () => {
     });
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
 
+    const FakeNode = class {};
+    const bodyNode = new FakeNode();
+    const documentElement = new FakeNode();
+    vi.stubGlobal('Node', FakeNode);
+    vi.stubGlobal('document', {
+      body: bodyNode,
+      documentElement,
+    });
+    editorState.hasTextFocus = false;
     const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
     const toggleEvent = {
       ctrlKey: !isMacRuntime,
@@ -748,7 +757,7 @@ describe('QueryEditor external SQL save', () => {
       altKey: false,
       shiftKey: true,
       key: 'm',
-      target: null,
+      target: bodyNode,
       preventDefault: vi.fn(),
       stopPropagation: vi.fn(),
     };

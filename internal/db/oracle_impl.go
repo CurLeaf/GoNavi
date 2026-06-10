@@ -325,7 +325,7 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	metadataTableName := escapeOracleMetadataLiteral(tableName)
 	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
-	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
 		cc.comments AS "COMMENT"
 		FROM all_tab_columns c
@@ -342,7 +342,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
 
 	if dbName == "" {
-		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
 			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
 			cc.comments AS "COMMENT"
 			FROM user_tab_columns c
@@ -367,7 +367,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 	for _, row := range data {
 		col := connection.ColumnDefinition{
 			Name:     oracleRowString(row, "COLUMN_NAME"),
-			Type:     oracleRowString(row, "DATA_TYPE"),
+			Type:     formatOracleColumnType(row),
 			Nullable: oracleRowString(row, "NULLABLE"),
 			Key:      oracleRowString(row, "COLUMN_KEY"),
 			Comment:  oracleRowString(row, "COMMENT"),
@@ -402,7 +402,58 @@ func oracleRowString(row map[string]interface{}, names ...string) string {
 	if value == nil {
 		return ""
 	}
-	return fmt.Sprintf("%v", value)
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func oracleRowInt(row map[string]interface{}, names ...string) (int, bool) {
+	raw := oracleRowString(row, names...)
+	if raw == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func isOracleLengthQualifiedType(upperType string) bool {
+	switch strings.TrimSpace(upperType) {
+	case "CHAR", "NCHAR", "VARCHAR", "VARCHAR2", "NVARCHAR", "NVARCHAR2", "RAW", "BINARY", "VARBINARY":
+		return true
+	default:
+		return strings.Contains(upperType, "CHARACTER")
+	}
+}
+
+func formatOracleColumnType(row map[string]interface{}) string {
+	dataType := oracleRowString(row, "DATA_TYPE")
+	if dataType == "" || strings.Contains(dataType, "(") {
+		return dataType
+	}
+
+	upperType := strings.ToUpper(dataType)
+	if isOracleLengthQualifiedType(upperType) {
+		if charLength, ok := oracleRowInt(row, "CHAR_LENGTH", "CHAR_COL_DECL_LENGTH"); ok && charLength > 0 {
+			return fmt.Sprintf("%s(%d)", dataType, charLength)
+		}
+		if dataLength, ok := oracleRowInt(row, "DATA_LENGTH"); ok && dataLength > 0 {
+			return fmt.Sprintf("%s(%d)", dataType, dataLength)
+		}
+	}
+
+	if strings.Contains(upperType, "NUMBER") || strings.Contains(upperType, "DECIMAL") || strings.Contains(upperType, "NUMERIC") {
+		precision, hasPrecision := oracleRowInt(row, "DATA_PRECISION", "NUMERIC_PRECISION")
+		if hasPrecision && precision > 0 {
+			scale, hasScale := oracleRowInt(row, "DATA_SCALE", "NUMERIC_SCALE")
+			if hasScale && scale > 0 {
+				return fmt.Sprintf("%s(%d,%d)", dataType, precision, scale)
+			}
+			return fmt.Sprintf("%s(%d)", dataType, precision)
+		}
+	}
+
+	return dataType
 }
 
 func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableName string) string {

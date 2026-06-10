@@ -1766,6 +1766,16 @@ const resolveEventTargetNode = (target: EventTarget | null): Node | null => (
     typeof Node !== 'undefined' && target instanceof Node ? target : null
 );
 
+const isDocumentLevelShortcutTarget = (targetNode: Node | null): boolean => {
+    if (!targetNode) {
+        return true;
+    }
+    if (typeof document === 'undefined') {
+        return false;
+    }
+    return targetNode === document.body || targetNode === document.documentElement;
+};
+
 const clearQueryEditorLinkDecorations = (
     editor: any,
     decorationIdsRef: React.MutableRefObject<string[]>,
@@ -5004,7 +5014,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const targetNode = resolveEventTargetNode(event.target);
           const editorHasFocus = !!editor?.hasTextFocus?.();
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
-          if (!editorHasFocus && !inQueryEditor) {
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
               return;
           }
 

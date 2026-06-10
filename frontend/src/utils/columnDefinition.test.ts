@@ -60,6 +60,21 @@ describe('columnDefinition metadata normalization', () => {
     });
   });
 
+  it('normalizes Dameng style data length and nullable flags', () => {
+    const column = {
+      COLUMN_NAME: 'USER_NAME',
+      DATA_TYPE: 'VARCHAR2',
+      DATA_LENGTH: 64,
+      NULLABLE: 'N',
+    };
+
+    expect(normalizeColumnDefinition(column)).toMatchObject({
+      name: 'USER_NAME',
+      type: 'VARCHAR2(64)',
+      nullable: 'NO',
+    });
+  });
+
   it('maps boolean primary and unique metadata aliases to GoNavi keys', () => {
     expect(getColumnDefinitionKey({ column_name: 'id', isPrimary: true })).toBe('PRI');
     expect(getColumnDefinitionKey({ column_name: 'id', primary_key: 't' })).toBe('PRI');

@@ -55,6 +55,19 @@ const readNumberProperty = (value: unknown, keys: string[]): number => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0;
 };
 
+const normalizeNullable = (value: string): string => {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  const upper = normalized.toUpperCase();
+  if (upper === 'N' || upper === 'NO' || upper === 'FALSE' || upper === '0' || upper === 'NOT NULL') {
+    return 'NO';
+  }
+  if (upper === 'Y' || upper === 'YES' || upper === 'TRUE' || upper === '1' || upper === 'NULL' || upper === 'NULLABLE') {
+    return 'YES';
+  }
+  return normalized;
+};
+
 export const getColumnDefinitionName = (column: unknown): string => (
   readStringProperty(column, ['name', 'Name', 'COLUMN_NAME', 'column_name', 'field', 'Field'])
 );
@@ -85,6 +98,8 @@ export const getColumnDefinitionType = (column: unknown): string => {
     'character_max_length',
     'CHAR_LENGTH',
     'char_length',
+    'DATA_LENGTH',
+    'data_length',
     'LENGTH',
     'length',
   ]);
@@ -148,7 +163,7 @@ export const normalizeColumnDefinition = (column: unknown): ColumnDefinition => 
     ...source,
     name: getColumnDefinitionName(column),
     type: getColumnDefinitionType(column),
-    nullable: readStringProperty(column, ['nullable', 'Nullable', 'NULLABLE', 'is_nullable', 'IS_NULLABLE', 'Null', 'null']),
+    nullable: normalizeNullable(readStringProperty(column, ['nullable', 'Nullable', 'NULLABLE', 'is_nullable', 'IS_NULLABLE', 'Null', 'null'])),
     key: getColumnDefinitionKey(column),
     default: source.default,
     extra: getColumnDefinitionExtra(column),
