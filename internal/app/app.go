@@ -55,6 +55,15 @@ type queryContext struct {
 	started time.Time
 }
 
+type managedSQLTransaction struct {
+	id          string
+	execer      db.StatementExecer
+	dbType      string
+	commitSQL   string
+	rollbackSQL string
+	createdAt   time.Time
+}
+
 // App struct
 type App struct {
 	ctx                context.Context
@@ -68,6 +77,8 @@ type App struct {
 	configDir          string
 	secretStore        secretstore.SecretStore
 	runningQueries     map[string]queryContext // queryID -> cancelFunc and start time
+	sqlTransactionMu   sync.Mutex
+	sqlTransactions    map[string]*managedSQLTransaction
 	jvmPreviewTokenMu  sync.Mutex
 	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
 	jvmPreviewTokenTTL time.Duration
@@ -86,6 +97,7 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		dbCache:            make(map[string]cachedDatabase),
 		connectFailures:    make(map[string]cachedConnectFailure),
 		runningQueries:     make(map[string]queryContext),
+		sqlTransactions:    make(map[string]*managedSQLTransaction),
 		configDir:          resolveAppConfigDir(),
 		secretStore:        store,
 		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
@@ -167,6 +179,7 @@ func (a *App) LogWindowDiagnostic(stage string, payload string) {
 // Shutdown is called when the app terminates
 func (a *App) Shutdown(ctx context.Context) {
 	logger.Infof("应用开始关闭，准备释放资源")
+	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, dbInst := range a.dbCache {

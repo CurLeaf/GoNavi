@@ -33,6 +33,7 @@ interface QueryEditorResultsPanelProps {
     currentDb: string;
     currentConnectionId: string;
     toggleShortcutLabel: string;
+    transactionToolbar?: React.ReactNode;
     onActiveResultKeyChange: (key: string) => void;
     onHide: () => void;
     onCloseResult: (key: string) => void;
@@ -57,6 +58,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     currentDb,
     currentConnectionId,
     toggleShortcutLabel,
+    transactionToolbar,
     onActiveResultKeyChange,
     onHide,
     onCloseResult,
@@ -132,6 +134,16 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             />
         </Tooltip>
     );
+    const tabsExtraContent = transactionToolbar || !activeResultUsesDataGrid
+        ? {
+            right: (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    {transactionToolbar}
+                    {!activeResultUsesDataGrid ? tabsHideButton : null}
+                </div>
+            ),
+        }
+        : undefined;
 
     const toolbarHideButton = (
         <Tooltip title={hideTooltipTitle}>
@@ -321,7 +333,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         onChange={onActiveResultKeyChange}
                         animated={false}
                         style={{ flex: 1, minHeight: 0 }}
-                        tabBarExtraContent={!activeResultUsesDataGrid ? { right: tabsHideButton } : undefined}
+                        tabBarExtraContent={tabsExtraContent}
                         items={resultSets.map((rs, idx) => ({
                             key: rs.key,
                             label: (

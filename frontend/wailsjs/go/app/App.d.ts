@@ -52,13 +52,19 @@ export function DBGetTriggers(arg1:connection.ConnectionConfig,arg2:string,arg3:
 
 export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function DBCommitTransaction(arg1:string):Promise<connection.QueryResult>;
+
 export function DBQueryIsolated(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DBQueryMulti(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DBQueryMultiTransactional(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DBRollbackTransaction(arg1:string):Promise<connection.QueryResult>;
 
 export function DataSync(arg1:sync.SyncConfig):Promise<sync.SyncResult>;
 

@@ -94,6 +94,10 @@ export function DBQuery(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQuery'](arg1, arg2, arg3);
 }
 
+export function DBCommitTransaction(arg1) {
+  return window['go']['app']['App']['DBCommitTransaction'](arg1);
+}
+
 export function DBQueryIsolated(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBQueryIsolated'](arg1, arg2, arg3);
 }
@@ -102,12 +106,20 @@ export function DBQueryMulti(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryMulti'](arg1, arg2, arg3, arg4);
 }
 
+export function DBQueryMultiTransactional(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DBQueryMultiTransactional'](arg1, arg2, arg3, arg4);
+}
+
 export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
 }
 
 export function DBShowCreateTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBShowCreateTable'](arg1, arg2, arg3);
+}
+
+export function DBRollbackTransaction(arg1) {
+  return window['go']['app']['App']['DBRollbackTransaction'](arg1);
 }
 
 export function DataSync(arg1) {

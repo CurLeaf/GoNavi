@@ -1119,6 +1119,11 @@ export interface DataEditTransactionOptions {
   autoCommitDelayMs: number;
 }
 
+export interface SqlEditorTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
 interface AppState {
   connections: SavedConnection[];
   connectionTags: ConnectionTag[];
@@ -1137,6 +1142,7 @@ interface AppState {
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
   dataEditTransactionOptions: DataEditTransactionOptions;
+  sqlEditorTransactionOptions: SqlEditorTransactionOptions;
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
@@ -1244,6 +1250,9 @@ interface AppState {
   setQueryOptions: (options: Partial<QueryOptions>) => void;
   setDataEditTransactionOptions: (
     options: Partial<DataEditTransactionOptions>,
+  ) => void;
+  setSqlEditorTransactionOptions: (
+    options: Partial<SqlEditorTransactionOptions>,
   ) => void;
   updateShortcut: (
     action: ShortcutAction,
@@ -1614,6 +1623,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
 };
 
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
+const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
 
 const sanitizeDataEditTransactionOptions = (
   value: unknown,
@@ -1626,6 +1636,22 @@ const sanitizeDataEditTransactionOptions = (
   return {
     commitMode: raw.commitMode === "auto" ? "auto" : "manual",
     autoCommitDelayMs: DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 5000,
+  };
+};
+
+const sanitizeSqlEditorTransactionOptions = (
+  value: unknown,
+): SqlEditorTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
       ? autoCommitDelayMs
       : 5000,
   };
@@ -2018,6 +2044,10 @@ export const useStore = create<AppState>()(
         showQueryResultsPanel: false,
       },
       dataEditTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 5000,
+      },
+      sqlEditorTransactionOptions: {
         commitMode: "manual",
         autoCommitDelayMs: 5000,
       },
@@ -2772,6 +2802,13 @@ export const useStore = create<AppState>()(
             ...options,
           }),
         })),
+      setSqlEditorTransactionOptions: (options) =>
+        set((state) => ({
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions({
+            ...state.sqlEditorTransactionOptions,
+            ...options,
+          }),
+        })),
       updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
           const targetPlatform = platform ?? getShortcutPlatform();
@@ -3180,6 +3217,8 @@ export const useStore = create<AppState>()(
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
         nextState.dataEditTransactionOptions =
           sanitizeDataEditTransactionOptions(state.dataEditTransactionOptions);
+        nextState.sqlEditorTransactionOptions =
+          sanitizeSqlEditorTransactionOptions(state.sqlEditorTransactionOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
@@ -3285,6 +3324,9 @@ export const useStore = create<AppState>()(
           dataEditTransactionOptions: sanitizeDataEditTransactionOptions(
             state.dataEditTransactionOptions,
           ),
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions(
+            state.sqlEditorTransactionOptions,
+          ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
@@ -3316,6 +3358,7 @@ export const useStore = create<AppState>()(
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
           dataEditTransactionOptions: state.dataEditTransactionOptions,
+          sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,

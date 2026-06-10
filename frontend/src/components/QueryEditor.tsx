@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
+import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBCommitTransaction, DBRollbackTransaction, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
@@ -749,6 +749,67 @@ const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => 
     left.length === right.length
     && left.every((statement, index) => normalizeExecutedSqlKey(statement) === normalizeExecutedSqlKey(right[index]))
 );
+
+const SQL_EDITOR_DML_KEYWORDS = new Set(['insert', 'update', 'delete', 'replace', 'merge', 'upsert']);
+const SQL_EDITOR_READ_KEYWORDS = new Set(['select', 'with', 'show', 'describe', 'desc', 'explain', 'pragma', 'values']);
+const SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS = new Set(['begin', 'commit', 'rollback', 'savepoint', 'release']);
+const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = [
+    { value: 3000, label: '3 秒' },
+    { value: 5000, label: '5 秒' },
+    { value: 10000, label: '10 秒' },
+    { value: 30000, label: '30 秒' },
+];
+
+const resolveLeadingSqlKeyword = (statement: string): string => {
+    let text = String(statement || '').trim();
+    while (text) {
+        if (text.startsWith('--') || text.startsWith('#')) {
+            const lineBreak = text.indexOf('\n');
+            if (lineBreak < 0) return '';
+            text = text.slice(lineBreak + 1).trimStart();
+            continue;
+        }
+        if (text.startsWith('/*')) {
+            const blockEnd = text.indexOf('*/');
+            if (blockEnd < 0) return '';
+            text = text.slice(blockEnd + 2).trimStart();
+            continue;
+        }
+        break;
+    }
+    const match = text.match(/^([A-Za-z0-9_]+)/);
+    return match?.[1]?.toLowerCase() || '';
+};
+
+const isSqlEditorTransactionControlStatement = (statement: string): boolean => {
+    const keyword = resolveLeadingSqlKeyword(statement);
+    if (SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS.has(keyword)) return true;
+    return keyword === 'start' && /\btransaction\b/i.test(statement);
+};
+
+const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean => {
+    let hasManagedWrite = false;
+    for (const statement of statements) {
+        const trimmed = String(statement || '').trim();
+        if (!trimmed) continue;
+        if (isSqlEditorTransactionControlStatement(trimmed)) return false;
+        const keyword = resolveLeadingSqlKeyword(trimmed);
+        if (SQL_EDITOR_READ_KEYWORDS.has(keyword)) continue;
+        if (SQL_EDITOR_DML_KEYWORDS.has(keyword)) {
+            hasManagedWrite = true;
+            continue;
+        }
+        return false;
+    }
+    return hasManagedWrite;
+};
+
+type PendingSqlEditorTransaction = {
+    id: string;
+    commitMode: 'manual' | 'auto';
+    autoCommitDelayMs: number;
+    createdAt: number;
+};
 
 const normalizeEditorPosition = (position: any): { lineNumber: number; column: number } | null => {
     if (!position) return null;
@@ -2031,9 +2092,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const sqlEditorTransactionOptions = useStore(state => state.sqlEditorTransactionOptions);
+  const setSqlEditorTransactionOptions = useStore(state => state.setSqlEditorTransactionOptions);
   const [isResultPanelVisible, setIsResultPanelVisible] = useState(
       () => tab.resultPanelVisible === true
   );
+  const [pendingSqlTransaction, setPendingSqlTransaction] = useState<PendingSqlEditorTransaction | null>(null);
+  const pendingSqlTransactionRef = useRef<PendingSqlEditorTransaction | null>(null);
+  const sqlEditorAutoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sqlEditorAutoCommitCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [sqlEditorAutoCommitRemainingSeconds, setSqlEditorAutoCommitRemainingSeconds] = useState<number | null>(null);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -2070,6 +2138,89 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return nextVisible;
       });
   }, [tab.id, updateQueryTabDraft]);
+  const sqlEditorCommitMode = sqlEditorTransactionOptions?.commitMode === 'auto' ? 'auto' : 'manual';
+  const sqlEditorAutoCommitDelayMs = SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.some((item) => item.value === sqlEditorTransactionOptions?.autoCommitDelayMs)
+      ? Number(sqlEditorTransactionOptions?.autoCommitDelayMs)
+      : 5000;
+  const clearSqlEditorAutoCommitTimer = useCallback(() => {
+      if (sqlEditorAutoCommitTimerRef.current) {
+          clearTimeout(sqlEditorAutoCommitTimerRef.current);
+          sqlEditorAutoCommitTimerRef.current = null;
+      }
+      if (sqlEditorAutoCommitCountdownRef.current) {
+          clearInterval(sqlEditorAutoCommitCountdownRef.current);
+          sqlEditorAutoCommitCountdownRef.current = null;
+      }
+      setSqlEditorAutoCommitRemainingSeconds(null);
+  }, []);
+  const updatePendingSqlTransaction = useCallback((transaction: PendingSqlEditorTransaction | null) => {
+      pendingSqlTransactionRef.current = transaction;
+      setPendingSqlTransaction(transaction);
+  }, []);
+  const finishPendingSqlTransaction = useCallback(async (
+      action: 'commit' | 'rollback',
+      source: 'manual' | 'auto' = 'manual',
+      transactionId?: string,
+  ) => {
+      const transaction = pendingSqlTransactionRef.current;
+      if (!transaction || (transactionId && transaction.id !== transactionId)) {
+          return;
+      }
+      clearSqlEditorAutoCommitTimer();
+      try {
+          const res = action === 'commit'
+              ? await DBCommitTransaction(transaction.id)
+              : await DBRollbackTransaction(transaction.id);
+          if (res?.success) {
+              updatePendingSqlTransaction(null);
+              if (action === 'commit') {
+                  message.success(source === 'auto' ? 'SQL 事务已自动提交' : 'SQL 事务已提交');
+              } else {
+                  message.success('SQL 事务已回滚');
+              }
+              return;
+          }
+          updatePendingSqlTransaction(null);
+          const fallback = action === 'commit' ? '提交失败' : '回滚失败';
+          message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(res?.message || '未知错误')}`);
+      } catch (err: any) {
+          updatePendingSqlTransaction(null);
+          const fallback = action === 'commit' ? '提交失败' : '回滚失败';
+          message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(err?.message || err || '未知错误')}`);
+      }
+  }, [clearSqlEditorAutoCommitTimer, updatePendingSqlTransaction]);
+  const activatePendingSqlTransaction = useCallback((transaction: PendingSqlEditorTransaction) => {
+      clearSqlEditorAutoCommitTimer();
+      updatePendingSqlTransaction(transaction);
+      if (transaction.commitMode !== 'auto') {
+          return;
+      }
+      const dueAt = Date.now() + transaction.autoCommitDelayMs;
+      const updateRemaining = () => {
+          setSqlEditorAutoCommitRemainingSeconds(Math.max(1, Math.ceil((dueAt - Date.now()) / 1000)));
+      };
+      updateRemaining();
+      sqlEditorAutoCommitCountdownRef.current = setInterval(updateRemaining, 250);
+      sqlEditorAutoCommitTimerRef.current = setTimeout(() => {
+          sqlEditorAutoCommitTimerRef.current = null;
+          if (sqlEditorAutoCommitCountdownRef.current) {
+              clearInterval(sqlEditorAutoCommitCountdownRef.current);
+              sqlEditorAutoCommitCountdownRef.current = null;
+          }
+          setSqlEditorAutoCommitRemainingSeconds(null);
+          void finishPendingSqlTransaction('commit', 'auto', transaction.id);
+      }, transaction.autoCommitDelayMs);
+  }, [clearSqlEditorAutoCommitTimer, finishPendingSqlTransaction, updatePendingSqlTransaction]);
+  useEffect(() => {
+      return () => {
+          clearSqlEditorAutoCommitTimer();
+          const transaction = pendingSqlTransactionRef.current;
+          if (transaction?.id) {
+              pendingSqlTransactionRef.current = null;
+              void DBRollbackTransaction(transaction.id);
+          }
+      };
+  }, [clearSqlEditorAutoCommitTimer]);
   const autoFetchVisible = useAutoFetchVisibility();
 
   const currentSavedQuery = useMemo(() => {
@@ -4297,6 +4448,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 message.info('没有可执行的 SQL。');
                 return;
             }
+            const useManagedTransaction = shouldUseSqlEditorManagedTransaction(sourceStatements);
+            if (useManagedTransaction && pendingSqlTransactionRef.current) {
+                message.warning('当前 SQL 编辑器已有未提交事务，请先提交或回滚后再执行新的增删改语句。');
+                return;
+            }
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
             const statementPlans: QueryStatementPlan[] = [];
@@ -4331,7 +4487,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
             setQueryId(queryId);
 
-            const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, fullSQL, queryId);
+            const queryExecutor = useManagedTransaction ? DBQueryMultiTransactional : DBQueryMulti;
+            const res = await queryExecutor(buildRpcConnectionConfig(config) as any, currentDb, fullSQL, queryId);
             const duration = Date.now() - startTime;
 
             addSqlLog({
@@ -4371,6 +4528,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
+            }
+
+            if (useManagedTransaction && res.transactionPending && res.transactionId) {
+                activatePendingSqlTransaction({
+                    id: String(res.transactionId),
+                    commitMode: sqlEditorCommitMode,
+                    autoCommitDelayMs: sqlEditorAutoCommitDelayMs,
+                    createdAt: Date.now(),
+                });
             }
 
             // res.data 是 ResultSetData[] 数组
@@ -5122,6 +5288,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }, wasClosed ? 350 : 0);
   };
 
+  const sqlEditorTransactionToolbar = pendingSqlTransaction ? (
+      <div
+          className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}
+          style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '0 4px',
+              whiteSpace: 'nowrap',
+          }}
+      >
+          <span style={{ fontSize: 12, color: darkMode ? '#d4d4d4' : '#666' }}>
+              {pendingSqlTransaction.commitMode === 'auto' && sqlEditorAutoCommitRemainingSeconds !== null
+                  ? `事务待提交，${sqlEditorAutoCommitRemainingSeconds}s 后自动提交`
+                  : '事务待提交'}
+          </span>
+          <Button
+              size="small"
+              type="primary"
+              onClick={() => void finishPendingSqlTransaction('commit', 'manual')}
+          >
+              提交
+          </Button>
+          <Button
+              size="small"
+              danger
+              onClick={() => void finishPendingSqlTransaction('rollback', 'manual')}
+          >
+              回滚
+          </Button>
+      </div>
+  ) : null;
+
   return (
     <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <div
@@ -5170,6 +5369,28 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ]}
               />
           </Tooltip>
+          <Tooltip title="SQL 编辑器直接执行 INSERT/UPDATE/DELETE 等增删改语句时启用事务；手动提交更安全，自动提交会在执行成功后按所选时间提交。">
+              <Select
+                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
+                  style={isV2Ui ? undefined : { width: 128 }}
+                  value={sqlEditorCommitMode}
+                  onChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode === 'auto' ? 'auto' : 'manual' })}
+                  options={[
+                      { label: '事务：手动', value: 'manual' },
+                      { label: '事务：自动', value: 'auto' },
+                  ]}
+              />
+          </Tooltip>
+          {sqlEditorCommitMode === 'auto' && (
+              <Select
+                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-delay-select' : undefined}
+                  style={isV2Ui ? undefined : { width: 96 }}
+                  value={sqlEditorAutoCommitDelayMs}
+                  onChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: Number(delayMs) })}
+                  options={SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS}
+              />
+          )}
+          {pendingSqlTransaction && sqlEditorTransactionToolbar}
         </div>
         <div
           className={isV2Ui ? 'gn-v2-query-toolbar-actions' : undefined}
@@ -5305,6 +5526,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           currentDb={currentDb}
           currentConnectionId={currentConnectionId}
           toggleShortcutLabel={toggleQueryResultsPanelShortcutLabel}
+          transactionToolbar={sqlEditorTransactionToolbar}
           onActiveResultKeyChange={setActiveResultKey}
           onHide={() => updateResultPanelVisibility(false)}
           onCloseResult={handleCloseResult}

@@ -43,6 +43,11 @@ const storeState = vi.hoisted(() => ({
     showQueryResultsPanel: false,
   },
   setQueryOptions: vi.fn(),
+  sqlEditorTransactionOptions: {
+    commitMode: 'manual' as 'manual' | 'auto',
+    autoCommitDelayMs: 5000,
+  },
+  setSqlEditorTransactionOptions: vi.fn(),
   shortcutOptions: {
     runQuery: {
       mac: { enabled: false, combo: '' },
@@ -70,6 +75,9 @@ const backendApp = vi.hoisted(() => ({
   DBQuery: vi.fn(),
   DBQueryWithCancel: vi.fn(),
   DBQueryMulti: vi.fn(),
+  DBQueryMultiTransactional: vi.fn(),
+  DBCommitTransaction: vi.fn(),
+  DBRollbackTransaction: vi.fn(),
   DBGetTables: vi.fn(),
   DBGetAllColumns: vi.fn(),
   DBGetDatabases: vi.fn(),
@@ -449,6 +457,10 @@ describe('QueryEditor external SQL save', () => {
       showColumnType: true,
       showQueryResultsPanel: false,
     };
+    storeState.sqlEditorTransactionOptions = {
+      commitMode: 'manual',
+      autoCommitDelayMs: 5000,
+    };
     storeState.shortcutOptions = {
       runQuery: {
         mac: { enabled: false, combo: '' },
@@ -471,13 +483,21 @@ describe('QueryEditor external SQL save', () => {
     storeState.setQueryOptions.mockImplementation((options: Record<string, unknown>) => {
       storeState.queryOptions = { ...storeState.queryOptions, ...options };
     });
+    storeState.setSqlEditorTransactionOptions.mockReset();
+    storeState.setSqlEditorTransactionOptions.mockImplementation((options: Record<string, unknown>) => {
+      storeState.sqlEditorTransactionOptions = { ...storeState.sqlEditorTransactionOptions, ...options };
+    });
     messageApi.success.mockReset();
     messageApi.error.mockReset();
     messageApi.warning.mockReset();
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.WriteSQLFile.mockResolvedValue({ success: true });
     backendApp.ExportSQLFile.mockResolvedValue({ success: true });
+    backendApp.DBQueryWithCancel.mockResolvedValue({ success: true, data: [] });
     backendApp.DBQueryMulti.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBQueryMultiTransactional.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBCommitTransaction.mockResolvedValue({ success: true, message: '事务已提交' });
+    backendApp.DBRollbackTransaction.mockResolvedValue({ success: true, message: '事务已回滚' });
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
@@ -2117,6 +2137,96 @@ describe('QueryEditor external SQL save', () => {
     expect(pageText).toContain('原始错误：pq: syntax error at or near "from"');
   });
 
+  it('runs SQL editor DML through a pending managed transaction and commits manually', async () => {
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-1',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 2 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: "UPDATE users SET name = 'new' WHERE id = 1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('UPDATE users SET name'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(textContent(renderer!.root)).toContain('事务待提交');
+    expect(textContent(renderer!.root)).toContain('影响行数：2');
+
+    await act(async () => {
+      await findExactButton(renderer!, '提交').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
+    expect(textContent(renderer!.root)).not.toContain('事务待提交');
+  });
+
+  it('auto commits SQL editor DML transactions after the configured delay', async () => {
+    vi.useFakeTimers();
+    storeState.sqlEditorTransactionOptions = {
+      commitMode: 'auto',
+      autoCommitDelayMs: 3000,
+    };
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-auto',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    try {
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({ query: "DELETE FROM users WHERE id = 1" })} />);
+      });
+
+      await act(async () => {
+        await findButton(renderer!, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(textContent(renderer!.root)).toContain('事务待提交');
+      expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto');
+      expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('automatically appends hidden primary key locator columns for editable query results', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
@@ -3334,6 +3444,8 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain('gn-v2-query-toolbar-connection-select');
     expect(source).toContain('gn-v2-query-toolbar-database-select');
     expect(source).toContain('gn-v2-query-toolbar-max-rows-select');
+    expect(source).toContain('gn-v2-query-toolbar-transaction-mode-select');
+    expect(source).toContain('gn-v2-query-toolbar-transaction-delay-select');
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 150 }}');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');
@@ -3348,10 +3460,12 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('display: inline-flex !important;');
     expect(css).toContain('gap: 6px;');
     expect(css).toContain('margin-left: 0 !important;');
-    expect(css).toContain('max-width: 520px;');
+    expect(css).toContain('max-width: 720px;');
     expect(css).toContain('width: 140px !important;');
     expect(css).toContain('width: 166px !important;');
     expect(css).toContain('width: 132px !important;');
+    expect(css).toContain('width: 112px !important;');
+    expect(css).toContain('width: 82px !important;');
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
 

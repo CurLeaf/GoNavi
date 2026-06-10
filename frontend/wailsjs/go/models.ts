@@ -981,6 +981,8 @@ export namespace connection {
 	    fields?: string[];
 	    messages?: string[];
 	    queryId?: string;
+	    transactionId?: string;
+	    transactionPending?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueryResult(source);
@@ -994,6 +996,8 @@ export namespace connection {
 	        this.fields = source["fields"];
 	        this.messages = source["messages"];
 	        this.queryId = source["queryId"];
+	        this.transactionId = source["transactionId"];
+	        this.transactionPending = source["transactionPending"];
 	    }
 	}
 	

@@ -4810,7 +4810,7 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
   flex: 0 1 auto !important;
   flex-wrap: nowrap;
-  max-width: 520px;
+  max-width: 720px;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
@@ -4837,6 +4837,16 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-database-select {
 body[data-ui-version="v2"] .gn-v2-query-toolbar-max-rows-select {
   width: 132px !important;
   flex: 0 0 132px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-mode-select {
+  width: 112px !important;
+  flex: 0 0 112px !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {
+  width: 82px !important;
+  flex: 0 0 82px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select-selector {
