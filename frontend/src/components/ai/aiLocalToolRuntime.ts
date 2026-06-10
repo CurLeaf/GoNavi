@@ -105,6 +105,13 @@ export const buildDefaultLocalToolRuntime = (): AILocalToolRuntime => ({
     }
     return service.AIGetMCPClientInstallStatuses();
   },
+  getSqlEditorTransactionState: async () => {
+    const state = useStore.getState();
+    return {
+      ...state.sqlEditorTransactionOptions,
+      pendingTransactions: state.sqlEditorPendingTransactions,
+    };
+  },
   getShortcutOptions: async () => useStore.getState().shortcutOptions,
   getShortcutPlatform: async () => getShortcutPlatform(isMacLikePlatform()),
 });

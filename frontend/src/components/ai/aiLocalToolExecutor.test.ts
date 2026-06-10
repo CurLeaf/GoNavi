@@ -481,6 +481,61 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
   });
 
+  it('returns sql editor transaction settings, active dml semantics, and pending transactions', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_sql_editor_transaction', {}),
+      connections: [buildConnection()],
+      tabs: [{
+        id: 'tab-query-1',
+        title: '订单更新',
+        type: 'query',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        query: 'UPDATE orders SET status = \'paid\' WHERE id = 1',
+        resultPanelVisible: true,
+      }],
+      activeTabId: 'tab-query-1',
+      mcpTools: [],
+      toolContextMap: new Map(),
+      sqlLogs: [{
+        id: 'log-1',
+        timestamp: 10,
+        sql: 'UPDATE orders SET status = \'paid\' WHERE id = 1',
+        status: 'success',
+        duration: 42,
+        dbName: 'crm',
+        affectedRows: 1,
+      }],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getSqlEditorTransactionState: vi.fn().mockResolvedValue({
+          commitMode: 'auto',
+          autoCommitDelayMs: 3000,
+          pendingTransactions: {
+            'tab-query-1': {
+              id: 'tx-1',
+              tabId: 'tab-query-1',
+              commitMode: 'auto',
+              autoCommitDelayMs: 3000,
+              createdAt: 1000,
+              autoCommitDueAt: Date.now() + 3000,
+            },
+          },
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"commitMode":"auto"');
+    expect(result.content).toContain('"transactionAlwaysOnForDML":true');
+    expect(result.content).toContain('"usesManagedTransaction":true');
+    expect(result.content).toContain('"pendingTransactionCount":1');
+    expect(result.content).toContain('"activePendingTransaction"');
+    expect(result.content).toContain('自动提交，但 DML 仍会先进入托管事务');
+    expect(result.content).toContain('UPDATE orders SET status');
+  });
+
   it('returns a database overview bundle with per-table column previews in one tool call', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_database_bundle', {

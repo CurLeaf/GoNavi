@@ -53,6 +53,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_workspace_tabs: '盘点当前工作区页签',
   inspect_recent_sql_logs: '回看最近 SQL 执行日志',
   inspect_recent_sql_activity: '总结最近 SQL 活动',
+  inspect_sql_editor_transaction: '读取 SQL 编辑器事务状态',
   inspect_app_logs: '回看 GoNavi 应用日志',
   inspect_recent_connection_failures: '总结最近连接失败记录',
   inspect_ai_last_render_error: '读取最近一次 AI 渲染异常',

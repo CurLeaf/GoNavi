@@ -179,6 +179,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_sql_editor_transaction',
+    '如果用户提到“SQL 编辑器手动提交/自动提交”“当前有没有未提交事务”“执行 update/insert/delete 会不会自动提交”“事务语义是不是理解错了”，优先调用 inspect_sql_editor_transaction 读取真实提交设置、待提交事务和当前 SQL 页签是否会进入托管事务，不要凭记忆解释。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_sql_risk',
     '如果用户要求你执行、删除、更新、DDL、批量 SQL，或问“这条 SQL 能不能跑/危险不危险”，优先调用 inspect_sql_risk 检查当前编辑区或传入 SQL 的语句数量、写入/DDL 风险、WHERE 条件和安全策略结果；发现 high/critical 风险时先解释风险并让用户确认，不要直接推进执行。',
   );

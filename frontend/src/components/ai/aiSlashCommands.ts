@@ -58,6 +58,7 @@ export const DEFAULT_AI_SLASH_COMMANDS: AISlashCommandDefinition[] = [
   { cmd: '/airender', label: '🧯 AI 渲染异常', desc: '读取最近一次 AI 消息渲染失败记录', prompt: '请先调用 inspect_ai_last_render_error，告诉我最近一次 AI 消息渲染失败记录里是哪条消息、报错摘要是什么，以及下一步该怎么排查。', category: 'diagnose', keywords: ['渲染失败', '气泡空白', 'ai消息', 'render', '白块'] },
   { cmd: '/safety', label: '🛡️ 查看写入安全', desc: '确认只读/写入边界和 allowMutating', prompt: '请先调用 inspect_ai_safety，告诉我当前 AI 和 GoNavi MCP 的写入边界、是否只读，以及 execute_sql 是否需要 allowMutating。', category: 'diagnose', keywords: ['安全', '只读', 'allowmutating', 'ddl', 'dml'] },
   { cmd: '/activity', label: '🕘 最近 SQL 活动', desc: '总结最近执行、报错和热点', prompt: '请先调用 inspect_recent_sql_activity，帮我总结最近 SQL 活动、错误热点和主要读写类型。', category: 'diagnose', keywords: ['activity', 'sql日志', '最近执行', '报错'] },
+  { cmd: '/tx', label: '🔁 SQL 事务状态', desc: '查看 SQL 编辑器提交模式和待提交事务', prompt: '请先调用 inspect_sql_editor_transaction，告诉我 SQL 编辑器当前 DML 托管事务语义、手动/自动提交设置、活动 SQL 页签是否会进入事务、是否有待提交事务，以及下一步应该提交、回滚还是继续执行。', category: 'diagnose', featured: true, keywords: ['事务', 'transaction', '提交', '自动提交', '手动提交', '未提交', 'dml'] },
 ];
 
 const buildCommandSearchText = (command: AISlashCommandDefinition): string => [

@@ -146,6 +146,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先看最近到底以读还是写为主、有没有 DDL 或删除、哪个库最近报错最多，再决定继续下钻哪条日志或哪个连接。',
   },
   {
+    title: '核对 SQL 编辑器事务',
+    steps: 'inspect_sql_editor_transaction → inspect_recent_sql_activity → inspect_sql_risk',
+    description: '适合先确认 SQL 编辑器 DML 是否会进入托管事务、当前是手动还是自动提交、有没有待提交事务，再解释 update/insert/delete 执行后的提交语义。',
+  },
+  {
     title: 'SQL 风险预检',
     steps: 'inspect_sql_risk → inspect_ai_safety → execute_sql',
     description: '适合用户要求执行、删除、更新、DDL 或批量 SQL 前，先检查语句数量、写入/DDL 风险、WHERE 条件和当前安全策略，再决定是否需要用户确认。',

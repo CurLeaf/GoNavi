@@ -147,6 +147,7 @@ describe('aiToolRegistry', () => {
 
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
     const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
+    const sqlEditorTransactionTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_editor_transaction');
     const sqlRiskTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_risk');
     const appLogTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_app_logs');
     const connectionFailureTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_connection_failures');
@@ -158,6 +159,8 @@ describe('aiToolRegistry', () => {
 
     expect(recentActivityTool?.desc).toContain('最近 SQL 活动');
     expect(recentActivityTool?.tool.function.description).toContain('最近 SQL 活动');
+    expect(sqlEditorTransactionTool?.desc).toContain('SQL 编辑器事务');
+    expect(sqlEditorTransactionTool?.tool.function.description).toContain('托管事务');
     expect(sqlRiskTool?.desc).toContain('SQL 的执行风险');
     expect(sqlRiskTool?.tool.function.description).toContain('危险点');
     expect(appLogTool?.desc).toContain('GoNavi 应用日志');
@@ -208,6 +211,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_directories')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_file')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_sql_activity')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_sql_editor_transaction')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_risk')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_app_logs')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_connection_failures')).toBe(true);

@@ -16,12 +16,28 @@ export interface AISnapshotInspectionRuntimeState {
   contextLevel?: string;
 }
 
+export interface AISqlEditorPendingTransactionRuntimeState {
+  id: string;
+  tabId: string;
+  commitMode: string;
+  autoCommitDelayMs: number;
+  createdAt: number;
+  autoCommitDueAt?: number | null;
+}
+
+export interface AISqlEditorTransactionRuntimeState {
+  commitMode?: string;
+  autoCommitDelayMs?: number;
+  pendingTransactions?: Record<string, AISqlEditorPendingTransactionRuntimeState>;
+}
+
 export interface AISnapshotInspectionRuntime {
   getAIRuntimeState?: () => Promise<AISnapshotInspectionRuntimeState | undefined>;
   getMCPServers?: () => Promise<AIMCPServerConfig[] | undefined>;
   getMCPClientInstallStatuses?: () => Promise<AIMCPClientInstallStatus[] | undefined>;
   getShortcutOptions?: () => Promise<ShortcutOptions | undefined>;
   getShortcutPlatform?: () => Promise<ShortcutPlatform | undefined>;
+  getSqlEditorTransactionState?: () => Promise<AISqlEditorTransactionRuntimeState | undefined>;
   readAppLogTail?: (lineLimit: number, keyword: string) => Promise<any>;
   readSQLFile?: (filePath: string) => Promise<any>;
   checkSQL?: (sql: string) => Promise<{ allowed?: boolean; operationType?: string } | undefined>;

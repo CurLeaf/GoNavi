@@ -1124,6 +1124,15 @@ export interface SqlEditorTransactionOptions {
   autoCommitDelayMs: number;
 }
 
+export interface SqlEditorPendingTransactionState {
+  id: string;
+  tabId: string;
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+  createdAt: number;
+  autoCommitDueAt?: number | null;
+}
+
 interface AppState {
   connections: SavedConnection[];
   connectionTags: ConnectionTag[];
@@ -1143,6 +1152,7 @@ interface AppState {
   queryOptions: QueryOptions;
   dataEditTransactionOptions: DataEditTransactionOptions;
   sqlEditorTransactionOptions: SqlEditorTransactionOptions;
+  sqlEditorPendingTransactions: Record<string, SqlEditorPendingTransactionState>;
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
@@ -1253,6 +1263,10 @@ interface AppState {
   ) => void;
   setSqlEditorTransactionOptions: (
     options: Partial<SqlEditorTransactionOptions>,
+  ) => void;
+  setSqlEditorPendingTransaction: (
+    tabId: string,
+    transaction: Omit<SqlEditorPendingTransactionState, "tabId"> | null,
   ) => void;
   updateShortcut: (
     action: ShortcutAction,
@@ -2051,6 +2065,7 @@ export const useStore = create<AppState>()(
         commitMode: "manual",
         autoCommitDelayMs: 5000,
       },
+      sqlEditorPendingTransactions: {},
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
@@ -2809,6 +2824,23 @@ export const useStore = create<AppState>()(
             ...options,
           }),
         })),
+      setSqlEditorPendingTransaction: (tabId, transaction) =>
+        set((state) => {
+          const safeTabId = String(tabId || "").trim();
+          if (!safeTabId) {
+            return {};
+          }
+          const next = { ...state.sqlEditorPendingTransactions };
+          if (!transaction) {
+            delete next[safeTabId];
+            return { sqlEditorPendingTransactions: next };
+          }
+          next[safeTabId] = {
+            ...transaction,
+            tabId: safeTabId,
+          };
+          return { sqlEditorPendingTransactions: next };
+        }),
       updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
           const targetPlatform = platform ?? getShortcutPlatform();

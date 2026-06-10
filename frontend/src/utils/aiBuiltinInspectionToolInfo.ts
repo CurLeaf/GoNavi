@@ -464,6 +464,28 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_sql_editor_transaction",
+    icon: "🔁",
+    desc: "查看 SQL 编辑器事务提交状态",
+    detail:
+      "返回 SQL 编辑器 DML 托管事务语义、当前手动/自动提交设置、活动 SQL 页签是否会进入托管事务、待提交事务以及最近写入/事务执行记录。适合用户问“手动/自动提交到底是什么意思”“当前有没有事务没提交”“执行 update/insert/delete 会不会自动提交”时先读真实状态。",
+    params: "includeSqlPreview?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_sql_editor_transaction",
+        description:
+          "读取 SQL 编辑器事务状态快照，包括 DML 始终进入托管事务的真实语义、当前提交模式、自动提交延迟、活动 SQL 页签是否会触发托管事务、待提交事务列表和最近写入/事务日志。适用于用户提到 SQL 编辑器手动提交、自动提交、未提交事务、DML 执行后是否提交或事务语义不清时，先读取真实状态再解释。",
+        parameters: {
+          type: "object",
+          properties: {
+            includeSqlPreview: { type: "boolean", description: "可选，是否返回活动 SQL 页签的 SQL 预览，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_sql_risk",
     icon: "🛑",
     desc: "检查当前或指定 SQL 的执行风险",

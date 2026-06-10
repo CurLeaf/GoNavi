@@ -71,6 +71,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_recent_sql_logs');
     expect(markup).toContain('总结最近 SQL 活动');
     expect(markup).toContain('inspect_recent_sql_activity');
+    expect(markup).toContain('核对 SQL 编辑器事务');
+    expect(markup).toContain('inspect_sql_editor_transaction');
+    expect(markup).toContain('待提交事务');
     expect(markup).toContain('SQL 风险预检');
     expect(markup).toContain('inspect_sql_risk');
     expect(markup).toContain('WHERE 条件');

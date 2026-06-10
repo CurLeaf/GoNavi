@@ -31,6 +31,7 @@ import {
   buildRecentSqlActivitySnapshot,
   buildRecentSqlLogsSnapshot,
 } from './aiSqlLogInsights';
+import { buildSqlEditorTransactionSnapshot } from './aiSqlEditorTransactionInsights';
 import {
   buildActiveTabSnapshot,
   buildWorkspaceTabsSnapshot,
@@ -300,6 +301,22 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_sql_editor_transaction': {
+        const transactionState = typeof runtime?.getSqlEditorTransactionState === 'function'
+          ? await runtime.getSqlEditorTransactionState()
+          : undefined;
+        return {
+          content: JSON.stringify(buildSqlEditorTransactionSnapshot({
+            transactionState,
+            tabs,
+            activeTabId,
+            connections,
+            sqlLogs,
+            includeSqlPreview: args.includeSqlPreview !== false,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_app_logs': {
         const readResult = typeof runtime?.readAppLogTail === 'function'
           ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
@@ -403,6 +420,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_ai_context: '读取当前 AI 上下文失败',
       inspect_recent_sql_logs: '获取最近 SQL 日志失败',
       inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
+      inspect_sql_editor_transaction: '读取 SQL 编辑器事务状态失败',
       inspect_sql_risk: '检查 SQL 风险失败',
       inspect_app_logs: '读取 GoNavi 应用日志失败',
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',

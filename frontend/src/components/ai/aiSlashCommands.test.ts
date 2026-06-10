@@ -20,6 +20,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
     expect(commands.some((command) => command.cmd === '/applog')).toBe(true);
     expect(commands.some((command) => command.cmd === '/airender')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/tx')).toBe(true);
   });
 
   it('supports filtering by chinese keywords in addition to command prefix', () => {
@@ -47,6 +48,12 @@ describe('aiSlashCommands', () => {
   it('supports filtering ai-render diagnostics by chinese keyword and command prefix', () => {
     expect(filterAISlashCommands('气泡空白').map((command) => command.cmd)).toContain('/airender');
     expect(filterAISlashCommands('/air').map((command) => command.cmd)).toContain('/airender');
+  });
+
+  it('supports filtering sql editor transaction diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('自动提交').map((command) => command.cmd)).toContain('/tx');
+    expect(filterAISlashCommands('未提交').map((command) => command.cmd)).toContain('/tx');
+    expect(filterAISlashCommands('/tx').map((command) => command.cmd)).toContain('/tx');
   });
 
   it('supports filtering mcp tool schema diagnostics by keyword and command prefix', () => {
@@ -77,6 +84,7 @@ describe('aiSlashCommands', () => {
     expect(featured).toContain('/mcp');
     expect(featured).toContain('/mcpadd');
     expect(featured).toContain('/connfail');
+    expect(featured).toContain('/tx');
     expect(featured).not.toContain('/shortcuts');
   });
 });
