@@ -1007,6 +1007,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 
 func shouldTryQueryResultFirst(dbType string, query string) bool {
 	isSQLServer := strings.EqualFold(strings.TrimSpace(dbType), "sqlserver")
+	if keyword, withHasWrite := sqlDataOperationInfo(query); withHasWrite && keyword == "select" {
+		return true
+	}
 	keyword := leadingSQLKeyword(query)
 	switch keyword {
 	case "exec", "execute", "call":

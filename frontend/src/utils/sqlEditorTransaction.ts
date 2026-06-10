@@ -2,6 +2,11 @@ const SQL_EDITOR_DML_KEYWORDS = new Set(['insert', 'update', 'delete', 'replace'
 const SQL_EDITOR_READ_KEYWORDS = new Set(['select', 'with', 'show', 'describe', 'desc', 'explain', 'pragma', 'values']);
 const SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS = new Set(['begin', 'commit', 'rollback', 'savepoint', 'release']);
 
+type SqlEditorWithAnalysis = {
+    keyword: string;
+    cteHasManagedWrite: boolean;
+};
+
 const isSqlEditorKeywordChar = (char: string | undefined): boolean => !!char && /[A-Za-z0-9_]/.test(char);
 
 const skipSqlEditorTrivia = (text: string, start: number): number => {
@@ -167,8 +172,9 @@ const findTopLevelSqlEditorKeyword = (text: string, start: number, keyword: stri
     return -1;
 };
 
-const resolveSqlEditorKeywordAfterWith = (text: string, start: number): string => {
+const resolveSqlEditorWithAnalysis = (text: string, start: number): SqlEditorWithAnalysis => {
     let pos = skipSqlEditorTrivia(text, start);
+    let cteHasManagedWrite = false;
     const recursive = readSqlEditorKeyword(text, pos);
     if (recursive.keyword === 'recursive') {
         pos = recursive.end;
@@ -177,16 +183,16 @@ const resolveSqlEditorKeywordAfterWith = (text: string, start: number): string =
     while (pos < text.length) {
         pos = skipSqlEditorTrivia(text, pos);
         const identifierEnd = skipSqlEditorIdentifierToken(text, pos);
-        if (identifierEnd < 0) return '';
+        if (identifierEnd < 0) return { keyword: '', cteHasManagedWrite };
         pos = skipSqlEditorTrivia(text, identifierEnd);
         if (text[pos] === '(') {
             const columnsEnd = skipBalancedSqlEditorParens(text, pos);
-            if (columnsEnd < 0) return '';
+            if (columnsEnd < 0) return { keyword: '', cteHasManagedWrite };
             pos = skipSqlEditorTrivia(text, columnsEnd);
         }
 
         const asEnd = findTopLevelSqlEditorKeyword(text, pos, 'as');
-        if (asEnd < 0) return '';
+        if (asEnd < 0) return { keyword: '', cteHasManagedWrite };
         pos = skipSqlEditorTrivia(text, asEnd);
         const materialized = readSqlEditorKeyword(text, pos);
         if (materialized.keyword === 'not') {
@@ -199,18 +205,23 @@ const resolveSqlEditorKeywordAfterWith = (text: string, start: number): string =
         }
 
         pos = skipSqlEditorTrivia(text, pos);
-        if (text[pos] !== '(') return '';
+        if (text[pos] !== '(') return { keyword: '', cteHasManagedWrite };
+        const cteBodyStart = pos + 1;
         const cteEnd = skipBalancedSqlEditorParens(text, pos);
-        if (cteEnd < 0) return '';
+        if (cteEnd < 0) return { keyword: '', cteHasManagedWrite };
+        const cteBody = text.slice(cteBodyStart, Math.max(cteBodyStart, cteEnd - 1));
+        if (sqlEditorStatementHasManagedWrite(cteBody)) {
+            cteHasManagedWrite = true;
+        }
         pos = skipSqlEditorTrivia(text, cteEnd);
         if (text[pos] === ',') {
             pos++;
             continue;
         }
 
-        return readSqlEditorKeyword(text, pos).keyword;
+        return { keyword: readSqlEditorKeyword(text, pos).keyword, cteHasManagedWrite };
     }
-    return '';
+    return { keyword: '', cteHasManagedWrite };
 };
 
 export const resolveSqlEditorOperationKeyword = (statement: string): string => {
@@ -219,7 +230,17 @@ export const resolveSqlEditorOperationKeyword = (statement: string): string => {
     if (leading.keyword !== 'with') {
         return leading.keyword;
     }
-    return resolveSqlEditorKeywordAfterWith(text, leading.end) || leading.keyword;
+    return resolveSqlEditorWithAnalysis(text, leading.end).keyword || leading.keyword;
+};
+
+const sqlEditorStatementHasManagedWrite = (statement: string): boolean => {
+    const text = String(statement || '');
+    const leading = readSqlEditorKeyword(text, 0);
+    if (leading.keyword === 'with') {
+        const analysis = resolveSqlEditorWithAnalysis(text, leading.end);
+        return analysis.cteHasManagedWrite || SQL_EDITOR_DML_KEYWORDS.has(analysis.keyword);
+    }
+    return SQL_EDITOR_DML_KEYWORDS.has(leading.keyword);
 };
 
 const isSqlEditorTransactionControlStatement = (statement: string): boolean => {
@@ -234,12 +255,12 @@ export const shouldUseSqlEditorManagedTransaction = (statements: string[]): bool
         const trimmed = String(statement || '').trim();
         if (!trimmed) continue;
         if (isSqlEditorTransactionControlStatement(trimmed)) return false;
-        const keyword = resolveSqlEditorOperationKeyword(trimmed);
-        if (SQL_EDITOR_READ_KEYWORDS.has(keyword)) continue;
-        if (SQL_EDITOR_DML_KEYWORDS.has(keyword)) {
+        if (sqlEditorStatementHasManagedWrite(trimmed)) {
             hasManagedWrite = true;
             continue;
         }
+        const keyword = resolveSqlEditorOperationKeyword(trimmed);
+        if (SQL_EDITOR_READ_KEYWORDS.has(keyword)) continue;
         return false;
     }
     return hasManagedWrite;

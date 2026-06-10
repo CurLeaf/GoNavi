@@ -53,14 +53,19 @@ func leadingSQLKeyword(query string) string {
 }
 
 func sqlDataOperationKeyword(query string) string {
+	keyword, _ := sqlDataOperationInfo(query)
+	return keyword
+}
+
+func sqlDataOperationInfo(query string) (keyword string, withHasWrite bool) {
 	keyword, keywordEnd := nextSQLKeyword(query, 0)
 	if keyword != "with" {
-		return keyword
+		return keyword, false
 	}
-	if withKeyword, ok := sqlKeywordAfterLeadingWith(query, keywordEnd); ok {
-		return withKeyword
+	if withKeyword, hasWrite, ok := sqlKeywordAfterLeadingWith(query, keywordEnd); ok {
+		return withKeyword, hasWrite
 	}
-	return keyword
+	return keyword, false
 }
 
 func nextSQLKeyword(text string, start int) (string, int) {
@@ -106,8 +111,9 @@ func skipSQLTrivia(text string, start int) int {
 	return pos
 }
 
-func sqlKeywordAfterLeadingWith(text string, start int) (string, bool) {
+func sqlKeywordAfterLeadingWith(text string, start int) (string, bool, bool) {
 	pos := skipSQLTrivia(text, start)
+	hasWriteCTE := false
 	if keyword, end := nextSQLKeyword(text, pos); keyword == "recursive" {
 		pos = end
 	}
@@ -116,20 +122,20 @@ func sqlKeywordAfterLeadingWith(text string, start int) (string, bool) {
 		pos = skipSQLTrivia(text, pos)
 		next, ok := skipSQLIdentifierToken(text, pos)
 		if !ok {
-			return "", false
+			return "", hasWriteCTE, false
 		}
 		pos = skipSQLTrivia(text, next)
 		if pos < len(text) && text[pos] == '(' {
 			next = skipBalancedSQLParens(text, pos)
 			if next < 0 {
-				return "", false
+				return "", hasWriteCTE, false
 			}
 			pos = skipSQLTrivia(text, next)
 		}
 
 		asEnd := findTopLevelSQLKeyword(text, pos, "as")
 		if asEnd < 0 {
-			return "", false
+			return "", hasWriteCTE, false
 		}
 		pos = skipSQLTrivia(text, asEnd)
 		if keyword, end := nextSQLKeyword(text, pos); keyword == "not" {
@@ -142,11 +148,19 @@ func sqlKeywordAfterLeadingWith(text string, start int) (string, bool) {
 
 		pos = skipSQLTrivia(text, pos)
 		if pos >= len(text) || text[pos] != '(' {
-			return "", false
+			return "", hasWriteCTE, false
 		}
+		cteBodyStart := pos + 1
 		next = skipBalancedSQLParens(text, pos)
 		if next < 0 {
-			return "", false
+			return "", hasWriteCTE, false
+		}
+		cteBodyEnd := next - 1
+		if cteBodyEnd >= cteBodyStart {
+			bodyKeyword, bodyHasWrite := sqlDataOperationInfo(text[cteBodyStart:cteBodyEnd])
+			if bodyHasWrite || isSQLDataWriteKeyword(bodyKeyword) {
+				hasWriteCTE = true
+			}
 		}
 		pos = skipSQLTrivia(text, next)
 		if pos < len(text) && text[pos] == ',' {
@@ -155,7 +169,7 @@ func sqlKeywordAfterLeadingWith(text string, start int) (string, bool) {
 		}
 
 		keyword, _ := nextSQLKeyword(text, pos)
-		return keyword, keyword != ""
+		return keyword, hasWriteCTE, keyword != ""
 	}
 }
 
@@ -327,7 +341,11 @@ func isReadOnlySQLQuery(dbType string, query string) bool {
 		return true
 	}
 
-	switch sqlDataOperationKeyword(query) {
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite {
+		return false
+	}
+	switch keyword {
 	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values":
 		return true
 	default:
@@ -340,7 +358,15 @@ func isBatchableWriteSQLStatement(dbType string, query string) bool {
 		return false
 	}
 
-	switch sqlDataOperationKeyword(query) {
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite {
+		return true
+	}
+	return isSQLDataWriteKeyword(keyword)
+}
+
+func isSQLDataWriteKeyword(keyword string) bool {
+	switch keyword {
 	case "insert", "update", "delete", "replace", "merge", "upsert":
 		return true
 	default:

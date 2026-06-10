@@ -27,6 +27,12 @@ describe('sqlEditorTransaction', () => {
     ])).toBe(false);
   });
 
+  it('uses managed transactions for data-changing CTEs even when the top-level operation is SELECT', () => {
+    const sql = 'WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved';
+    expect(resolveSqlEditorOperationKeyword(sql)).toBe('select');
+    expect(shouldUseSqlEditorManagedTransaction([sql])).toBe(true);
+  });
+
   it('does not wrap user-authored explicit transactions', () => {
     expect(shouldUseSqlEditorManagedTransaction([
       'BEGIN',

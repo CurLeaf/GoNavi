@@ -79,6 +79,11 @@ func TestIsReadOnlySQLQuery_ClassifiesWithByTopLevelOperation(t *testing.T) {
 	if isReadOnlySQLQuery("postgres", writeQuery) {
 		t.Fatal("WITH ... UPDATE should not be treated as read-only")
 	}
+
+	writeCTEQuery := "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved"
+	if isReadOnlySQLQuery("postgres", writeCTEQuery) {
+		t.Fatal("data-changing CTE should not be treated as read-only")
+	}
 }
 
 func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
@@ -87,6 +92,9 @@ func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.
 	}
 	if !isBatchableWriteSQLStatement("postgres", "WITH target AS (SELECT id FROM users) DELETE FROM users WHERE id IN (SELECT id FROM target)") {
 		t.Fatal("expected WITH ... DELETE to be treated as batchable write")
+	}
+	if !isBatchableWriteSQLStatement("postgres", "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved") {
+		t.Fatal("expected data-changing CTE to be treated as batchable write")
 	}
 	if isBatchableWriteSQLStatement("sqlserver", "EXEC sp_who2") {
 		t.Fatal("EXEC should not be treated as batchable write")
@@ -114,5 +122,12 @@ func TestShouldTryQueryResultFirst_TreatsSQLServerSystemCommandsAsQueryFirst(t *
 	}
 	if shouldTryQueryResultFirst("mysql", "sp_who2") {
 		t.Fatal("non-SQLServer system procedure name should not force query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsDataChangingCTESelectAsQueryFirst(t *testing.T) {
+	query := "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved"
+	if !shouldTryQueryResultFirst("postgres", query) {
+		t.Fatal("data-changing CTE ending in SELECT should try query-first to preserve returned rows")
 	}
 }

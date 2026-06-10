@@ -5328,15 +5328,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ]}
               />
           </Tooltip>
-          <Tooltip title="SQL 编辑器执行 INSERT/UPDATE/DELETE 等 DML 时始终启用事务；这里仅选择该事务执行成功后的提交方式。">
+          <Tooltip title="SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时会先开启受管事务；这里仅选择事务执行成功后的 COMMIT 方式。">
               <Select
                   className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
-                  style={isV2Ui ? undefined : { width: 128 }}
+                  style={isV2Ui ? undefined : { width: 150 }}
                   value={sqlEditorCommitMode}
                   onChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode === 'auto' ? 'auto' : 'manual' })}
                   options={[
-                      { label: '提交：手动', value: 'manual' },
-                      { label: '提交：自动', value: 'auto' },
+                      { label: '事务：手动提交', value: 'manual' },
+                      { label: '事务：自动提交', value: 'auto' },
                   ]}
               />
           </Tooltip>

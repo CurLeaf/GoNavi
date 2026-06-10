@@ -624,6 +624,59 @@ func TestDBQueryMultiTransactionalTreatsWithDMLAsManagedWrite(t *testing.T) {
 	}
 }
 
+func TestDBQueryMultiTransactionalTreatsDataChangingCTEAsManagedWrite(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	stmt := "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved"
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			stmt: {{"id": 41}, {"id": 42}},
+		},
+		fieldMap: map[string][]string{
+			stmt: {"id"},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "postgres", Host: "127.0.0.1", Port: 5432, User: "postgres"}
+
+	result := app.DBQueryMultiTransactional(config, "main", stmt, "cte-write-query")
+	if !result.Success {
+		t.Fatalf("expected transactional data-changing CTE success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil || fakeDB.session.closed {
+		t.Fatal("expected data-changing CTE transaction session to stay open")
+	}
+	wantExecs := []string{"BEGIN"}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected exec queries %#v, got %#v", wantExecs, fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+	if fakeDB.session.queryCalls == 0 {
+		t.Fatal("expected data-changing CTE SELECT to query returned rows inside the transaction")
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 || len(resultSets[0].Rows) != 2 {
+		t.Fatalf("expected returned rows from data-changing CTE, got %#v", resultSets)
+	}
+}
+
 func TestDBQueryMultiTransactionalRollsBackAndClosesOnDMLFailure(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

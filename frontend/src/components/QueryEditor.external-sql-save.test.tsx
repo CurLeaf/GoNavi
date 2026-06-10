@@ -48,6 +48,8 @@ const storeState = vi.hoisted(() => ({
     autoCommitDelayMs: 5000,
   },
   setSqlEditorTransactionOptions: vi.fn(),
+  sqlEditorPendingTransactions: {} as Record<string, unknown>,
+  setSqlEditorPendingTransaction: vi.fn(),
   shortcutOptions: {
     runQuery: {
       mac: { enabled: false, combo: '' },
@@ -486,6 +488,15 @@ describe('QueryEditor external SQL save', () => {
     storeState.setSqlEditorTransactionOptions.mockReset();
     storeState.setSqlEditorTransactionOptions.mockImplementation((options: Record<string, unknown>) => {
       storeState.sqlEditorTransactionOptions = { ...storeState.sqlEditorTransactionOptions, ...options };
+    });
+    storeState.sqlEditorPendingTransactions = {};
+    storeState.setSqlEditorPendingTransaction.mockReset();
+    storeState.setSqlEditorPendingTransaction.mockImplementation((tabId: string, transaction: unknown) => {
+      if (!transaction) {
+        delete storeState.sqlEditorPendingTransactions[tabId];
+        return;
+      }
+      storeState.sqlEditorPendingTransactions[tabId] = transaction;
     });
     messageApi.success.mockReset();
     messageApi.error.mockReset();
@@ -2257,6 +2268,40 @@ describe('QueryEditor external SQL save', () => {
     expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
   });
 
+  it('runs SQL editor data-changing CTEs through a pending managed transaction', async () => {
+    const sql = 'WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved';
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-write-cte',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 3 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: sql })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('DELETE FROM audit_logs'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(textContent(renderer!.root)).toContain('事务待提交');
+  });
+
   it('auto commits SQL editor DML transactions after the configured delay', async () => {
     vi.useFakeTimers();
     storeState.sqlEditorTransactionOptions = {
@@ -3521,9 +3566,9 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain('gn-v2-query-toolbar-max-rows-select');
     expect(source).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(source).toContain('gn-v2-query-toolbar-transaction-delay-select');
-    expect(source).toContain('这里仅选择该事务执行成功后的提交方式');
-    expect(source).toContain("label: '提交：手动'");
-    expect(source).toContain("label: '提交：自动'");
+    expect(source).toContain('这里仅选择事务执行成功后的 COMMIT 方式');
+    expect(source).toContain("label: '事务：手动提交'");
+    expect(source).toContain("label: '事务：自动提交'");
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 150 }}');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');
@@ -3538,11 +3583,11 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('display: inline-flex !important;');
     expect(css).toContain('gap: 6px;');
     expect(css).toContain('margin-left: 0 !important;');
-    expect(css).toContain('max-width: 720px;');
+    expect(css).toContain('max-width: 760px;');
     expect(css).toContain('width: 140px !important;');
     expect(css).toContain('width: 166px !important;');
     expect(css).toContain('width: 132px !important;');
-    expect(css).toContain('width: 112px !important;');
+    expect(css).toContain('width: 142px !important;');
     expect(css).toContain('width: 82px !important;');
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
