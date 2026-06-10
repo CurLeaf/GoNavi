@@ -404,6 +404,16 @@ describe('aiLocalToolExecutor', () => {
             enabled: true,
             timeoutSeconds: 20,
           },
+          {
+            id: 'server-2',
+            name: 'Broken',
+            transport: 'stdio',
+            command: '',
+            args: [],
+            env: {},
+            enabled: true,
+            timeoutSeconds: 1,
+          },
         ]),
         getMCPClientInstallStatuses: vi.fn().mockResolvedValue([
           {
@@ -424,9 +434,12 @@ describe('aiLocalToolExecutor', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.content).toContain('"serverCount":1');
+    expect(result.content).toContain('"serverCount":2');
     expect(result.content).toContain('"name":"Browser"');
     expect(result.content).toContain('"launchCommandPreview":"uvx mcp-server-browser"');
+    expect(result.content).toContain('"serverConfigurationIssueCount":2');
+    expect(result.content).toContain('"serversWithConfigurationErrors":1');
+    expect(result.content).toContain('"key":"command-missing"');
     expect(result.content).toContain('"displayName":"Codex"');
     expect(result.content).toContain('"launchCommandPreview":"gonavi-mcp-server stdio"');
   });

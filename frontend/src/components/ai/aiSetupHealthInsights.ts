@@ -109,6 +109,8 @@ export const buildAISetupHealthSnapshot = (params: {
     appendUnique(warnings, '当前还没有配置任何 MCP 服务');
     appendUnique(nextActions, '如需扩展 AI 工具能力，可新增并测试至少 1 个 MCP 服务');
   }
+  mcpSnapshot.warnings.forEach((warning) => appendUnique(warnings, warning));
+  mcpSnapshot.nextActions.forEach((action) => appendUnique(nextActions, action));
   if (mcpSnapshot.currentClientCount === 0) {
     appendUnique(warnings, 'Claude Code / Codex 还没有任何客户端接入当前 GoNavi MCP');
     appendUnique(nextActions, '如需让外部 CLI 使用 GoNavi MCP，先把当前 GoNavi 接入 Claude Code 或 Codex');
@@ -160,6 +162,8 @@ export const buildAISetupHealthSnapshot = (params: {
       customPromptCount: guidanceSnapshot.customPromptCount,
       mcpServerCount: mcpSnapshot.serverCount,
       enabledMCPServerCount: mcpSnapshot.enabledServerCount,
+      mcpServerConfigurationIssueCount: mcpSnapshot.serverConfigurationIssueCount,
+      mcpServersWithConfigurationErrors: mcpSnapshot.serversWithConfigurationErrors,
       installedExternalClientCount: mcpSnapshot.installedClientCount,
       currentExternalClientCount: mcpSnapshot.currentClientCount,
       discoveredMCPToolCount: mcpSnapshot.discoveredMCPToolCount,
