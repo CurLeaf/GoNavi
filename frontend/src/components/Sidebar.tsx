@@ -63,7 +63,7 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
@@ -1160,17 +1160,11 @@ const Sidebar: React.FC<{
   };
 
   const getMetadataDialect = (conn: SavedConnection | undefined): string => {
-      const type = normalizeDriverType(String(conn?.config?.type || '').trim());
-      if (type === 'custom') {
-          const driver = normalizeDriverType(String(conn?.config?.driver || '').trim());
-          if (driver === 'diros' || driver === 'doris') return 'mysql';
-          if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
-          return driver;
-      }
-      if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
-      if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
-      if (type === 'dameng') return 'dm';
-      return type;
+      return resolveSidebarMetadataDialect(
+          conn?.config?.type || '',
+          conn?.config?.driver || '',
+          conn?.config?.oceanBaseProtocol,
+      );
   };
 
   const supportsDatabaseEvents = (conn: SavedConnection | undefined): boolean => {

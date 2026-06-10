@@ -1,5 +1,6 @@
 import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
 import { splitQualifiedNameLast } from './qualifiedName';
+import { resolveSqlDialect } from './sqlDialect';
 
 const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBaseProtocol?: string): string => {
   const normalizedType = String(type || '').trim().toLowerCase();
@@ -20,6 +21,15 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBa
   if (normalizedType === 'open_gauss' || normalizedType === 'open-gauss') return 'opengauss';
   if (normalizedType === 'dameng') return 'dm';
   return normalizedType;
+};
+
+export const resolveSidebarMetadataDialect = (type: string, driver = '', oceanBaseProtocol?: unknown): string => {
+  const dialect = String(resolveSqlDialect(type, driver, { oceanBaseProtocol })).trim().toLowerCase();
+  if (dialect === 'diros' || dialect === 'sphinx' || dialect === 'mariadb' || dialect === 'oceanbase') {
+    return 'mysql';
+  }
+  if (dialect === 'dameng') return 'dm';
+  return dialect;
 };
 
 export const normalizeSidebarViewName = (dialect: string, dbName: string, schemaName: string, viewName: string): string => {

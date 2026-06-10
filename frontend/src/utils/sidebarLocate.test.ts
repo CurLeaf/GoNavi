@@ -573,6 +573,53 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds a mysql-compatible view node when objectType carries the view identity', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'opaque-view-node',
+                    type: 'database-object',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                      tableName: 'V_ACCOUNT',
+                      objectType: 'view',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'opaque-view-node',
+    ]);
+  });
+
   it('falls back to a table-like node when a view is only present in the tables branch', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'stale-view-tab-id',

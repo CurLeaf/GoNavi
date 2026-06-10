@@ -308,6 +308,7 @@ const matchesLocateObjectNode = (
   options: { allowUnqualifiedSchemaMatch?: boolean } = {},
 ): boolean => {
   const dataRef = node.dataRef || {};
+  const nodeObjectType = normalizeLocateName(toTrimmedString(dataRef.objectType || dataRef.objectKind));
 
   if (target.objectGroup === 'externalSqlFiles') {
     return node.type === 'external-sql-file'
@@ -322,12 +323,12 @@ const matchesLocateObjectNode = (
   }
 
   if (target.objectGroup === 'views') {
-    if (node.type !== 'view') return false;
+    if (node.type !== 'view' && nodeObjectType !== 'view' && nodeObjectType !== 'views') return false;
     return matchesLocateObjectName(target, toTrimmedString(dataRef.viewName || dataRef.tableName), toTrimmedString(dataRef.schemaName), options);
   }
 
   if (target.objectGroup === 'materializedViews') {
-    if (node.type !== 'materialized-view') return false;
+    if (node.type !== 'materialized-view' && nodeObjectType !== 'materialized-view' && nodeObjectType !== 'materializedviews') return false;
     return matchesLocateObjectName(target, toTrimmedString(dataRef.viewName || dataRef.tableName), toTrimmedString(dataRef.schemaName), options);
   }
 
@@ -414,9 +415,10 @@ const matchesLocateObjectNodeByVisualIdentity = (
   path: string[],
 ): boolean => {
   if (!path.includes(target.databaseKey)) return false;
+  const nodeObjectType = normalizeLocateName(toTrimmedString(node.dataRef?.objectType || node.dataRef?.objectKind));
 
-  if (target.objectGroup === 'views' && node.type !== 'view') return false;
-  if (target.objectGroup === 'materializedViews' && node.type !== 'materialized-view') return false;
+  if (target.objectGroup === 'views' && node.type !== 'view' && nodeObjectType !== 'view' && nodeObjectType !== 'views') return false;
+  if (target.objectGroup === 'materializedViews' && node.type !== 'materialized-view' && nodeObjectType !== 'materialized-view' && nodeObjectType !== 'materializedviews') return false;
   if (target.objectGroup === 'triggers' && node.type !== 'db-trigger') return false;
   if (target.objectGroup === 'routines' && node.type !== 'routine') return false;
   if (target.objectGroup === 'tables' && node.type !== 'table') return false;

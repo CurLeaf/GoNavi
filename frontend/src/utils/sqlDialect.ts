@@ -94,6 +94,10 @@ export const resolveSqlDialect = (
     case 'kingbasees':
     case 'kingbasev8':
       return 'kingbase';
+    case 'gdb':
+    case 'goldendb':
+    case 'greatdb':
+      return 'mysql';
     case 'mariadb':
     case 'oceanbase':
     case 'mysql':
@@ -119,6 +123,7 @@ export const resolveSqlDialect = (
   if (source.includes('postgres')) return 'postgres';
   if (source.includes('oceanbase')) return 'oceanbase';
   if (source.includes('mariadb')) return 'mariadb';
+  if (source.includes('goldendb') || source.includes('greatdb')) return 'mysql';
   if (source.includes('mysql')) return 'mysql';
   if (source.includes('doris') || source.includes('diros')) return 'diros';
   if (source.includes('starrocks')) return 'starrocks';

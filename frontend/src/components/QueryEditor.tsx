@@ -784,6 +784,17 @@ const getFirstRowValue = (row: Record<string, any>): string => {
     return '';
 };
 
+const getMySQLShowTablesName = (row: Record<string, any>): string => {
+    for (const key of Object.keys(row || {})) {
+        if (!key.toLowerCase().startsWith('tables_in_')) continue;
+        const value = row[key];
+        if (value === undefined || value === null) continue;
+        const normalized = String(value).trim();
+        if (normalized !== '') return normalized;
+    }
+    return '';
+};
+
 const normalizeMetadataQuerySpecs = (specs: MetadataQuerySpec[]): MetadataQuerySpec[] => {
     const seen = new Set<string>();
     const normalized: MetadataQuerySpec[] = [];
@@ -2514,7 +2525,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       const tableType = getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']);
                       if (!isSidebarViewTableType(tableType)) return;
                       const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']) || '').trim();
-                      const rawViewName = String(getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name']) || '').trim() || getFirstRowValue(row);
+                      const rawViewName = String(getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name']) || '').trim()
+                          || getMySQLShowTablesName(row)
+                          || getFirstRowValue(row);
                       const normalizedViewName = normalizeSidebarViewName(metadataDialect, dbName, schemaName, rawViewName);
                       if (!normalizedViewName) return;
                       const uniqueKey = `${dbName.toLowerCase()}@@${normalizedViewName.toLowerCase()}`;
