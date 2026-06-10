@@ -36,6 +36,9 @@ import {
     getColumnDefinitionName,
 } from '../utils/columnDefinition';
 import QueryEditorResultsPanel, { type QueryEditorResultSet } from './QueryEditorResultsPanel';
+import QueryEditorTransactionSettings, {
+    SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS,
+} from './QueryEditorTransactionSettings';
 import QueryEditorTransactionToolbar, { type PendingSqlEditorTransaction } from './QueryEditorTransactionToolbar';
 
 const SQL_KEYWORDS = [
@@ -751,13 +754,6 @@ const areSqlStatementListsEqual = (left: string[], right: string[]): boolean => 
     left.length === right.length
     && left.every((statement, index) => normalizeExecutedSqlKey(statement) === normalizeExecutedSqlKey(right[index]))
 );
-
-const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = [
-    { value: 3000, label: '3 秒' },
-    { value: 5000, label: '5 秒' },
-    { value: 10000, label: '10 秒' },
-    { value: 30000, label: '30 秒' },
-];
 
 const normalizeEditorPosition = (position: any): { lineNumber: number; column: number } | null => {
     if (!position) return null;
@@ -5298,27 +5294,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ]}
               />
           </Tooltip>
-          <Tooltip title="SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时会先开启受管事务；这里仅选择事务执行成功后的 COMMIT 方式。">
-              <Select
-                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
-                  style={isV2Ui ? undefined : { width: 150 }}
-                  value={sqlEditorCommitMode}
-                  onChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode === 'auto' ? 'auto' : 'manual' })}
-                  options={[
-                      { label: '事务：手动提交', value: 'manual' },
-                      { label: '事务：自动提交', value: 'auto' },
-                  ]}
-              />
-          </Tooltip>
-          {sqlEditorCommitMode === 'auto' && (
-              <Select
-                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-delay-select' : undefined}
-                  style={isV2Ui ? undefined : { width: 96 }}
-                  value={sqlEditorAutoCommitDelayMs}
-                  onChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: Number(delayMs) })}
-                  options={SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS}
-              />
-          )}
+          <QueryEditorTransactionSettings
+              isV2Ui={isV2Ui}
+              commitMode={sqlEditorCommitMode}
+              autoCommitDelayMs={sqlEditorAutoCommitDelayMs}
+              onCommitModeChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode })}
+              onAutoCommitDelayMsChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: delayMs })}
+          />
           {pendingSqlTransaction && sqlEditorTransactionToolbar}
         </div>
         <div
