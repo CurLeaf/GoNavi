@@ -76,6 +76,11 @@ const BUILTIN_TOOL_FLOWS = [
     description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合运行时工具列表判断为什么某个工具没暴露出来。',
   },
   {
+    title: '远程 Agent 接入 GoNavi MCP',
+    steps: 'inspect_mcp_remote_access → inspect_mcp_setup → inspect_ai_safety',
+    description: '适合 OpenClaw/Hermans 部署在云端 Linux，但数据库连接和密码只在 Windows GoNavi 本机时，先生成 HTTP MCP、Bearer Token、隧道和安全边界指引。',
+  },
+  {
     title: '新增 MCP 填写指引',
     steps: 'inspect_mcp_authoring_guide → inspect_mcp_draft → inspect_mcp_setup',
     description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再把用户贴出的命令或草稿交给真实校验器试算，最后结合当前 MCP 配置现状判断应该新增哪种启动方式。',

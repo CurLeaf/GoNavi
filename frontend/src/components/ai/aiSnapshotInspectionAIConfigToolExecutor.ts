@@ -16,6 +16,7 @@ import { buildMCPAuthoringGuideSnapshot } from './aiMCPAuthoringGuideInsights';
 import { buildMCPDraftInspectionSnapshot } from './aiMCPDraftInspectionInsights';
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
+import { buildMCPRemoteAccessSnapshot } from './aiMCPRemoteAccessInsights';
 import { buildMCPToolSchemaSnapshot } from './aiMCPToolSchemaInsights';
 import type {
   AISnapshotInspectionRuntime,
@@ -54,6 +55,11 @@ const loadMCPSetupState = async (runtime: AISnapshotInspectionRuntime | undefine
       ? runtime.getMCPClientInstallStatuses()
       : Promise.resolve(undefined),
   ]);
+
+const loadMCPClientInstallStatuses = async (runtime: AISnapshotInspectionRuntime | undefined) =>
+  typeof runtime?.getMCPClientInstallStatuses === 'function'
+    ? runtime.getMCPClientInstallStatuses()
+    : undefined;
 
 export async function executeAIConfigSnapshotToolCall(
   options: ExecuteAIConfigSnapshotToolCallOptions,
@@ -167,6 +173,20 @@ export async function executeAIConfigSnapshotToolCall(
           success: true,
         };
       }
+      case 'inspect_mcp_remote_access': {
+        const mcpClientInstallStatuses = await loadMCPClientInstallStatuses(runtime);
+        return {
+          content: JSON.stringify(buildMCPRemoteAccessSnapshot({
+            mcpClientStatuses: Array.isArray(mcpClientInstallStatuses) ? mcpClientInstallStatuses : [],
+            publicUrl: args.publicUrl,
+            localAddr: args.localAddr,
+            path: args.path,
+            exposeStrategy: args.exposeStrategy,
+            tokenConfigured: args.tokenConfigured,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_mcp_authoring_guide':
         return {
           content: JSON.stringify(buildMCPAuthoringGuideSnapshot()),
@@ -208,6 +228,7 @@ export async function executeAIConfigSnapshotToolCall(
       inspect_ai_providers: '读取当前 AI 供应商配置失败',
       inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',
+      inspect_mcp_remote_access: '读取 MCP 远程接入指引失败',
       inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',
       inspect_mcp_draft: '校验 MCP 新增草稿失败',
       inspect_mcp_tool_schema: '读取 MCP 工具参数 schema 失败',

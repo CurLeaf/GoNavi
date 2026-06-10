@@ -129,6 +129,36 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_mcp_remote_access",
+    icon: "🌉",
+    desc: "查看 OpenClaw/Hermans 远程 MCP 接入方式",
+    detail:
+      "返回 GoNavi Streamable HTTP MCP 的本机启动命令、远程 URL/鉴权填写方式、OpenClaw/Hermans 云端 Agent 接入边界、可选桥接方案和安全提醒。适合用户说“OpenClaw 在云上怎么连 Windows GoNavi”“不要把数据库密码交给 Agent”“HTTP MCP 该怎么暴露”时先读这份远程接入快照。",
+    params: "publicUrl?, localAddr?, path?, exposeStrategy?, tokenConfigured?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_remote_access",
+        description:
+          "读取 GoNavi MCP 远程 Agent 接入快照，返回 Streamable HTTP 模式启动命令、/mcp URL、Bearer Token 鉴权要求、OpenClaw/Hermans 云端接入步骤、数据库密码留在 Windows 本机的安全边界，以及隧道/反向代理/Tailscale 等暴露方式的风险提示。适用于用户提到 OpenClaw、Hermans、云端 Linux Agent、远程 MCP、不要复制数据库密码、或本机 GoNavi 如何给外部 Agent 访问表结构时优先调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            publicUrl: { type: "string", description: "可选，云端 Agent 最终能访问的 HTTPS 或私有网络 URL；如果没带 /mcp，工具会按 path 补上" },
+            localAddr: { type: "string", description: "可选，Windows 本机 HTTP MCP 监听地址，默认 127.0.0.1:8765；不建议直接绑定 0.0.0.0" },
+            path: { type: "string", description: "可选，Streamable HTTP MCP 路径，默认 /mcp" },
+            exposeStrategy: {
+              type: "string",
+              enum: ["reverse_proxy", "ssh_reverse_tunnel", "cloudflare_tunnel", "tailscale", "custom"],
+              description: "可选，计划使用的远程暴露方式，用于返回对应风险提醒",
+            },
+            tokenConfigured: { type: "boolean", description: "可选，是否已经准备随机 Bearer Token；传 false 会返回鉴权告警" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_authoring_guide",
     icon: "🧭",
     desc: "查看新增 MCP 的填写指引",
