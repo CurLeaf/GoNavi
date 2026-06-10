@@ -55,6 +55,18 @@ go run ./cmd/gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp
 
 默认建议只监听 `127.0.0.1`，再通过 SSH 隧道、反向代理或内网网关暴露给云端 Agent。不要在没有 TLS、防火墙和鉴权的情况下直接监听公网地址。
 
+无图形界面或需要把配置交给云端 Agent 时，可直接生成 OpenClaw / Hermans 等远程 MCP 配置：
+
+```powershell
+& "C:\Program Files\GoNavi\GoNavi.exe" mcp-server remote-config --client openclaw --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>"
+```
+
+独立 server 开发态也支持同样能力：
+
+```powershell
+go run ./cmd/gonavi-mcp-server remote-config --client hermans --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>"
+```
+
 ## Claude Code / Codex / OpenClaw / Hermans
 
 正式安装包场景，推荐直接在 GoNavi 里使用“AI 设置 -> MCP 服务 -> 安装到 Claude Code / 安装到 Codex”。

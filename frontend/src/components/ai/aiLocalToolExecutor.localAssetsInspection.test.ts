@@ -139,6 +139,61 @@ describe('aiLocalToolExecutor local asset inspection tools', () => {
     expect(result.content).toContain('回复拆成多个气泡');
   });
 
+  it('returns ai context budget diagnostics for the active session', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_context_budget', {
+        messageLimit: 10,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'remote_probe',
+        originalName: 'remote_probe',
+        serverId: 'server-1',
+        serverName: '远程工具',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            keyword: { type: 'string' },
+          },
+        },
+      }],
+      toolContextMap: new Map(),
+      aiChatSessions: [
+        { id: 'session-1', title: '上下文预算排查', updatedAt: 200 },
+      ],
+      aiChatHistory: {
+        'session-1': [
+          { id: 'msg-1', role: 'user', content: 'AI 变慢是不是上下文太大', timestamp: 101 },
+          { id: 'msg-2', role: 'tool', content: 'x'.repeat(21000), timestamp: 102, tool_call_id: 'tool-1' },
+        ],
+      },
+      activeSessionId: 'session-1',
+      aiContexts: {
+        'conn-1:crm': [
+          { dbName: 'crm', tableName: 'orders', ddl: 'CREATE TABLE orders(id bigint, amount decimal(10,2));' },
+        ],
+      },
+      skills: [{
+        id: 'skill-1',
+        name: 'SQL 审查',
+        systemPrompt: '先检查风险',
+        enabled: true,
+        scopes: ['database'],
+      }],
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"title":"上下文预算排查"');
+    expect(result.content).toContain('"toolResultChars":21000');
+    expect(result.content).toContain('"tableName":"orders"');
+    expect(result.content).toContain('"mcpToolCount":1');
+    expect(result.content).toContain('最近工具结果较长');
+  });
+
   it('returns sql snippets so the model can inspect local query templates', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_sql_snippets', {

@@ -134,6 +134,50 @@ func TestGetConnectionsReturnsSavedConnectionSummaries(t *testing.T) {
 	}
 }
 
+func TestGetConnectionsRedactsOpaqueURIAndDSNTargets(t *testing.T) {
+	backend := &fakeBackend{
+		savedConnections: []connection.SavedConnectionView{
+			{
+				ID:   "pg-uri",
+				Name: "Postgres URI",
+				Config: connection.ConnectionConfig{
+					Type: "postgres",
+					URI:  "postgres://postgres:secret@db.local:5432/app?sslmode=disable",
+				},
+			},
+			{
+				ID:   "mysql-dsn",
+				Name: "MySQL DSN",
+				Config: connection.ConnectionConfig{
+					Type: "mysql",
+					DSN:  "root:secret@tcp(db.local:3306)/app?charset=utf8mb4",
+				},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetConnections(context.Background(), nil, emptyArgs{})
+	if err != nil {
+		t.Fatalf("GetConnections returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Connections) != 2 {
+		t.Fatalf("expected 2 connections, got %d", len(out.Connections))
+	}
+	if out.Connections[0].Target != "postgres://db.local:5432/app" {
+		t.Fatalf("expected URI target to remove credentials and query, got %q", out.Connections[0].Target)
+	}
+	if strings.Contains(out.Connections[0].Target, "secret") || strings.Contains(out.Connections[0].Target, "postgres@") {
+		t.Fatalf("URI target leaked credentials: %q", out.Connections[0].Target)
+	}
+	if out.Connections[1].Target != redactedOpaqueTarget {
+		t.Fatalf("expected opaque DSN target to be redacted, got %q", out.Connections[1].Target)
+	}
+}
+
 func TestGetAllColumnsReturnsCrossTableColumnSummaries(t *testing.T) {
 	backend := &fakeBackend{
 		editableConnection: connection.SavedConnectionView{

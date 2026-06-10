@@ -196,6 +196,16 @@ sudo apt-get update
 sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18
 ```
 
+### Linux 中文显示为方框
+
+Ubuntu 24.04 LTS 的最小化桌面或服务器环境可能没有安装中文 CJK 字体，GoNavi 打开后中文会显示为方框。安装 Noto / 文泉驿字体后重启 GoNavi：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y fonts-noto-cjk fonts-wqy-microhei
+fc-cache -fv
+```
+
 ---
 
 ## 贡献指南

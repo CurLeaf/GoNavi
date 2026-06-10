@@ -185,6 +185,11 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
     description: '适合用户反馈回复被拆成多个气泡、工具调用后没继续回答、消息流状态不对时，先读取当前会话的真实消息结构和异常信号。',
   },
   {
+    title: '诊断 AI 上下文体量',
+    steps: 'inspect_ai_context_budget -> inspect_ai_context / inspect_ai_message_flow / inspect_ai_tool_catalog',
+    description: '适合用户反馈 AI 变慢、乱答、上下文太大、工具结果过长或表结构挂太多时，先看消息、DDL、MCP schema、提示词和 Skills 的体量来源，再决定收窄上下文或拆任务。',
+  },
+  {
     title: '复用历史 SQL',
     steps: 'inspect_saved_queries -> get_columns / execute_sql',
     description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',

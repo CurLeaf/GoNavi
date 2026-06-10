@@ -310,7 +310,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
               {remoteQuickStart.displayName} 远程 MCP 快速配置
             </div>
             <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-              下面两段分别给云端 Agent 和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码。
+              下面分别给云端 Agent、无 GUI/CLI 场景和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码。
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
               <div
@@ -337,6 +337,34 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
                 >
                   {remoteQuickStart.configJson}
                 </code>
+              </div>
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.78)',
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>
+                  无 GUI / CLI 生成配置
+                </div>
+                <code
+                  style={{
+                    display: 'block',
+                    marginTop: 8,
+                    fontFamily: 'var(--gn-font-mono)',
+                    fontSize: 11,
+                    color: overlayTheme.titleText,
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {remoteQuickStart.configCommand}
+                </code>
+                <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                  用于生成可粘贴到 {remoteQuickStart.displayName} 的远程 MCP 配置，不会读取或输出数据库密码。
+                </div>
               </div>
               <div
                 style={{

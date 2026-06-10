@@ -11,6 +11,7 @@ const DEFAULT_REMOTE_MCP_PATH = '/mcp';
 export interface RemoteMCPClientQuickStart {
   displayName: string;
   configJson: string;
+  configCommand: string;
   launchCommand: string;
   standaloneCommand: string;
   verificationSteps: string[];
@@ -170,7 +171,7 @@ export const formatMCPLaunchCommand = (
 };
 
 export const buildRemoteMCPClientGuide = (
-  status?: Pick<AIMCPClientInstallStatus, 'displayName' | 'message'> | null,
+  status?: Partial<Pick<AIMCPClientInstallStatus, 'client' | 'displayName' | 'message'>> | null,
 ): string => {
   const quickStart = buildRemoteMCPClientQuickStart(status);
   return [
@@ -194,6 +195,9 @@ export const buildRemoteMCPClientGuide = (
     '可复制配置片段（适用于支持 mcpServers JSON 的 Agent）：',
     ...quickStart.configJson.split('\n'),
     '',
+    '无 GUI / CLI 生成配置命令：',
+    quickStart.configCommand,
+    '',
     'CLI / 服务启动命令：',
     quickStart.launchCommand,
     `或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 ${quickStart.standaloneCommand.replace(' --token <随机token>', '')}`,
@@ -203,11 +207,13 @@ export const buildRemoteMCPClientGuide = (
 };
 
 export const buildRemoteMCPClientQuickStart = (
-  status?: Pick<AIMCPClientInstallStatus, 'displayName'> | null,
+  status?: Partial<Pick<AIMCPClientInstallStatus, 'client' | 'displayName'>> | null,
 ): RemoteMCPClientQuickStart => {
   const displayName = String(status?.displayName || '远程 Agent').trim();
+  const client = isMCPClientKey(String(status?.client || '')) ? String(status?.client || '').trim() : 'openclaw';
   const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
   const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
+  const configCommand = `GoNavi.exe mcp-server remote-config --client ${client} --url ${DEFAULT_REMOTE_MCP_PUBLIC_URL} --token <随机token>`;
   const configJson = JSON.stringify({
     mcpServers: {
       gonavi: {
@@ -223,6 +229,7 @@ export const buildRemoteMCPClientQuickStart = (
   return {
     displayName,
     configJson,
+    configCommand,
     launchCommand,
     standaloneCommand,
     verificationSteps: [

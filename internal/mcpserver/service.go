@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"GoNavi-Wails/internal/ai"
@@ -15,6 +16,7 @@ import (
 const (
 	defaultMaxRowsPerResult = 200
 	maxRowsPerResultLimit   = 1000
+	redactedOpaqueTarget    = "opaque-connection-string-configured"
 )
 
 type Service struct {
@@ -534,12 +536,47 @@ func describeConnectionTarget(config connection.ConnectionConfig) string {
 		return host
 	}
 	if uri := strings.TrimSpace(config.URI); uri != "" {
-		return uri
+		return redactConnectionTarget(uri)
 	}
 	if dsn := strings.TrimSpace(config.DSN); dsn != "" {
-		return dsn
+		return redactConnectionTarget(dsn)
 	}
 	return strings.TrimSpace(config.Database)
+}
+
+func redactConnectionTarget(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	if parsed, err := url.Parse(trimmed); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		parsed.User = nil
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	}
+
+	if looksLikeOpaqueConnectionString(trimmed) {
+		return redactedOpaqueTarget
+	}
+	return trimmed
+}
+
+func looksLikeOpaqueConnectionString(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "@") ||
+		strings.Contains(lower, "password=") ||
+		strings.Contains(lower, "pwd=") ||
+		strings.Contains(lower, "user=") ||
+		strings.Contains(lower, "uid=") ||
+		strings.Contains(lower, "token=") ||
+		strings.Contains(lower, "secret=") ||
+		strings.Contains(lower, "access_key=") ||
+		strings.Contains(lower, "api_key=")
 }
 
 func decodeNamedStringSlice(data interface{}, keys ...string) ([]string, error) {

@@ -149,6 +149,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_ai_context_budget',
+    '如果用户提到“AI 变慢”“上下文太大”“表结构挂太多”“工具结果太长”“模型开始乱答”或复杂任务前需要判断是否该拆小上下文，优先调用 inspect_ai_context_budget 读取消息、DDL、MCP schema、提示词和 Skills 的体量风险，再决定收窄上下文或拆任务。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_current_connection',
     '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
   );

@@ -162,6 +162,14 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('连续 assistant 消息');
   });
 
+  it('registers the ai-context-budget inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_context_budget');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('上下文体量');
+    expect(info?.tool.function.description).toContain('MCP 工具 schema');
+    expect(info?.tool.function.parameters?.properties?.messageLimit?.description).toContain('最大 120');
+  });
+
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
     const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
     const sqlEditorTransactionTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_editor_transaction');
@@ -236,6 +244,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_recent_connection_failures')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_last_render_error')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_message_flow')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_context_budget')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);

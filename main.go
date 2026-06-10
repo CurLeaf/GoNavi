@@ -101,8 +101,10 @@ func runMCPServerMode(ctx context.Context, args []string) error {
 		}
 		logger.Infof("GoNavi MCP Streamable HTTP Server 启动：addr=%s path=%s", options.Addr, options.Path)
 		return mcpserver.RunAppStreamableHTTPServer(ctx, options)
+	case "remote-config", "--remote-config":
+		return mcpserver.WriteRemoteMCPClientConfig(os.Stdout, args[1:])
 	default:
-		return fmt.Errorf("未知 MCP server 模式: %s（支持 stdio/http）", args[0])
+		return fmt.Errorf("未知 MCP server 模式: %s（支持 stdio/http/remote-config）", args[0])
 	}
 }
 

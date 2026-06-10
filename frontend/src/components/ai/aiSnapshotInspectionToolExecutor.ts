@@ -16,6 +16,7 @@ import {
   buildAIChatSessionsSnapshot,
   buildAIMessageFlowSnapshot,
 } from './aiChatSessionInsights';
+import { buildAIContextBudgetSnapshot } from './aiContextBudgetInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import {
@@ -280,6 +281,22 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_ai_context_budget':
+        return {
+          content: JSON.stringify(buildAIContextBudgetSnapshot({
+            aiContexts,
+            aiChatHistory,
+            aiChatSessions,
+            activeSessionId,
+            sessionId: args.sessionId,
+            messageLimit: args.messageLimit,
+            includeDetails: args.includeDetails,
+            mcpTools,
+            skills,
+            userPromptSettings,
+          })),
+          success: true,
+        };
       case 'inspect_recent_sql_logs':
         return {
           content: JSON.stringify(buildRecentSqlLogsSnapshot({
@@ -426,6 +443,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_ai_message_flow: '读取 AI 消息流诊断失败',
+      inspect_ai_context_budget: '读取 AI 上下文体量诊断失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
       inspect_shortcuts: '读取快捷键配置失败',

@@ -194,9 +194,11 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL');
     expect(markup).toContain('OpenClaw 远程 MCP 快速配置');
     expect(markup).toContain('配置到云端 Agent');
+    expect(markup).toContain('无 GUI / CLI 生成配置');
     expect(markup).toContain('&quot;type&quot;: &quot;streamable-http&quot;');
     expect(markup).toContain('&quot;url&quot;: &quot;https://&lt;你的域名或隧道地址&gt;/mcp&quot;');
     expect(markup).toContain('&quot;Authorization&quot;: &quot;Bearer &lt;随机token&gt;&quot;');
+    expect(markup).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://&lt;你的域名或隧道地址&gt;/mcp --token &lt;随机token&gt;');
     expect(markup).toContain('Windows 启动 GoNavi MCP HTTP');
     expect(markup).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt;');
     expect(markup).toContain('独立二进制：gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt;');

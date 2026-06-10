@@ -702,6 +702,30 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_context_budget",
+    icon: "📦",
+    desc: "诊断 AI 上下文体量与稳定性风险",
+    detail:
+      "统计当前或指定 AI 会话的最近消息、工具结果、已挂载表结构、MCP 工具 schema、用户提示词和 Skills 体量，返回 low/medium/high/critical 风险、主要膨胀来源和收窄建议。适合用户反馈 AI 变慢、乱答、上下文太大、工具结果过长或表结构挂太多时先做预算体检。",
+    params: "sessionId?(默认当前会话), messageLimit?(默认 40), includeDetails?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_context_budget",
+        description:
+          "读取当前 AI 上下文体量与稳定性风险快照，包括最近消息窗口、tool 结果长度、已挂载表结构 DDL、MCP 工具 schema、用户提示词和启用 Skills 的估算体量，并返回风险级别、告警和收窄建议。适用于用户提到 AI 回复变慢、上下文过大、表结构带太多、工具结果过长、模型开始乱答或复杂任务前需要判断是否应拆小上下文时优先调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string", description: "可选，指定要诊断的 AI 会话 ID；不传时读取当前活动会话" },
+            messageLimit: { type: "number", description: "可选，最多统计最近多少条消息，默认 40，最大 120" },
+            includeDetails: { type: "boolean", description: "可选，是否返回最大消息、最大 DDL 表和最大 MCP schema 明细，默认 true" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_sql_snippets",
     icon: "🧩",
     desc: "查看 SQL 片段模板",

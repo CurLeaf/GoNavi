@@ -213,6 +213,16 @@ sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0
 
 If you use Linux artifacts with the `-WebKit41` suffix, prefer Debian 13 / Ubuntu 24.04+.
 
+### Linux: Chinese text appears as square boxes
+
+Minimal Ubuntu 24.04 LTS desktop/server environments may not include Chinese CJK fonts. Install Noto / WenQuanYi fonts and restart GoNavi:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y fonts-noto-cjk fonts-wqy-microhei
+fc-cache -fv
+```
+
 ---
 
 ## Contributing

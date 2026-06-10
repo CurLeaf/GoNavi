@@ -35,6 +35,7 @@ func TestShouldRunMCPServerMode(t *testing.T) {
 		{name: "mcp-server", args: []string{"mcp-server"}, want: true},
 		{name: "flag style", args: []string{"--mcp-server"}, want: true},
 		{name: "mcp-server http mode", args: []string{"mcp-server", "http"}, want: true},
+		{name: "mcp-server remote config", args: []string{"mcp-server", "remote-config"}, want: true},
 		{name: "unknown", args: []string{"serve"}, want: false},
 	}
 
