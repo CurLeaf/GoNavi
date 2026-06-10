@@ -24,6 +24,7 @@ export interface MCPTroubleshootingGuide {
 }
 
 export const MCP_COMMAND_EXAMPLES = [
+  'npx -y @modelcontextprotocol/server-filesystem --stdio',
   'uvx mcp-server-fetch',
   'node server.js --stdio',
   'python -m your_mcp_server',
@@ -68,17 +69,17 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     key: 'command',
     title: '启动命令',
     summary: '只填程序名或启动器本身。',
-    detail: '常见是 node、uvx、python；脚本名和 --stdio 这类内容放到参数里。',
+    detail: '常见是 npx、node、uvx、python；包名、脚本名和 --stdio 这类内容放到参数里。',
     fieldState: 'required',
-    example: 'node / uvx / python',
+    example: 'npx / node / uvx / python',
   },
   {
     key: 'args',
     title: '命令参数',
     summary: '把脚本名、模块名、开关参数拆开逐项填写。',
-    detail: '例如 node server.js --stdio，要拆成 server.js 和 --stdio 两项。',
+    detail: '例如 npx -y pkg --stdio，要拆成 -y、pkg 和 --stdio；node server.js --stdio 要拆成 server.js 和 --stdio。',
     fieldState: 'optional',
-    example: 'server.js / --stdio / -m / your_mcp_server',
+    example: '-y / @modelcontextprotocol/server-filesystem / --stdio / server.js',
   },
   {
     key: 'env',
@@ -100,6 +101,7 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
 
 export const MCP_AUTHORING_NOTES = [
   '启动命令只填程序本身，不要把脚本名、模块名和 --stdio 混进去。',
+  'README 给 npx 示例时，command 填 npx，args 逐项填 -y、包名和 --stdio；不要把整行 npx 命令放进 command。',
   '如果 README 里只给了一整行命令，优先粘到完整命令框自动拆分；支持 KEY=VALUE、env KEY=VALUE、PowerShell $env:KEY=VALUE; 和 Windows set KEY=VALUE && 这几类前缀环境变量写法。',
   '环境变量每行一条 KEY=VALUE，不要写 export，也不要和启动命令混成一行保存。',
   '密钥类环境变量会保存到本机配置，并只在启动 MCP 进程时作为进程环境传入；不要把密钥写进聊天内容。',
@@ -112,7 +114,7 @@ export const MCP_TROUBLESHOOTING_GUIDES: MCPTroubleshootingGuide[] = [
     symptom: '测试提示找不到命令',
     likelyCause: '启动命令填了整串命令、命令没加入 PATH，或 Windows 路径里有空格但没有用真实 exe 路径。',
     fix: '启动命令只填可执行程序本身；脚本名和 --stdio 放到命令参数里。命令不在 PATH 时，直接填绝对路径。',
-    example: 'command=node, args=server.js / --stdio',
+    example: 'command=npx, args=-y / @modelcontextprotocol/server-filesystem / --stdio',
   },
   {
     key: 'timeout-or-no-tools',

@@ -164,7 +164,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
     </div>
     {mcpServers.length === 0 && (
       <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
-        还没有 MCP 服务。常见形式是 `node server.js`、`uvx some-mcp-server`、`python -m server`。
+        还没有 MCP 服务。常见形式是 `npx -y package --stdio`、`node server.js`、`uvx some-mcp-server`、`python -m server`。
       </div>
     )}
     {mcpServers.map((server) => (

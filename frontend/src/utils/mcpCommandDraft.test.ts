@@ -70,6 +70,17 @@ describe('mcpCommandDraft helpers', () => {
     });
   });
 
+  it('keeps npx package launches as command plus split args', () => {
+    const result = parseMCPCommandDraft('npx -y @modelcontextprotocol/server-filesystem --stdio C:\\Users\\me\\workspace');
+
+    expect(result.ok).toBe(true);
+    expect(result.draft).toEqual({
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '--stdio', 'C:\\Users\\me\\workspace'],
+      env: {},
+    });
+  });
+
   it('reports unclosed quotes instead of producing a broken parse', () => {
     expect(splitShellLikeCommand('uvx "broken command')).toEqual({
       tokens: ['uvx'],

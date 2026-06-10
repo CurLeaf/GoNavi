@@ -111,9 +111,12 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('给 MCP Server 传入 KEY=VALUE 形式的配置');
     expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('常见启动方式模板');
+    expect(markup).toContain('npx 包');
+    expect(markup).toContain('npx -y @modelcontextprotocol/server-filesystem --stdio');
     expect(markup).toContain('Node 脚本');
     expect(markup).toContain('新增 MCP 服务');
     expect(markup).toContain('还没有 MCP 服务');
+    expect(markup).toContain('npx -y package --stdio');
   });
 
   it('renders troubleshooting hints when a server draft exists', () => {
@@ -149,16 +152,16 @@ describe('AISettingsMCPSection', () => {
       onAddServer,
     }));
 
-    const nodeTemplateButton = findElement(
+    const npxTemplateButton = findElement(
       tree,
-      (node) => node.type === 'button' && flattenElementText(node.props?.children).includes('Node 脚本'),
+      (node) => node.type === 'button' && flattenElementText(node.props?.children).includes('npx 包'),
     );
-    expect(nodeTemplateButton).toBeTruthy();
-    nodeTemplateButton.props.onClick();
+    expect(npxTemplateButton).toBeTruthy();
+    npxTemplateButton.props.onClick();
 
     expect(onAddServer).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'node',
-      args: ['server.js', '--stdio'],
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '--stdio'],
     }));
   });
 });

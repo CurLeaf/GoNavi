@@ -40,7 +40,7 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('保存后显示给你和 AI 看的名字');
     expect(markup).toContain('示例值：');
     expect(markup).toContain('Filesystem / Browser / GitHub');
-    expect(markup).toContain('server.js / --stdio / -m / your_mcp_server');
+    expect(markup).toContain('-y / @modelcontextprotocol/server-filesystem / --stdio / server.js');
     expect(markup).toContain('当前固定为 stdio');
     expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('必填');
@@ -50,10 +50,12 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('自动拆分到下方字段');
     expect(markup).toContain('$env:KEY=VALUE;');
     expect(markup).toContain('set KEY=VALUE &amp;&amp;');
+    expect(markup).toContain('npx -y package --stdio');
+    expect(markup).toContain('-y、@modelcontextprotocol/server-filesystem、--stdio、server.js');
     expect(markup).toContain('每个参数单独录入一个标签');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('没有等号或 key 含空格的行不会保存');
-    expect(markup).toContain('不要把 node server.js --stdio 整串都塞进这里');
+    expect(markup).toContain('不要把 npx -y package --stdio 或 node server.js --stdio 整串都塞进这里');
     expect(markup).toContain('不要写 export');
     expect(markup).toContain('当前阶段只支持 stdio');
     expect(markup).toContain('实际启动命令预览');
@@ -67,6 +69,7 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('默认 20 秒');
     expect(markup).toContain('稍宽松 45 秒');
     expect(markup).toContain('慢启动 60 秒');
+    expect(markup).toContain('npx -y @modelcontextprotocol/server-filesystem --stdio');
     expect(markup).toContain('node server.js --stdio');
     expect(markup).toContain('$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio');
   });

@@ -15,6 +15,7 @@ describe('mcpServerGuidance', () => {
     expect(symptoms).toContain('测试提示找不到命令');
     expect(symptoms).toContain('认证失败、401 或 403');
     expect(allGuidance).toContain('命令参数');
+    expect(allGuidance).toContain('command=npx');
     expect(allGuidance).toContain('KEY=VALUE');
     expect(allGuidance).toContain('当前只支持 stdio');
   });
@@ -24,6 +25,7 @@ describe('mcpServerGuidance', () => {
 
     expect(notes).toContain('本机配置');
     expect(notes).toContain('不要把密钥写进聊天内容');
+    expect(notes).toContain('command 填 npx');
     expect(notes).toContain('PowerShell $env:KEY=VALUE;');
     expect(notes).toContain('Windows set KEY=VALUE &&');
   });

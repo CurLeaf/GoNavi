@@ -73,11 +73,11 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
           options={[{ label: 'stdio', value: 'stdio' }]}
         />
       </AIMCPHelpBlock>
-      <AIMCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 node/uvx/python 这类启动器，把脚本名或模块名放到下面的参数里。不要把 node server.js --stdio 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="node / uvx / python">
+      <AIMCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 npx/node/uvx/python 这类启动器，把包名、脚本名或模块名放到下面的参数里。不要把 npx -y package --stdio 或 node server.js --stdio 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="npx / node / uvx / python">
         <Input
           value={server.command}
           onChange={(event) => onChange({ command: event.target.value })}
-          placeholder="启动命令，例如：node / uvx / python"
+          placeholder="启动命令，例如：npx / node / uvx / python"
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
         />
       </AIMCPHelpBlock>
@@ -120,12 +120,12 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </AIMCPHelpBlock>
     </div>
 
-    <AIMCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 node server.js --stdio，要把 server.js 和 --stdio 分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="server.js、--stdio、-m、your_mcp_server">
+    <AIMCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 npx -y package --stdio，要把 -y、package 和 --stdio 分开填；node server.js --stdio 要把 server.js 和 --stdio 分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="-y、@modelcontextprotocol/server-filesystem、--stdio、server.js">
       <Select
         mode="tags"
         value={server.args || []}
         onChange={(value) => onChange({ args: value })}
-        placeholder="命令参数，回车录入，例如：server.js、--stdio"
+        placeholder="命令参数，回车录入，例如：-y、包名、--stdio"
         style={{ width: '100%' }}
       />
     </AIMCPHelpBlock>

@@ -133,14 +133,14 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     icon: "🧭",
     desc: "查看新增 MCP 的填写指引",
     detail:
-      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 Node / uvx / Python / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 node / uvx / python 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
+      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 npx / Node / uvx / Python / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 npx / node / uvx / python 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
     params: "无参数",
     tool: {
       type: "function",
       function: {
         name: "inspect_mcp_authoring_guide",
         description:
-          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 Node / uvx / Python / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
+          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 npx / Node / uvx / Python / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
         parameters: { type: "object", properties: {} },
       },
     },

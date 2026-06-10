@@ -315,8 +315,10 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"supportsWholeCommandAutoSplit":true');
     expect(result.content).toContain('"fullCommandPasteExample":"$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio"');
     expect(result.content).toContain('"title":"启动命令"');
-    expect(result.content).toContain('"example":"node / uvx / python"');
+    expect(result.content).toContain('"example":"npx / node / uvx / python"');
     expect(result.content).toContain('PowerShell $env:KEY=VALUE;');
+    expect(result.content).toContain('"title":"npx 包"');
+    expect(result.content).toContain('"exampleLaunchPreview":"npx -y @modelcontextprotocol/server-filesystem --stdio"');
     expect(result.content).toContain('"title":"uvx 工具"');
     expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
   });

@@ -10,6 +10,19 @@ export interface MCPServerDraftTemplate {
 
 export const MCP_SERVER_DRAFT_TEMPLATES: MCPServerDraftTemplate[] = [
   {
+    key: 'npx',
+    title: 'npx 包',
+    description: '适合 README 里写着 `npx -y xxx --stdio` 的 npm MCP 包。',
+    detail: '示例会填成 `npx -y @modelcontextprotocol/server-filesystem --stdio`，把包名和路径参数改成实际值。',
+    seed: {
+      name: 'npx 包',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '--stdio'],
+      env: {},
+      timeoutSeconds: 20,
+    },
+  },
+  {
     key: 'uvx',
     title: 'uvx 工具',
     description: '适合 Python/uv 生态里已经发布好的 MCP 包。',
