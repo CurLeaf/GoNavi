@@ -12,6 +12,7 @@ import { buildAIGuidanceSnapshot } from './aiPromptInsights';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import { buildAISafetySnapshot } from './aiSafetyInsights';
+import { buildAIToolCatalogSnapshot } from './aiToolCatalogInsights';
 import { buildMCPAuthoringGuideSnapshot } from './aiMCPAuthoringGuideInsights';
 import { buildMCPDraftInspectionSnapshot } from './aiMCPDraftInspectionInsights';
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
@@ -162,6 +163,18 @@ export async function executeAIConfigSnapshotToolCall(
           success: true,
         };
       }
+      case 'inspect_ai_tool_catalog':
+        return {
+          content: JSON.stringify(buildAIToolCatalogSnapshot({
+            builtinTools: BUILTIN_AI_TOOL_INFO,
+            mcpTools,
+            keyword: args.keyword,
+            toolName: args.toolName,
+            includeMCPTools: args.includeMCPTools !== false,
+            limit: args.limit,
+          })),
+          success: true,
+        };
       case 'inspect_mcp_setup': {
         const [mcpServers, mcpClientInstallStatuses] = await loadMCPSetupState(runtime);
         return {
@@ -227,6 +240,7 @@ export async function executeAIConfigSnapshotToolCall(
       inspect_ai_safety: '读取当前 AI 安全边界失败',
       inspect_ai_providers: '读取当前 AI 供应商配置失败',
       inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
+      inspect_ai_tool_catalog: '读取 AI 工具目录失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',
       inspect_mcp_remote_access: '读取 MCP 远程接入指引失败',
       inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',

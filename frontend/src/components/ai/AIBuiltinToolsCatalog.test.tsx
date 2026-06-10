@@ -28,6 +28,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_database_bundle');
     expect(markup).toContain('AI 应用健康总览');
     expect(markup).toContain('inspect_app_health');
+    expect(markup).toContain('选择 AI 工具路线');
+    expect(markup).toContain('inspect_ai_tool_catalog');
+    expect(markup).toContain('每个工具 arguments 怎么填');
     expect(markup).toContain('一键体检 AI 配置');
     expect(markup).toContain('inspect_ai_setup_health');
     expect(markup).toContain('查看 AI 当前能力');

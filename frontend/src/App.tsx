@@ -20,7 +20,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
+import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
   sanitizeDataTableDensity,
@@ -393,6 +393,7 @@ function App() {
       () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
       [installedFontFamilies, runtimePlatform],
   );
+  const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
@@ -2258,7 +2259,9 @@ function App() {
   const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
   useEffect(() => {
-      if (!isThemeModalOpen || themeModalSection !== 'appearance') {
+      const shouldLoadInstalledFonts =
+          runtimePlatform === 'linux' || (isThemeModalOpen && themeModalSection === 'appearance');
+      if (!shouldLoadInstalledFonts) {
           return;
       }
       if (hasLoadedInstalledFontsRef.current || isFontFamiliesLoading) {
@@ -2306,7 +2309,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isThemeModalOpen, themeModalSection]);
+  }, [isThemeModalOpen, runtimePlatform, themeModalSection]);
 
   useEffect(() => {
       if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
@@ -4400,6 +4403,24 @@ function App() {
                                                       ? `已读取当前系统 ${installedFontFamilies.length} 个字体族，支持输入搜索匹配。清空后回退默认 UI 字体。`
                                                       : '按当前系统实时加载已安装字体，支持输入搜索匹配。清空后回退默认 UI 字体。')}
                                           </div>
+                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
+                                              <div
+                                                  style={{
+                                                      marginTop: 8,
+                                                      padding: '9px 10px',
+                                                      borderRadius: 8,
+                                                      border: darkMode ? '1px solid rgba(250,204,21,0.28)' : '1px solid rgba(217,119,6,0.22)',
+                                                      background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)',
+                                                      color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e',
+                                                      fontSize: 12,
+                                                      lineHeight: 1.7,
+                                                  }}
+                                              >
+                                                  Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：
+                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
+                                                  ，然后重启 GoNavi。
+                                              </div>
+                                          )}
                                       </div>
                                       <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>代码字体 (Mono Font Family)</div>

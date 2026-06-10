@@ -64,6 +64,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_ai_tool_catalog',
+    '如果用户问题横跨多个功能、你不确定该先调用哪个内置工具，或用户问“你有哪些工具/这个工具参数怎么填/某类问题该用哪个探针”，优先调用 inspect_ai_tool_catalog 按关键词读取真实工具目录、推荐流程和参数提示，再选择具体探针。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_ai_setup_health',
     '如果用户提到“AI 为什么不好用”“帮我体检一下当前 AI 配置”“当前 AI 整体还有哪些明显问题”，优先调用 inspect_ai_setup_health 先拿到整体现状，再按需下钻 inspect_ai_providers、inspect_ai_chat_readiness、inspect_mcp_setup 或 inspect_ai_guidance。',
   );

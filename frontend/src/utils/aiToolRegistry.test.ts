@@ -76,6 +76,15 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('当前 AI 聊天输入区');
   });
 
+  it('registers the ai-tool-catalog inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_tool_catalog');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('内置工具目录');
+    expect(info?.tool.function.description).toContain('推荐工具调用流程');
+    expect(info?.tool.function.parameters?.properties?.keyword?.description).toContain('连接失败');
+    expect(info?.tool.function.parameters?.properties?.includeMCPTools?.description).toContain('MCP 工具摘要');
+  });
+
   it('registers the ai-guidance inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_guidance');
     expect(info).toBeTruthy();
@@ -208,6 +217,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_ai_safety')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_providers')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_tool_catalog')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_remote_access')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_authoring_guide')).toBe(true);

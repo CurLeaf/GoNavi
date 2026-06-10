@@ -109,6 +109,22 @@ OpenClaw、Hermans 这类部署在云端或远端 Linux 的 Agent，不能直接
 4. 在 OpenClaw / Hermans 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 指向 `/mcp` 地址，并设置请求头 `Authorization: Bearer <随机token>`。
 5. 先调用 `get_connections` 获取 `connectionId`，再调用 `get_databases`、`get_tables`、`get_columns`、`get_table_ddl` 等工具读取结构。
 
+如果目标 Agent 支持 `mcpServers` JSON，可按下面的通用片段配置：
+
+```json
+{
+  "mcpServers": {
+    "gonavi": {
+      "type": "streamable-http",
+      "url": "https://<你的域名或隧道地址>/mcp",
+      "headers": {
+        "Authorization": "Bearer <随机token>"
+      }
+    }
+  }
+}
+```
+
 不要把数据库 `host/user/password` 写入云端 Agent 的配置文件。`execute_sql` 写操作仍受 GoNavi AI 安全设置控制，且必须显式传 `allowMutating=true`。
 
 ## MCP 客户端配置示例

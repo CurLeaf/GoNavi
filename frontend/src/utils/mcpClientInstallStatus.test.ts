@@ -134,5 +134,8 @@ describe('mcpClientInstallStatus helpers', () => {
     expect(guide).toContain('云端 Agent 不需要保存数据库密码');
     expect(guide).toContain('不能直接使用 Windows 本地 stdio 命令');
     expect(guide).toContain('allowMutating=true');
+    expect(guide).toContain('"type": "streamable-http"');
+    expect(guide).toContain('"Authorization": "Bearer <随机token>"');
+    expect(guide).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>');
   });
 });

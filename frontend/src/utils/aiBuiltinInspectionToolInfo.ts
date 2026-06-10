@@ -112,6 +112,31 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_tool_catalog",
+    icon: "🧭",
+    desc: "查看 AI 内置工具目录和参数提示",
+    detail:
+      "按关键词或工具名返回 GoNavi AI 内置工具、推荐探针流程、参数说明和当前 MCP 工具摘要。适合用户问“你该用哪个工具”“这个工具参数怎么填”“有哪些内置工具”或 AI 需要先选择探针路线时调用。",
+    params: "keyword?, toolName?, includeMCPTools?(默认 true), limit?(默认 12)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_tool_catalog",
+        description:
+          "读取 GoNavi AI 工具目录快照，可按关键词或工具名筛选，返回推荐工具调用流程、内置工具说明、参数提示和当前已发现 MCP 工具摘要。适用于用户询问当前有哪些内置工具、某类问题该先调用哪个探针、工具 arguments 怎么填、或 AI 在处理复杂问题前需要先选择工具路线时优先调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按问题关键词过滤工具和流程，例如 mcp、连接失败、事务、快捷键、schema、日志" },
+            toolName: { type: "string", description: "可选，按内置工具名精确查询，例如 inspect_mcp_draft 或 inspect_sql_risk" },
+            includeMCPTools: { type: "boolean", description: "可选，是否同时返回当前已发现的 MCP 工具摘要，默认 true" },
+            limit: { type: "number", description: "可选，最多返回多少条流程、内置工具和 MCP 工具，默认 12，最大 40" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_setup",
     icon: "🪛",
     desc: "查看当前 MCP 配置与外部接入状态",

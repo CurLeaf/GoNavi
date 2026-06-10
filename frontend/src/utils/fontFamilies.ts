@@ -4,6 +4,33 @@ export const DEFAULT_MONO_FONT_FAMILY =
   '"JetBrains Mono", "Noto Sans Mono CJK SC", "Noto Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
 
 const MAX_FONT_FAMILY_LENGTH = 512;
+const LINUX_CJK_FONT_INSTALL_COMMAND = 'sudo apt install fonts-noto-cjk fonts-wqy-microhei && fc-cache -fv';
+
+const CJK_FONT_KEYWORDS = [
+  'noto sans cjk',
+  'noto sans sc',
+  'noto serif cjk',
+  'noto serif sc',
+  'source han sans',
+  'source han serif',
+  '思源',
+  'wenquanyi',
+  '文泉驿',
+  'sarasa',
+  '更纱',
+  'lxgw',
+  '霞鹜',
+  'microsoft yahei',
+  '微软雅黑',
+  'simsun',
+  '宋体',
+  'simhei',
+  '黑体',
+  'pingfang',
+  '苹方',
+  'hiragino',
+  '冬青',
+];
 
 export type FontFamilyOption = {
   value: string;
@@ -45,6 +72,11 @@ const MONO_FONT_PRIORITY_HINTS = [
 const normalizeFontSearchToken = (value: string): string => String(value || '')
   .toLowerCase()
   .replace(/[^a-z0-9\u4e00-\u9fff]+/gi, '');
+
+const normalizeInstalledFontNameForCJK = (entry: string | InstalledFontFamily): string => {
+  const raw = typeof entry === 'string' ? entry : entry.family;
+  return String(raw || '').trim().toLowerCase();
+};
 
 const insertFontNameWordBreaks = (value: string): string => value
   .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
@@ -265,6 +297,32 @@ export const resolveUIFontFamily = (customValue: unknown): string => {
 
 export const resolveMonoFontFamily = (customValue: unknown): string => {
   return sanitizeFontFamilyInput(customValue) ?? DEFAULT_MONO_FONT_FAMILY;
+};
+
+export const hasInstalledCJKFontFamily = (
+  installedFamilies: Array<string | InstalledFontFamily>,
+): boolean => {
+  return installedFamilies.some((entry) => {
+    const family = normalizeInstalledFontNameForCJK(entry);
+    if (!family) {
+      return false;
+    }
+    const compactFamily = normalizeFontSearchToken(family);
+    return CJK_FONT_KEYWORDS.some((keyword) => {
+      const normalizedKeyword = keyword.toLowerCase();
+      return family.includes(normalizedKeyword) || compactFamily.includes(normalizeFontSearchToken(normalizedKeyword));
+    });
+  });
+};
+
+export const getLinuxCJKFontInstallHint = (
+  platform: string,
+  installedFamilies: Array<string | InstalledFontFamily>,
+): string | null => {
+  if (String(platform || '').toLowerCase() !== 'linux') {
+    return null;
+  }
+  return hasInstalledCJKFontFamily(installedFamilies) ? null : LINUX_CJK_FONT_INSTALL_COMMAND;
 };
 
 export const getPlatformFontFamilyOptions = (

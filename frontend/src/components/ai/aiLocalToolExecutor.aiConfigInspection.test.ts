@@ -230,6 +230,47 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('OpenAI 主账号');
   });
 
+  it('returns the ai tool catalog so the model can choose probes and build arguments', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_tool_catalog', {
+        keyword: 'mcp',
+        limit: 8,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'github_create_issue',
+        originalName: 'create_issue',
+        serverId: 'github-server',
+        serverName: 'GitHub',
+        title: '创建 Issue',
+        description: 'Create a GitHub issue',
+        inputSchema: {
+          type: 'object',
+          required: ['owner', 'repo', 'title'],
+          properties: {
+            owner: { type: 'string', description: '仓库 owner' },
+            repo: { type: 'string', description: '仓库名' },
+            title: { type: 'string', description: 'Issue 标题' },
+          },
+        },
+      }],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"keyword":"mcp"');
+    expect(result.content).toContain('新增 MCP 填写指引');
+    expect(result.content).toContain('"name":"inspect_mcp_draft"');
+    expect(result.content).toContain('"name":"fullCommand"');
+    expect(result.content).toContain('"alias":"github_create_issue"');
+    expect(result.content).toContain('"requiredParameters":["owner","repo","title"]');
+    expect(result.content).toContain('调用带参数工具前');
+  });
+
   it('returns the current mcp setup snapshot so the model can inspect configured servers and client install state', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_setup', {}),

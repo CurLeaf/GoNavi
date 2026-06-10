@@ -161,6 +161,19 @@ export const buildRemoteMCPClientGuide = (
   status?: Pick<AIMCPClientInstallStatus, 'displayName' | 'message'> | null,
 ): string => {
   const displayName = String(status?.displayName || '远程 Agent').trim();
+  const streamableHTTPConfig = [
+    '{',
+    '  "mcpServers": {',
+    '    "gonavi": {',
+    '      "type": "streamable-http",',
+    '      "url": "https://<你的域名或隧道地址>/mcp",',
+    '      "headers": {',
+    '        "Authorization": "Bearer <随机token>"',
+    '      }',
+    '    }',
+    '  }',
+    '}',
+  ];
   return [
     `GoNavi MCP 远程接入说明 - ${displayName}`,
     '',
@@ -178,6 +191,13 @@ export const buildRemoteMCPClientGuide = (
     '2. 在 Windows 或可信内网侧运行：GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>。',
     `3. 在 ${displayName} 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 填隧道/反向代理后的 /mcp 地址，并设置 Authorization: Bearer <随机token>。`,
     '4. 先调用 get_connections 获取 connectionId，再调用表结构工具；不要把数据库 host/user/password 写进云端 Agent 配置。',
+    '',
+    '可复制配置片段（适用于支持 mcpServers JSON 的 Agent）：',
+    ...streamableHTTPConfig,
+    '',
+    'CLI / 服务启动命令：',
+    'GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>',
+    '或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp',
     '',
     status?.message ? `当前提示：${status.message}` : '',
   ].filter((line, index, lines) => line || index < lines.length - 1).join('\n');
