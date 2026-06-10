@@ -8,6 +8,7 @@ import { MCP_FIELD_GUIDES } from '../../utils/mcpServerGuidance';
 import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
+import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
 import AIMCPServerCard from './AIMCPServerCard';
 
 export type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
@@ -98,25 +99,14 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
         {MCP_FIELD_GUIDES.filter((item) => ['command', 'args', 'env', 'timeout'].includes(item.key)).map((item) => (
-          <div
+          <AIMCPFieldGuideCard
             key={item.key}
-            style={{
-              padding: '10px 12px',
-              borderRadius: 12,
-              border: `1px solid ${cardBorder}`,
-              background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)',
-            }}
-          >
-            <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.title}</div>
-            <div style={{ marginTop: 4, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{item.summary}</div>
-            {item.example ? (
-              <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                例：
-                {' '}
-                <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
-              </div>
-            ) : null}
-          </div>
+            item={item}
+            cardBorder={cardBorder}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
+            compact
+          />
         ))}
       </div>
     </div>

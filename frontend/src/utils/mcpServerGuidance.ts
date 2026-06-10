@@ -5,6 +5,8 @@ export interface MCPFieldGuide {
   title: string;
   summary: string;
   detail: string;
+  fill: string;
+  avoid: string;
   fieldState: MCPFieldState;
   example?: string;
 }
@@ -46,6 +48,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '服务名称',
     summary: '保存后显示给你和 AI 看的名字。',
     detail: '按用途命名，建议写成 Browser、GitHub、Filesystem 这类一眼能认出的名字。',
+    fill: '这个 MCP 的用途名，例如 GitHub 或 Filesystem。',
+    avoid: '不要写 server、test、mcp1 这类看不出用途的名字。',
     fieldState: 'required',
     example: 'Filesystem / Browser / GitHub',
   },
@@ -54,6 +58,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '启用状态',
     summary: '控制这条配置现在要不要参与工具发现和调用。',
     detail: '禁用只是不使用，不会删除下面填好的配置。',
+    fill: '临时不用选已禁用；确认要给 AI 用时选已启用。',
+    avoid: '不要用删除代替临时停用，避免重新配置 command、args、env。',
     fieldState: 'optional',
     example: '已启用 / 已禁用',
   },
@@ -62,6 +68,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '传输方式',
     summary: 'GoNavi 用什么方式和这个 MCP Server 通信。',
     detail: '当前固定为 stdio，表示本机直接启动进程并通过标准输入输出交互。',
+    fill: '保持 stdio。',
+    avoid: '不要填写 HTTP、SSE、URL 或端口；当前新增入口不是远程 MCP URL 配置。',
     fieldState: 'fixed',
     example: 'stdio',
   },
@@ -70,6 +78,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '启动命令',
     summary: '只填程序名或启动器本身。',
     detail: '常见是 npx、node、uvx、python；包名、脚本名和 --stdio 这类内容放到参数里。',
+    fill: '填 npx、node、uvx、python，或某个 exe 的绝对路径。',
+    avoid: '不要填整行命令，例如不要填 npx -y pkg --stdio。',
     fieldState: 'required',
     example: 'npx / node / uvx / python',
   },
@@ -78,6 +88,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '命令参数',
     summary: '把脚本名、模块名、开关参数拆开逐项填写。',
     detail: '例如 npx -y pkg --stdio，要拆成 -y、pkg 和 --stdio；node server.js --stdio 要拆成 server.js 和 --stdio。',
+    fill: '逐项填 -y、包名、脚本名、-m、--stdio 等参数。',
+    avoid: '不要再填 npx/node/uvx/python，也不要把多个参数粘成一个长字符串。',
     fieldState: 'optional',
     example: '-y / @modelcontextprotocol/server-filesystem / --stdio / server.js',
   },
@@ -86,6 +98,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '环境变量',
     summary: '给 MCP Server 传入 KEY=VALUE 形式的配置。',
     detail: '通常用来放 API Key、服务地址、工作目录等；每行一条，不要写 export。',
+    fill: '每行一条 KEY=VALUE，例如 GITHUB_TOKEN=...。',
+    avoid: '不要写 export、set 或 $env: 前缀；也不要把环境变量混进 command 或 args。',
     fieldState: 'optional',
     example: 'OPENAI_API_KEY=... / GITHUB_TOKEN=...',
   },
@@ -94,6 +108,8 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     title: '超时(秒)',
     summary: '单次工具发现或调用最多等待多久。',
     detail: '本机常规工具一般 20 秒就够，启动慢或远端链路再适当调大。',
+    fill: '常规填 20；启动慢时填 45 或 60。',
+    avoid: '不要随意填过小，3 秒以下很容易让工具发现误判失败。',
     fieldState: 'optional',
     example: '20 / 45 / 60',
   },

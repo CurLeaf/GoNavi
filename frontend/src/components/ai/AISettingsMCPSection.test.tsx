@@ -107,8 +107,13 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('env');
     expect(markup).toContain('timeout');
     expect(markup).toContain('只填程序名或启动器本身');
+    expect(markup).toContain('应填：');
+    expect(markup).toContain('填 npx、node、uvx、python，或某个 exe 的绝对路径');
+    expect(markup).toContain('不要填整行命令，例如不要填 npx -y pkg --stdio');
     expect(markup).toContain('把脚本名、模块名、开关参数拆开逐项填写');
+    expect(markup).toContain('不要再填 npx/node/uvx/python');
     expect(markup).toContain('给 MCP Server 传入 KEY=VALUE 形式的配置');
+    expect(markup).toContain('不要写 export、set 或 $env: 前缀');
     expect(markup).toContain('单次工具发现或调用最多等待多久');
     expect(markup).toContain('常见启动方式模板');
     expect(markup).toContain('npx 包');

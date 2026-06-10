@@ -11,7 +11,8 @@ import {
   MCP_TROUBLESHOOTING_GUIDES,
 } from '../../utils/mcpServerGuidance';
 import AIMCPCommandDraftPreview from './AIMCPCommandDraftPreview';
-import { buildMCPFieldTone, buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
+import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
+import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
 
 interface AIMCPServerGuidePanelProps {
   cardBorder: string;
@@ -73,48 +74,15 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
         如果看到某个参数名不知道该填什么，先看这一块；下面每个字段也都有更具体的示例和注意事项。
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
-        {MCP_FIELD_GUIDES.map((item) => {
-          const tone = buildMCPFieldTone(item.fieldState, darkMode);
-          return (
-            <div
-              key={item.key}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: `1px solid ${cardBorder}`,
-                background: darkMode ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.78)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.title}</div>
-                <span
-                  style={{
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: tone.color,
-                    background: tone.bg,
-                  }}
-                >
-                  {tone.label}
-                </span>
-              </div>
-              <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>{item.summary}</div>
-              <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{item.detail}</div>
-              {item.example ? (
-                <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-                  示例值：
-                  {' '}
-                  <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+        {MCP_FIELD_GUIDES.map((item) => (
+          <AIMCPFieldGuideCard
+            key={item.key}
+            item={item}
+            cardBorder={cardBorder}
+            darkMode={darkMode}
+            overlayTheme={overlayTheme}
+          />
+        ))}
       </div>
     </div>
 
