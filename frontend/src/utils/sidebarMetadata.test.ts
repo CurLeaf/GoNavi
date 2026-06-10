@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect } from './sidebarMetadata';
+import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect } from './sidebarMetadata';
 
 describe('sidebarMetadata', () => {
   it('normalizes MySQL-compatible view names without schema prefixes', () => {
@@ -21,5 +21,12 @@ describe('sidebarMetadata', () => {
     expect(isSidebarViewTableType('BASE VIEW')).toBe(true);
     expect(isSidebarViewTableType('BASE TABLE')).toBe(false);
     expect(isSidebarViewTableType('MATERIALIZED VIEW')).toBe(false);
+  });
+
+  it('adds SHOW FULL TABLES view-only fallbacks for MySQL-compatible databases', () => {
+    expect(buildMySQLCompatibleViewMetadataSqls('GDB_APP')).toEqual(expect.arrayContaining([
+      "SHOW FULL TABLES FROM `GDB_APP` WHERE Table_type = 'VIEW'",
+      "SHOW FULL TABLES WHERE Table_type = 'VIEW'",
+    ]));
   });
 });

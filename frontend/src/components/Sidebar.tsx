@@ -63,7 +63,7 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
@@ -1386,21 +1386,9 @@ const Sidebar: React.FC<{
       switch (dialect) {
           case 'mysql':
           case 'starrocks': {
-              const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
-              return normalizeMetadataQuerySpecs([
-                  {
-                      sql: safeDbName
-                          ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
-                          : '',
-                  },
-                  {
-                      sql: safeDbName
-                          ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE table_schema = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%VIEW%' ORDER BY TABLE_NAME`
-                          : '',
-                  },
-                  { sql: dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '' },
-                  { sql: `SHOW FULL TABLES` },
-              ]);
+              return normalizeMetadataQuerySpecs(
+                  buildMySQLCompatibleViewMetadataSqls(dbName).map((sql) => ({ sql })),
+              );
           }
           case 'postgres':
           case 'kingbase':

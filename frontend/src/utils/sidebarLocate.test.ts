@@ -793,6 +793,48 @@ describe('sidebarLocate', () => {
     ]);
   });
 
+  it('finds a view node by title under the views group when node type metadata is missing', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    dataRef: {},
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-generated-key',
+    ]);
+  });
+
   it('finds a schema-qualified view request by visual title when the node has no schema metadata', () => {
     const target = resolveSidebarLocateTarget({
       tabId: 'stale-view-tab-id',

@@ -2,6 +2,9 @@ import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
 import { splitQualifiedNameLast } from './qualifiedName';
 import { resolveSqlDialect } from './sqlDialect';
 
+const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
+const escapeBacktickIdentifier = (raw: string): string => String(raw || '').replace(/`/g, '``');
+
 const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBaseProtocol?: string): string => {
   const normalizedType = String(type || '').trim().toLowerCase();
   if (normalizedType === 'custom') {
@@ -61,6 +64,23 @@ export const isSidebarViewTableType = (tableType: unknown): boolean => {
   const normalizedType = String(tableType ?? '').trim().toUpperCase();
   if (!normalizedType) return true;
   return normalizedType.includes('VIEW') && !normalizedType.includes('MATERIALIZED');
+};
+
+export const buildMySQLCompatibleViewMetadataSqls = (dbName: string): string[] => {
+  const safeDbName = escapeSQLLiteral(dbName);
+  const dbIdent = escapeBacktickIdentifier(dbName).trim();
+  return [
+    safeDbName
+      ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
+      : '',
+    safeDbName
+      ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE table_schema = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%VIEW%' ORDER BY TABLE_NAME`
+      : '',
+    dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\` WHERE Table_type = 'VIEW'` : '',
+    dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '',
+    `SHOW FULL TABLES WHERE Table_type = 'VIEW'`,
+    `SHOW FULL TABLES`,
+  ].filter(Boolean);
 };
 
 export const resolveSidebarRuntimeDatabase = (

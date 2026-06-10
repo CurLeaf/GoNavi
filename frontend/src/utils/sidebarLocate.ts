@@ -409,6 +409,24 @@ const getVisualNodeObjectName = (
   return matchedPrefix ? nodeKey.slice(matchedPrefix.length) : '';
 };
 
+const getLocateObjectGroupPathSuffix = (objectGroup: SidebarLocateObjectGroup): string => {
+  if (objectGroup === 'externalSqlFiles') return 'external-sql-root';
+  return objectGroup.toLowerCase();
+};
+
+const isPathInsideLocateObjectGroup = (
+  path: string[],
+  target: SidebarLocateTarget,
+): boolean => {
+  if (target.objectGroup === 'externalSqlFiles') return false;
+  const normalizedObjectGroupKey = normalizeLocateName(target.objectGroupKey);
+  const groupSuffix = getLocateObjectGroupPathSuffix(target.objectGroup);
+  return path.some((key) => {
+    const normalizedKey = normalizeLocateName(key);
+    return normalizedKey === normalizedObjectGroupKey || normalizedKey.endsWith(`-${groupSuffix}`);
+  });
+};
+
 const matchesLocateObjectNodeByVisualIdentity = (
   node: SidebarLocateTreeNodeLike,
   target: SidebarLocateTarget,
@@ -416,12 +434,13 @@ const matchesLocateObjectNodeByVisualIdentity = (
 ): boolean => {
   if (!path.includes(target.databaseKey)) return false;
   const nodeObjectType = normalizeLocateName(toTrimmedString(node.dataRef?.objectType || node.dataRef?.objectKind));
+  const insideExpectedGroup = isPathInsideLocateObjectGroup(path, target);
 
-  if (target.objectGroup === 'views' && node.type !== 'view' && nodeObjectType !== 'view' && nodeObjectType !== 'views') return false;
-  if (target.objectGroup === 'materializedViews' && node.type !== 'materialized-view' && nodeObjectType !== 'materialized-view' && nodeObjectType !== 'materializedviews') return false;
-  if (target.objectGroup === 'triggers' && node.type !== 'db-trigger') return false;
-  if (target.objectGroup === 'routines' && node.type !== 'routine') return false;
-  if (target.objectGroup === 'tables' && node.type !== 'table') return false;
+  if (target.objectGroup === 'views' && node.type !== 'view' && nodeObjectType !== 'view' && nodeObjectType !== 'views' && !insideExpectedGroup) return false;
+  if (target.objectGroup === 'materializedViews' && node.type !== 'materialized-view' && nodeObjectType !== 'materialized-view' && nodeObjectType !== 'materializedviews' && !insideExpectedGroup) return false;
+  if (target.objectGroup === 'triggers' && node.type !== 'db-trigger' && !insideExpectedGroup) return false;
+  if (target.objectGroup === 'routines' && node.type !== 'routine' && !insideExpectedGroup) return false;
+  if (target.objectGroup === 'tables' && node.type !== 'table' && !insideExpectedGroup) return false;
   if (target.objectGroup === 'externalSqlFiles') return false;
 
   const schemaName = toTrimmedString(node.dataRef?.schemaName);
