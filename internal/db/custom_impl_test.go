@@ -142,3 +142,44 @@ func TestCustomDBOnlyNormalizesBuiltInMySQLDriverDSN(t *testing.T) {
 		t.Fatalf("non-mysql custom driver DSN should stay untouched, got %q", customMySQLDSNRecordingLastDSN)
 	}
 }
+
+func TestBuildCustomColumnDefinitionPrefersCompleteColumnType(t *testing.T) {
+	col := buildCustomColumnDefinition(map[string]interface{}{
+		"COLUMN_NAME": "USER_NAME",
+		"DATA_TYPE":   "varchar",
+		"COLUMN_TYPE": "varchar(64)",
+		"IS_NULLABLE": "NO",
+	})
+
+	if col.Name != "USER_NAME" {
+		t.Fatalf("expected name USER_NAME, got %q", col.Name)
+	}
+	if col.Type != "varchar(64)" {
+		t.Fatalf("expected complete type varchar(64), got %q", col.Type)
+	}
+	if col.Nullable != "NO" {
+		t.Fatalf("expected nullable NO, got %q", col.Nullable)
+	}
+}
+
+func TestBuildCustomColumnDefinitionBuildsTypeFromLengthAndPrecision(t *testing.T) {
+	nameCol := buildCustomColumnDefinition(map[string]interface{}{
+		"column_name":              "display_name",
+		"data_type":                "varchar",
+		"character_maximum_length": int64(128),
+		"is_nullable":              "YES",
+	})
+	if nameCol.Type != "varchar(128)" {
+		t.Fatalf("expected varchar(128), got %q", nameCol.Type)
+	}
+
+	amountCol := buildCustomColumnDefinition(map[string]interface{}{
+		"column_name":       "amount",
+		"data_type":         "decimal",
+		"numeric_precision": float64(10),
+		"numeric_scale":     float64(2),
+	})
+	if amountCol.Type != "decimal(10,2)" {
+		t.Fatalf("expected decimal(10,2), got %q", amountCol.Type)
+	}
+}

@@ -516,7 +516,9 @@ describe('QueryEditor external SQL save', () => {
     editorState.editor.layout.mockClear();
     storeState.updateQueryTabDraft.mockReset();
     clearQueryTabDraft('tab-1');
+    clearQueryTabDraft('tab-2');
     clearSQLFileTabDraft('tab-1');
+    clearSQLFileTabDraft('tab-2');
   });
 
   afterEach(() => {
@@ -556,7 +558,9 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
-    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ showQueryResultsPanel: true });
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      resultPanelVisible: true,
+    });
   });
 
   it('hides the expanded empty query results panel from the inline hide action', async () => {
@@ -577,7 +581,9 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
-    expect(storeState.setQueryOptions).toHaveBeenLastCalledWith({ showQueryResultsPanel: false });
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: false,
+    });
   });
 
   it('auto expands the query results panel after a successful execution returns rows', async () => {
@@ -603,7 +609,9 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer.toJSON())).toContain('结果 1');
-    expect(storeState.setQueryOptions).toHaveBeenCalledWith({ showQueryResultsPanel: true });
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      resultPanelVisible: true,
+    });
   });
 
   it('keeps the inline hide action available after query results render rows', async () => {
@@ -633,7 +641,9 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer.toJSON())).not.toContain('结果 1');
-    expect(storeState.setQueryOptions).toHaveBeenLastCalledWith({ showQueryResultsPanel: false });
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: false,
+    });
   });
 
   it('toggles the query results panel with Ctrl/Cmd+Shift+M', async () => {
@@ -697,6 +707,81 @@ describe('QueryEditor external SQL save', () => {
     expect(secondEvent.preventDefault).toHaveBeenCalled();
     expect(secondEvent.stopPropagation).toHaveBeenCalled();
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+  });
+
+  it('shows the query results panel with the shortcut after manually hiding it', async () => {
+    storeState.appearance.uiVersion = 'v2';
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    await act(async () => {
+      findButton(renderer, '结果').props.onClick();
+    });
+    await act(async () => {
+      findButton(renderer, '隐藏').props.onClick();
+    });
+    expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const toggleEvent = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: true,
+      key: 'm',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(toggleEvent));
+    });
+
+    expect(toggleEvent.preventDefault).toHaveBeenCalled();
+    expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: true,
+    });
+
+    renderer.unmount();
+  });
+
+  it('keeps query result panel visibility isolated per tab', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.queryOptions.showQueryResultsPanel = false;
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ id: 'tab-1', resultPanelVisible: false })} />);
+    });
+    expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
+
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ id: 'tab-2', resultPanelVisible: true })} />);
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
+
+    renderer.unmount();
   });
 
   it('keeps table name completion available after typing in a fresh query tab', async () => {
@@ -3270,7 +3355,6 @@ describe('QueryEditor external SQL save', () => {
     const moveListeners: Array<(event: MouseEvent) => void> = [];
     const upListeners: Array<() => void> = [];
     const frameCallbacks: FrameRequestCallback[] = [];
-    storeState.queryOptions.showQueryResultsPanel = true;
     vi.mocked(document.addEventListener).mockImplementation((type: string, listener: any) => {
       if (type === 'mousemove') moveListeners.push(listener);
       if (type === 'mouseup') upListeners.push(listener);
@@ -3282,7 +3366,7 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(<QueryEditor tab={createTab({ resultPanelVisible: true })} />);
     });
 
     const resizer = renderer.root.find((node) => node.props?.title === '拖动调整高度');

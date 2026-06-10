@@ -272,8 +272,6 @@ const matchesLocateObjectName = (
   const resolvedNodeSchema = toTrimmedString(nodeSchemaName) || nodeParsed.schemaName;
   const resolvedTargetSchema = toTrimmedString(target.schemaName) || targetParsed.schemaName;
 
-  if (normalizeLocateName(normalizedNodeName) === normalizeLocateName(target.tableName)) return true;
-
   if (
     resolvedTargetSchema
     && !resolvedNodeSchema
@@ -542,8 +540,15 @@ export const findSidebarNodePathForLocate = (
     }
   }
 
+  const relaxedPaths = collectSidebarNodePathsForLocateByObject(
+    nodes,
+    target,
+    { allowUnqualifiedSchemaMatch: true },
+  );
+  const relaxedPath = selectPreferredSidebarLocatePath(relaxedPaths, target);
+  if (relaxedPath) return relaxedPath;
+
   if (hasLocateTargetSchema(target)) return null;
 
-  const relaxedPaths = collectSidebarNodePathsForLocateByObject(nodes, target, { allowUnqualifiedSchemaMatch: true });
-  return selectPreferredSidebarLocatePath(relaxedPaths, target);
+  return null;
 };

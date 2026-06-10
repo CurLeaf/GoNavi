@@ -60,6 +60,28 @@ export const normalizeSidebarViewName = (dialect: string, dbName: string, schema
   return `${normalizedSchemaName}.${normalizedViewName}`;
 };
 
+export interface SidebarViewMetadataEntry {
+  viewName: string;
+  schemaName: string;
+}
+
+export const normalizeSidebarViewMetadataEntry = (
+  dialect: string,
+  dbName: string,
+  schemaName: string,
+  viewName: string,
+): SidebarViewMetadataEntry | null => {
+  const normalizedViewName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
+  if (!normalizedViewName) return null;
+
+  const parsedViewName = splitQualifiedNameLast(viewName);
+  const parsedNormalizedViewName = splitQualifiedNameLast(normalizedViewName);
+  return {
+    viewName: normalizedViewName,
+    schemaName: String(schemaName || parsedNormalizedViewName.parentPath || parsedViewName.parentPath || '').trim(),
+  };
+};
+
 export const isSidebarViewTableType = (tableType: unknown): boolean => {
   const normalizedType = String(tableType ?? '').trim().toUpperCase();
   if (!normalizedType) return true;

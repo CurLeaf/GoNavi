@@ -40,6 +40,11 @@ const storeState = vi.hoisted(() => ({
     showColumnType: false,
   },
   setQueryOptions: vi.fn(),
+  dataEditTransactionOptions: {
+    commitMode: 'manual' as 'manual' | 'auto',
+    autoCommitDelayMs: 5000,
+  },
+  setDataEditTransactionOptions: vi.fn(),
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
   tableColumnOrders: {},
@@ -608,6 +613,17 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
     storeState.appearance.uiVersion = 'legacy';
+    storeState.dataEditTransactionOptions = {
+      commitMode: 'manual',
+      autoCommitDelayMs: 5000,
+    };
+    storeState.setDataEditTransactionOptions.mockReset();
+    storeState.setDataEditTransactionOptions.mockImplementation((options: Partial<typeof storeState.dataEditTransactionOptions>) => {
+      storeState.dataEditTransactionOptions = {
+        ...storeState.dataEditTransactionOptions,
+        ...options,
+      };
+    });
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     testRenderState.latestColumns = [];
@@ -646,6 +662,7 @@ describe('DataGrid DDL interactions', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     backendApp.ImportData.mockReset();
     backendApp.ExportTable.mockReset();
     backendApp.ExportData.mockReset();
@@ -1089,6 +1106,105 @@ describe('DataGrid DDL interactions', () => {
     expect(messageApi.success).toHaveBeenCalledWith('已粘贴 1 行为新增行，请检查后提交事务');
     expect(testRenderState.latestTableProps.dataSource).toHaveLength(2);
     expect(testRenderState.latestTableProps.dataSource[1][GONAVI_ROW_KEY]).toContain('paste-');
+    renderer!.unmount();
+  });
+
+  it('auto commits pending table edits after the configured delay', async () => {
+    vi.useFakeTimers();
+    storeState.appearance.uiVersion = 'v2';
+    storeState.dataEditTransactionOptions = {
+      commitMode: 'auto',
+      autoCommitDelayMs: 3000,
+    };
+    backendApp.ApplyChanges.mockResolvedValue({ success: true, message: 'ok' });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const contextTarget = {
+      closest: (selector: string) => selector === '[data-row-key][data-col-name]'
+        ? {
+            getAttribute: (name: string) => {
+              if (name === 'data-row-key') return 'row-1';
+              if (name === 'data-col-name') return 'name';
+              return null;
+            },
+          }
+        : null,
+    } as unknown as HTMLElement;
+
+    const openMenu = async () => {
+      const cellProps = nameColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' });
+      await act(async () => {
+        cellProps.onContextMenu({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          clientX: 160,
+          clientY: 120,
+          currentTarget: contextTarget,
+          target: contextTarget,
+        });
+      });
+    };
+
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '复制本行为新增行').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '粘贴为新增行 (1)').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(backendApp.ApplyChanges).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2999);
+      await Promise.resolve();
+    });
+    expect(backendApp.ApplyChanges).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.ApplyChanges).toHaveBeenCalledTimes(1);
+    expect(backendApp.ApplyChanges.mock.calls[0][3]).toMatchObject({
+      inserts: [
+        expect.objectContaining({
+          id: 1,
+          name: 'alpha',
+        }),
+      ],
+      updates: [],
+      deletes: [],
+      locatorStrategy: 'primary-key',
+    });
+    expect(messageApi.success).toHaveBeenCalledWith('自动提交成功');
     renderer!.unmount();
   });
 

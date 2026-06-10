@@ -48,13 +48,72 @@ const readBooleanProperty = (value: unknown, keys: string[]): boolean => {
   return text === '1' || text === 't' || text === 'true' || text === 'y' || text === 'yes' || text === 'pri' || text === 'primary';
 };
 
+const readNumberProperty = (value: unknown, keys: string[]): number => {
+  const raw = readProperty(value, keys);
+  if (raw === undefined || raw === null || raw === '') return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0;
+};
+
 export const getColumnDefinitionName = (column: unknown): string => (
   readStringProperty(column, ['name', 'Name', 'COLUMN_NAME', 'column_name', 'field', 'Field'])
 );
 
-export const getColumnDefinitionType = (column: unknown): string => (
-  readStringProperty(column, ['type', 'Type', 'DATA_TYPE', 'data_type'])
-);
+export const getColumnDefinitionType = (column: unknown): string => {
+  const fullType = readStringProperty(column, [
+    'COLUMN_TYPE',
+    'column_type',
+    'FULL_TYPE',
+    'full_type',
+    'FULL_DATA_TYPE',
+    'full_data_type',
+    'TYPE_NAME',
+    'type_name',
+    'Type',
+    'type',
+  ]);
+  if (fullType) return fullType;
+
+  const dataType = readStringProperty(column, ['DATA_TYPE', 'data_type']);
+  if (!dataType || /\(.+\)/.test(dataType)) return dataType;
+
+  const upperType = dataType.toUpperCase();
+  const charLength = readNumberProperty(column, [
+    'CHARACTER_MAXIMUM_LENGTH',
+    'character_maximum_length',
+    'CHARACTER_MAX_LENGTH',
+    'character_max_length',
+    'CHAR_LENGTH',
+    'char_length',
+    'LENGTH',
+    'length',
+  ]);
+  if (charLength > 0 && /(CHAR|VARCHAR|BINARY|VARBINARY|NCHAR|NVARCHAR)/.test(upperType)) {
+    return `${dataType}(${charLength})`;
+  }
+
+  const precision = readNumberProperty(column, [
+    'NUMERIC_PRECISION',
+    'numeric_precision',
+    'DATA_PRECISION',
+    'data_precision',
+    'PRECISION',
+    'precision',
+  ]);
+  if (precision > 0 && /(DECIMAL|NUMERIC|NUMBER)/.test(upperType)) {
+    const scale = readNumberProperty(column, [
+      'NUMERIC_SCALE',
+      'numeric_scale',
+      'DATA_SCALE',
+      'data_scale',
+      'SCALE',
+      'scale',
+    ]);
+    return scale > 0 ? `${dataType}(${precision},${scale})` : `${dataType}(${precision})`;
+  }
+
+  return dataType;
+};
 
 export const getColumnDefinitionKey = (column: unknown): string => {
   const key = readStringProperty(column, ['key', 'Key', 'COLUMN_KEY', 'column_key']);
@@ -89,7 +148,7 @@ export const normalizeColumnDefinition = (column: unknown): ColumnDefinition => 
     ...source,
     name: getColumnDefinitionName(column),
     type: getColumnDefinitionType(column),
-    nullable: readStringProperty(column, ['nullable', 'Nullable', 'NULLABLE', 'is_nullable']),
+    nullable: readStringProperty(column, ['nullable', 'Nullable', 'NULLABLE', 'is_nullable', 'IS_NULLABLE', 'Null', 'null']),
     key: getColumnDefinitionKey(column),
     default: source.default,
     extra: getColumnDefinitionExtra(column),

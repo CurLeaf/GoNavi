@@ -189,6 +189,12 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
+const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
+    { value: 3000, label: '3 秒' },
+    { value: 5000, label: '5 秒' },
+    { value: 10000, label: '10 秒' },
+    { value: 30000, label: '30 秒' },
+];
 const DATA_GRID_DISPLAY_RENDER_VERSION = Symbol('DATA_GRID_DISPLAY_RENDER_VERSION');
 const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
 const DEFAULT_GRID_MONO_FONT_FAMILY = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
@@ -1499,6 +1505,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const uiScale = useStore(state => state.uiScale);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const dataEditTransactionOptions = useStore(state => state.dataEditTransactionOptions);
+  const setDataEditTransactionOptions = useStore(state => state.setDataEditTransactionOptions);
   const tableColumnOrders = useStore(state => state.tableColumnOrders);
   const enableColumnOrderMemory = useStore(state => state.enableColumnOrderMemory);
   const setTableColumnOrder = useStore(state => state.setTableColumnOrder);
@@ -3962,6 +3970,26 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const pendingChangeCount = addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size;
   const hasChanges = pendingChangeCount > 0;
+  const dataEditCommitMode = dataEditTransactionOptions?.commitMode === 'auto' ? 'auto' : 'manual';
+  const dataEditAutoCommitDelayMs = DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.some((item) => item.value === dataEditTransactionOptions?.autoCommitDelayMs)
+      ? Number(dataEditTransactionOptions?.autoCommitDelayMs)
+      : 5000;
+  const [autoCommitRemainingSeconds, setAutoCommitRemainingSeconds] = useState<number | null>(null);
+  const autoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoCommitCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoCommitChangeTokenRef = useRef(0);
+  const autoCommitFailedTokenRef = useRef(-1);
+  const clearAutoCommitTimer = useCallback(() => {
+      if (autoCommitTimerRef.current) {
+          clearTimeout(autoCommitTimerRef.current);
+          autoCommitTimerRef.current = null;
+      }
+      if (autoCommitCountdownRef.current) {
+          clearInterval(autoCommitCountdownRef.current);
+          autoCommitCountdownRef.current = null;
+      }
+      setAutoCommitRemainingSeconds(null);
+  }, []);
 
   const allSelectedAreDeleted = useMemo(() => {
       if (selectedRowKeys.length === 0) return false;
@@ -3979,6 +4007,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [addedRows, rowKeyStr]);
 
   const modifiedRowKeySet = useMemo(() => new Set(Object.keys(modifiedRows)), [modifiedRows]);
+  useEffect(() => {
+      autoCommitChangeTokenRef.current += 1;
+      autoCommitFailedTokenRef.current = -1;
+  }, [addedRows, modifiedRows, deletedRowKeys]);
+
   const rowClassName = useCallback((record: Item) => {
       const k = record?.[GONAVI_ROW_KEY];
       if (k === undefined || k === null) return '';
@@ -5255,7 +5288,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       visibleColumnNames, rowKeyStr, normalizeCommitCellValue, shouldCommitColumn,
       connectionId, tableName, connections]);
 
-  const handleCommit = async () => {
+  const handleCommit = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
+      clearAutoCommitTimer();
       if (!connectionId || !tableName) return;
       const conn = connections.find(c => c.id === connectionId);
       if (!conn) return;
@@ -5301,6 +5335,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (deletes.length > 0) logSql += `DELETE ${deletes.length} rows;\n`;
       
       if (res.success) {
+          autoCommitFailedTokenRef.current = -1;
           addSqlLog({
               id: Date.now().toString(),
               timestamp: Date.now(),
@@ -5310,7 +5345,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.success("事务提交成功");
+          void message.success(source === 'auto' ? "自动提交成功" : "事务提交成功");
           setAddedRows([]);
           setModifiedRows({});
           setDeletedRowKeys(new Set());
@@ -5326,9 +5361,70 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.error("提交失败: " + res.message);
+          if (source === 'auto') {
+              autoCommitFailedTokenRef.current = autoCommitChangeTokenRef.current;
+          }
+          void message.error((source === 'auto' ? "自动提交失败: " : "提交失败: ") + res.message);
       }
-  };
+  }, [
+      clearAutoCommitTimer,
+      connectionId,
+      tableName,
+      connections,
+      addedRows,
+      modifiedRows,
+      deletedRowKeys,
+      data,
+      effectiveEditLocator,
+      visibleColumnNames,
+      rowKeyStr,
+      normalizeCommitCellValue,
+      shouldCommitColumn,
+      dbName,
+      addSqlLog,
+      onReload,
+  ]);
+
+  useEffect(() => {
+      if (!canModifyData || dataEditCommitMode !== 'auto' || !hasChanges) {
+          clearAutoCommitTimer();
+          return;
+      }
+      if (autoCommitFailedTokenRef.current === autoCommitChangeTokenRef.current) {
+          clearAutoCommitTimer();
+          return;
+      }
+
+      const delayMs = dataEditAutoCommitDelayMs;
+      const dueAt = Date.now() + delayMs;
+      const updateRemaining = () => {
+          setAutoCommitRemainingSeconds(Math.max(1, Math.ceil((dueAt - Date.now()) / 1000)));
+      };
+      clearAutoCommitTimer();
+      updateRemaining();
+      autoCommitCountdownRef.current = setInterval(updateRemaining, 250);
+      autoCommitTimerRef.current = setTimeout(() => {
+          autoCommitTimerRef.current = null;
+          if (autoCommitCountdownRef.current) {
+              clearInterval(autoCommitCountdownRef.current);
+              autoCommitCountdownRef.current = null;
+          }
+          setAutoCommitRemainingSeconds(null);
+          void handleCommit('auto');
+      }, delayMs);
+
+      return clearAutoCommitTimer;
+  }, [
+      canModifyData,
+      dataEditCommitMode,
+      dataEditAutoCommitDelayMs,
+      hasChanges,
+      pendingChangeCount,
+      handleCommit,
+      clearAutoCommitTimer,
+  ]);
+
+  useEffect(() => clearAutoCommitTimer, [clearAutoCommitTimer]);
 
   const copyToClipboard = useCallback((text: string) => {
       navigator.clipboard.writeText(text).catch(console.error);
@@ -7350,12 +7446,23 @@ const DataGrid: React.FC<DataGridProps> = ({
   ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
+      clearAutoCommitTimer();
+      autoCommitFailedTokenRef.current = -1;
       setAddedRows([]);
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
       if (onReload) onReload();
-  }, [onReload]);
+  }, [clearAutoCommitTimer, onReload]);
+
+  const handleResetPendingChanges = useCallback(() => {
+      clearAutoCommitTimer();
+      autoCommitFailedTokenRef.current = -1;
+      setAddedRows([]);
+      setModifiedRows({});
+      setDeletedRowKeys(new Set());
+      setModifiedColumns({});
+  }, [clearAutoCommitTimer]);
 
   const handleToggleFilterWithDefault = useCallback(() => {
       if (!onToggleFilter) return;
@@ -7425,6 +7532,10 @@ const DataGrid: React.FC<DataGridProps> = ({
             copiedCellPatchColumnCount={copiedCellPatch ? Object.keys(copiedCellPatch.values).length : 0}
             hasChanges={hasChanges}
             pendingChangeCount={pendingChangeCount}
+            dataEditCommitMode={dataEditCommitMode}
+            dataEditAutoCommitDelayMs={dataEditAutoCommitDelayMs}
+            dataEditAutoCommitDelayOptions={DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS}
+            autoCommitRemainingSeconds={autoCommitRemainingSeconds}
             canImport={canImport}
             canExport={canExport}
             isQueryResultExport={isQueryResultExport}
@@ -7451,12 +7562,9 @@ const DataGrid: React.FC<DataGridProps> = ({
             exportMenu={exportMenu}
             queryResultCopyMenu={queryResultCopyMenu}
             dbType={dbType}
-            onResetPendingChanges={() => {
-                setAddedRows([]);
-                setModifiedRows({});
-                setDeletedRowKeys(new Set());
-                setModifiedColumns({});
-            }}
+            onResetPendingChanges={handleResetPendingChanges}
+            onDataEditCommitModeChange={(mode) => setDataEditTransactionOptions({ commitMode: mode })}
+            onDataEditAutoCommitDelayChange={(delayMs) => setDataEditTransactionOptions({ autoCommitDelayMs: delayMs })}
             onRefresh={handleRefreshGrid}
             onToggleFilterClick={handleToggleFilterWithDefault}
             onAddRow={handleAddRow}

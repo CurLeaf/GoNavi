@@ -31,6 +31,11 @@ vi.mock('../store', () => ({
       showColumnType: false,
     },
     setQueryOptions: vi.fn(),
+    dataEditTransactionOptions: {
+      commitMode: 'manual',
+      autoCommitDelayMs: 5000,
+    },
+    setDataEditTransactionOptions: vi.fn(),
     addTab: vi.fn(),
     setActiveContext: vi.fn(),
     tableColumnOrders: {},
@@ -271,6 +276,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('gn-v2-data-grid-table-wrap');
     expect(markup).toContain('· main');
     expect(markup).toContain('提交事务');
+    expect(markup).toContain('手动提交');
     expect(markup).toContain('AI 洞察');
   });
 

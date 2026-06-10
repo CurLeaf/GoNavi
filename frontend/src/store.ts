@@ -1114,6 +1114,11 @@ export interface QueryOptions {
   showQueryResultsPanel: boolean;
 }
 
+export interface DataEditTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
 interface AppState {
   connections: SavedConnection[];
   connectionTags: ConnectionTag[];
@@ -1131,6 +1136,7 @@ interface AppState {
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
+  dataEditTransactionOptions: DataEditTransactionOptions;
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
@@ -1202,7 +1208,12 @@ interface AppState {
   addTab: (tab: TabData) => void;
   updateQueryTabDraft: (
     id: string,
-    draft: Partial<Pick<TabData, "query" | "connectionId" | "dbName" | "title">>,
+    draft: Partial<
+      Pick<
+        TabData,
+        "query" | "connectionId" | "dbName" | "title" | "resultPanelVisible"
+      >
+    >,
   ) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
@@ -1231,6 +1242,9 @@ interface AppState {
   replaceGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: "upper" | "lower" }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
+  setDataEditTransactionOptions: (
+    options: Partial<DataEditTransactionOptions>,
+  ) => void;
   updateShortcut: (
     action: ShortcutAction,
     binding: Partial<ShortcutPlatformBinding>,
@@ -1434,6 +1448,10 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
       connectionId: toTrimmedString(raw.connectionId),
       dbName: toTrimmedString(raw.dbName),
       query,
+      resultPanelVisible:
+        typeof raw.resultPanelVisible === "boolean"
+          ? raw.resultPanelVisible
+          : undefined,
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
       readOnly: raw.readOnly === true,
@@ -1592,6 +1610,24 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     showColumnComment,
     showColumnType,
     showQueryResultsPanel,
+  };
+};
+
+const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
+
+const sanitizeDataEditTransactionOptions = (
+  value: unknown,
+): DataEditTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 5000,
   };
 };
 
@@ -1981,6 +2017,10 @@ export const useStore = create<AppState>()(
         showColumnType: true,
         showQueryResultsPanel: false,
       },
+      dataEditTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 5000,
+      },
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
@@ -2308,41 +2348,48 @@ export const useStore = create<AppState>()(
 
       addTab: (tab) =>
         set((state) => {
-          const index = state.tabs.findIndex((t) => t.id === tab.id);
+          const incomingTab =
+            tab.type === "query" && tab.resultPanelVisible === undefined
+              ? {
+                  ...tab,
+                  resultPanelVisible: state.queryOptions.showQueryResultsPanel,
+                }
+              : tab;
+          const index = state.tabs.findIndex((t) => t.id === incomingTab.id);
           if (index !== -1) {
             // Update existing tab with new data (e.g. switch initialTab)
             const newTabs = [...state.tabs];
-            newTabs[index] = { ...newTabs[index], ...tab };
+            newTabs[index] = { ...newTabs[index], ...incomingTab };
             return {
               tabs: newTabs,
-              activeTabId: tab.id,
+              activeTabId: incomingTab.id,
               activeContext: resolveActiveContextForTabId(
                 newTabs,
-                tab.id,
+                incomingTab.id,
                 state.activeContext,
               ),
             };
           }
           // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
           if (
-            (tab.type === "table" || tab.type === "design") &&
-            tab.tableName &&
-            tab.connectionId &&
-            tab.dbName
+            (incomingTab.type === "table" || incomingTab.type === "design") &&
+            incomingTab.tableName &&
+            incomingTab.connectionId &&
+            incomingTab.dbName
           ) {
             const semanticIndex = state.tabs.findIndex(
               (t) =>
-                t.type === tab.type &&
-                t.connectionId === tab.connectionId &&
-                t.dbName === tab.dbName &&
-                t.tableName === tab.tableName,
+                t.type === incomingTab.type &&
+                t.connectionId === incomingTab.connectionId &&
+                t.dbName === incomingTab.dbName &&
+                t.tableName === incomingTab.tableName,
             );
             if (semanticIndex !== -1) {
               const existingTab = state.tabs[semanticIndex];
               const newTabs = [...state.tabs];
               newTabs[semanticIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2357,19 +2404,19 @@ export const useStore = create<AppState>()(
             }
           }
           // 语义去重：对 query 类型按 savedQueryId 匹配已有 Tab（避免保存后重复打开）
-          if (tab.type === "query" && tab.savedQueryId) {
+          if (incomingTab.type === "query" && incomingTab.savedQueryId) {
             const savedQueryIndex = state.tabs.findIndex(
               (t) =>
                 t.type === "query" &&
-                (t.savedQueryId === tab.savedQueryId ||
-                  t.id === tab.savedQueryId),
+                (t.savedQueryId === incomingTab.savedQueryId ||
+                  t.id === incomingTab.savedQueryId),
             );
             if (savedQueryIndex !== -1) {
               const existingTab = state.tabs[savedQueryIndex];
               const newTabs = [...state.tabs];
               newTabs[savedQueryIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2383,13 +2430,13 @@ export const useStore = create<AppState>()(
               };
             }
           }
-          const nextTabs = [...state.tabs, tab];
+          const nextTabs = [...state.tabs, incomingTab];
           return {
             tabs: nextTabs,
-            activeTabId: tab.id,
+            activeTabId: incomingTab.id,
             activeContext: resolveActiveContextForTabId(
               nextTabs,
-              tab.id,
+              incomingTab.id,
               state.activeContext,
             ),
           };
@@ -2430,6 +2477,13 @@ export const useStore = create<AppState>()(
               const nextTitle = toTrimmedString(draft.title, nextTab.title) || nextTab.title;
               if (nextTab.title !== nextTitle) {
                 nextTab.title = nextTitle;
+                changed = true;
+              }
+            }
+            if (draft.resultPanelVisible !== undefined) {
+              const nextResultPanelVisible = draft.resultPanelVisible === true;
+              if (nextTab.resultPanelVisible !== nextResultPanelVisible) {
+                nextTab.resultPanelVisible = nextResultPanelVisible;
                 changed = true;
               }
             }
@@ -2710,6 +2764,13 @@ export const useStore = create<AppState>()(
       setQueryOptions: (options) =>
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
+        })),
+      setDataEditTransactionOptions: (options) =>
+        set((state) => ({
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions({
+            ...state.dataEditTransactionOptions,
+            ...options,
+          }),
         })),
       updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
@@ -3117,6 +3178,8 @@ export const useStore = create<AppState>()(
           state.sqlFormatOptions,
         );
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.dataEditTransactionOptions =
+          sanitizeDataEditTransactionOptions(state.dataEditTransactionOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
@@ -3219,6 +3282,9 @@ export const useStore = create<AppState>()(
 
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions(
+            state.dataEditTransactionOptions,
+          ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
@@ -3249,6 +3315,7 @@ export const useStore = create<AppState>()(
               : toPersistedGlobalProxy(state.globalProxy),
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
+          dataEditTransactionOptions: state.dataEditTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,

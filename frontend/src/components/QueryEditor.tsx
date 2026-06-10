@@ -2021,7 +2021,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
-  const [isResultPanelVisible, setIsResultPanelVisible] = useState(Boolean(queryOptions?.showQueryResultsPanel));
+  const [isResultPanelVisible, setIsResultPanelVisible] = useState(
+      () => tab.resultPanelVisible === true
+  );
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -2045,19 +2047,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       [activeShortcutPlatform],
   );
   useEffect(() => {
-      setIsResultPanelVisible(Boolean(queryOptions?.showQueryResultsPanel));
-  }, [queryOptions?.showQueryResultsPanel]);
+      setIsResultPanelVisible(tab.resultPanelVisible === true);
+  }, [tab.id, tab.resultPanelVisible]);
   const updateResultPanelVisibility = useCallback((visible: boolean) => {
       setIsResultPanelVisible(visible);
-      setQueryOptions({ showQueryResultsPanel: visible });
-  }, [setQueryOptions]);
+      updateQueryTabDraft(tab.id, { resultPanelVisible: visible });
+  }, [tab.id, updateQueryTabDraft]);
   const toggleResultPanelVisibility = useCallback(() => {
       setIsResultPanelVisible((previousVisible) => {
           const nextVisible = !previousVisible;
-          setQueryOptions({ showQueryResultsPanel: nextVisible });
+          updateQueryTabDraft(tab.id, { resultPanelVisible: nextVisible });
           return nextVisible;
       });
-  }, [setQueryOptions]);
+  }, [tab.id, updateQueryTabDraft]);
   const autoFetchVisible = useAutoFetchVisibility();
 
   const currentSavedQuery = useMemo(() => {

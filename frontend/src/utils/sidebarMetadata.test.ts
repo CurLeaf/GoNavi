@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect } from './sidebarMetadata';
+import {
+  buildMySQLCompatibleViewMetadataSqls,
+  isSidebarViewTableType,
+  normalizeSidebarViewMetadataEntry,
+  normalizeSidebarViewName,
+  resolveSidebarMetadataDialect,
+} from './sidebarMetadata';
 
 describe('sidebarMetadata', () => {
   it('normalizes MySQL-compatible view names without schema prefixes', () => {
     expect(normalizeSidebarViewName('mysql', 'SYSDBA', 'SYSDBA', 'SYSDBA.V_ACCOUNT')).toBe('V_ACCOUNT');
+  });
+
+  it('keeps MySQL-compatible view schema metadata after display-name normalization', () => {
+    expect(normalizeSidebarViewMetadataEntry('mysql', 'SYSDBA', 'SYSDBA', 'SYSDBA.V_ACCOUNT')).toEqual({
+      viewName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+    });
+    expect(normalizeSidebarViewMetadataEntry('mysql', 'GDB_APP', 'SYSDBA', 'V_ACCOUNT')).toEqual({
+      viewName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+    });
   });
 
   it('uses MySQL metadata queries for custom MySQL-compatible domestic drivers', () => {

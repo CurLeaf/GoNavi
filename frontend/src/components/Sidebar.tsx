@@ -63,7 +63,14 @@ import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName, resolveSidebarMetadataDialect, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import {
+  buildMySQLCompatibleViewMetadataSqls,
+  isSidebarViewTableType,
+  normalizeSidebarViewMetadataEntry,
+  resolveSidebarMetadataDialect,
+  resolveSidebarRuntimeDatabase,
+  type SidebarViewMetadataEntry,
+} from '../utils/sidebarMetadata';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
@@ -1335,6 +1342,14 @@ const Sidebar: React.FC<{
       return `${schema}.${name}`;
   };
 
+  const buildSidebarObjectKeyName = (dbName: string, schemaName: string, objectName: string): string => {
+      const schema = String(schemaName || '').trim();
+      const name = String(objectName || '').trim();
+      if (!schema || !name || name.includes('.')) return name;
+      if (schema.toLowerCase() === String(dbName || '').trim().toLowerCase()) return name;
+      return `${schema}.${name}`;
+  };
+
   const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
       const parsed = splitQualifiedNameLast(qualifiedName);
       return {
@@ -1586,13 +1601,13 @@ const Sidebar: React.FC<{
       return { results, hasSuccessfulQuery };
   };
 
-  const loadViews = async (conn: any, dbName: string): Promise<{ views: string[]; supported: boolean }> => {
+  const loadViews = async (conn: any, dbName: string): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
       const savedConn = conn as SavedConnection;
       const dialect = getMetadataDialect(savedConn);
       const querySpecs = buildViewsMetadataQuerySpecs(dialect, dbName);
       const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
-      const views: string[] = [];
+      const views: SidebarViewMetadataEntry[] = [];
 
       results.forEach((queryResult) => {
           queryResult.rows.forEach((row) => {
@@ -1603,10 +1618,12 @@ const Sidebar: React.FC<{
                   getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])
                   || getMySQLShowTablesName(row)
                   || getFirstRowValue(row);
-              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
-              if (!fullName || seen.has(fullName)) return;
-              seen.add(fullName);
-              views.push(fullName);
+              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
+              if (!entry) return;
+              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              views.push(entry);
           });
       });
       return { views, supported: hasSuccessfulQuery };
@@ -1615,7 +1632,7 @@ const Sidebar: React.FC<{
   const loadStarRocksMaterializedViews = async (
       conn: any,
       dbName: string
-  ): Promise<{ views: string[]; supported: boolean }> => {
+  ): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
       const dialect = getMetadataDialect(conn as SavedConnection);
       if (dialect !== 'starrocks') {
           return { views: [], supported: false };
@@ -1634,7 +1651,7 @@ const Sidebar: React.FC<{
       ]);
       const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
-      const views: string[] = [];
+      const views: SidebarViewMetadataEntry[] = [];
 
       results.forEach((queryResult) => {
           queryResult.rows.forEach((row) => {
@@ -1642,10 +1659,12 @@ const Sidebar: React.FC<{
               const viewName =
                   getCaseInsensitiveValue(row, ['object_name', 'view_name', 'table_name', 'name', 'materialized_view_name', 'mv_name'])
                   || getFirstRowValue(row);
-              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
-              if (!fullName || seen.has(fullName)) return;
-              seen.add(fullName);
-              views.push(fullName);
+              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
+              if (!entry) return;
+              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              views.push(entry);
           });
       });
 
@@ -2116,28 +2135,28 @@ const Sidebar: React.FC<{
 	                loadFunctions(conn, conn.dbName),
 	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
-            const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
-            const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
+            const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
+            const materializedViewRows: SidebarViewMetadataEntry[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
             const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
             const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
 
-            const viewEntries = viewRows.map((viewName: string) => {
-                const parsed = splitQualifiedName(viewName);
+            const viewEntries = viewRows.map((entry: SidebarViewMetadataEntry) => {
+                const parsed = splitQualifiedName(entry.viewName);
                 return {
-                    viewName,
-	                    schemaName: parsed.schemaName,
-	                    displayName: getSidebarTableDisplayName(conn, viewName),
+                    viewName: entry.viewName,
+	                    schemaName: entry.schemaName || parsed.schemaName,
+	                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
 	                };
 	            });
 
-            const materializedViewEntries = materializedViewRows.map((viewName: string) => {
-                const parsed = splitQualifiedName(viewName);
+            const materializedViewEntries = materializedViewRows.map((entry: SidebarViewMetadataEntry) => {
+                const parsed = splitQualifiedName(entry.viewName);
                 return {
-                    viewName,
-                    schemaName: parsed.schemaName,
-                    displayName: getSidebarTableDisplayName(conn, viewName),
+                    viewName: entry.viewName,
+                    schemaName: entry.schemaName || parsed.schemaName,
+                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
                 };
             });
 
@@ -2254,23 +2273,29 @@ const Sidebar: React.FC<{
 	                };
 	            };
 
-	            const buildViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-view-${entry.viewName}`,
-	                icon: <EyeOutlined />,
-	                type: 'view',
-	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
-	                isLeaf: true,
-	            });
+	            const buildViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-view-${keyName}`,
+	                    icon: <EyeOutlined />,
+	                    type: 'view',
+	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
+	                    isLeaf: true,
+	                };
+	            };
 
-	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-materialized-view-${entry.viewName}`,
-	                icon: <ThunderboltOutlined />,
-	                type: 'materialized-view',
-	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
-	                isLeaf: true,
-	            });
+	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-materialized-view-${keyName}`,
+	                    icon: <ThunderboltOutlined />,
+	                    type: 'materialized-view',
+	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
+	                    isLeaf: true,
+	                };
+	            };
 
 	            const buildTriggerNode = (entry: { triggerName: string; tableName: string; schemaName: string; displayName: string }): TreeNode => ({
 	                title: entry.displayName,
@@ -3125,8 +3150,16 @@ const Sidebar: React.FC<{
       }
 
       const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
-      const viewRows: string[] = Array.isArray(viewResult.views) ? viewResult.views : [];
-      const viewSet = new Set(viewRows.map((view: string) => view.toLowerCase()));
+      const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewResult.views) ? viewResult.views : [];
+      const viewSet = new Set(
+          viewRows.flatMap((view) => {
+              const names = [view.viewName.toLowerCase()];
+              if (view.schemaName && !view.viewName.includes('.')) {
+                  names.push(`${view.schemaName}.${view.viewName}`.toLowerCase());
+              }
+              return names;
+          })
+      );
 
       const tableObjects: BatchObjectItem[] = tableRows
           .map((row: any) => Object.values(row)[0] as string)
@@ -3139,13 +3172,16 @@ const Sidebar: React.FC<{
               dataRef: { ...conn, tableName, dbName, objectType: 'table' },
           }));
 
-      const viewObjects: BatchObjectItem[] = viewRows.map((viewName: string) => ({
-          title: getSidebarTableDisplayName(conn, viewName),
-          key: `${conn.id}-${dbName}-view-${viewName}`,
-          objectName: viewName,
-          objectType: 'view' as const,
-          dataRef: { ...conn, tableName: viewName, dbName, objectType: 'view' },
-      }));
+      const viewObjects: BatchObjectItem[] = viewRows.map((view) => {
+          const keyName = buildSidebarObjectKeyName(dbName, view.schemaName, view.viewName);
+          return {
+              title: getSidebarTableDisplayName(conn, view.viewName),
+              key: `${conn.id}-${dbName}-view-${keyName}`,
+              objectName: view.viewName,
+              objectType: 'view' as const,
+              dataRef: { ...conn, tableName: view.viewName, schemaName: view.schemaName, dbName, objectType: 'view' },
+          };
+      });
 
       tableObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
       viewObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));

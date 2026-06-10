@@ -65,6 +65,10 @@ export interface DataGridToolbarFrameProps {
   copiedCellPatchColumnCount: number;
   hasChanges: boolean;
   pendingChangeCount: number;
+  dataEditCommitMode: 'manual' | 'auto';
+  dataEditAutoCommitDelayMs: number;
+  dataEditAutoCommitDelayOptions: Array<{ value: number; label: string }>;
+  autoCommitRemainingSeconds: number | null;
   canImport: boolean;
   canExport: boolean;
   isQueryResultExport: boolean;
@@ -92,6 +96,8 @@ export interface DataGridToolbarFrameProps {
   queryResultCopyMenu: MenuProps['items'];
   dbType: string;
   onResetPendingChanges: () => void;
+  onDataEditCommitModeChange: (mode: 'manual' | 'auto') => void;
+  onDataEditAutoCommitDelayChange: (delayMs: number) => void;
   onRefresh: () => void;
   onToggleFilterClick: () => void;
   onAddRow: () => void;
@@ -159,6 +165,10 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   copiedCellPatchColumnCount,
   hasChanges,
   pendingChangeCount,
+  dataEditCommitMode,
+  dataEditAutoCommitDelayMs,
+  dataEditAutoCommitDelayOptions,
+  autoCommitRemainingSeconds,
   canImport,
   canExport,
   isQueryResultExport,
@@ -186,6 +196,8 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   queryResultCopyMenu,
   dbType,
   onResetPendingChanges,
+  onDataEditCommitModeChange,
+  onDataEditAutoCommitDelayChange,
   onRefresh,
   onToggleFilterClick,
   onAddRow,
@@ -360,6 +372,32 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               </Dropdown>
             )}
             {hasChanges && <Button icon={<UndoOutlined />} onClick={onResetPendingChanges}>回滚</Button>}
+            <Tooltip title="控制表数据编辑后的提交方式。手动提交更安全；自动提交会在最后一次修改后按所选时间提交。">
+              <Select
+                size="small"
+                value={dataEditCommitMode}
+                onChange={onDataEditCommitModeChange}
+                style={{ width: 118, flex: '0 0 auto' }}
+                options={[
+                  { value: 'manual', label: '手动提交' },
+                  { value: 'auto', label: '自动提交' },
+                ]}
+              />
+            </Tooltip>
+            {dataEditCommitMode === 'auto' && (
+              <Select
+                size="small"
+                value={dataEditAutoCommitDelayMs}
+                onChange={onDataEditAutoCommitDelayChange}
+                style={{ width: 82, flex: '0 0 auto' }}
+                options={dataEditAutoCommitDelayOptions}
+              />
+            )}
+            {dataEditCommitMode === 'auto' && hasChanges && autoCommitRemainingSeconds !== null && (
+              <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
+                {autoCommitRemainingSeconds}s 后提交
+              </span>
+            )}
           </>
         )}
 
