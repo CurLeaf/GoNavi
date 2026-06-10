@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { AIMCPClientInstallStatus } from '../../types';
 import {
   buildRemoteMCPClientGuide,
+  buildRemoteMCPClientQuickStart,
   EMPTY_MCP_CLIENT_STATUSES,
   formatMCPLaunchCommand,
   isRemoteMCPClientStatus,
@@ -59,7 +60,9 @@ export const useAIMCPClientInstaller = ({
     [mcpClientStatuses, selectedMCPClient],
   );
   const selectedMCPClientCommandText = useMemo(
-    () => formatMCPLaunchCommand(selectedMCPClientStatus),
+    () => isRemoteMCPClientStatus(selectedMCPClientStatus)
+      ? buildRemoteMCPClientQuickStart(selectedMCPClientStatus).launchCommand
+      : formatMCPLaunchCommand(selectedMCPClientStatus),
     [selectedMCPClientStatus],
   );
 

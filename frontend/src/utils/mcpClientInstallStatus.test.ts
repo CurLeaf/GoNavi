@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AIMCPClientInstallStatus } from '../types';
 import {
   buildRemoteMCPClientGuide,
+  buildRemoteMCPClientQuickStart,
   EMPTY_MCP_CLIENT_STATUSES,
   formatMCPLaunchCommand,
   isRemoteMCPClientStatus,
@@ -137,5 +138,21 @@ describe('mcpClientInstallStatus helpers', () => {
     expect(guide).toContain('"type": "streamable-http"');
     expect(guide).toContain('"Authorization": "Bearer <随机token>"');
     expect(guide).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>');
+  });
+
+  it('builds remote quick-start snippets for cloud agents without database secrets', () => {
+    const quickStart = buildRemoteMCPClientQuickStart({
+      displayName: 'OpenClaw',
+    });
+
+    expect(quickStart.displayName).toBe('OpenClaw');
+    expect(quickStart.configJson).toContain('"type": "streamable-http"');
+    expect(quickStart.configJson).toContain('"url": "https://<你的域名或隧道地址>/mcp"');
+    expect(quickStart.configJson).toContain('"Authorization": "Bearer <随机token>"');
+    expect(quickStart.configJson).not.toContain('password');
+    expect(quickStart.launchCommand).toBe('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>');
+    expect(quickStart.standaloneCommand).toBe('gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>');
+    expect(quickStart.verificationSteps.join('\n')).toContain('get_connections');
+    expect(quickStart.securityNotes.join('\n')).toContain('allowMutating=true');
   });
 });

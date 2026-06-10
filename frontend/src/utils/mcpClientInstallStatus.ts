@@ -4,6 +4,18 @@ export type MCPClientKey = 'claude-code' | 'codex' | 'openclaw' | 'hermans';
 
 const AUTO_MCP_CLIENTS = new Set<MCPClientKey>(['claude-code', 'codex']);
 const REMOTE_MCP_CLIENTS = new Set<MCPClientKey>(['openclaw', 'hermans']);
+const DEFAULT_REMOTE_MCP_PUBLIC_URL = 'https://<你的域名或隧道地址>/mcp';
+const DEFAULT_REMOTE_MCP_LOCAL_ADDR = '127.0.0.1:8765';
+const DEFAULT_REMOTE_MCP_PATH = '/mcp';
+
+export interface RemoteMCPClientQuickStart {
+  displayName: string;
+  configJson: string;
+  launchCommand: string;
+  standaloneCommand: string;
+  verificationSteps: string[];
+  securityNotes: string[];
+}
 
 export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
   {
@@ -160,22 +172,9 @@ export const formatMCPLaunchCommand = (
 export const buildRemoteMCPClientGuide = (
   status?: Pick<AIMCPClientInstallStatus, 'displayName' | 'message'> | null,
 ): string => {
-  const displayName = String(status?.displayName || '远程 Agent').trim();
-  const streamableHTTPConfig = [
-    '{',
-    '  "mcpServers": {',
-    '    "gonavi": {',
-    '      "type": "streamable-http",',
-    '      "url": "https://<你的域名或隧道地址>/mcp",',
-    '      "headers": {',
-    '        "Authorization": "Bearer <随机token>"',
-    '      }',
-    '    }',
-    '  }',
-    '}',
-  ];
+  const quickStart = buildRemoteMCPClientQuickStart(status);
   return [
-    `GoNavi MCP 远程接入说明 - ${displayName}`,
+    `GoNavi MCP 远程接入说明 - ${quickStart.displayName}`,
     '',
     '目标：',
     '- 数据库连接、账号和密码继续保存在 Windows 上的 GoNavi。云端 Agent 不需要保存数据库密码。',
@@ -188,17 +187,53 @@ export const buildRemoteMCPClientGuide = (
     '',
     '建议接入方式：',
     '1. Windows 本机保持 GoNavi 可访问，由 GoNavi 读取保存连接和系统凭据。',
-    '2. 在 Windows 或可信内网侧运行：GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>。',
-    `3. 在 ${displayName} 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 填隧道/反向代理后的 /mcp 地址，并设置 Authorization: Bearer <随机token>。`,
+    `2. 在 Windows 或可信内网侧运行：${quickStart.launchCommand}。`,
+    `3. 在 ${quickStart.displayName} 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 填隧道/反向代理后的 /mcp 地址，并设置 Authorization: Bearer <随机token>。`,
     '4. 先调用 get_connections 获取 connectionId，再调用表结构工具；不要把数据库 host/user/password 写进云端 Agent 配置。',
     '',
     '可复制配置片段（适用于支持 mcpServers JSON 的 Agent）：',
-    ...streamableHTTPConfig,
+    ...quickStart.configJson.split('\n'),
     '',
     'CLI / 服务启动命令：',
-    'GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>',
-    '或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp',
+    quickStart.launchCommand,
+    `或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 ${quickStart.standaloneCommand.replace(' --token <随机token>', '')}`,
     '',
     status?.message ? `当前提示：${status.message}` : '',
   ].filter((line, index, lines) => line || index < lines.length - 1).join('\n');
+};
+
+export const buildRemoteMCPClientQuickStart = (
+  status?: Pick<AIMCPClientInstallStatus, 'displayName'> | null,
+): RemoteMCPClientQuickStart => {
+  const displayName = String(status?.displayName || '远程 Agent').trim();
+  const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
+  const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
+  const configJson = JSON.stringify({
+    mcpServers: {
+      gonavi: {
+        type: 'streamable-http',
+        url: DEFAULT_REMOTE_MCP_PUBLIC_URL,
+        headers: {
+          Authorization: 'Bearer <随机token>',
+        },
+      },
+    },
+  }, null, 2);
+
+  return {
+    displayName,
+    configJson,
+    launchCommand,
+    standaloneCommand,
+    verificationSteps: [
+      'Windows 本机先访问 http://127.0.0.1:8765/healthz，确认 GoNavi MCP HTTP 服务已启动。',
+      `${displayName} 里配置 Streamable HTTP MCP，URL 指向隧道或反向代理后的 /mcp 地址。`,
+      '先调用 get_connections 获取 connectionId，再读取 get_databases / get_tables / get_columns。',
+    ],
+    securityNotes: [
+      '数据库账号和密码仍保存在 Windows GoNavi，本段配置不要写数据库密码。',
+      'HTTP MCP 必须使用随机 Bearer Token，并放在 HTTPS、私有网络或受控隧道后面。',
+      'execute_sql 仍受 GoNavi AI 安全控制约束，写操作仍必须显式传 allowMutating=true。',
+    ],
+  };
 };

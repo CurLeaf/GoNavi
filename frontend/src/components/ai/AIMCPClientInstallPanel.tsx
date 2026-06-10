@@ -4,6 +4,7 @@ import { CheckCircleFilled, CopyOutlined, ReloadOutlined } from '@ant-design/ico
 
 import type { AIMCPClientInstallStatus } from '../../types';
 import {
+  buildRemoteMCPClientQuickStart,
   isMCPClientKey,
   isRemoteMCPClientStatus,
   type MCPClientKey,
@@ -56,6 +57,9 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
   onInstall,
 }) => {
   const selectedIsRemoteClient = isRemoteMCPClientStatus(selectedStatus);
+  const remoteQuickStart = selectedIsRemoteClient
+    ? buildRemoteMCPClientQuickStart(selectedStatus)
+    : null;
 
   return (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -288,6 +292,103 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
             }}
           >
             远程接入边界：数据库连接信息和密码仍保存在 Windows GoNavi；云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL。跨机器接入请使用 GoNavi Streamable HTTP 模式，并配合 token、隧道或反向代理。
+          </div>
+        )}
+        {remoteQuickStart && (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1px solid ${darkMode ? 'rgba(56,189,248,0.2)' : 'rgba(14,165,233,0.18)'}`,
+              background: darkMode ? 'rgba(14,165,233,0.06)' : 'rgba(240,249,255,0.78)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
+              {remoteQuickStart.displayName} 远程 MCP 快速配置
+            </div>
+            <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
+              下面两段分别给云端 Agent 和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码。
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.78)',
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>
+                  配置到云端 Agent
+                </div>
+                <code
+                  style={{
+                    display: 'block',
+                    marginTop: 8,
+                    fontFamily: 'var(--gn-font-mono)',
+                    fontSize: 11,
+                    color: overlayTheme.titleText,
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {remoteQuickStart.configJson}
+                </code>
+              </div>
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(15,23,42,0.55)' : 'rgba(255,255,255,0.78)',
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>
+                  Windows 启动 GoNavi MCP HTTP
+                </div>
+                <code
+                  style={{
+                    display: 'block',
+                    marginTop: 8,
+                    fontFamily: 'var(--gn-font-mono)',
+                    fontSize: 11,
+                    color: overlayTheme.titleText,
+                    whiteSpace: 'pre-wrap',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {remoteQuickStart.launchCommand}
+                </code>
+                <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                  独立二进制：{remoteQuickStart.standaloneCommand}
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>验证顺序</div>
+                <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {remoteQuickStart.verificationSteps.map((item) => (
+                    <div key={item} style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>安全边界</div>
+                <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {remoteQuickStart.securityNotes.map((item) => (
+                    <div key={item} style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
