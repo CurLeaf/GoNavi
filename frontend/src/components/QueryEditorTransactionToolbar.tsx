@@ -28,6 +28,12 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
     return null;
   }
 
+  const statusText = transaction.commitMode === 'auto'
+    ? autoCommitRemainingSeconds !== null && autoCommitRemainingSeconds > 0
+      ? `事务待提交，${autoCommitRemainingSeconds}s 后自动提交`
+      : '事务执行成功，正在自动提交'
+    : '事务待提交';
+
   return (
     <div
       className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}
@@ -40,9 +46,7 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
       }}
     >
       <span style={{ fontSize: 12, color: darkMode ? '#d4d4d4' : '#666' }}>
-        {transaction.commitMode === 'auto' && autoCommitRemainingSeconds !== null
-          ? `事务待提交，${autoCommitRemainingSeconds}s 后自动提交`
-          : '事务待提交'}
+        {statusText}
       </span>
       <Button
         size="small"

@@ -1637,7 +1637,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
 };
 
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
-const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
+const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = new Set([0, 3000, 5000, 10000, 30000]);
 
 const sanitizeDataEditTransactionOptions = (
   value: unknown,
@@ -1667,7 +1667,7 @@ const sanitizeSqlEditorTransactionOptions = (
     commitMode: raw.commitMode === "auto" ? "auto" : "manual",
     autoCommitDelayMs: SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
       ? autoCommitDelayMs
-      : 5000,
+      : 0,
   };
 };
 
@@ -2063,7 +2063,7 @@ export const useStore = create<AppState>()(
       },
       sqlEditorTransactionOptions: {
         commitMode: "manual",
-        autoCommitDelayMs: 5000,
+        autoCommitDelayMs: 0,
       },
       sqlEditorPendingTransactions: {},
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),

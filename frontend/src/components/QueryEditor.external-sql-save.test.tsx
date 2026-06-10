@@ -45,7 +45,7 @@ const storeState = vi.hoisted(() => ({
   setQueryOptions: vi.fn(),
   sqlEditorTransactionOptions: {
     commitMode: 'manual' as 'manual' | 'auto',
-    autoCommitDelayMs: 5000,
+    autoCommitDelayMs: 0,
   },
   setSqlEditorTransactionOptions: vi.fn(),
   sqlEditorPendingTransactions: {} as Record<string, unknown>,
@@ -461,7 +461,7 @@ describe('QueryEditor external SQL save', () => {
     };
     storeState.sqlEditorTransactionOptions = {
       commitMode: 'manual',
-      autoCommitDelayMs: 5000,
+      autoCommitDelayMs: 0,
     };
     storeState.shortcutOptions = {
       runQuery: {
@@ -2347,6 +2347,53 @@ describe('QueryEditor external SQL save', () => {
     }
   });
 
+  it('supports DBeaver-style immediate auto-commit for SQL editor DML transactions', async () => {
+    vi.useFakeTimers();
+    storeState.sqlEditorTransactionOptions = {
+      commitMode: 'auto',
+      autoCommitDelayMs: 0,
+    };
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-auto-now',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    try {
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({ query: "UPDATE users SET active = 0 WHERE id = 1" })} />);
+      });
+
+      await act(async () => {
+        await findButton(renderer!, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalled();
+      expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+      expect(textContent(renderer!.root)).toContain('事务执行成功，正在自动提交');
+      expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto-now');
+      expect(textContent(renderer!.root)).not.toContain('事务执行成功，正在自动提交');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('automatically appends hidden primary key locator columns for editable query results', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
@@ -3569,12 +3616,14 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain('QueryEditorTransactionSettings');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-delay-select');
-    expect(transactionSettingsSource).toContain('这里仅选择事务执行成功后的 COMMIT 时机');
-    expect(transactionSettingsSource).toContain("label: '提交：手动 COMMIT'");
-    expect(transactionSettingsSource).toContain("label: '提交：自动 COMMIT'");
+    expect(transactionSettingsSource).toContain('参考 DBeaver');
+    expect(transactionSettingsSource).toContain("label: 'Manual Commit'");
+    expect(transactionSettingsSource).toContain("label: 'Auto-commit'");
+    expect(transactionSettingsSource).toContain("label: '立即'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
     expect(transactionToolbarSource).toContain('事务待提交');
+    expect(transactionToolbarSource).toContain('事务执行成功，正在自动提交');
     expect(transactionToolbarSource).toContain('onFinish');
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 160 }}');

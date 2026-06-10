@@ -4,10 +4,11 @@ import { Select, Tooltip } from 'antd';
 export type SqlEditorCommitMode = 'manual' | 'auto';
 
 export const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = [
-  { value: 3000, label: '3 秒' },
-  { value: 5000, label: '5 秒' },
-  { value: 10000, label: '10 秒' },
-  { value: 30000, label: '30 秒' },
+  { value: 0, label: '立即' },
+  { value: 3000, label: '3 秒后' },
+  { value: 5000, label: '5 秒后' },
+  { value: 10000, label: '10 秒后' },
+  { value: 30000, label: '30 秒后' },
 ];
 
 type QueryEditorTransactionSettingsProps = {
@@ -26,15 +27,15 @@ const QueryEditorTransactionSettings: React.FC<QueryEditorTransactionSettingsPro
   onAutoCommitDelayMsChange,
 }) => (
   <>
-    <Tooltip title="SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时固定开启受管事务；这里仅选择事务执行成功后的 COMMIT 时机。">
+    <Tooltip title="参考 DBeaver：SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时先进入 GoNavi 托管事务；Manual Commit 需要手动提交/回滚，Auto-commit 在执行成功后自动 COMMIT。">
       <Select
         className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
         style={isV2Ui ? undefined : { width: 160 }}
         value={commitMode}
         onChange={(mode) => onCommitModeChange(mode === 'auto' ? 'auto' : 'manual')}
         options={[
-          { label: '提交：手动 COMMIT', value: 'manual' },
-          { label: '提交：自动 COMMIT', value: 'auto' },
+          { label: 'Manual Commit', value: 'manual' },
+          { label: 'Auto-commit', value: 'auto' },
         ]}
       />
     </Tooltip>

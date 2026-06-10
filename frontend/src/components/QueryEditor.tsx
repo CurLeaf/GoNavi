@@ -2086,7 +2086,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const sqlEditorCommitMode = sqlEditorTransactionOptions?.commitMode === 'auto' ? 'auto' : 'manual';
   const sqlEditorAutoCommitDelayMs = SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.some((item) => item.value === sqlEditorTransactionOptions?.autoCommitDelayMs)
       ? Number(sqlEditorTransactionOptions?.autoCommitDelayMs)
-      : 5000;
+      : 0;
   const clearSqlEditorAutoCommitTimer = useCallback(() => {
       if (sqlEditorAutoCommitTimerRef.current) {
           clearTimeout(sqlEditorAutoCommitTimerRef.current);
@@ -2137,10 +2137,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [clearSqlEditorAutoCommitTimer, updatePendingSqlTransaction]);
   const activatePendingSqlTransaction = useCallback((transaction: PendingSqlEditorTransaction) => {
       clearSqlEditorAutoCommitTimer();
-      const dueAt = transaction.commitMode === 'auto' ? Date.now() + transaction.autoCommitDelayMs : null;
-      const nextTransaction = { ...transaction, autoCommitDueAt: dueAt };
+      const autoCommitDelayMs = Math.max(0, Number(transaction.autoCommitDelayMs) || 0);
+      const dueAt = transaction.commitMode === 'auto' ? Date.now() + autoCommitDelayMs : null;
+      const nextTransaction = { ...transaction, autoCommitDelayMs, autoCommitDueAt: dueAt };
       updatePendingSqlTransaction(nextTransaction);
       if (nextTransaction.commitMode !== 'auto' || !dueAt) {
+          return;
+      }
+      if (autoCommitDelayMs === 0) {
+          setSqlEditorAutoCommitRemainingSeconds(0);
+          sqlEditorAutoCommitTimerRef.current = setTimeout(() => {
+              sqlEditorAutoCommitTimerRef.current = null;
+              setSqlEditorAutoCommitRemainingSeconds(null);
+              void finishPendingSqlTransaction('commit', 'auto', nextTransaction.id);
+          }, 0);
           return;
       }
       const updateRemaining = () => {
@@ -2156,7 +2166,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           setSqlEditorAutoCommitRemainingSeconds(null);
           void finishPendingSqlTransaction('commit', 'auto', nextTransaction.id);
-      }, nextTransaction.autoCommitDelayMs);
+      }, autoCommitDelayMs);
   }, [clearSqlEditorAutoCommitTimer, finishPendingSqlTransaction, updatePendingSqlTransaction]);
   useEffect(() => {
       return () => {
@@ -5298,7 +5308,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               isV2Ui={isV2Ui}
               commitMode={sqlEditorCommitMode}
               autoCommitDelayMs={sqlEditorAutoCommitDelayMs}
-              onCommitModeChange={(mode) => setSqlEditorTransactionOptions({ commitMode: mode })}
+              onCommitModeChange={(mode) => setSqlEditorTransactionOptions(
+                  mode === 'auto'
+                      ? { commitMode: mode, autoCommitDelayMs: 0 }
+                      : { commitMode: mode },
+              )}
               onAutoCommitDelayMsChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: delayMs })}
           />
           {pendingSqlTransaction && sqlEditorTransactionToolbar}
