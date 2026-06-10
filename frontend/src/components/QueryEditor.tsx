@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBCommitTransaction, DBRollbackTransaction, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
+import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
@@ -39,7 +39,8 @@ import QueryEditorResultsPanel, { type QueryEditorResultSet } from './QueryEdito
 import QueryEditorTransactionSettings, {
     SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS,
 } from './QueryEditorTransactionSettings';
-import QueryEditorTransactionToolbar, { type PendingSqlEditorTransaction } from './QueryEditorTransactionToolbar';
+import QueryEditorTransactionToolbar from './QueryEditorTransactionToolbar';
+import { useSqlEditorTransactionController } from './useSqlEditorTransactionController';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -2038,15 +2039,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const setQueryOptions = useStore(state => state.setQueryOptions);
   const sqlEditorTransactionOptions = useStore(state => state.sqlEditorTransactionOptions);
   const setSqlEditorTransactionOptions = useStore(state => state.setSqlEditorTransactionOptions);
-  const setSqlEditorPendingTransaction = useStore(state => state.setSqlEditorPendingTransaction);
   const [isResultPanelVisible, setIsResultPanelVisible] = useState(
       () => tab.resultPanelVisible === true
   );
-  const [pendingSqlTransaction, setPendingSqlTransaction] = useState<PendingSqlEditorTransaction | null>(null);
-  const pendingSqlTransactionRef = useRef<PendingSqlEditorTransaction | null>(null);
-  const sqlEditorAutoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const sqlEditorAutoCommitCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [sqlEditorAutoCommitRemainingSeconds, setSqlEditorAutoCommitRemainingSeconds] = useState<number | null>(null);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
   const runQueryShortcutBinding = useMemo(
@@ -2087,98 +2082,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const sqlEditorAutoCommitDelayMs = SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.some((item) => item.value === sqlEditorTransactionOptions?.autoCommitDelayMs)
       ? Number(sqlEditorTransactionOptions?.autoCommitDelayMs)
       : 0;
-  const clearSqlEditorAutoCommitTimer = useCallback(() => {
-      if (sqlEditorAutoCommitTimerRef.current) {
-          clearTimeout(sqlEditorAutoCommitTimerRef.current);
-          sqlEditorAutoCommitTimerRef.current = null;
-      }
-      if (sqlEditorAutoCommitCountdownRef.current) {
-          clearInterval(sqlEditorAutoCommitCountdownRef.current);
-          sqlEditorAutoCommitCountdownRef.current = null;
-      }
-      setSqlEditorAutoCommitRemainingSeconds(null);
-  }, []);
-  const updatePendingSqlTransaction = useCallback((transaction: PendingSqlEditorTransaction | null) => {
-      pendingSqlTransactionRef.current = transaction;
-      setPendingSqlTransaction(transaction);
-      setSqlEditorPendingTransaction(tab.id, transaction);
-  }, [setSqlEditorPendingTransaction, tab.id]);
-  const finishPendingSqlTransaction = useCallback(async (
-      action: 'commit' | 'rollback',
-      source: 'manual' | 'auto' = 'manual',
-      transactionId?: string,
-  ) => {
-      const transaction = pendingSqlTransactionRef.current;
-      if (!transaction || (transactionId && transaction.id !== transactionId)) {
-          return;
-      }
-      clearSqlEditorAutoCommitTimer();
-      try {
-          const res = action === 'commit'
-              ? await DBCommitTransaction(transaction.id)
-              : await DBRollbackTransaction(transaction.id);
-          if (res?.success) {
-              updatePendingSqlTransaction(null);
-              if (action === 'commit') {
-                  message.success(source === 'auto' ? 'SQL 事务已自动提交' : 'SQL 事务已提交');
-              } else {
-                  message.success('SQL 事务已回滚');
-              }
-              return;
-          }
-          updatePendingSqlTransaction(null);
-          const fallback = action === 'commit' ? '提交失败' : '回滚失败';
-          message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(res?.message || '未知错误')}`);
-      } catch (err: any) {
-          updatePendingSqlTransaction(null);
-          const fallback = action === 'commit' ? '提交失败' : '回滚失败';
-          message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(err?.message || err || '未知错误')}`);
-      }
-  }, [clearSqlEditorAutoCommitTimer, updatePendingSqlTransaction]);
-  const activatePendingSqlTransaction = useCallback((transaction: PendingSqlEditorTransaction) => {
-      clearSqlEditorAutoCommitTimer();
-      const autoCommitDelayMs = Math.max(0, Number(transaction.autoCommitDelayMs) || 0);
-      const dueAt = transaction.commitMode === 'auto' ? Date.now() + autoCommitDelayMs : null;
-      const nextTransaction = { ...transaction, autoCommitDelayMs, autoCommitDueAt: dueAt };
-      updatePendingSqlTransaction(nextTransaction);
-      if (nextTransaction.commitMode !== 'auto' || !dueAt) {
-          return;
-      }
-      if (autoCommitDelayMs === 0) {
-          setSqlEditorAutoCommitRemainingSeconds(0);
-          sqlEditorAutoCommitTimerRef.current = setTimeout(() => {
-              sqlEditorAutoCommitTimerRef.current = null;
-              setSqlEditorAutoCommitRemainingSeconds(null);
-              void finishPendingSqlTransaction('commit', 'auto', nextTransaction.id);
-          }, 0);
-          return;
-      }
-      const updateRemaining = () => {
-          setSqlEditorAutoCommitRemainingSeconds(Math.max(1, Math.ceil((dueAt - Date.now()) / 1000)));
-      };
-      updateRemaining();
-      sqlEditorAutoCommitCountdownRef.current = setInterval(updateRemaining, 250);
-      sqlEditorAutoCommitTimerRef.current = setTimeout(() => {
-          sqlEditorAutoCommitTimerRef.current = null;
-          if (sqlEditorAutoCommitCountdownRef.current) {
-              clearInterval(sqlEditorAutoCommitCountdownRef.current);
-              sqlEditorAutoCommitCountdownRef.current = null;
-          }
-          setSqlEditorAutoCommitRemainingSeconds(null);
-          void finishPendingSqlTransaction('commit', 'auto', nextTransaction.id);
-      }, autoCommitDelayMs);
-  }, [clearSqlEditorAutoCommitTimer, finishPendingSqlTransaction, updatePendingSqlTransaction]);
-  useEffect(() => {
-      return () => {
-          clearSqlEditorAutoCommitTimer();
-          const transaction = pendingSqlTransactionRef.current;
-          if (transaction?.id) {
-              pendingSqlTransactionRef.current = null;
-              setSqlEditorPendingTransaction(tab.id, null);
-              void DBRollbackTransaction(transaction.id);
-          }
-      };
-  }, [clearSqlEditorAutoCommitTimer, setSqlEditorPendingTransaction, tab.id]);
+  const {
+      activatePendingSqlTransaction,
+      autoCommitRemainingSeconds: sqlEditorAutoCommitRemainingSeconds,
+      finishPendingSqlTransaction,
+      pendingSqlTransaction,
+      pendingSqlTransactionRef,
+  } = useSqlEditorTransactionController({ tabId: tab.id });
   const autoFetchVisible = useAutoFetchVisibility();
 
   const currentSavedQuery = useMemo(() => {
