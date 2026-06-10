@@ -42,6 +42,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_mcp_setup');
     expect(markup).toContain('新增 MCP 填写指引');
     expect(markup).toContain('inspect_mcp_authoring_guide');
+    expect(markup).toContain('inspect_mcp_draft');
+    expect(markup).toContain('真实校验器试算');
     expect(markup).toContain('查看 MCP 工具参数');
     expect(markup).toContain('inspect_mcp_tool_schema');
     expect(markup).toContain('inputSchema');

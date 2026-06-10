@@ -146,6 +146,40 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_mcp_draft",
+    icon: "🧪",
+    desc: "校验 MCP 新增草稿",
+    detail:
+      "按完整启动命令或分字段草稿试算 GoNavi 的 MCP 新增配置，返回自动拆分结果、启动预览、字段校验问题、推荐模板和下一步修复建议。适合用户贴出一整行 MCP 启动命令、问 command/args/env/timeout 该怎么拆，或保存前想确认配置有没有明显问题时使用。",
+    params: "fullCommand?, command?, args?, envText?, timeoutSeconds?, templateKey?, name?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_draft",
+        description:
+          "校验一份待新增的 MCP 服务草稿。支持传 fullCommand/rawCommand/commandLine 让 GoNavi 自动拆分，也支持传 command、args、envText、timeoutSeconds 和 templateKey 做分字段校验；返回解析后的字段、启动命令预览、错误/告警、推荐模板和 nextActions。适用于用户贴出 MCP README 启动命令、问新增 MCP 参数怎么填、或 AI 准备指导用户保存前，先用真实校验器试算。",
+        parameters: {
+          type: "object",
+          properties: {
+            fullCommand: { type: "string", description: "可选，README 或用户贴出的一整行 MCP 启动命令，例如 $env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio" },
+            command: { type: "string", description: "可选，分字段草稿里的启动命令，只应是 npx、node、uvx、python 或 exe 路径本身" },
+            args: {
+              oneOf: [
+                { type: "array", items: { type: "string" } },
+                { type: "string" },
+              ],
+              description: "可选，分字段草稿里的命令参数；数组更准确，也可传逗号或换行分隔字符串",
+            },
+            envText: { type: "string", description: "可选，环境变量草稿，每行 KEY=VALUE；不要传 export、set 或 $env: 前缀" },
+            timeoutSeconds: { type: "number", description: "可选，单次工具发现或调用超时秒数；推荐 20，慢启动服务可用 45 或 60" },
+            templateKey: { type: "string", enum: ["npx", "uvx", "node", "python", "exe"], description: "可选，先套用一个内置模板再覆盖用户传入字段" },
+            name: { type: "string", description: "可选，MCP 服务名称，例如 GitHub、Filesystem、Browser" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_tool_schema",
     icon: "🧩",
     desc: "查看 MCP 工具参数怎么传",

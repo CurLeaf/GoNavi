@@ -77,8 +77,8 @@ const BUILTIN_TOOL_FLOWS = [
   },
   {
     title: '新增 MCP 填写指引',
-    steps: 'inspect_mcp_authoring_guide → inspect_mcp_setup',
-    description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再结合当前 MCP 配置现状判断应该新增哪种启动方式。',
+    steps: 'inspect_mcp_authoring_guide → inspect_mcp_draft → inspect_mcp_setup',
+    description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再把用户贴出的命令或草稿交给真实校验器试算，最后结合当前 MCP 配置现状判断应该新增哪种启动方式。',
   },
   {
     title: '查看 MCP 工具参数',

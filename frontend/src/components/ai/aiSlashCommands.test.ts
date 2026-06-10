@@ -14,6 +14,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/mcpdraft')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcptool')).toBe(true);
     expect(commands.some((command) => command.cmd === '/connfail')).toBe(true);
     expect(commands.some((command) => command.cmd === '/shortcuts')).toBe(true);
@@ -52,6 +53,12 @@ describe('aiSlashCommands', () => {
     expect(filterAISlashCommands('arguments').map((command) => command.cmd)).toContain('/mcptool');
     expect(filterAISlashCommands('MCP工具参数').map((command) => command.cmd)).toContain('/mcptool');
     expect(filterAISlashCommands('/mcpt').map((command) => command.cmd)).toContain('/mcptool');
+  });
+
+  it('supports filtering mcp draft validation diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('MCP草稿').map((command) => command.cmd)).toContain('/mcpdraft');
+    expect(filterAISlashCommands('启动命令').map((command) => command.cmd)).toContain('/mcpdraft');
+    expect(filterAISlashCommands('/mcpd').map((command) => command.cmd)).toContain('/mcpdraft');
   });
 
   it('groups commands by configured category order', () => {

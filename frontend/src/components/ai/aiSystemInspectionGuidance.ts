@@ -90,7 +90,13 @@ export const appendDatabaseInspectionGuidanceMessages = (
     messages,
     availableToolNames,
     'inspect_mcp_authoring_guide',
-    '如果用户提到“新增 MCP 不知道 command/args/env/timeout 怎么填”“给我一个 node / uvx / python 模板”“为什么启动命令不能直接填整行”，优先调用 inspect_mcp_authoring_guide 读取真实新增指引和模板，再结合 inspect_mcp_setup 判断当前配置现状，不要凭记忆口述。',
+    '如果用户提到“新增 MCP 不知道 command/args/env/timeout 怎么填”“给我一个 node / uvx / python 模板”“为什么启动命令不能直接填整行”，优先调用 inspect_mcp_authoring_guide 读取真实新增指引和模板；如果用户已经贴出命令或草稿，再调用 inspect_mcp_draft 用真实校验器试算，不要凭记忆口述。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
+    'inspect_mcp_draft',
+    '如果用户贴出 MCP README 启动命令、command/args/env/timeout 草稿，或问“这条 MCP 命令在 GoNavi 里怎么填”，优先调用 inspect_mcp_draft 返回自动拆分、启动预览、配置错误/告警和 nextActions，再给用户具体填写结果。',
   );
   appendGuidanceIfToolAvailable(
     messages,

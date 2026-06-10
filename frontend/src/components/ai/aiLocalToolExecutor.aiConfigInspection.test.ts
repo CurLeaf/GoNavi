@@ -323,6 +323,30 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
   });
 
+  it('validates an mcp draft with the real command splitter and server validator', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_draft', {
+        fullCommand: '$env:GITHUB_TOKEN="ghp test"; uvx mcp-server-github --stdio',
+        timeoutSeconds: 45,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"command":"uvx"');
+    expect(result.content).toContain('"args":["mcp-server-github","--stdio"]');
+    expect(result.content).toContain('"envKeys":["GITHUB_TOKEN"]');
+    expect(result.content).toContain('"launchCommandPreview":"uvx mcp-server-github --stdio"');
+    expect(result.content).toContain('"recommendedTemplate":{"key":"uvx"');
+    expect(result.content).toContain('"canSave":true');
+  });
+
   it('returns mcp tool input schemas so the model can build arguments from discovered tool metadata', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_tool_schema', {

@@ -38,6 +38,14 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('command、args、env、timeout');
   });
 
+  it('registers the mcp-draft inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_draft');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('MCP 新增草稿');
+    expect(info?.tool.function.description).toContain('真实校验器试算');
+    expect(info?.tool.function.parameters?.properties?.fullCommand?.description).toContain('一整行 MCP 启动命令');
+  });
+
   it('registers the mcp-tool-schema inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_tool_schema');
     expect(info).toBeTruthy();
@@ -191,6 +199,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_ai_chat_readiness')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_authoring_guide')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_mcp_draft')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_tool_schema')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_guidance')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);

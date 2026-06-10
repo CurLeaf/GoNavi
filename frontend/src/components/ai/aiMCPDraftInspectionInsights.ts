@@ -1,0 +1,194 @@
+import type { AIMCPServerConfig } from '../../types';
+import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
+import { parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
+import { buildMCPLaunchPreview } from '../../utils/mcpServerGuidance';
+import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
+import { validateMCPServerDraft } from '../../utils/mcpServerValidation';
+
+const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeArgs = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(toTrimmedString).filter(Boolean);
+  }
+  const text = toTrimmedString(value);
+  if (!text) {
+    return [];
+  }
+  return text
+    .split(/\r?\n|,/u)
+    .map(toTrimmedString)
+    .filter(Boolean);
+};
+
+const normalizeTimeoutSeconds = (value: unknown, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const getTemplateSeed = (templateKey: unknown): Partial<AIMCPServerConfig> => {
+  const normalizedKey = toTrimmedString(templateKey).toLowerCase();
+  if (!normalizedKey) {
+    return {};
+  }
+  return MCP_SERVER_DRAFT_TEMPLATES.find((template) => template.key === normalizedKey)?.seed || {};
+};
+
+const resolveRecommendedTemplate = (command: string, args: string[]) => {
+  const normalizedCommand = toTrimmedString(command).toLowerCase();
+  if (!normalizedCommand) {
+    return null;
+  }
+
+  const commandTemplate = MCP_SERVER_DRAFT_TEMPLATES.find((template) => {
+    const seedCommand = toTrimmedString(template.seed.command).toLowerCase();
+    if (seedCommand === normalizedCommand) {
+      return true;
+    }
+    return template.key === 'exe' && /\.(exe|cmd|bat)$/iu.test(normalizedCommand);
+  });
+  if (!commandTemplate) {
+    return null;
+  }
+
+  return {
+    key: commandTemplate.key,
+    title: commandTemplate.title,
+    description: commandTemplate.description,
+    exampleLaunchPreview: buildMCPLaunchPreview(
+      toTrimmedString(commandTemplate.seed.command),
+      Array.isArray(commandTemplate.seed.args) ? commandTemplate.seed.args : [],
+    ),
+    confidence: args.length > 0 ? 'high' : 'medium',
+  };
+};
+
+const buildNextActions = (params: {
+  errorCount: number;
+  warningCount: number;
+  issueKeys: Set<string>;
+  hasFullCommand: boolean;
+}): string[] => {
+  const { errorCount, warningCount, issueKeys, hasFullCommand } = params;
+  const actions: string[] = [];
+
+  if (issueKeys.has('command-missing')) {
+    actions.push('先粘贴 README 里的完整启动命令，或至少填写 node、npx、uvx、python、exe 之一作为 command。');
+  }
+  if (issueKeys.has('command-whole-line')) {
+    actions.push('把整行命令放到完整命令框自动拆分；command 只保留可执行程序，脚本名、包名和 --stdio 放到 args。');
+  }
+  if (issueKeys.has('args-missing-for-launcher')) {
+    actions.push('给启动器补齐参数：npx 通常需要 -y 和包名，node 需要 server.js，python 需要 -m 模块名，uvx 需要包名。');
+  }
+  if (issueKeys.has('args-contain-env-or-shell-glue') || issueKeys.has('env-invalid-lines')) {
+    actions.push('环境变量改成每行 KEY=VALUE；不要把 export、set、env、&& 或 $env:KEY=VALUE; 放进 args。');
+  }
+  if (issueKeys.has('timeout-out-of-range')) {
+    actions.push('把 timeout 调整到 20 秒；慢启动服务可改成 45 或 60 秒。');
+  }
+  if (errorCount === 0 && warningCount === 0) {
+    actions.push('当前草稿可以保存并测试工具发现；如果发现 0 个工具，再检查服务是否支持 stdio。');
+  } else if (errorCount === 0) {
+    actions.push('当前草稿可以测试，但建议先处理 warning，避免工具发现超时或发现 0 个工具。');
+  }
+  if (!hasFullCommand) {
+    actions.push('如果仍不确定怎么拆，优先把原始完整命令传给 fullCommand 让 GoNavi 试算。');
+  }
+
+  return actions;
+};
+
+export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = {}) => {
+  const templateSeed = getTemplateSeed(args.templateKey);
+  const fullCommand = toTrimmedString(args.fullCommand ?? args.commandLine ?? args.rawCommand);
+  const parsedCommand = fullCommand ? parseMCPCommandDraft(fullCommand) : null;
+  const envDraftText = toTrimmedString(args.envText ?? args.envDraft);
+  const parsedEnvDraft = envDraftText ? parseMCPEnvDraft(envDraftText) : undefined;
+
+  const baseName = toTrimmedString(templateSeed.name) || 'MCP 草稿';
+  let command = toTrimmedString(templateSeed.command);
+  let commandArgs = Array.isArray(templateSeed.args) ? templateSeed.args.map(toTrimmedString).filter(Boolean) : [];
+  let env: Record<string, string> = { ...(templateSeed.env || {}) };
+
+  if (parsedCommand?.ok && parsedCommand.draft) {
+    command = parsedCommand.draft.command;
+    commandArgs = parsedCommand.draft.args;
+    env = {
+      ...env,
+      ...parsedCommand.draft.env,
+    };
+  }
+  if (args.command !== undefined) {
+    command = toTrimmedString(args.command);
+  }
+  if (args.args !== undefined) {
+    commandArgs = normalizeArgs(args.args);
+  }
+  if (parsedEnvDraft) {
+    env = {
+      ...env,
+      ...parsedEnvDraft.env,
+    };
+  }
+
+  const server: Pick<AIMCPServerConfig, 'name' | 'transport' | 'command' | 'args' | 'timeoutSeconds'> = {
+    name: toTrimmedString(args.name ?? args.serverName) || baseName,
+    transport: 'stdio',
+    command,
+    args: commandArgs,
+    timeoutSeconds: normalizeTimeoutSeconds(args.timeoutSeconds, Number(templateSeed.timeoutSeconds) || 20),
+  };
+  const validation = validateMCPServerDraft(server, parsedEnvDraft);
+  const issueKeys = new Set(validation.issues.map((issue) => issue.key));
+  const recommendedTemplate = resolveRecommendedTemplate(command, commandArgs);
+
+  return {
+    input: {
+      hasFullCommand: Boolean(fullCommand),
+      templateKey: toTrimmedString(args.templateKey),
+      fullCommand,
+    },
+    parse: parsedCommand
+      ? {
+          ok: parsedCommand.ok,
+          error: parsedCommand.error || '',
+          command: parsedCommand.draft?.command || '',
+          args: parsedCommand.draft?.args || [],
+          envKeys: Object.keys(parsedCommand.draft?.env || {}).sort(),
+        }
+      : {
+          ok: false,
+          error: '未提供 fullCommand，已按分字段草稿校验。',
+          command: '',
+          args: [],
+          envKeys: [],
+        },
+    draft: {
+      name: server.name,
+      transport: server.transport,
+      command,
+      args: commandArgs,
+      envKeys: Object.keys(env).sort(),
+      envVarCount: Object.keys(env).length,
+      invalidEnvLines: parsedEnvDraft?.invalidLines || [],
+      timeoutSeconds: server.timeoutSeconds,
+      launchCommandPreview: buildMCPLaunchPreview(command, commandArgs),
+      recommendedTemplate,
+    },
+    validation: {
+      errorCount: validation.errorCount,
+      warningCount: validation.warningCount,
+      infoCount: validation.infoCount,
+      canTest: validation.canTest,
+      canSave: validation.canSave,
+      issues: validation.issues,
+    },
+    nextActions: buildNextActions({
+      errorCount: validation.errorCount,
+      warningCount: validation.warningCount,
+      issueKeys,
+      hasFullCommand: Boolean(fullCommand),
+    }),
+  };
+};

@@ -13,6 +13,7 @@ import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import { buildAISafetySnapshot } from './aiSafetyInsights';
 import { buildMCPAuthoringGuideSnapshot } from './aiMCPAuthoringGuideInsights';
+import { buildMCPDraftInspectionSnapshot } from './aiMCPDraftInspectionInsights';
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import { buildMCPToolSchemaSnapshot } from './aiMCPToolSchemaInsights';
@@ -171,6 +172,11 @@ export async function executeAIConfigSnapshotToolCall(
           content: JSON.stringify(buildMCPAuthoringGuideSnapshot()),
           success: true,
         };
+      case 'inspect_mcp_draft':
+        return {
+          content: JSON.stringify(buildMCPDraftInspectionSnapshot(args)),
+          success: true,
+        };
       case 'inspect_mcp_tool_schema':
         return {
           content: JSON.stringify(buildMCPToolSchemaSnapshot({
@@ -203,6 +209,7 @@ export async function executeAIConfigSnapshotToolCall(
       inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
       inspect_mcp_setup: '读取 MCP 配置状态失败',
       inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',
+      inspect_mcp_draft: '校验 MCP 新增草稿失败',
       inspect_mcp_tool_schema: '读取 MCP 工具参数 schema 失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
     }[toolName] || '读取 AI 配置探针失败';
