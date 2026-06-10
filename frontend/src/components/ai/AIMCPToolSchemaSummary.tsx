@@ -36,6 +36,42 @@ const readRequiredSet = (schema: JSONSchemaRecord): Set<string> => new Set(
     : [],
 );
 
+const readExampleValue = (name: string, schema: JSONSchemaRecord): unknown => {
+  if (Object.prototype.hasOwnProperty.call(schema, 'default')) {
+    const value = schema.default;
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+      return value;
+    }
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    const value = schema.enum[0];
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+      return value;
+    }
+  }
+
+  const type = readSchemaType(schema);
+  if (type.includes('boolean')) return false;
+  if (type.includes('number') || type.includes('integer')) return 0;
+  if (type.includes('array')) return [];
+  if (type.includes('object')) return {};
+  return `<${name}>`;
+};
+
+export const buildMCPToolMinimalArgumentsExample = (tool: AIMCPToolDescriptor): string => {
+  const inputSchema = isRecord(tool.inputSchema) ? tool.inputSchema : {};
+  const properties = isRecord(inputSchema.properties) ? inputSchema.properties : {};
+  const requiredSet = readRequiredSet(inputSchema);
+  const example = Object.entries(properties).reduce<Record<string, unknown>>((acc, [name, rawSchema]) => {
+    if (!requiredSet.has(name)) {
+      return acc;
+    }
+    acc[name] = readExampleValue(name, isRecord(rawSchema) ? rawSchema : {});
+    return acc;
+  }, {});
+  return JSON.stringify(example);
+};
+
 const summarizeToolParameters = (tool: AIMCPToolDescriptor) => {
   const inputSchema = isRecord(tool.inputSchema) ? tool.inputSchema : {};
   const properties = isRecord(inputSchema.properties) ? inputSchema.properties : {};
@@ -54,6 +90,7 @@ const summarizeToolParameters = (tool: AIMCPToolDescriptor) => {
     hasInputSchema: Object.keys(inputSchema).length > 0,
     parameters,
     requiredCount: parameters.filter((item) => item.required).length,
+    minimalArgumentsExample: buildMCPToolMinimalArgumentsExample(tool),
     truncated: parameters.length > MAX_PARAMETER_PREVIEW,
   };
 };
@@ -106,6 +143,15 @@ const AIMCPToolSchemaSummary: React.FC<AIMCPToolSchemaSummaryProps> = ({
                   ? `参数 ${summary.parameters.length} 个，必填 ${summary.requiredCount} 个；星号表示必填。`
                   : '未声明 inputSchema，调用参数需参考服务文档或用 /mcptool 继续查看。'}
               </div>
+              {summary.hasInputSchema ? (
+                <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
+                  最小 arguments 示例：
+                  {' '}
+                  <code style={{ fontFamily: 'var(--gn-font-mono)', overflowWrap: 'anywhere' }}>
+                    {summary.minimalArgumentsExample}
+                  </code>
+                </div>
+              ) : null}
               {previewParameters.length > 0 ? (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {previewParameters.map((parameter) => (

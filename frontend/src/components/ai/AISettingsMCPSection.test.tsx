@@ -175,6 +175,9 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('已发现工具和参数提示');
     expect(markup).toContain('execute_sql');
     expect(markup).toContain('参数 4 个，必填 2 个');
+    expect(markup).toContain('最小 arguments 示例');
+    expect(markup).toContain('&quot;connectionId&quot;:&quot;&lt;connectionId&gt;&quot;');
+    expect(markup).toContain('&quot;sql&quot;:&quot;&lt;sql&gt;&quot;');
     expect(markup).toContain('connectionId*: string');
     expect(markup).toContain('sql*: string');
     expect(markup).toContain('allowMutating: boolean');
