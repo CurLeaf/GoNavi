@@ -3557,6 +3557,7 @@ describe('QueryEditor external SQL save', () => {
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const transactionToolbarSource = readFileSync(new URL('./QueryEditorTransactionToolbar.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-query-toolbar-selects');
@@ -3569,6 +3570,10 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain('这里仅选择事务执行成功后的 COMMIT 方式');
     expect(source).toContain("label: '事务：手动提交'");
     expect(source).toContain("label: '事务：自动提交'");
+    expect(source).toContain('QueryEditorTransactionToolbar');
+    expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
+    expect(transactionToolbarSource).toContain('事务待提交');
+    expect(transactionToolbarSource).toContain('onFinish');
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 150 }}');
     expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');

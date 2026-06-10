@@ -36,6 +36,7 @@ import {
     getColumnDefinitionName,
 } from '../utils/columnDefinition';
 import QueryEditorResultsPanel, { type QueryEditorResultSet } from './QueryEditorResultsPanel';
+import QueryEditorTransactionToolbar, { type PendingSqlEditorTransaction } from './QueryEditorTransactionToolbar';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'LIMIT', 'INSERT', 'UPDATE', 'DELETE', 'JOIN', 'LEFT', 'RIGHT',
@@ -757,14 +758,6 @@ const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = [
     { value: 10000, label: '10 秒' },
     { value: 30000, label: '30 秒' },
 ];
-
-type PendingSqlEditorTransaction = {
-    id: string;
-    commitMode: 'manual' | 'auto';
-    autoCommitDelayMs: number;
-    createdAt: number;
-    autoCommitDueAt?: number | null;
-};
 
 const normalizeEditorPosition = (position: any): { lineNumber: number; column: number } | null => {
     if (!position) return null;
@@ -5247,38 +5240,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }, wasClosed ? 350 : 0);
   };
 
-  const sqlEditorTransactionToolbar = pendingSqlTransaction ? (
-      <div
-          className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}
-          style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '0 4px',
-              whiteSpace: 'nowrap',
-          }}
-      >
-          <span style={{ fontSize: 12, color: darkMode ? '#d4d4d4' : '#666' }}>
-              {pendingSqlTransaction.commitMode === 'auto' && sqlEditorAutoCommitRemainingSeconds !== null
-                  ? `事务待提交，${sqlEditorAutoCommitRemainingSeconds}s 后自动提交`
-                  : '事务待提交'}
-          </span>
-          <Button
-              size="small"
-              type="primary"
-              onClick={() => void finishPendingSqlTransaction('commit', 'manual')}
-          >
-              提交
-          </Button>
-          <Button
-              size="small"
-              danger
-              onClick={() => void finishPendingSqlTransaction('rollback', 'manual')}
-          >
-              回滚
-          </Button>
-      </div>
-  ) : null;
+  const sqlEditorTransactionToolbar = (
+      <QueryEditorTransactionToolbar
+          isV2Ui={isV2Ui}
+          darkMode={darkMode}
+          transaction={pendingSqlTransaction}
+          autoCommitRemainingSeconds={sqlEditorAutoCommitRemainingSeconds}
+          onFinish={(action) => void finishPendingSqlTransaction(action, 'manual')}
+      />
+  );
 
   return (
     <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
