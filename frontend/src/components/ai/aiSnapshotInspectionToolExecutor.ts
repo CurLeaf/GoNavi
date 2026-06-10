@@ -12,7 +12,10 @@ import type {
 } from '../../types';
 import type { SqlLog } from '../../store';
 import { buildAIContextSnapshot } from './aiContextInsights';
-import { buildAIChatSessionsSnapshot } from './aiChatSessionInsights';
+import {
+  buildAIChatSessionsSnapshot,
+  buildAIMessageFlowSnapshot,
+} from './aiChatSessionInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import {
@@ -262,6 +265,19 @@ export async function executeSnapshotInspectionToolCall(
           })),
           success: true,
         };
+      case 'inspect_ai_message_flow':
+        return {
+          content: JSON.stringify(buildAIMessageFlowSnapshot({
+            aiChatSessions,
+            aiChatHistory,
+            activeSessionId,
+            sessionId: args.sessionId,
+            limit: args.limit,
+            includeContent: args.includeContent !== false,
+            previewLimit: args.previewLimit,
+          })),
+          success: true,
+        };
       case 'inspect_recent_sql_logs':
         return {
           content: JSON.stringify(buildRecentSqlLogsSnapshot({
@@ -390,6 +406,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_app_logs: '读取 GoNavi 应用日志失败',
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
+      inspect_ai_message_flow: '读取 AI 消息流诊断失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
       inspect_shortcuts: '读取快捷键配置失败',

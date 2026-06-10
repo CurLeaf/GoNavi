@@ -42,8 +42,8 @@ const BUILTIN_TOOL_FLOWS = [
   },
   {
     title: 'AI 应用健康总览',
-    steps: 'inspect_app_health → inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures / inspect_ai_last_render_error',
-    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、回复气泡显示异常，或需要先看整体健康状态时，一次汇总配置、日志、连接失败、渲染异常和工作区现场。',
+    steps: 'inspect_app_health → inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures / inspect_ai_last_render_error / inspect_ai_message_flow',
+    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、回复气泡显示异常，或需要先看整体健康状态时，一次汇总配置、日志、连接失败、渲染异常、消息流和工作区现场。',
   },
   {
     title: '一键体检 AI 配置',
@@ -159,6 +159,11 @@ const BUILTIN_TOOL_FLOWS = [
     title: '排查 AI 气泡渲染异常',
     steps: 'inspect_ai_last_render_error → inspect_active_tab / inspect_ai_runtime',
     description: '适合用户反馈 AI 某条消息空白、气泡局部报错但整个面板没挂时，先拿到最近一次被隔离的渲染异常快照，再回到具体会话和运行时上下文继续缩小范围。',
+  },
+  {
+    title: '诊断 AI 消息流',
+    steps: 'inspect_ai_message_flow → inspect_ai_last_render_error / inspect_app_logs',
+    description: '适合用户反馈回复被拆成多个气泡、工具调用后没继续回答、消息流状态不对时，先读取当前会话的真实消息结构和异常信号。',
   },
   {
     title: '复用历史 SQL',

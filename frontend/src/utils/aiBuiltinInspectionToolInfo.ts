@@ -540,6 +540,31 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_message_flow",
+    icon: "🧬",
+    desc: "诊断当前 AI 会话消息流",
+    detail:
+      "读取当前或指定 AI 会话的最近消息流，统计用户/助手/tool 消息、工具调用是否都有结果、是否出现连续 assistant 气泡、空 assistant 占位或未清理 loading。适合用户反馈“AI 回复被拆成多个气泡”“工具调用后没继续回答”“消息流看着不对”时先看真实消息结构。",
+    params: "sessionId?(默认当前会话), limit?(默认 24), includeContent?(默认 true), previewLimit?(默认 180)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_message_flow",
+        description:
+          "读取当前或指定 AI 会话的最近消息流诊断，包括消息角色序列、assistant/tool 消息数量、工具调用与 tool 结果匹配情况、连续 assistant 消息、空 assistant 消息和 loading 残留。适用于用户提到 AI 回复被拆成多个气泡、流式追加异常、工具调用没有闭环、某轮回答没有继续生成时，先读取真实消息结构再定位。",
+        parameters: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string", description: "可选，指定要诊断的 AI 会话 ID；不传时读取当前活动会话" },
+            limit: { type: "number", description: "可选，最多返回最近多少条消息，默认 24，最大 80" },
+            includeContent: { type: "boolean", description: "可选，是否附带消息内容预览，默认 true" },
+            previewLimit: { type: "number", description: "可选，每条消息预览字符数，默认 180，最大 1000" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_sql_snippets",
     icon: "🧩",
     desc: "查看 SQL 片段模板",

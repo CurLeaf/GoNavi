@@ -125,6 +125,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_ai_message_flow',
+    '如果用户提到“AI 回复被拆成多个气泡”“工具调用后没继续回答”“消息流状态不对”“同一轮回答没有追加到同一个气泡”，优先调用 inspect_ai_message_flow 读取当前会话的真实消息结构、连续 assistant 消息和未闭环工具调用，不要只凭界面现象猜测。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_current_connection',
     '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
   );

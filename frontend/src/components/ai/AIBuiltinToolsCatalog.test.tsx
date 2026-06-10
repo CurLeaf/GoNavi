@@ -75,6 +75,8 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_recent_connection_failures');
     expect(markup).toContain('排查 AI 气泡渲染异常');
     expect(markup).toContain('inspect_ai_last_render_error');
+    expect(markup).toContain('诊断 AI 消息流');
+    expect(markup).toContain('inspect_ai_message_flow');
     expect(markup).toContain('复用历史 SQL');
     expect(markup).toContain('inspect_saved_queries');
     expect(markup).toContain('回看 AI 历史对话');

@@ -101,6 +101,44 @@ describe('aiLocalToolExecutor local asset inspection tools', () => {
     expect(result.content).not.toContain('列出最近注册用户');
   });
 
+  it('returns ai message flow diagnostics for the active session', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_message_flow', {
+        limit: 8,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      aiChatSessions: [
+        { id: 'session-1', title: '消息流异常', updatedAt: 200 },
+      ],
+      aiChatHistory: {
+        'session-1': [
+          { id: 'msg-1', role: 'user', content: 'AI 回复拆成多个气泡', timestamp: 101 },
+          {
+            id: 'msg-2',
+            role: 'assistant',
+            content: '先调用探针',
+            timestamp: 102,
+            tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'inspect_ai_runtime', arguments: '{}' } }],
+          },
+          { id: 'msg-3', role: 'assistant', content: '继续回答', timestamp: 103 },
+        ],
+      },
+      activeSessionId: 'session-1',
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"requestedSessionId":"session-1"');
+    expect(result.content).toContain('"unresolvedToolCallCount":1');
+    expect(result.content).toContain('"consecutiveAssistantPairCount":1');
+    expect(result.content).toContain('回复拆成多个气泡');
+  });
+
   it('returns sql snippets so the model can inspect local query templates', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_sql_snippets', {

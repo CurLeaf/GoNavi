@@ -122,12 +122,20 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('消息渲染异常');
   });
 
+  it('registers the ai-message-flow inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_message_flow');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('消息流');
+    expect(info?.tool.function.description).toContain('连续 assistant 消息');
+  });
+
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
     const recentActivityTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_sql_activity');
     const sqlRiskTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_risk');
     const appLogTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_app_logs');
     const connectionFailureTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_connection_failures');
     const renderErrorTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
+    const messageFlowTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_message_flow');
     const savedQueryTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_queries');
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
     const snippetTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_snippets');
@@ -142,6 +150,8 @@ describe('aiToolRegistry', () => {
     expect(connectionFailureTool?.tool.function.description).toContain('连接冷却');
     expect(renderErrorTool?.desc).toContain('渲染异常记录');
     expect(renderErrorTool?.tool.function.description).toContain('气泡局部报错');
+    expect(messageFlowTool?.desc).toContain('消息流');
+    expect(messageFlowTool?.tool.function.description).toContain('工具调用没有闭环');
     expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
     expect(savedQueryTool?.tool.function.description).toContain('历史查询');
     expect(aiSessionsTool?.desc).toContain('AI 历史会话');
@@ -184,6 +194,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_app_logs')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_connection_failures')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_last_render_error')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_ai_message_flow')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_queries')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_ai_sessions')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);
