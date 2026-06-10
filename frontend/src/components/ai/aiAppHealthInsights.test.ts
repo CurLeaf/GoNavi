@@ -129,4 +129,116 @@ describe('buildAIAppHealthSnapshot', () => {
     expect(snapshot.blockers).toContain('当前活动供应商缺少接口地址');
     expect(snapshot.summary.chatReady).toBe(false);
   });
+
+  it('marks the app health as degraded when the last ai message render error is present', () => {
+    const snapshot = buildAIAppHealthSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        models: ['gpt-5.4'],
+        maxTokens: 32000,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+      safetyLevel: 'readonly',
+      contextLevel: 'schema_only',
+      builtinToolNames: ['inspect_app_health', 'inspect_ai_last_render_error'],
+      mcpServers: [{
+        id: 'server-1',
+        name: 'Browser',
+        transport: 'stdio',
+        command: 'uvx',
+        args: ['mcp-server-browser'],
+        env: {},
+        enabled: true,
+        timeoutSeconds: 20,
+      }],
+      mcpClientStatuses: [{
+        client: 'codex',
+        displayName: 'Codex',
+        installed: true,
+        matchesCurrent: true,
+        clientDetected: true,
+        clientCommand: 'codex',
+        clientPath: 'C:/Tools/codex.exe',
+        configPath: 'C:/Users/demo/.codex/config.toml',
+        command: 'gonavi-mcp-server',
+        args: ['stdio'],
+        message: '已接入当前 GoNavi MCP',
+      }],
+      mcpTools: [{
+        alias: 'browser_open',
+        originalName: 'browser_open',
+        serverId: 'server-1',
+        serverName: 'Browser',
+        title: '打开页面',
+      }],
+      userPromptSettings: {
+        global: '回答前先核对上下文。',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+      },
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      },
+      aiContexts: {
+        'conn-1:crm': [{
+          dbName: 'crm',
+          tableName: 'orders',
+          ddl: 'CREATE TABLE orders (...)',
+        }],
+      },
+      connections: [{
+        id: 'conn-1',
+        name: '主库',
+        config: {
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+        },
+      }],
+      tabs: [{
+        id: 'query-1',
+        title: '订单查询',
+        type: 'query',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        query: 'select * from orders',
+      }],
+      activeTabId: 'query-1',
+      appLogReadResult: {
+        success: true,
+        data: { lines: ['2026/06/10 09:00:00.000000 [INFO] started'] },
+      },
+      connectionFailureReadResult: {
+        success: true,
+        data: { lines: [] },
+      },
+      lastRenderErrorSnapshot: {
+        hasError: true,
+        summary: '已记录到最近一次 AI 消息渲染异常',
+        messageId: 'msg-1',
+        role: 'assistant',
+        recordedAt: 1780700000000,
+        contentPreview: '回复预览',
+        errorMessage: 'Cannot read properties of undefined',
+        nextActions: ['先按 messageId 和 contentPreview 对照当前会话。'],
+      },
+    });
+
+    expect(snapshot.status).toBe('degraded');
+    expect(snapshot.summary.hasLastAIMessageRenderError).toBe(true);
+    expect(snapshot.summary.lastAIMessageRenderErrorId).toBe('msg-1');
+    expect(snapshot.warnings).toContain('最近记录到 AI 消息渲染异常，可能影响回复气泡展示或 Markdown 渲染');
+    expect(snapshot.nextActions).toContain('调用 inspect_ai_last_render_error 查看最近一次气泡渲染异常的 messageId、内容预览和组件栈');
+    expect(snapshot.lastRenderError.errorMessage).toBe('Cannot read properties of undefined');
+  });
 });

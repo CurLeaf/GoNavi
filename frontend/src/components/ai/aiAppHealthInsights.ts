@@ -17,6 +17,19 @@ import { buildActiveTabSnapshot, buildWorkspaceTabsSnapshot } from './aiWorkspac
 
 type AIAppHealthStatus = 'ready' | 'needs_attention' | 'degraded' | 'blocked';
 
+interface AILastRenderErrorHealthSnapshot {
+  hasError: boolean;
+  summary: string;
+  messageId?: string;
+  role?: string;
+  recordedAt?: number | null;
+  contentPreview?: string;
+  errorMessage?: string;
+  stackPreview?: string;
+  componentStackPreview?: string;
+  nextActions?: string[];
+}
+
 const DEFAULT_APP_HEALTH_LOG_LIMIT = 120;
 const MAX_APP_HEALTH_LOG_LIMIT = 240;
 
@@ -56,6 +69,12 @@ const buildUnreadLogSnapshot = (message: string, lineLimit: number) => ({
   lines: [] as string[],
   linesOmitted: false,
   message,
+});
+
+const buildEmptyLastRenderErrorSnapshot = (): AILastRenderErrorHealthSnapshot => ({
+  hasError: false,
+  summary: '当前还没有记录到 AI 消息渲染异常。',
+  nextActions: [],
 });
 
 const summarizeAppLogSnapshot = (
@@ -148,6 +167,7 @@ export const buildAIAppHealthSnapshot = (params: {
   activeTabId?: string | null;
   appLogReadResult?: any;
   connectionFailureReadResult?: any;
+  lastRenderErrorSnapshot?: AILastRenderErrorHealthSnapshot;
   keyword?: unknown;
   connectionKeyword?: unknown;
   lineLimit?: unknown;
@@ -178,6 +198,7 @@ export const buildAIAppHealthSnapshot = (params: {
     lineLimit,
     includeLogLines: params.includeLogLines === true,
   });
+  const lastRenderError = params.lastRenderErrorSnapshot || buildEmptyLastRenderErrorSnapshot();
   const connectionFailures = summarizeConnectionFailures(params.connectionFailureReadResult, {
     keyword: params.connectionKeyword ?? params.keyword,
     lineLimit,
@@ -230,9 +251,15 @@ export const buildAIAppHealthSnapshot = (params: {
     appendUnique(nextActions, '如果要分析当前 SQL，先打开或选中目标 SQL 页签，再调用 inspect_active_tab');
   }
 
+  if (lastRenderError.hasError) {
+    appendUnique(warnings, '最近记录到 AI 消息渲染异常，可能影响回复气泡展示或 Markdown 渲染');
+    appendUnique(nextActions, '调用 inspect_ai_last_render_error 查看最近一次气泡渲染异常的 messageId、内容预览和组件栈');
+    (lastRenderError.nextActions || []).forEach((action) => appendUnique(nextActions, action));
+  }
+
   const status: AIAppHealthStatus = blockers.length > 0
     ? 'blocked'
-    : connectionFailures.failureEventCount > 0 || Number(appLog.levelBreakdown.ERROR) > 0
+    : connectionFailures.failureEventCount > 0 || Number(appLog.levelBreakdown.ERROR) > 0 || lastRenderError.hasError
       ? 'degraded'
       : warnings.length > 0
         ? 'needs_attention'
@@ -279,6 +306,8 @@ export const buildAIAppHealthSnapshot = (params: {
       appLogWarnCount: Number(appLog.levelBreakdown.WARN) || 0,
       recentConnectionFailureCount: connectionFailures.failureEventCount,
       primaryConnectionFailureLabel: connectionFailures.primaryCategoryLabel,
+      hasLastAIMessageRenderError: lastRenderError.hasError,
+      lastAIMessageRenderErrorId: lastRenderError.messageId || '',
     },
     aiSetup: {
       status: setupHealth.status,
@@ -290,6 +319,7 @@ export const buildAIAppHealthSnapshot = (params: {
       summary: setupHealth.summary,
     },
     appLog,
+    lastRenderError,
     connectionFailures,
     workspace,
     activeTab,

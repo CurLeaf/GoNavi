@@ -8,6 +8,7 @@ import type {
 } from '../../types';
 import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildAIAppHealthSnapshot } from './aiAppHealthInsights';
+import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import type {
   AISnapshotInspectionRuntime,
   AISnapshotInspectionRuntimeState,
@@ -120,6 +121,7 @@ export async function executeAppHealthSnapshotToolCall(
         activeTabId,
         appLogReadResult,
         connectionFailureReadResult,
+        lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(),
         keyword,
         connectionKeyword,
         lineLimit,

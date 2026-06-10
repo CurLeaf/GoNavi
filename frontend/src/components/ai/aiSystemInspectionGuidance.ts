@@ -59,7 +59,7 @@ export const appendDatabaseInspectionGuidanceMessages = (
     messages,
     availableToolNames,
     'inspect_app_health',
-    '如果用户提到“AI 不稳定”“整体帮我看看”“GoNavi AI 现在还有哪些明显问题”“连接、MCP、日志一起排查”，优先调用 inspect_app_health 获取 AI 配置、应用日志、连接失败和工作区页签的全局健康总览，再决定下钻 inspect_ai_setup_health、inspect_app_logs 或 inspect_recent_connection_failures。',
+    '如果用户提到“AI 不稳定”“整体帮我看看”“GoNavi AI 现在还有哪些明显问题”“连接、MCP、日志一起排查”或“AI 回复气泡显示异常”，优先调用 inspect_app_health 获取 AI 配置、应用日志、连接失败、回复气泡渲染异常和工作区页签的全局健康总览，再决定下钻 inspect_ai_setup_health、inspect_app_logs、inspect_recent_connection_failures 或 inspect_ai_last_render_error。',
   );
   appendGuidanceIfToolAvailable(
     messages,

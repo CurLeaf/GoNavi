@@ -75,7 +75,7 @@ describe('buildAISystemContextMessages', () => {
 
     const joined = messages.map((message) => message.content).join('\n');
     expect(joined).toContain('inspect_workspace_tabs 盘点当前工作区');
-    expect(joined).toContain('inspect_app_health 获取 AI 配置、应用日志、连接失败和工作区页签的全局健康总览');
+    expect(joined).toContain('inspect_app_health 获取 AI 配置、应用日志、连接失败、回复气泡渲染异常和工作区页签的全局健康总览');
     expect(joined).toContain('inspect_ai_setup_health 先拿到整体现状');
     expect(joined).toContain('inspect_ai_runtime 读取当前 AI 运行状态');
     expect(joined).toContain('inspect_ai_safety 读取真实安全边界');

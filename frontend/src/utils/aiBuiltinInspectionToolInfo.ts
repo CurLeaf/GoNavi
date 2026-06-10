@@ -6,14 +6,14 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     icon: "🧭",
     desc: "一键查看 AI 应用健康总览",
     detail:
-      "汇总 AI 配置、供应商发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却和当前工作区页签，给出阻塞项、运行期异常信号和下一步探针建议。适合用户说“AI 不稳定”“整体帮我看看”“连接和 MCP 一起排查”时先做一次全局摸底。",
+      "汇总 AI 配置、供应商发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却、AI 回复气泡渲染异常和当前工作区页签，给出阻塞项、运行期异常信号和下一步探针建议。适合用户说“AI 不稳定”“整体帮我看看”“连接和 MCP 一起排查”时先做一次全局摸底。",
     params: "keyword?, connectionKeyword?, lineLimit?(默认 120), includeLogLines?(默认 false)",
     tool: {
       type: "function",
       function: {
         name: "inspect_app_health",
         description:
-          "读取 GoNavi AI 应用健康总览，汇总 AI 供应商与发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却和当前工作区页签，并返回阻塞项、运行期异常信号与下一步探针建议。适用于用户提到 AI 不稳定、整体不成熟、连接/MCP/日志需要一起排查或要求先看全局状态时，优先调用该工具。",
+          "读取 GoNavi AI 应用健康总览，汇总 AI 供应商与发送前置、MCP 接入、应用日志 ERROR/WARN、最近连接失败/冷却、AI 回复气泡渲染异常和当前工作区页签，并返回阻塞项、运行期异常信号与下一步探针建议。适用于用户提到 AI 不稳定、整体不成熟、连接/MCP/日志/回复气泡异常需要一起排查或要求先看全局状态时，优先调用该工具。",
         parameters: {
           type: "object",
           properties: {

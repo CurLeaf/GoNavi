@@ -42,8 +42,8 @@ const BUILTIN_TOOL_FLOWS = [
   },
   {
     title: 'AI 应用健康总览',
-    steps: 'inspect_app_health → inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures',
-    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、或需要先看整体健康状态时，一次汇总配置、日志、连接失败和工作区现场。',
+    steps: 'inspect_app_health → inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures / inspect_ai_last_render_error',
+    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、回复气泡显示异常，或需要先看整体健康状态时，一次汇总配置、日志、连接失败、渲染异常和工作区现场。',
   },
   {
     title: '一键体检 AI 配置',

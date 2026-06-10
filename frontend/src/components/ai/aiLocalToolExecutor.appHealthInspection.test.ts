@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AIToolCall, SavedConnection } from '../../types';
 import { executeLocalAIToolCall } from './aiLocalToolExecutor';
@@ -24,7 +24,21 @@ const buildToolCall = (name: string, args: Record<string, unknown>): AIToolCall 
 });
 
 describe('aiLocalToolExecutor inspect_app_health', () => {
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__gonaviLastAIMessageRenderError;
+  });
+
   it('returns an app-level health snapshot across ai setup, logs, connection failures, and workspace tabs', async () => {
+    (globalThis as Record<string, unknown>).__gonaviLastAIMessageRenderError = {
+      messageId: 'msg-render-1',
+      role: 'assistant',
+      contentPreview: '这是一条触发渲染异常的 AI 回复预览',
+      message: 'Cannot read properties of undefined',
+      stack: 'TypeError: Cannot read properties of undefined\n    at AIMessageBubble.tsx:12:3',
+      componentStack: '\n    at AIMessageBubble\n    at AIChatPanelConversationView',
+      recordedAt: 1780700000000,
+    };
+
     const readAppLogTail = vi.fn()
       .mockResolvedValueOnce({
         success: true,
@@ -100,6 +114,10 @@ describe('aiLocalToolExecutor inspect_app_health', () => {
     expect(result.content).toContain('"appLogErrorCount":1');
     expect(result.content).toContain('"recentConnectionFailureCount":1');
     expect(result.content).toContain('"activeTabTitle":"订单查询"');
+    expect(result.content).toContain('"hasLastAIMessageRenderError":true');
+    expect(result.content).toContain('"lastAIMessageRenderErrorId":"msg-render-1"');
+    expect(result.content).toContain('"messageId":"msg-render-1"');
+    expect(result.content).toContain('inspect_ai_last_render_error');
     expect(result.content).toContain('inspect_recent_connection_failures');
     expect(readAppLogTail).toHaveBeenCalledWith(120, '');
   });
