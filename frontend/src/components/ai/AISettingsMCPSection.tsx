@@ -5,7 +5,6 @@ import { PlusOutlined } from '@ant-design/icons';
 import type { AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import { MCP_FIELD_GUIDES } from '../../utils/mcpServerGuidance';
-import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
 import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
@@ -138,44 +137,6 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
             overlayTheme={overlayTheme}
             compact
           />
-        ))}
-      </div>
-    </div>
-    <div
-      style={{
-        padding: '14px 16px',
-        borderRadius: 14,
-        border: `1px solid ${cardBorder}`,
-        background: cardBg,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>常见启动方式模板</div>
-      <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        不确定命令和参数怎么拆时，先选一个最接近的启动方式。GoNavi 会自动带入示例值，你再改成自己的脚本名、模块名、Docker 镜像或 exe 路径即可。
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-        {MCP_SERVER_DRAFT_TEMPLATES.map((template) => (
-          <button
-            key={template.key}
-            type="button"
-            onClick={() => onAddServer(template.seed)}
-            style={{
-              textAlign: 'left',
-              padding: '12px 13px',
-              borderRadius: 12,
-              border: `1px solid ${cardBorder}`,
-              background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)',
-              color: overlayTheme.titleText,
-              cursor: 'pointer',
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{template.title}</div>
-            <div style={{ marginTop: 4, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{template.description}</div>
-            <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{template.detail}</div>
-          </button>
         ))}
       </div>
     </div>

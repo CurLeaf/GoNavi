@@ -6,19 +6,6 @@ import AISettingsMCPSection from './AISettingsMCPSection';
 import type { AISettingsMCPSectionProps } from './AISettingsMCPSection';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
-const flattenElementText = (node: any): string => {
-  if (node == null || typeof node === 'boolean') {
-    return '';
-  }
-  if (typeof node === 'string' || typeof node === 'number') {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map((item) => flattenElementText(item)).join('');
-  }
-  return flattenElementText(node.props?.children);
-};
-
 const findElement = (node: any, predicate: (element: any) => boolean): any => {
   if (node == null || typeof node === 'boolean' || typeof node === 'string' || typeof node === 'number') {
     return null;
@@ -118,7 +105,7 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('接入外部客户端');
     expect(markup).toContain('尚未把当前 GoNavi MCP 接入到这里');
     expect(markup).toContain('一行命令快速新增');
-    expect(markup).toContain('README 里通常只给一整行启动命令');
+    expect(markup).toContain('先选最接近的模板');
     expect(markup).toContain('解析并新增草稿');
     expect(markup).toContain('新增 MCP 参数速查');
     expect(markup).toContain('command');
@@ -204,49 +191,6 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('allowMutating: boolean');
     expect(markup).toContain('legacy_tool');
     expect(markup).toContain('未声明 inputSchema');
-  });
-
-  it('seeds a new draft when a launch template is selected', () => {
-    const onAddServer = vi.fn();
-    const tree = AISettingsMCPSection(buildMCPSectionProps({
-      mcpClientStatuses: [],
-      selectedMCPClientStatus: undefined,
-      onAddServer,
-    }));
-
-    const npxTemplateButton = findElement(
-      tree,
-      (node) => node.type === 'button' && flattenElementText(node.props?.children).includes('npx 包'),
-    );
-    expect(npxTemplateButton).toBeTruthy();
-    npxTemplateButton.props.onClick();
-
-    expect(onAddServer).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '--stdio'],
-    }));
-  });
-
-  it('seeds a docker MCP draft with interactive stdio args', () => {
-    const onAddServer = vi.fn();
-    const tree = AISettingsMCPSection(buildMCPSectionProps({
-      mcpClientStatuses: [],
-      selectedMCPClientStatus: undefined,
-      onAddServer,
-    }));
-
-    const dockerTemplateButton = findElement(
-      tree,
-      (node) => node.type === 'button' && flattenElementText(node.props?.children).includes('Docker 镜像'),
-    );
-    expect(dockerTemplateButton).toBeTruthy();
-    dockerTemplateButton.props.onClick();
-
-    expect(onAddServer).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'docker',
-      args: ['run', '--rm', '-i', 'mcp/server-fetch:latest'],
-      timeoutSeconds: 45,
-    }));
   });
 
   it('toggles the in-app MCP HTTP service from the switch panel', () => {
