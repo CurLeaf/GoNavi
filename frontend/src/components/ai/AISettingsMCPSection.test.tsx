@@ -117,6 +117,9 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('复制 Authorization');
     expect(markup).toContain('接入外部客户端');
     expect(markup).toContain('尚未把当前 GoNavi MCP 接入到这里');
+    expect(markup).toContain('一行命令快速新增');
+    expect(markup).toContain('README 里通常只给一整行启动命令');
+    expect(markup).toContain('解析并新增草稿');
     expect(markup).toContain('新增 MCP 参数速查');
     expect(markup).toContain('command');
     expect(markup).toContain('args');

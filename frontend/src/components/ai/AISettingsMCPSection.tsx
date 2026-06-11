@@ -10,6 +10,7 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
 import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
 import AIMCPHTTPServerPanel from './AIMCPHTTPServerPanel';
+import AIMCPQuickAddServerPanel from './AIMCPQuickAddServerPanel';
 import AIMCPServerCard from './AIMCPServerCard';
 
 export type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
@@ -103,6 +104,14 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
       onCopyConfigPath={onCopyConfigPath}
       onCopyLaunchCommand={onCopyLaunchCommand}
       onInstall={onInstallSelectedClient}
+    />
+    <AIMCPQuickAddServerPanel
+      cardBg={cardBg}
+      cardBorder={cardBorder}
+      inputBg={inputBg}
+      darkMode={darkMode}
+      overlayTheme={overlayTheme}
+      onAddServer={onAddServer}
     />
     <div
       style={{

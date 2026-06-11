@@ -59,7 +59,7 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('必填参数看起来已经齐了');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('没有等号或 key 含空格的行不会保存');
-    expect(markup).toContain('不要把 npx -y package --stdio 或 node server.js --stdio 整串都塞进这里');
+    expect(markup).toContain('不要把 npx -y package --stdio、node server.js --stdio 或 docker run -i image 整串都塞进这里');
     expect(markup).toContain('不要写 export');
     expect(markup).toContain('当前阶段只支持 stdio');
     expect(markup).toContain('实际启动命令预览');
