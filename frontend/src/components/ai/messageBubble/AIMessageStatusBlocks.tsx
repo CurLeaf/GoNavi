@@ -28,6 +28,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_ai_providers: '读取当前 AI 供应商与模型配置',
   inspect_ai_chat_readiness: '读取当前 AI 聊天发送前置状态',
   inspect_ai_tool_catalog: '读取 AI 工具目录和参数提示',
+  inspect_ai_support_bundle: '生成 AI 排障支持包',
   inspect_mcp_setup: '读取当前 MCP 配置状态',
   inspect_mcp_authoring_guide: '读取 MCP 新增填写指引',
   inspect_mcp_draft: '校验 MCP 新增草稿',

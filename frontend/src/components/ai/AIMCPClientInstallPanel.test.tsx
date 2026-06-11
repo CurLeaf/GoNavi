@@ -193,6 +193,14 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('远程接入边界');
     expect(markup).toContain('云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL');
     expect(markup).toContain('OpenClaw 远程 MCP 快速配置');
+    expect(markup).toContain('公网/隧道 URL');
+    expect(markup).toContain('云端 Agent 能访问到的 Streamable HTTP MCP 地址');
+    expect(markup).toContain('不要填 Windows 本机的 127.0.0.1');
+    expect(markup).toContain('Bearer Token');
+    expect(markup).toContain('Windows 启动命令和云端 Agent 配置必须一致');
+    expect(markup).toContain('不要把数据库密码当 token 填进去');
+    expect(markup).toContain('本机监听地址');
+    expect(markup).toContain('MCP 路径');
     expect(markup).toContain('配置到云端 Agent');
     expect(markup).toContain('无 GUI / CLI 生成配置');
     expect(markup).toContain('&quot;type&quot;: &quot;streamable-http&quot;');

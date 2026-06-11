@@ -250,6 +250,9 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
     expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
+    expect(appSource).toContain('data-gonavi-linux-cjk-font-banner="true"');
+    expect(appSource).toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
+    expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');
     expect(appSource).toContain('const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;');

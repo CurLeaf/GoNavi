@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_support_bundle', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -76,6 +76,7 @@ describe('buildAISystemContextMessages', () => {
     const joined = messages.map((message) => message.content).join('\n');
     expect(joined).toContain('inspect_workspace_tabs 盘点当前工作区');
     expect(joined).toContain('inspect_app_health 获取 AI 配置、应用日志、连接失败、回复气泡渲染异常和工作区页签的全局健康总览');
+    expect(joined).toContain('inspect_ai_support_bundle 生成不含密钥和数据库密码的支持包');
     expect(joined).toContain('inspect_ai_setup_health 先拿到整体现状');
     expect(joined).toContain('inspect_ai_runtime 读取当前 AI 运行状态');
     expect(joined).toContain('inspect_ai_safety 读取真实安全边界');

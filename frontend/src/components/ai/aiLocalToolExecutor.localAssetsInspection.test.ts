@@ -194,6 +194,121 @@ describe('aiLocalToolExecutor local asset inspection tools', () => {
     expect(result.content).toContain('最近工具结果较长');
   });
 
+  it('returns an ai support bundle with health, message flow, context budget, and remote MCP evidence', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_support_bundle', {
+        keyword: 'mcp',
+        publicUrl: 'https://agent.example.com/mcp',
+        tokenConfigured: false,
+      }),
+      connections: [buildConnection()],
+      mcpTools: [{
+        alias: 'remote_probe',
+        originalName: 'remote_probe',
+        serverId: 'server-1',
+        serverName: '远程工具',
+        description: '读取远程信息',
+        inputSchema: {
+          type: 'object',
+          required: ['keyword'],
+          properties: {
+            keyword: { type: 'string', description: '关键词' },
+          },
+        },
+      }],
+      toolContextMap: new Map(),
+      aiChatSessions: [
+        { id: 'session-1', title: 'AI 稳定性排障', updatedAt: 200 },
+      ],
+      aiChatHistory: {
+        'session-1': [
+          { id: 'msg-1', role: 'user', content: 'AI 最近不稳定', timestamp: 101 },
+          {
+            id: 'msg-2',
+            role: 'assistant',
+            content: '先看支持包',
+            timestamp: 102,
+            tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'inspect_app_health', arguments: '{}' } }],
+          },
+          { id: 'msg-3', role: 'assistant', content: '继续分析', timestamp: 103 },
+        ],
+      },
+      activeSessionId: 'session-1',
+      aiContexts: {
+        'conn-1:crm': [
+          { dbName: 'crm', tableName: 'orders', ddl: 'CREATE TABLE orders(id bigint);' },
+        ],
+      },
+      skills: [{
+        id: 'skill-1',
+        name: 'SQL 审查',
+        systemPrompt: '先检查风险',
+        enabled: true,
+        scopes: ['database'],
+      }],
+      runtime: {
+        getAIRuntimeState: vi.fn(async () => ({
+          providers: [{
+            id: 'provider-1',
+            name: 'OpenAI',
+            type: 'openai' as const,
+            apiKey: '',
+            baseUrl: 'https://api.example.com',
+            model: 'gpt-5',
+            hasSecret: true,
+            maxTokens: 4096,
+            temperature: 0.2,
+          }],
+          activeProviderId: 'provider-1',
+          safetyLevel: 'readonly',
+          contextLevel: 'schema_only',
+        })),
+        getMCPServers: vi.fn(async () => [{
+          id: 'server-1',
+          name: '远程工具',
+          transport: 'stdio' as const,
+          command: 'node',
+          args: ['server.js'],
+          env: { TOKEN: 'secret-value' },
+          enabled: true,
+          timeoutSeconds: 20,
+        }]),
+        getMCPClientInstallStatuses: vi.fn(async () => [{
+          client: 'openclaw',
+          displayName: 'OpenClaw',
+          installMode: 'remote' as const,
+          installed: false,
+          matchesCurrent: false,
+          clientDetected: false,
+          message: 'OpenClaw 走远程 MCP 桥接',
+        }]),
+        readAppLogTail: vi.fn(async () => ({
+          success: true,
+          logPath: 'C:/Users/mock/.GoNavi/Logs/gonavi.log',
+          lines: [
+            '2026/06/11 10:00:00 [WARN] MCP mock warning',
+            '2026/06/11 10:00:01 [ERROR] MCP mock error',
+          ],
+          fileWindowTruncated: false,
+          matchedLinesTruncated: false,
+        })),
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"kind":"ai_support_bundle"');
+    expect(result.content).toContain('"databasePasswordsIncluded":false');
+    expect(result.content).toContain('"providerSecretsIncluded":false');
+    expect(result.content).toContain('"mcpEnvValuesIncluded":false');
+    expect(result.content).toContain('"unresolvedToolCallCount":1');
+    expect(result.content).toContain('"consecutiveAssistantPairCount":1');
+    expect(result.content).toContain('"remoteMCPPublicUrl":"https://agent.example.com/mcp"');
+    expect(result.content).toContain('尚未确认 Bearer Token');
+    expect(result.content).not.toContain('secret-value');
+  });
+
   it('returns sql snippets so the model can inspect local query templates', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_sql_snippets', {

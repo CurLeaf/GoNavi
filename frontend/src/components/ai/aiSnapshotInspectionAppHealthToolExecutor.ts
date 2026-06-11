@@ -1,4 +1,5 @@
 import type {
+  AIChatMessage,
   AIContextItem,
   AIMCPToolDescriptor,
   AISkillConfig,
@@ -9,6 +10,7 @@ import type {
 import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import { buildAIAppHealthSnapshot } from './aiAppHealthInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
+import { buildAISupportBundleSnapshot } from './aiSupportBundleInsights';
 import type {
   AISnapshotInspectionRuntime,
   AISnapshotInspectionRuntimeState,
@@ -24,6 +26,9 @@ interface ExecuteAppHealthSnapshotToolCallOptions {
   args: Record<string, any>;
   activeContext?: { connectionId: string; dbName: string } | null;
   aiContexts?: Record<string, AIContextItem[]>;
+  aiChatHistory?: Record<string, AIChatMessage[]>;
+  aiChatSessions?: Array<{ id: string; title: string; updatedAt: number }>;
+  activeSessionId?: string | null;
   connections: SavedConnection[];
   tabs?: TabData[];
   activeTabId?: string | null;
@@ -75,6 +80,9 @@ export async function executeAppHealthSnapshotToolCall(
     args,
     activeContext = null,
     aiContexts = {},
+    aiChatHistory = {},
+    aiChatSessions = [],
+    activeSessionId = null,
     connections,
     tabs = [],
     activeTabId = null,
@@ -85,7 +93,7 @@ export async function executeAppHealthSnapshotToolCall(
     runtime,
   } = options;
 
-  if (toolName !== 'inspect_app_health') {
+  if (toolName !== 'inspect_app_health' && toolName !== 'inspect_ai_support_bundle') {
     return null;
   }
 
@@ -100,6 +108,49 @@ export async function executeAppHealthSnapshotToolCall(
       readLogTail(runtime, lineLimit, connectionKeyword),
     ]);
     const [mcpServers, mcpClientInstallStatuses] = mcpState;
+
+    if (toolName === 'inspect_ai_support_bundle') {
+      return {
+        content: JSON.stringify(buildAISupportBundleSnapshot({
+          providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
+          activeProviderId: runtimeState?.activeProviderId || '',
+          safetyLevel: runtimeState?.safetyLevel,
+          contextLevel: runtimeState?.contextLevel,
+          skills,
+          mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
+          mcpClientStatuses: Array.isArray(mcpClientInstallStatuses) ? mcpClientInstallStatuses : [],
+          mcpTools,
+          dynamicModels,
+          builtinTools: BUILTIN_AI_TOOL_INFO,
+          builtinToolNames: BUILTIN_AI_TOOL_NAMES,
+          userPromptSettings,
+          activeContext,
+          aiContexts,
+          aiChatHistory,
+          aiChatSessions,
+          activeSessionId,
+          sessionId: args.sessionId,
+          connections,
+          tabs,
+          activeTabId,
+          appLogReadResult,
+          connectionFailureReadResult,
+          lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(),
+          keyword,
+          connectionKeyword,
+          lineLimit,
+          includeLogLines: args.includeLogLines === true,
+          includeMessageContent: args.includeMessageContent === true,
+          includeDetails: args.includeDetails === true,
+          publicUrl: args.publicUrl,
+          localAddr: args.localAddr,
+          path: args.path,
+          exposeStrategy: args.exposeStrategy,
+          tokenConfigured: args.tokenConfigured,
+        })),
+        success: true,
+      };
+    }
 
     return {
       content: JSON.stringify(buildAIAppHealthSnapshot({
@@ -131,7 +182,7 @@ export async function executeAppHealthSnapshotToolCall(
     };
   } catch (error: any) {
     return {
-      content: `读取 AI 应用健康总览失败: ${error?.message || error}`,
+      content: `${toolName === 'inspect_ai_support_bundle' ? '生成 AI 支持包失败' : '读取 AI 应用健康总览失败'}: ${error?.message || error}`,
       success: false,
     };
   }

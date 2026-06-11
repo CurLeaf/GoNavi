@@ -7,6 +7,7 @@ import {
   buildRemoteMCPClientQuickStart,
   isMCPClientKey,
   isRemoteMCPClientStatus,
+  REMOTE_MCP_PARAMETER_GUIDES,
   type MCPClientKey,
 } from '../../utils/mcpClientInstallStatus';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
@@ -311,6 +312,50 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
             </div>
             <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
               下面分别给云端 Agent、无 GUI/CLI 场景和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码。
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
+              {REMOTE_MCP_PARAMETER_GUIDES.map((item) => (
+                <div
+                  key={item.key}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: `1px solid ${cardBorder}`,
+                    background: darkMode ? 'rgba(15,23,42,0.42)' : 'rgba(255,255,255,0.72)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 5,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: overlayTheme.titleText }}>
+                      {item.title}
+                    </div>
+                    <span
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: 999,
+                        fontSize: 11,
+                        color: item.required ? '#dc2626' : overlayTheme.mutedText,
+                        background: item.required
+                          ? (darkMode ? 'rgba(248,113,113,0.12)' : 'rgba(254,226,226,0.7)')
+                          : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                      }}
+                    >
+                      {item.required ? '必填' : '可选'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.6 }}>
+                    应填：{item.fill}
+                  </div>
+                  <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                    示例：<code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
+                  </div>
+                  <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                    避免：{item.avoid}
+                  </div>
+                </div>
+              ))}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
               <div

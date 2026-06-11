@@ -45,6 +45,11 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
     description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、回复气泡显示异常，或需要先看整体健康状态时，一次汇总配置、日志、连接失败、渲染异常、消息流和工作区现场。',
   },
   {
+    title: '导出 AI 排障支持包',
+    steps: 'inspect_ai_support_bundle -> inspect_app_health / inspect_ai_context_budget / inspect_ai_message_flow / inspect_mcp_remote_access',
+    description: '适合需要一次性带走排障证据，或用户反馈 AI 不成熟、不稳定、MCP/连接/日志/上下文都可能相关时，先生成不含密钥和数据库密码的支持包。',
+  },
+  {
     title: '选择 AI 工具路线',
     steps: 'inspect_ai_tool_catalog -> inspect_ai_runtime / inspect_mcp_setup',
     description: '适合先按关键词确认该用哪些内置探针、每个工具 arguments 怎么填，以及当前有没有外部 MCP 工具可用。',

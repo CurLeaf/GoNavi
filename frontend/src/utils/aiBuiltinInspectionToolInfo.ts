@@ -27,6 +27,43 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_support_bundle",
+    icon: "📦",
+    desc: "导出 AI 排障支持包",
+    detail:
+      "一次性汇总 AI 应用健康、供应商与 MCP 状态、应用日志摘要、连接失败摘要、消息流结构、上下文体量、远程 MCP 接入和工具目录索引。适合用户反馈“AI 不稳定”“MCP/连接/日志一起看”“要给开发排障材料”时先生成一份不含密钥和数据库密码的支持包。",
+    params: "keyword?, sessionId?, lineLimit?(默认 120), includeLogLines?(默认 false), includeMessageContent?(默认 false), publicUrl?, tokenConfigured?",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_support_bundle",
+        description:
+          "生成 GoNavi AI 排障支持包，汇总 AI 应用健康、供应商和发送前置、MCP 配置和远程接入、应用日志摘要、数据库连接失败摘要、当前 AI 消息流、上下文体量风险和工具目录索引。默认不包含数据库密码、供应商密钥、MCP 环境变量值、日志原文或完整消息内容。适用于用户反馈 AI 不稳定、MCP/连接/日志问题交织、需要一次性导出排障证据或准备给开发定位时优先调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "可选，按关键词过滤日志和工具目录，例如 ai、mcp、mysql、error、openclaw" },
+            connectionKeyword: { type: "string", description: "可选，分析连接失败日志时使用的关键词；不传时复用 keyword" },
+            sessionId: { type: "string", description: "可选，指定要诊断的 AI 会话 ID；不传时使用当前活动会话" },
+            lineLimit: { type: "number", description: "可选，最多分析多少行应用日志，默认 120，最大 240" },
+            includeLogLines: { type: "boolean", description: "可选，是否附带日志原文行，默认 false；需要引用原文时再开启" },
+            includeMessageContent: { type: "boolean", description: "可选，是否附带消息内容预览，默认 false；排查气泡内容时再开启" },
+            includeDetails: { type: "boolean", description: "可选，是否附带上下文体量明细，默认 false" },
+            publicUrl: { type: "string", description: "可选，云端 Agent 访问 GoNavi MCP 的公网/隧道 URL，用于远程 MCP 支持包" },
+            localAddr: { type: "string", description: "可选，Windows 本机 HTTP MCP 监听地址，默认 127.0.0.1:8765" },
+            path: { type: "string", description: "可选，Streamable HTTP MCP 路径，默认 /mcp" },
+            exposeStrategy: {
+              type: "string",
+              enum: ["reverse_proxy", "ssh_reverse_tunnel", "cloudflare_tunnel", "tailscale", "custom"],
+              description: "可选，远程暴露方式，用于生成对应安全提醒",
+            },
+            tokenConfigured: { type: "boolean", description: "可选，是否已经准备随机 Bearer Token；传 false 会返回鉴权告警" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_ai_setup_health",
     icon: "🩺",
     desc: "一键体检当前 AI 配置健康度",

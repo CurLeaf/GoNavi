@@ -18,6 +18,58 @@ export interface RemoteMCPClientQuickStart {
   securityNotes: string[];
 }
 
+export interface RemoteMCPParameterGuide {
+  key: string;
+  title: string;
+  required: boolean;
+  fill: string;
+  example: string;
+  avoid: string;
+}
+
+export const REMOTE_MCP_PARAMETER_GUIDES: RemoteMCPParameterGuide[] = [
+  {
+    key: 'publicUrl',
+    title: '公网/隧道 URL',
+    required: true,
+    fill: '填云端 Agent 能访问到的 Streamable HTTP MCP 地址，通常以 /mcp 结尾。',
+    example: 'https://agent-gateway.example.com/mcp',
+    avoid: '不要填 Windows 本机的 127.0.0.1；云端 Linux 访问不到这个地址。',
+  },
+  {
+    key: 'bearerToken',
+    title: 'Bearer Token',
+    required: true,
+    fill: '填一段随机长 token，Windows 启动命令和云端 Agent 配置必须一致。',
+    example: 'Authorization: Bearer gnv_xxx',
+    avoid: '不要使用空 token、短 token，也不要把数据库密码当 token 填进去。',
+  },
+  {
+    key: 'localAddr',
+    title: '本机监听地址',
+    required: true,
+    fill: 'Windows GoNavi HTTP MCP 默认监听 127.0.0.1:8765，再交给隧道或反向代理转发。',
+    example: DEFAULT_REMOTE_MCP_LOCAL_ADDR,
+    avoid: '没有网关隔离时不要直接绑定 0.0.0.0 暴露到公网。',
+  },
+  {
+    key: 'path',
+    title: 'MCP 路径',
+    required: true,
+    fill: '本机启动命令、隧道 URL 和云端 Agent 配置里的路径要保持一致。',
+    example: DEFAULT_REMOTE_MCP_PATH,
+    avoid: '不要一边用 /mcp，另一边配置 /api/mcp，路径不一致会 404。',
+  },
+  {
+    key: 'serverId',
+    title: '服务 ID',
+    required: false,
+    fill: '给云端 Agent 识别这条 MCP 服务的名称，默认 gonavi 即可。',
+    example: 'gonavi',
+    avoid: '不要频繁改名，否则 Agent 里已有的工具引用可能失效。',
+  },
+];
+
 export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
   {
     client: 'claude-code',
