@@ -30,6 +30,13 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	beginSQL, commitSQL, rollbackSQL, hasTextTransaction := sqlFileBatchTransactionSQL(runConfig.Type)
+	implicitTextTransaction := false
+	if implicitCommitSQL, implicitRollbackSQL, ok := sqlEditorImplicitTransactionSQL(runConfig.Type); ok {
+		commitSQL = implicitCommitSQL
+		rollbackSQL = implicitRollbackSQL
+		hasTextTransaction = true
+		implicitTextTransaction = true
+	}
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -58,7 +65,21 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		transactionCancel    context.CancelFunc
 		startTextTransaction bool
 	)
-	if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
+	if implicitTextTransaction {
+		provider, ok := dbInst.(db.SessionExecerProvider)
+		if !ok {
+			return connection.QueryResult{
+				Success: false,
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				QueryID: queryID,
+			}
+		}
+		sessionExecer, err = provider.OpenSessionExecer(ctx)
+		if err != nil {
+			logger.Error(err, "DBQueryMultiTransactional 打开隐式事务会话失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+		}
+	} else if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
 		// database/sql rolls back a BeginTx transaction when its context is cancelled.
 		// SQL editor transactions must outlive the execution RPC and be ended only by
 		// explicit commit, rollback, or shutdown cleanup.
@@ -274,6 +295,18 @@ func shouldUseManagedSQLTransaction(dbType string, query string) bool {
 		return false
 	}
 	return hasManagedWrite
+}
+
+func sqlEditorImplicitTransactionSQL(dbType string) (commitSQL string, rollbackSQL string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "oracle":
+		// Oracle starts a transaction implicitly on the first DML statement.
+		// Keeping SQL editor DML on one physical connection avoids database/sql
+		// Tx context lifecycle ending the transaction before the UI commits it.
+		return "COMMIT", "ROLLBACK", true
+	default:
+		return "", "", false
+	}
 }
 
 func isSQLTransactionControlStatement(stmt string) bool {

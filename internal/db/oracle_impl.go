@@ -24,6 +24,7 @@ type OracleDB struct {
 	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
 }
 
+var _ SessionExecerProvider = (*OracleDB)(nil)
 var _ TransactionExecerProvider = (*OracleDB)(nil)
 
 func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
@@ -262,6 +263,17 @@ func (o *OracleDB) OpenTransactionExecer(ctx context.Context) (TransactionExecer
 		return nil, err
 	}
 	return NewSQLTxStatementExecer(tx), nil
+}
+
+func (o *OracleDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if o.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := o.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
 }
 
 func (o *OracleDB) GetDatabases() ([]string, error) {
