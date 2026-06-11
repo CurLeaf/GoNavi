@@ -6,6 +6,10 @@ const appSource = readFileSync(
   fileURLToPath(new globalThis.URL('./App.tsx', import.meta.url)),
   'utf8',
 );
+const appCss = readFileSync(
+  fileURLToPath(new globalThis.URL('./App.css', import.meta.url)),
+  'utf8',
+);
 const linuxCJKFontBannerSource = readFileSync(
   fileURLToPath(new globalThis.URL('./components/LinuxCJKFontBanner.tsx', import.meta.url)),
   'utf8',
@@ -114,6 +118,10 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('resolveSidebarResizeBounds(siderRef.current)');
     expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft}px`;');
     expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
+  });
+
+  it('keeps legacy sidebar resize bounds aligned with the v2 sider CSS limits', () => {
+    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*420px\s*!important;/s);
   });
 
   it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
