@@ -469,6 +469,7 @@ export interface SqlSnippet {
   prefix: string;
   name: string;
   description?: string;
+  syntaxHelp?: string;
   body: string;
   isBuiltin: boolean;
   createdAt: number;

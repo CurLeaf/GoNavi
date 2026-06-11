@@ -1201,6 +1201,7 @@ interface DataGridProps {
     objectType?: 'table' | 'view' | 'materialized-view';
     exportScope?: 'table' | 'queryResult';
     resultSql?: string;
+    resultExportAllSql?: string;
     dbName?: string;
     connectionId?: string;
     pkColumns?: string[];
@@ -1492,6 +1493,7 @@ const VIRTUAL_EDITING_CELL_STYLE: React.CSSProperties = {
 
 const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
     scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions
@@ -5910,12 +5912,15 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [tableName, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
 
   const queryResultCurrentPageRows = useMemo(() => {
+      if (isQueryResultExport) {
+          return mergedDisplayData;
+      }
       if (!pagination) {
           return mergedDisplayData;
       }
       const offset = Math.max(0, (pagination.current - 1) * pagination.pageSize);
       return mergedDisplayData.slice(offset, offset + pagination.pageSize);
-  }, [mergedDisplayData, pagination]);
+  }, [isQueryResultExport, mergedDisplayData, pagination]);
 
   const exportQueryResultRows = useCallback(async (format: string, scope: QueryResultExportScope) => {
       if (scope === 'selected') {
@@ -5935,8 +5940,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           await exportData(queryResultCurrentPageRows, format);
           return;
       }
+      const exportAllSql = String(resultExportAllSql || '').trim();
+      if (exportAllSql && connectionId) {
+          await exportByQuery(exportAllSql, format, tableName || 'query_result');
+          return;
+      }
       await exportData(mergedDisplayData, format);
-  }, [exportData, mergedDisplayData, queryResultCurrentPageRows, rowKeyStr, selectedRowKeys]);
+  }, [connectionId, exportByQuery, exportData, mergedDisplayData, queryResultCurrentPageRows, resultExportAllSql, rowKeyStr, selectedRowKeys, tableName]);
 
   const openQueryResultExportScopeModal = useCallback((format: string) => {
       let instance: { destroy: () => void } | null = null;
@@ -5962,7 +5972,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                           当前页导出 ({queryResultCurrentPageRows.length}条)
                       </Button>
                       <Button type="primary" onClick={() => { void runExport('all'); }}>
-                          全部导出 ({mergedDisplayData.length}条)
+                          {resultExportAllSql ? '全部导出（重新查询）' : `全部导出 (${mergedDisplayData.length}条)`}
                       </Button>
                   </div>
               </div>
@@ -5971,7 +5981,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           okButtonProps: { style: { display: 'none' } },
           maskClosable: true,
       });
-  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, selectedRowKeys.length]);
+  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, resultExportAllSql, selectedRowKeys.length]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {

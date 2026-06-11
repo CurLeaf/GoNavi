@@ -2237,6 +2237,50 @@ describe('QueryEditor external SQL save', () => {
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-with-dml');
   });
 
+  it('shows the pending statement count for multi-SQL manual transactions', async () => {
+    const sql = "UPDATE users SET active = 0 WHERE id = 1; DELETE FROM users WHERE id = 2;";
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-multi-dml',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 2 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: sql })} />);
+    });
+    editorState.selection = {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: sql.length + 1,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('DELETE FROM users'),
+      'query-1',
+    );
+    expect(textContent(renderer!.root)).toContain('事务待提交，未提交 2 条变更语句');
+    expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
+      id: 'tx-multi-dml',
+      statementCount: 2,
+    });
+  });
+
   it('keeps SQL editor WITH SELECT on the regular query path', async () => {
     const sql = 'WITH target AS (SELECT id FROM users WHERE active = 1) SELECT * FROM target';
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -2266,6 +2310,65 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
+  });
+
+  it('adds pagination to limited query results and reloads the selected page only', async () => {
+    const firstPageRows = Array.from({ length: 500 }, (_item, index) => ({ id: index + 1 }));
+    const secondPageRows = Array.from({ length: 500 }, (_item, index) => ({ id: index + 501 }));
+    backendApp.DBQueryMulti
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { columns: ['id'], rows: firstPageRows, statementIndex: 1 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { columns: ['id'], rows: secondPageRows, statementIndex: 1 },
+        ],
+      });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT id FROM users LIMIT 0,500' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      current: 1,
+      pageSize: 500,
+      total: 1000,
+      totalKnown: false,
+    });
+    expect(dataGridState.latestProps?.resultExportAllSql).toBe('SELECT id FROM users');
+
+    await act(async () => {
+      await dataGridState.latestProps?.onPageChange?.(2, 500);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(2);
+    const pageSql = String(backendApp.DBQueryMulti.mock.calls[1][2]);
+    expect(pageSql).toContain('SELECT * FROM (SELECT id FROM users) AS __gonavi_query_page__');
+    expect(pageSql).toContain('LIMIT 501 OFFSET 500');
+    expect(dataGridState.latestProps?.pagination).toMatchObject({
+      current: 2,
+      pageSize: 500,
+      total: 1000,
+      totalKnown: true,
+    });
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ id: 501 });
   });
 
   it('runs SQL editor data-changing CTEs through a pending managed transaction', async () => {
@@ -2378,7 +2481,7 @@ describe('QueryEditor external SQL save', () => {
 
       expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalled();
       expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-      expect(textContent(renderer!.root)).toContain('事务执行成功，正在自动提交');
+      expect(textContent(renderer!.root)).toContain('事务执行成功，未提交 1 条变更语句，正在自动提交');
       expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
 
       await act(async () => {
@@ -2388,7 +2491,7 @@ describe('QueryEditor external SQL save', () => {
       });
 
       expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto-now');
-      expect(textContent(renderer!.root)).not.toContain('事务执行成功，正在自动提交');
+      expect(textContent(renderer!.root)).not.toContain('事务执行成功，未提交 1 条变更语句，正在自动提交');
     } finally {
       vi.useRealTimers();
     }
@@ -3617,13 +3720,14 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-delay-select');
     expect(transactionSettingsSource).toContain('参考 DBeaver');
-    expect(transactionSettingsSource).toContain("label: 'Manual Commit'");
-    expect(transactionSettingsSource).toContain("label: 'Auto-commit'");
+    expect(transactionSettingsSource).toContain("label: '手动提交'");
+    expect(transactionSettingsSource).toContain("label: '自动提交'");
     expect(transactionSettingsSource).toContain("label: '立即'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
     expect(transactionToolbarSource).toContain('事务待提交');
-    expect(transactionToolbarSource).toContain('事务执行成功，正在自动提交');
+    expect(transactionToolbarSource).toContain('未提交 ${statementCount} 条变更语句');
+    expect(transactionToolbarSource).toContain('事务执行成功${pendingCountText}，正在自动提交');
     expect(transactionToolbarSource).toContain('onFinish');
     expect(source).toContain('gn-v2-query-toolbar-action-group');
     expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 160 }}');
@@ -3651,6 +3755,16 @@ describe('QueryEditor external SQL save', () => {
     const queryToolbarCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-monaco-shell {'));
     expect(queryToolbarCss).not.toContain('margin-left: auto;');
     expect(queryToolbarCss).not.toContain('justify-content: flex-end;');
+  });
+
+  it('keeps custom SQL snippet syntax help editable and uses it in completion details', () => {
+    const modalSource = readFileSync(new URL('./SnippetSettingsModal.tsx', import.meta.url), 'utf8');
+    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+
+    expect(modalSource).toContain('片段语法说明（可选）');
+    expect(modalSource).toContain('syntaxHelp');
+    expect(modalSource).toContain('占位符语法参考');
+    expect(source).toContain('s.syntaxHelp || s.description || s.body');
   });
 
   it('coalesces editor result splitter dragging through requestAnimationFrame', async () => {

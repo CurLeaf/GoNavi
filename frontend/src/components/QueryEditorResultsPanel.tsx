@@ -3,6 +3,7 @@ import { Button, Dropdown, Tabs, Tooltip, type MenuProps } from 'antd';
 import { CloseOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
 
 import type { EditRowLocator } from '../utils/rowLocator';
+import type { QueryResultPaginationState } from '../utils/queryResultPagination';
 import DataGrid from './DataGrid';
 
 export type QueryEditorResultSet = {
@@ -21,6 +22,7 @@ export type QueryEditorResultSet = {
     readOnly: boolean;
     truncated?: boolean;
     pkLoading?: boolean;
+    page?: QueryResultPaginationState & { loading?: boolean };
 };
 
 interface QueryEditorResultsPanelProps {
@@ -42,6 +44,7 @@ interface QueryEditorResultsPanelProps {
     onCloseResultTabsToRight: (key: string) => void;
     onCloseAllResultTabs: () => void;
     onReloadResult: (key: string, sql: string) => void;
+    onResultPageChange: (key: string, page: number, pageSize: number) => void;
     onDiagnoseExecutionError: () => void;
 }
 
@@ -67,6 +70,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onCloseResultTabsToRight,
     onCloseAllResultTabs,
     onReloadResult,
+    onResultPageChange,
     onDiagnoseExecutionError,
 }) => {
     const resolvedActiveResultKey = activeResultKey || resultSets[0]?.key || '';
@@ -453,15 +457,29 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                         <DataGrid
                                             data={rs.rows}
                                             columnNames={rs.columns}
-                                            loading={loading}
+                                            loading={loading || rs.page?.loading === true}
                                             tableName={rs.tableName}
                                             exportScope="queryResult"
                                             resultSql={rs.exportSql || rs.sql}
+                                            resultExportAllSql={rs.page?.exportAllSql}
                                             dbName={currentDb}
                                             connectionId={currentConnectionId}
                                             pkColumns={rs.pkColumns}
                                             editLocator={rs.editLocator}
-                                            onReload={() => onReloadResult(rs.key, rs.sql)}
+                                            onReload={() => {
+                                                if (rs.page) {
+                                                    onResultPageChange(rs.key, rs.page.current, rs.page.pageSize);
+                                                    return;
+                                                }
+                                                onReloadResult(rs.key, rs.sql);
+                                            }}
+                                            pagination={rs.page ? {
+                                                current: rs.page.current,
+                                                pageSize: rs.page.pageSize,
+                                                total: rs.page.total,
+                                                totalKnown: rs.page.totalKnown,
+                                            } : undefined}
+                                            onPageChange={rs.page ? ((page, size) => onResultPageChange(rs.key, page, size)) : undefined}
                                             readOnly={rs.readOnly}
                                             toolbarExtraActions={resolvedActiveResultKey === rs.key ? toolbarHideButton : null}
                                         />

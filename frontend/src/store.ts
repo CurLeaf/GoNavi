@@ -1131,6 +1131,7 @@ export interface SqlEditorPendingTransactionState {
   autoCommitDelayMs: number;
   createdAt: number;
   autoCommitDueAt?: number | null;
+  statementCount?: number;
 }
 
 interface AppState {
@@ -1397,6 +1398,7 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
       prefix,
       name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
       description: toTrimmedString(raw.description) || undefined,
+      syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
       isBuiltin: raw.isBuiltin === true,
       createdAt: Number.isFinite(Number(raw.createdAt))

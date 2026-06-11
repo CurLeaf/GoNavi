@@ -7,6 +7,7 @@ export type PendingSqlEditorTransaction = {
   autoCommitDelayMs: number;
   createdAt: number;
   autoCommitDueAt?: number | null;
+  statementCount?: number;
 };
 
 type QueryEditorTransactionToolbarProps = {
@@ -28,11 +29,15 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
     return null;
   }
 
+  const statementCount = Math.max(0, Math.floor(Number(transaction.statementCount) || 0));
+  const pendingCountText = statementCount > 0
+    ? `，未提交 ${statementCount} 条变更语句`
+    : '';
   const statusText = transaction.commitMode === 'auto'
     ? autoCommitRemainingSeconds !== null && autoCommitRemainingSeconds > 0
-      ? `事务待提交，${autoCommitRemainingSeconds}s 后自动提交`
-      : '事务执行成功，正在自动提交'
-    : '事务待提交';
+      ? `事务待提交${pendingCountText}，${autoCommitRemainingSeconds}s 后自动提交`
+      : `事务执行成功${pendingCountText}，正在自动提交`
+    : `事务待提交${pendingCountText}`;
 
   return (
     <div

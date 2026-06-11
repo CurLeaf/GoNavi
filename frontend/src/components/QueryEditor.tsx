@@ -15,6 +15,11 @@ import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
+import {
+    buildQueryResultPageSql,
+    createInitialQueryResultPagination,
+    resolveQueryResultPaginationTotal,
+} from '../utils/queryResultPagination';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart } from '../utils/sql';
 import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
@@ -3595,7 +3600,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       insertText: s.body,
                       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
                       detail: s.name,
-                      documentation: s.description || s.body,
+                      documentation: s.syntaxHelp || s.description || s.body,
                       range,
                       sortText: '04' + s.prefix,
                   })),
@@ -3925,6 +3930,107 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
   };
 
+  const handleResultPageChange = async (resultKey: string, page: number, pageSize: number) => {
+      const target = resultSets.find((item) => item.key === resultKey);
+      if (!target?.page?.baseSql || !currentDb) return;
+      const conn = connections.find(c => c.id === currentConnectionId);
+      if (!conn) return;
+      const safePage = Math.max(1, Math.floor(Number(page) || 1));
+      const safePageSize = Math.max(1, Math.floor(Number(pageSize) || target.page.pageSize || 1));
+      const config = {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+      const dbType = String(config.type || 'mysql');
+      const driver = String((config as any).driver || '');
+      const normalizedDbType = String(resolveSqlDialect(dbType, driver, {
+          oceanBaseProtocol: String((config as any).oceanBaseProtocol || ''),
+      })).toLowerCase();
+      const pageSql = buildQueryResultPageSql({
+          baseSql: target.page.baseSql,
+          dbType: normalizedDbType,
+          driver,
+          page: safePage,
+          pageSize: safePageSize,
+          lookahead: true,
+      });
+
+      try {
+          setLoading(true);
+          setResultSets(prev => prev.map(rs =>
+              rs.key === resultKey && rs.page
+                  ? { ...rs, page: { ...rs.page, loading: true } }
+                  : rs
+          ));
+          let queryId: string;
+          try {
+              queryId = await GenerateQueryID();
+          } catch {
+              queryId = 'query-page-' + Date.now();
+          }
+          const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, pageSql, queryId);
+          if (!res?.success) {
+              message.error('翻页失败: ' + formatSqlExecutionError(res?.message || '未知错误'));
+              return;
+          }
+
+          const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
+          const rsData = resultSetDataArray[0];
+          if (!rsData) {
+              message.warning('翻页未返回结果集');
+              return;
+          }
+          const rawRows = Array.isArray(rsData.rows) ? rsData.rows : [];
+          const hasNext = rawRows.length > safePageSize;
+          const rows = rawRows.slice(0, safePageSize);
+          const rowKeyOffset = (safePage - 1) * safePageSize;
+          rows.forEach((row: any, i: number) => {
+              if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = rowKeyOffset + i;
+          });
+          const cols = (rsData.columns && rsData.columns.length > 0)
+              ? rsData.columns
+              : (rows.length > 0 ? Object.keys(rows[0]) : target.columns);
+          const totalState = resolveQueryResultPaginationTotal({
+              current: safePage,
+              pageSize: safePageSize,
+              rowCount: rows.length,
+              hasNext,
+          });
+          setResultSets(prev => prev.map(rs =>
+              rs.key === resultKey && rs.page
+                  ? {
+                      ...rs,
+                      rows,
+                      columns: cols,
+                      messages: Array.isArray(rsData.messages) ? rsData.messages : [],
+                      resultType: 'grid',
+                      truncated: false,
+                      page: {
+                          ...rs.page,
+                          current: safePage,
+                          pageSize: safePageSize,
+                          ...totalState,
+                          loading: false,
+                      },
+                  }
+                  : rs
+          ));
+      } catch (err: any) {
+          message.error('翻页失败: ' + formatSqlExecutionError(err?.message || err || '未知错误'));
+      } finally {
+          setLoading(false);
+          setResultSets(prev => prev.map(rs =>
+              rs.key === resultKey && rs.page?.loading
+                  ? { ...rs, page: { ...rs.page, loading: false } }
+                  : rs
+          ));
+      }
+  };
+
   const handleRun = async () => {
     const currentQuery = getCurrentQuery();
     if (!currentQuery.trim()) return;
@@ -4163,6 +4269,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 message.warning('当前 SQL 编辑器已有未提交事务，请先提交或回滚后再执行新的增删改语句。');
                 return;
             }
+            const managedTransactionStatementCount = sourceStatements
+                .filter((statement) => shouldUseSqlEditorManagedTransaction([statement]))
+                .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
             const statementPlans: QueryStatementPlan[] = [];
@@ -4246,6 +4355,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     commitMode: sqlEditorCommitMode,
                     autoCommitDelayMs: sqlEditorAutoCommitDelayMs,
                     createdAt: Date.now(),
+                    statementCount: managedTransactionStatementCount,
                 });
             }
 
@@ -4320,6 +4430,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
                     const tableRef = plan?.tableRef;
                     const editLocator = plan?.editLocator;
+                    const page = createInitialQueryResultPagination({
+                        executedSql,
+                        exportSql: originalSql,
+                        dbType: normalizedDbType,
+                        driver,
+                        returnedRowCount: rows.length,
+                        fallbackPageSize: maxRows,
+                    });
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
                         sql: executedSql,
@@ -4333,7 +4451,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         pkColumns: plan?.pkColumns || [],
                         editLocator,
                         readOnly: forceReadOnlyResult || !editLocator || editLocator.readOnly,
-                        truncated
+                        truncated,
+                        page,
                     });
                 }
             }
@@ -5212,6 +5331,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onCloseResultTabsToRight={closeResultTabsToRight}
           onCloseAllResultTabs={closeAllResultTabs}
           onReloadResult={handleReloadResult}
+          onResultPageChange={handleResultPageChange}
           onDiagnoseExecutionError={handleDiagnoseExecutionError}
         />
       )}
