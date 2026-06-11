@@ -69,6 +69,16 @@ import {
   getConnectionTypeDefaultPort as getDefaultPortByType,
   getConnectionTypeHint,
 } from "../utils/connectionTypeCatalog";
+import {
+  isFileDatabaseType,
+  isMySQLCompatibleType,
+  isPostgresCompatibleSSLType,
+  singleHostUriSchemesByType,
+  supportsConnectionParamsForType,
+  supportsSSLCAPathForType,
+  supportsSSLClientCertificateForType,
+  supportsSSLForType,
+} from "../utils/connectionTypeCapabilities";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   describeUnsupportedOceanBaseProtocol,
@@ -235,144 +245,6 @@ const resolveInitialSecretFieldValue = (
       return "";
   }
 };
-
-const singleHostUriSchemesByType: Record<string, string[]> = {
-  postgres: ["postgresql", "postgres"],
-  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
-  clickhouse: ["clickhouse"],
-  oracle: ["oracle"],
-  sqlserver: ["sqlserver"],
-  iris: ["iris", "intersystems"],
-  redis: ["redis"],
-  tdengine: ["tdengine"],
-  dameng: ["dameng", "dm"],
-  kingbase: ["kingbase"],
-  highgo: ["highgo"],
-  vastbase: ["vastbase"],
-  elasticsearch: ["http", "https"],
-};
-
-const sslSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "doris",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "oracle",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "tdengine",
-  "elasticsearch",
-]);
-
-const supportsSSLForType = (type: string) =>
-  sslSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const sslCAPathSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "elasticsearch",
-]);
-
-const sslClientCertificateSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-]);
-
-const supportsSSLCAPathForType = (type: string) =>
-  sslCAPathSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const supportsSSLClientCertificateForType = (type: string) =>
-  sslClientCertificateSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isPostgresCompatibleSSLType = (type: string) =>
-  [
-    "postgres",
-    "kingbase",
-    "highgo",
-    "vastbase",
-    "opengauss",
-  ].includes(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isFileDatabaseType = (type: string) =>
-  type === "sqlite" || type === "duckdb";
-
-const isMySQLCompatibleType = (type: string) =>
-  type === "mysql" ||
-  type === "mariadb" ||
-  type === "oceanbase" ||
-  type === "doris" ||
-  type === "diros" ||
-  type === "starrocks" ||
-  type === "sphinx";
-
-const supportsConnectionParamsForType = (type: string) =>
-  isMySQLCompatibleType(type) ||
-  type === "postgres" ||
-  type === "kingbase" ||
-  type === "highgo" ||
-  type === "vastbase" ||
-  type === "opengauss" ||
-  type === "oracle" ||
-  type === "sqlserver" ||
-  type === "iris" ||
-  type === "clickhouse" ||
-  type === "mongodb" ||
-  type === "dameng" ||
-  type === "tdengine" ||
-  type === "elasticsearch";
 
 type DriverStatusSnapshot = {
   type: string;

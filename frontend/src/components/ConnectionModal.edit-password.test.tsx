@@ -5,7 +5,8 @@ const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', impo
 const redisSectionsSource = readFileSync(new URL('./ConnectionModalRedisSections.tsx', import.meta.url), 'utf8');
 const mongoSectionsSource = readFileSync(new URL('./ConnectionModalMongoSections.tsx', import.meta.url), 'utf8');
 const connectionTypeCatalogSource = readFileSync(new URL('../utils/connectionTypeCatalog.ts', import.meta.url), 'utf8');
-const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}\n${connectionTypeCatalogSource}`;
+const connectionTypeCapabilitiesSource = readFileSync(new URL('../utils/connectionTypeCapabilities.ts', import.meta.url), 'utf8');
+const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}\n${connectionTypeCatalogSource}\n${connectionTypeCapabilitiesSource}`;
 
 describe('ConnectionModal edit password behavior', () => {
   it('keeps the prefilled primary password masked by default', () => {

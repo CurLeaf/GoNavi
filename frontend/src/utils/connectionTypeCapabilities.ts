@@ -1,0 +1,126 @@
+export const singleHostUriSchemesByType: Record<string, string[]> = {
+  postgres: ["postgresql", "postgres"],
+  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
+  clickhouse: ["clickhouse"],
+  oracle: ["oracle"],
+  sqlserver: ["sqlserver"],
+  iris: ["iris", "intersystems"],
+  redis: ["redis"],
+  tdengine: ["tdengine"],
+  dameng: ["dameng", "dm"],
+  kingbase: ["kingbase"],
+  highgo: ["highgo"],
+  vastbase: ["vastbase"],
+  elasticsearch: ["http", "https"],
+};
+
+const normalizeConnectionType = (type: string) =>
+  String(type || "")
+    .trim()
+    .toLowerCase();
+
+const sslSupportedTypes = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "doris",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "dameng",
+  "clickhouse",
+  "postgres",
+  "sqlserver",
+  "oracle",
+  "kingbase",
+  "highgo",
+  "vastbase",
+  "opengauss",
+  "mongodb",
+  "redis",
+  "tdengine",
+  "elasticsearch",
+]);
+
+export const supportsSSLForType = (type: string) =>
+  sslSupportedTypes.has(normalizeConnectionType(type));
+
+const sslCAPathSupportedTypes = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "clickhouse",
+  "postgres",
+  "sqlserver",
+  "kingbase",
+  "highgo",
+  "vastbase",
+  "opengauss",
+  "mongodb",
+  "redis",
+  "elasticsearch",
+]);
+
+const sslClientCertificateSupportedTypes = new Set([
+  "mysql",
+  "mariadb",
+  "oceanbase",
+  "diros",
+  "starrocks",
+  "sphinx",
+  "dameng",
+  "clickhouse",
+  "postgres",
+  "kingbase",
+  "highgo",
+  "vastbase",
+  "opengauss",
+  "mongodb",
+  "redis",
+]);
+
+export const supportsSSLCAPathForType = (type: string) =>
+  sslCAPathSupportedTypes.has(normalizeConnectionType(type));
+
+export const supportsSSLClientCertificateForType = (type: string) =>
+  sslClientCertificateSupportedTypes.has(normalizeConnectionType(type));
+
+export const isPostgresCompatibleSSLType = (type: string) =>
+  [
+    "postgres",
+    "kingbase",
+    "highgo",
+    "vastbase",
+    "opengauss",
+  ].includes(normalizeConnectionType(type));
+
+export const isFileDatabaseType = (type: string) =>
+  type === "sqlite" || type === "duckdb";
+
+export const isMySQLCompatibleType = (type: string) =>
+  type === "mysql" ||
+  type === "mariadb" ||
+  type === "oceanbase" ||
+  type === "doris" ||
+  type === "diros" ||
+  type === "starrocks" ||
+  type === "sphinx";
+
+export const supportsConnectionParamsForType = (type: string) =>
+  isMySQLCompatibleType(type) ||
+  type === "postgres" ||
+  type === "kingbase" ||
+  type === "highgo" ||
+  type === "vastbase" ||
+  type === "opengauss" ||
+  type === "oracle" ||
+  type === "sqlserver" ||
+  type === "iris" ||
+  type === "clickhouse" ||
+  type === "mongodb" ||
+  type === "dameng" ||
+  type === "tdengine" ||
+  type === "elasticsearch";
