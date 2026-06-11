@@ -89,4 +89,44 @@ describe('aiLocalToolExecutor inspect_ai_upstream_logs', () => {
     expect(result.content).toContain('请先发送一次 AI 消息');
     expect(result.content).toContain('扩大 lineLimit');
   });
+
+  it('summarizes CLI upstream requests that complete without an HTTP status code', async () => {
+    const readAppLogTail = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        logPath: 'C:/Users/demo/.GoNavi/Logs/gonavi.log',
+        keyword: 'ClaudeCLI',
+        requestedLineLimit: 160,
+        lines: [
+          '2026/06/11 12:20:00.000000 [INFO] AI 上游请求开始：requestId=claudecli-123 provider=ClaudeCLI method=CLI endpoint=https://proxy.example.com/api/anthropic body={"command":"claude","args":["-p","[prompt logged separately]"],"prompt":"hello","has_api_key":true}',
+          '2026/06/11 12:20:01.000000 [INFO] AI 上游请求完成：requestId=claudecli-123 provider=ClaudeCLI endpoint=https://proxy.example.com/api/anthropic duration=981ms',
+        ],
+      },
+    });
+
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_upstream_logs', {
+        provider: 'ClaudeCLI',
+        includeBody: true,
+      }),
+      connections: [],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        readAppLogTail,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(readAppLogTail).toHaveBeenCalledWith(160, 'ClaudeCLI');
+    expect(result.content).toContain('"requestId":"claudecli-123"');
+    expect(result.content).toContain('"provider":"ClaudeCLI"');
+    expect(result.content).toContain('"method":"CLI"');
+    expect(result.content).toContain('"state":"completed"');
+    expect(result.content).toContain('"duration":"981ms"');
+    expect(result.content).toContain('"hasBody":true');
+    expect(result.content).not.toContain('"status":0');
+  });
 });

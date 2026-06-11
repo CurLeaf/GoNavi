@@ -75,12 +75,22 @@ func logAIUpstreamRequestFinish(handle aiUpstreamRequestLogHandle, statusCode in
 		)
 		return
 	}
+	if statusCode > 0 {
+		logger.Infof(
+			"AI 上游请求完成：requestId=%s provider=%s endpoint=%s status=%d duration=%s",
+			handle.id,
+			handle.provider,
+			handle.endpoint,
+			statusCode,
+			duration,
+		)
+		return
+	}
 	logger.Infof(
-		"AI 上游请求完成：requestId=%s provider=%s endpoint=%s status=%d duration=%s",
+		"AI 上游请求完成：requestId=%s provider=%s endpoint=%s duration=%s",
 		handle.id,
 		handle.provider,
 		handle.endpoint,
-		statusCode,
 		duration,
 	)
 }
