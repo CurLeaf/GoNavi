@@ -1,5 +1,10 @@
 import type React from 'react';
 import type { SavedConnection } from '../types';
+import {
+  isPostgresSchemaDialect as resolveIsPostgresSchemaDialect,
+  normalizeDriverType as normalizeConnectionDriverType,
+  resolveSavedConnectionDriverType as resolveSavedConnectionDriverTypeBase,
+} from '../utils/connectionDriverType';
 
 const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
 export const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
@@ -79,36 +84,9 @@ export const isConnectionTreeKey = (key: React.Key, connectionId: string): boole
   return text === connectionId || text.startsWith(`${connectionId}-`);
 };
 
-export const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
-  if (normalized === 'elastic') return 'elasticsearch';
-  if (normalized === 'doris') return 'diros';
-  if (
-    normalized === 'open_gauss' ||
-    normalized === 'open-gauss' ||
-    normalized === 'opengauss'
-  ) return 'opengauss';
-  if (
-    normalized === 'intersystems' ||
-    normalized === 'intersystemsiris' ||
-    normalized === 'inter-systems' ||
-    normalized === 'inter-systems-iris'
-  ) return 'iris';
-  return normalized;
-};
-
-export const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): string => {
-  const type = normalizeDriverType(conn?.config?.type || '');
-  if (type !== 'custom') {
-    return type;
-  }
-  return normalizeDriverType(conn?.config?.driver || '');
-};
-
-export const isPostgresSchemaDialect = (dialect: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
-);
+export const normalizeDriverType = normalizeConnectionDriverType;
+export const resolveSavedConnectionDriverType = resolveSavedConnectionDriverTypeBase;
+export const isPostgresSchemaDialect = resolveIsPostgresSchemaDialect;
 
 export const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
   { value: 'smart', label: '智能' },

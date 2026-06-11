@@ -79,6 +79,11 @@ import {
   supportsSSLClientCertificateForType,
   supportsSSLForType,
 } from "../utils/connectionTypeCapabilities";
+import {
+  normalizeDriverType,
+  resolveConnectionDriverType,
+  type DriverStatusSnapshot,
+} from "../utils/connectionDriverType";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   describeUnsupportedOceanBaseProtocol,
@@ -244,48 +249,6 @@ const resolveInitialSecretFieldValue = (
     default:
       return "";
   }
-};
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  affectedConnections?: number;
-  message?: string;
-};
-
-const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "postgresql") return "postgres";
-  if (normalized === "elastic") return "elasticsearch";
-  if (normalized === "doris") return "diros";
-  if (
-    normalized === "intersystems" ||
-    normalized === "intersystemsiris" ||
-    normalized === "inter-systems-iris" ||
-    normalized === "inter-systems"
-  )
-    return "iris";
-  if (
-    normalized === "open_gauss" ||
-    normalized === "open-gauss" ||
-    normalized === "opengauss"
-  )
-    return "opengauss";
-  return normalized;
-};
-
-const resolveConnectionDriverType = (type: string, driver?: string): string => {
-  const normalizedType = normalizeDriverType(type);
-  if (normalizedType !== "custom") {
-    return normalizedType;
-  }
-  return normalizeDriverType(driver || "");
 };
 
 const ConnectionModal: React.FC<{

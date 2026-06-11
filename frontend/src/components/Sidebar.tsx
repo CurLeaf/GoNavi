@@ -90,6 +90,7 @@ import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
+import type { DriverStatusSnapshot } from '../utils/connectionDriverType';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
   SEARCH_SCOPE_LABEL_MAP,
@@ -236,16 +237,6 @@ interface BatchObjectItem {
   objectType: BatchObjectType;
   dataRef: any;
 }
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  message?: string;
-};
 
 const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
 
