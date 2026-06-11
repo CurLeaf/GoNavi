@@ -59,10 +59,10 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		startTextTransaction bool
 	)
 	if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
+		// database/sql rolls back a BeginTx transaction when its context is cancelled.
+		// SQL editor transactions must outlive the execution RPC and be ended only by
+		// explicit commit, rollback, or shutdown cleanup.
 		transactionContext := context.Background()
-		if a.ctx != nil {
-			transactionContext = a.ctx
-		}
 		transactionContext, transactionCancel = context.WithCancel(transactionContext)
 		transactionExecer, err := provider.OpenTransactionExecer(transactionContext)
 		if err != nil {

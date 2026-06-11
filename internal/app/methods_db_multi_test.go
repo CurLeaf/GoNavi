@@ -682,6 +682,72 @@ func TestDBQueryMultiTransactionalUsesDriverTransactionForOracle(t *testing.T) {
 	}
 }
 
+func TestDBQueryMultiTransactionalOracleDriverTransactionOutlivesAppContextCancellation(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	for _, tt := range []struct {
+		name          string
+		finish        func(*App, string) connection.QueryResult
+		wantCommits   int
+		wantRollbacks int
+	}{
+		{
+			name: "commit",
+			finish: func(app *App, transactionID string) connection.QueryResult {
+				return app.DBCommitTransaction(transactionID)
+			},
+			wantCommits: 1,
+		},
+		{
+			name: "rollback",
+			finish: func(app *App, transactionID string) connection.QueryResult {
+				return app.DBRollbackTransaction(transactionID)
+			},
+			wantRollbacks: 1,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := "UPDATE users SET name = 'new' WHERE id = 1"
+			fakeDB := &fakeTransactionalDB{
+				fakeBatchWriteDB: fakeBatchWriteDB{
+					execAffected: map[string]int64{
+						stmt: 1,
+					},
+				},
+			}
+			newDatabaseFunc = func(dbType string) (db.Database, error) {
+				return fakeDB, nil
+			}
+
+			appCtx, cancelAppCtx := context.WithCancel(context.Background())
+			app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+			app.ctx = appCtx
+			config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+			result := app.DBQueryMultiTransactional(config, "ORCLPDB1", stmt, "oracle-tx-context-"+tt.name)
+			if !result.Success {
+				t.Fatalf("expected Oracle transactional query success, got failure: %s", result.Message)
+			}
+			if result.TransactionID == "" || !result.TransactionPending {
+				t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+			}
+
+			cancelAppCtx()
+			finishResult := tt.finish(app, result.TransactionID)
+			if !finishResult.Success {
+				t.Fatalf("expected Oracle transaction %s success after app context cancellation, got failure: %s", tt.name, finishResult.Message)
+			}
+			if fakeDB.txSession.commitCalls != tt.wantCommits || fakeDB.txSession.rollbackCalls != tt.wantRollbacks {
+				t.Fatalf("expected commits=%d rollbacks=%d, got commits=%d rollbacks=%d",
+					tt.wantCommits, tt.wantRollbacks, fakeDB.txSession.commitCalls, fakeDB.txSession.rollbackCalls)
+			}
+		})
+	}
+}
+
 func TestDBQueryMultiTransactionalRollsBackOracleDriverTransactionOnDMLFailure(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
