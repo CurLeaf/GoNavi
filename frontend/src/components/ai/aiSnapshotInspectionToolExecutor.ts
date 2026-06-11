@@ -27,6 +27,7 @@ import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
 import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
 import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
 import { buildAppLogSnapshot } from './aiAppLogInsights';
+import { buildAIUpstreamLogSnapshot } from './aiUpstreamLogInsights';
 import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
 import {
   buildRecentSqlActivitySnapshot,
@@ -356,6 +357,32 @@ export async function executeSnapshotInspectionToolCall(
           success: true,
         };
       }
+      case 'inspect_ai_upstream_logs': {
+        const keyword = String(args.requestId || args.provider || args.keyword || 'AI 上游请求').trim();
+        const readResult = typeof runtime?.readAppLogTail === 'function'
+          ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, keyword)
+          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        if (!readResult?.success) {
+          return {
+            content: `读取 AI 上游请求日志失败: ${readResult?.message || '未知错误'}`,
+            success: false,
+          };
+        }
+        return {
+          content: JSON.stringify(buildAIUpstreamLogSnapshot({
+            readResult,
+            provider: args.provider,
+            requestId: args.requestId,
+            keyword: args.keyword,
+            lineLimit: args.lineLimit,
+            requestLimit: args.requestLimit,
+            includeBody: args.includeBody !== false,
+            includeLines: args.includeLines === true,
+            bodyPreviewLimit: args.bodyPreviewLimit,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_recent_connection_failures': {
         const readResult = typeof runtime?.readAppLogTail === 'function'
           ? await runtime.readAppLogTail(Number(args.lineLimit) || 120, String(args.keyword || ''))
@@ -443,6 +470,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_sql_editor_transaction: '读取 SQL 编辑器事务状态失败',
       inspect_sql_risk: '检查 SQL 风险失败',
       inspect_app_logs: '读取 GoNavi 应用日志失败',
+      inspect_ai_upstream_logs: '读取 AI 上游请求日志失败',
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_ai_message_flow: '读取 AI 消息流诊断失败',

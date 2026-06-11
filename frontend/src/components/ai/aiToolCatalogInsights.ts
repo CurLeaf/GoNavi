@@ -17,6 +17,13 @@ const normalizeLimit = (value: unknown): number =>
 const matchesAnyText = (keyword: string, values: unknown[]): boolean =>
   !keyword || values.some((value) => normalizeText(value).includes(keyword));
 
+const scoreKeywordMatch = (keyword: string, values: Array<{ value: unknown; weight: number }>): number =>
+  !keyword
+    ? 0
+    : values.reduce((score, item) => (
+        normalizeText(item.value).includes(keyword) ? score + item.weight : score
+      ), 0);
+
 const readMCPToolParameterSummary = (tool: AIMCPToolDescriptor) => {
   const schema = tool.inputSchema && typeof tool.inputSchema === 'object'
     ? tool.inputSchema as Record<string, any>
@@ -57,6 +64,17 @@ export const buildAIToolCatalogSnapshot = (params: {
 
   const matchedFlows = BUILTIN_TOOL_FLOWS
     .filter((flow) => matchesAnyText(keyword, [flow.title, flow.steps, flow.description]))
+    .map((flow, index) => ({
+      flow,
+      index,
+      score: scoreKeywordMatch(keyword, [
+        { value: flow.title, weight: 100 },
+        { value: flow.steps, weight: 60 },
+        { value: flow.description, weight: 20 },
+      ]),
+    }))
+    .sort((left, right) => (right.score - left.score) || (left.index - right.index))
+    .map((item) => item.flow)
     .slice(0, limit);
 
   const matchedBuiltinTools = builtinTools
@@ -76,6 +94,25 @@ export const buildAIToolCatalogSnapshot = (params: {
         ]),
       ]);
     })
+    .map((tool, index) => ({
+      tool,
+      index,
+      score: normalizedToolName
+        ? 0
+        : scoreKeywordMatch(keyword, [
+            { value: tool.name, weight: 120 },
+            { value: tool.desc, weight: 100 },
+            { value: tool.params, weight: 60 },
+            { value: tool.detail, weight: 20 },
+            ...describeBuiltinToolParameters(tool).flatMap((param) => [
+              { value: param.name, weight: 40 },
+              { value: param.description, weight: 20 },
+              { value: param.enumValues.join(' '), weight: 20 },
+            ]),
+          ]),
+    }))
+    .sort((left, right) => (right.score - left.score) || (left.index - right.index))
+    .map((item) => item.tool)
     .slice(0, limit)
     .map((tool) => ({
       name: tool.name,

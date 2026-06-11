@@ -149,6 +149,35 @@ export const BUILTIN_AI_INSPECTION_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_ai_upstream_logs",
+    icon: "📡",
+    desc: "查看 AI 上游请求入参与状态",
+    detail:
+      "从 gonavi.log 读取最近的 AI 上游请求开始/完成/失败记录，按 provider、requestId 或关键词过滤，返回请求体 body 预览、endpoint、状态码、耗时和错误摘要。适合用户想核对发给上游模型的真实入参、排查请求参数兼容、确认脱敏日志是否写入时先调用。",
+    params: "provider?, requestId?, keyword?, lineLimit?(默认 160), requestLimit?(默认 12), includeBody?(默认 true), includeLines?(默认 false)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_ai_upstream_logs",
+        description:
+          "读取 GoNavi 应用日志中的 AI 上游请求记录，返回 requestId、provider、method、endpoint、请求 body 预览、状态码、耗时和错误摘要。适用于用户提到 AI 请求入参、上游请求体、requestId、provider 请求参数、模型接口报错、或需要核对刚才发给上游模型的真实 payload 时，先读取该工具，不要只凭界面响应推断。",
+        parameters: {
+          type: "object",
+          properties: {
+            provider: { type: "string", description: "可选，只看某个供应商，例如 openai、anthropic、gemini；大小写不敏感" },
+            requestId: { type: "string", description: "可选，按日志里的 requestId 精确过滤，适合从错误日志继续追踪同一次请求" },
+            keyword: { type: "string", description: "可选，在 requestId、provider、endpoint、bodyPreview 或 error 中继续过滤，例如模型名、接口路径、参数名" },
+            lineLimit: { type: "number", description: "可选，最多读取多少行日志尾部，默认 160，最大 300" },
+            requestLimit: { type: "number", description: "可选，最多返回多少个请求摘要，默认 12，最大 40" },
+            includeBody: { type: "boolean", description: "可选，是否返回已脱敏的请求 body 预览，默认 true；只看状态时可设为 false" },
+            includeLines: { type: "boolean", description: "可选，是否附带脱敏后的原始日志行，默认 false；需要引用原文时再开启" },
+            bodyPreviewLimit: { type: "number", description: "可选，单个 body 预览最大字符数，默认 6000，最大 12000" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_ai_tool_catalog",
     icon: "🧭",
     desc: "查看 AI 内置工具目录和参数提示",

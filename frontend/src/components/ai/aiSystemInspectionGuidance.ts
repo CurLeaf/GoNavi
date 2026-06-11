@@ -89,6 +89,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_ai_upstream_logs',
+    '如果用户提到“AI 上游请求”“请求入参/请求体”“requestId”“发给模型的 payload”“上游接口报错具体传了什么”，优先调用 inspect_ai_upstream_logs 读取脱敏后的真实请求日志，再结合 inspect_ai_providers 或 inspect_ai_message_flow 继续定位。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_ai_providers',
     '如果用户提到“当前配了哪些供应商”“为什么模型列表为空”“API Key 有没有配”“为什么现在不能发送/没选中模型”，优先调用 inspect_ai_providers 读取真实供应商配置，不要凭记忆猜测。',
   );

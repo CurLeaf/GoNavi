@@ -44,6 +44,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_ai_providers');
     expect(markup).toContain('排查聊天发送状态');
     expect(markup).toContain('inspect_ai_chat_readiness');
+    expect(markup).toContain('追踪 AI 上游请求');
+    expect(markup).toContain('inspect_ai_upstream_logs');
+    expect(markup).toContain('请求体预览');
     expect(markup).toContain('排查 MCP 接入状态');
     expect(markup).toContain('inspect_mcp_setup');
     expect(markup).toContain('新增 MCP 填写指引');

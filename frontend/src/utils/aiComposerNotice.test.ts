@@ -12,6 +12,10 @@ describe('ai composer notice helpers', () => {
       tone: 'warning',
       title: '还没有可用供应商',
       description: '先在 AI 设置里添加并启用一个模型供应商。',
+      action: {
+        key: 'open-settings',
+        label: '打开 AI 设置',
+      },
     });
   });
 
@@ -20,6 +24,10 @@ describe('ai composer notice helpers', () => {
       tone: 'warning',
       title: '先选择一个模型',
       description: '打开下方模型下拉并选择模型；如果列表为空，请检查供应商入口和 API Key。',
+      action: {
+        key: 'reload-models',
+        label: '重新加载模型',
+      },
     });
   });
 
@@ -28,6 +36,10 @@ describe('ai composer notice helpers', () => {
       tone: 'error',
       title: '模型列表加载失败',
       description: '当前接口未返回可用模型',
+      action: {
+        key: 'reload-models',
+        label: '重新加载模型',
+      },
     });
   });
 });
