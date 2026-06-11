@@ -17,6 +17,8 @@ const defaultSyncApplyBatchSize = 1000
 type SyncConfig struct {
 	SourceConfig        connection.ConnectionConfig `json:"sourceConfig"`
 	TargetConfig        connection.ConnectionConfig `json:"targetConfig"`
+	SourceDatabase      string                      `json:"sourceDatabase,omitempty"`
+	TargetDatabase      string                      `json:"targetDatabase,omitempty"`
 	Tables              []string                    `json:"tables"`
 	SourceQuery         string                      `json:"sourceQuery,omitempty"`
 	Content             string                      `json:"content,omitempty"` // "data", "schema", "both"
@@ -50,6 +52,7 @@ func NewSyncEngine(reporter Reporter) *SyncEngine {
 
 // CompareAndSync performs the synchronization
 func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
+	config = normalizeSyncConnectionDatabases(config)
 	result := SyncResult{Success: true, Logs: []string{}}
 	logger.Infof("开始数据同步：源=%s 目标=%s 表数量=%d", formatConnSummaryForSync(config.SourceConfig), formatConnSummaryForSync(config.TargetConfig), len(config.Tables))
 	if isRedisToMongoKeyspacePair(config) {

@@ -3,8 +3,72 @@ package sync
 import (
 	"strings"
 
+	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
 )
+
+func selectedSyncDatabase(selected string, fallback string) string {
+	if value := strings.TrimSpace(selected); value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func selectedSyncSourceDatabase(config SyncConfig) string {
+	return selectedSyncDatabase(config.SourceDatabase, config.SourceConfig.Database)
+}
+
+func selectedSyncTargetDatabase(config SyncConfig) string {
+	return selectedSyncDatabase(config.TargetDatabase, config.TargetConfig.Database)
+}
+
+func normalizeSyncConnectionDatabases(config SyncConfig) SyncConfig {
+	config.SourceConfig = normalizeSyncConnectionDatabase(config.SourceConfig, config.SourceDatabase)
+	config.TargetConfig = normalizeSyncConnectionDatabase(config.TargetConfig, config.TargetDatabase)
+	return config
+}
+
+func normalizeSyncConnectionDatabase(config connection.ConnectionConfig, selectedDatabase string) connection.ConnectionConfig {
+	selected := strings.TrimSpace(selectedDatabase)
+	if selected == "" {
+		return config
+	}
+	switch resolveMigrationDBType(config) {
+	case "oracle":
+		// Oracle 的 ConnectionConfig.Database 是 Service Name，数据同步选择的是 schema/owner。
+		return config
+	case "oceanbase":
+		if isOceanBaseOracleSyncConnection(config) {
+			return config
+		}
+	default:
+		config.Database = selected
+		return config
+	}
+	config.Database = selected
+	return config
+}
+
+func isOceanBaseOracleSyncConnection(config connection.ConnectionConfig) bool {
+	if !strings.EqualFold(strings.TrimSpace(config.Type), "oceanbase") {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(config.OceanBaseProtocol), "oracle") {
+		return true
+	}
+	for _, part := range strings.FieldsFunc(config.ConnectionParams, func(r rune) bool { return r == '&' || r == ';' }) {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		normalizedValue := strings.ToLower(strings.TrimSpace(value))
+		if (normalizedKey == "protocol" || normalizedKey == "tenantmode") && normalizedValue == "oracle" {
+			return true
+		}
+	}
+	return false
+}
 
 func normalizeSyncMode(mode string) string {
 	m := strings.ToLower(strings.TrimSpace(mode))

@@ -14,8 +14,8 @@ func (s *SyncEngine) syncTableSchema(config SyncConfig, res *SyncResult, sourceD
 	}
 
 	sourceType := resolveMigrationDBType(config.SourceConfig)
-	sourceSchema, sourceTable := normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	targetSchema, targetTable := normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	sourceSchema, sourceTable := normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	targetSchema, targetTable := normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	targetQueryTable := qualifiedNameForQuery(targetType, targetSchema, targetTable, tableName)
 
 	// 1) 获取源表字段

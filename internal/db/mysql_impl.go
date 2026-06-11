@@ -964,13 +964,56 @@ func (m *MySQLDB) GetTables(dbName string) ([]string, error) {
 	return resolveShardingSphereLogicalTables(tables, m.Query), nil
 }
 
-func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
-	query := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, tableName)
-	if dbName == "" {
-		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)
+func normalizeMySQLIdentifierPart(ident string) string {
+	value := strings.TrimSpace(ident)
+	for i := 0; i < 4; i++ {
+		next := normalizeSQLIdentPartCommon(value)
+		if next == value {
+			break
+		}
+		value = next
+	}
+	if len(value) >= 2 {
+		first := value[0]
+		last := value[len(value)-1]
+		switch {
+		case first == '\'' && last == '\'':
+			return strings.TrimSpace(strings.ReplaceAll(value[1:len(value)-1], `''`, `'`))
+		case (first == '\'' && last == '"') || (first == '"' && last == '\''):
+			return strings.TrimSpace(value[1 : len(value)-1])
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func quoteMySQLIdentifier(ident string) string {
+	return "`" + strings.ReplaceAll(normalizeMySQLIdentifierPart(ident), "`", "``") + "`"
+}
+
+func mysqlQualifiedTableIdentifier(dbName, tableName string) string {
+	schema := normalizeMySQLIdentifierPart(dbName)
+	table := strings.TrimSpace(tableName)
+	if parsedSchema, parsedTable := SplitSQLQualifiedName(table); parsedTable != "" {
+		if parsedSchema != "" {
+			schema = normalizeMySQLIdentifierPart(parsedSchema)
+		}
+		table = normalizeMySQLIdentifierPart(parsedTable)
+	} else {
+		table = normalizeMySQLIdentifierPart(table)
 	}
 
-	data, _, err := m.Query(query)
+	if schema != "" {
+		return quoteMySQLIdentifier(schema) + "." + quoteMySQLIdentifier(table)
+	}
+	return quoteMySQLIdentifier(table)
+}
+
+func buildMySQLShowCreateTableQuery(dbName, tableName string) string {
+	return "SHOW CREATE TABLE " + mysqlQualifiedTableIdentifier(dbName, tableName)
+}
+
+func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
+	data, _, err := m.Query(buildMySQLShowCreateTableQuery(dbName, tableName))
 	if err != nil {
 		return "", err
 	}

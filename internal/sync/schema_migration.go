@@ -98,8 +98,8 @@ func buildSchemaMigrationPlanLegacy(config SyncConfig, tableName string, sourceD
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -593,8 +593,8 @@ func buildMySQLToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Data
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -832,8 +832,8 @@ func buildPGLikeToPGLikePlan(config SyncConfig, tableName string, sourceDB db.Da
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -1078,8 +1078,8 @@ func buildPGLikeToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Dat
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -1369,8 +1369,8 @@ func buildMySQLToPGLikePlan(config SyncConfig, tableName string, sourceDB db.Dat
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"

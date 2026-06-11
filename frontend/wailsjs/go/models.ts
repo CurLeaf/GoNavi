@@ -1257,6 +1257,8 @@ export namespace sync {
 	export class SyncConfig {
 	    sourceConfig: connection.ConnectionConfig;
 	    targetConfig: connection.ConnectionConfig;
+	    sourceDatabase?: string;
+	    targetDatabase?: string;
 	    tables: string[];
 	    sourceQuery?: string;
 	    content?: string;
@@ -1276,6 +1278,8 @@ export namespace sync {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sourceConfig = this.convertValues(source["sourceConfig"], connection.ConnectionConfig);
 	        this.targetConfig = this.convertValues(source["targetConfig"], connection.ConnectionConfig);
+	        this.sourceDatabase = source["sourceDatabase"];
+	        this.targetDatabase = source["targetDatabase"];
 	        this.tables = source["tables"];
 	        this.sourceQuery = source["sourceQuery"];
 	        this.content = source["content"];

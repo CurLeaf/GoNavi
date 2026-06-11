@@ -32,6 +32,7 @@ type SyncAnalyzeResult struct {
 }
 
 func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
+	config = normalizeSyncConnectionDatabases(config)
 	result := SyncAnalyzeResult{Success: true, Tables: []TableDiffSummary{}}
 	if isRedisToMongoKeyspacePair(config) {
 		return s.analyzeRedisToMongo(config)

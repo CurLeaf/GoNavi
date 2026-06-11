@@ -10,8 +10,8 @@ import (
 
 func buildMySQLToClickHousePlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	plan := SchemaMigrationPlan{}
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(config.SourceConfig.Type, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(config.TargetConfig.Type, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -70,8 +70,8 @@ func buildPGLikeToClickHousePlan(config SyncConfig, tableName string, sourceDB d
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -128,8 +128,8 @@ func buildPGLikeToClickHousePlan(config SyncConfig, tableName string, sourceDB d
 
 func buildClickHouseToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	plan := SchemaMigrationPlan{}
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(config.SourceConfig.Type, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(config.TargetConfig.Type, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -187,8 +187,8 @@ func buildClickHouseToPGLikePlan(config SyncConfig, tableName string, sourceDB d
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -247,8 +247,8 @@ func buildClickHouseToClickHousePlan(config SyncConfig, tableName string, source
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, config.SourceConfig.Database, tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"

@@ -73,7 +73,7 @@ func buildRedisToMongoPlan(config SyncConfig, keyName string, targetDB db.Databa
 		SourceSchema:       strconv.Itoa(resolveRedisDBIndex(config.SourceConfig)),
 		SourceTable:        keyName,
 		SourceQueryTable:   keyName,
-		TargetSchema:       strings.TrimSpace(config.TargetConfig.Database),
+		TargetSchema:       strings.TrimSpace(selectedSyncTargetDatabase(config)),
 		TargetTable:        collection,
 		TargetQueryTable:   collection,
 		PlannedAction:      "按 Redis Key 生成 MongoDB 文档导入",
@@ -557,7 +557,7 @@ func listMongoRedisCollections(sourceDB db.Database, config SyncConfig) ([]strin
 	if len(config.Tables) > 0 {
 		return dedupeStrings(config.Tables), nil
 	}
-	tables, err := sourceDB.GetTables(strings.TrimSpace(config.SourceConfig.Database))
+	tables, err := sourceDB.GetTables(strings.TrimSpace(selectedSyncSourceDatabase(config)))
 	if err == nil && len(tables) > 0 {
 		return dedupeStrings(tables), nil
 	}
