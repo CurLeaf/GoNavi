@@ -14,6 +14,7 @@ describe('aiSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
     expect(commands.some((command) => command.cmd === '/tools')).toBe(true);
     expect(commands.some((command) => command.cmd === '/budget')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/hotspots')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpfail')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
@@ -43,6 +44,12 @@ describe('aiSlashCommands', () => {
     expect(filterAISlashCommands('上下文').map((command) => command.cmd)).toContain('/budget');
     expect(filterAISlashCommands('变慢').map((command) => command.cmd)).toContain('/budget');
     expect(filterAISlashCommands('/bud').map((command) => command.cmd)).toContain('/budget');
+  });
+
+  it('supports filtering code hotspot diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('大文件').map((command) => command.cmd)).toContain('/hotspots');
+    expect(filterAISlashCommands('拆分').map((command) => command.cmd)).toContain('/hotspots');
+    expect(filterAISlashCommands('/hot').map((command) => command.cmd)).toContain('/hotspots');
   });
 
   it('supports filtering shortcut diagnostics by chinese keyword and command prefix', () => {

@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_support_bundle', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_upstream_logs', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_runtime_failures', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_support_bundle', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_upstream_logs', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_runtime_failures', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_codebase_hotspots', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -104,6 +104,7 @@ describe('buildAISystemContextMessages', () => {
     expect(joined).toContain('inspect_ai_last_render_error 读取最近一次被隔离的前端渲染异常记录');
     expect(joined).toContain('inspect_ai_message_flow 读取当前会话的真实消息结构');
     expect(joined).toContain('inspect_ai_context_budget 读取消息、DDL、MCP schema、提示词和 Skills 的体量风险');
+    expect(joined).toContain('inspect_codebase_hotspots 读取大文件热点');
     expect(joined).toContain('inspect_saved_queries');
     expect(joined).toContain('inspect_ai_sessions');
     expect(joined).toContain('inspect_sql_snippets');

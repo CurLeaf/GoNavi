@@ -173,6 +173,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_codebase_hotspots',
+    '如果用户提到“几千行文件太臃肿”“继续拆分大组件”“下一步该拆哪个文件”“AI/MCP/UI 改动风险大不大”，优先调用 inspect_codebase_hotspots 读取大文件热点、建议拆分切片和测试目标，再制定改动范围。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_current_connection',
     '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
   );

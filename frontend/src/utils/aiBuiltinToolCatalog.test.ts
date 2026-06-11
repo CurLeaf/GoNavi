@@ -89,5 +89,9 @@ describe('describeBuiltinToolParameters', () => {
     const mcpFlows = filterBuiltinToolFlows(BUILTIN_TOOL_FLOWS, '运行期失败日志')
       .map((flow) => flow.title);
     expect(mcpFlows).toContain('排查 MCP 接入状态');
+
+    const codebaseFlows = filterBuiltinToolFlows(BUILTIN_TOOL_FLOWS, '拆分热点')
+      .map((flow) => flow.title);
+    expect(codebaseFlows).toContain('治理前端大文件');
   });
 });

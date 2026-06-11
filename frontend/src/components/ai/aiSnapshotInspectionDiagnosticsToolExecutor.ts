@@ -15,6 +15,7 @@ import {
   buildAIMessageFlowSnapshot,
 } from './aiChatSessionInsights';
 import { buildAIContextBudgetSnapshot } from './aiContextBudgetInsights';
+import { buildCodebaseHotspotSnapshot } from './aiCodebaseHotspotInsights';
 import {
   buildSavedQueriesSnapshot,
   buildSqlSnippetsSnapshot,
@@ -111,6 +112,16 @@ export async function executeDiagnosticsSnapshotToolCall({
           mcpTools,
           skills,
           userPromptSettings,
+        })),
+        success: true,
+      };
+    case 'inspect_codebase_hotspots':
+      return {
+        content: JSON.stringify(buildCodebaseHotspotSnapshot({
+          keyword: args.keyword,
+          minLines: args.minLines,
+          limit: args.limit,
+          includeRecommendations: args.includeRecommendations !== false,
         })),
         success: true,
       };

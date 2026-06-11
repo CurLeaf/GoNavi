@@ -104,6 +104,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('诊断 AI 上下文体量');
     expect(markup).toContain('inspect_ai_context_budget');
     expect(markup).toContain('messageLimit');
+    expect(markup).toContain('治理前端大文件');
+    expect(markup).toContain('inspect_codebase_hotspots');
+    expect(markup).toContain('大文件和拆分热点');
     expect(markup).toContain('复用历史 SQL');
     expect(markup).toContain('inspect_saved_queries');
     expect(markup).toContain('回看 AI 历史对话');

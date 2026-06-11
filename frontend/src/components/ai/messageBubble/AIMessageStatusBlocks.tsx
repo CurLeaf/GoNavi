@@ -62,6 +62,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_ai_last_render_error: '读取最近一次 AI 渲染异常',
   inspect_ai_message_flow: '诊断当前 AI 消息流',
   inspect_ai_context_budget: '诊断 AI 上下文体量风险',
+  inspect_codebase_hotspots: '读取代码大文件热点',
   inspect_saved_queries: '检索本地已保存查询',
   inspect_sql_snippets: '读取 SQL 片段模板',
   inspect_shortcuts: '读取当前快捷键配置',

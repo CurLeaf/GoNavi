@@ -180,6 +180,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_ai_message_flow: '读取 AI 消息流诊断失败',
       inspect_ai_context_budget: '读取 AI 上下文体量诊断失败',
+      inspect_codebase_hotspots: '读取代码热点诊断失败',
       inspect_saved_queries: '读取已保存查询失败',
       inspect_sql_snippets: '读取 SQL 片段失败',
       inspect_shortcuts: '读取快捷键配置失败',
