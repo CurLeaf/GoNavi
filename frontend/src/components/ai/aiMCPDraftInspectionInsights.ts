@@ -1,7 +1,8 @@
 import type { AIMCPServerConfig } from '../../types';
-import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
+import { parseMCPCommandDraft, type ParseMCPCommandDraftResult } from '../../utils/mcpCommandDraft';
 import { parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import { buildMCPLaunchPreview } from '../../utils/mcpServerGuidance';
+import { buildMCPServerDraftSeed } from '../../utils/mcpServerDraftSeed';
 import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import { validateMCPServerDraft } from '../../utils/mcpServerValidation';
 
@@ -24,6 +25,25 @@ const normalizeArgs = (value: unknown): string[] => {
 const normalizeTimeoutSeconds = (value: unknown, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const redactEnvValues = (env: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.keys(env).sort().map((key) => [key, env[key] ? '***' : '']));
+
+const buildRedactedFullCommand = (
+  fullCommand: string,
+  parsedCommand: ParseMCPCommandDraftResult | null,
+): string => {
+  if (!fullCommand) {
+    return '';
+  }
+  if (!parsedCommand?.ok || !parsedCommand.draft) {
+    return '[解析失败，原始命令已隐藏]';
+  }
+  return [
+    ...Object.keys(parsedCommand.draft.env || {}).sort().map((key) => `${key}=***`),
+    buildMCPLaunchPreview(parsedCommand.draft.command, parsedCommand.draft.args),
+  ].filter(Boolean).join(' ');
 };
 
 const getTemplateSeed = (templateKey: unknown): Partial<AIMCPServerConfig> => {
@@ -151,12 +171,19 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
   const validation = validateMCPServerDraft(server, parsedEnvDraft);
   const issueKeys = new Set(validation.issues.map((issue) => issue.key));
   const recommendedTemplate = resolveRecommendedTemplate(command, commandArgs);
+  const suggestedServerSeed = buildMCPServerDraftSeed({
+    name: toTrimmedString(args.name ?? args.serverName) || undefined,
+    command,
+    args: commandArgs,
+    env,
+    timeoutSeconds: server.timeoutSeconds,
+  });
 
   return {
     input: {
       hasFullCommand: Boolean(fullCommand),
       templateKey: toTrimmedString(args.templateKey),
-      fullCommand,
+      fullCommand: buildRedactedFullCommand(fullCommand, parsedCommand),
     },
     parse: parsedCommand
       ? {
@@ -184,6 +211,11 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
       timeoutSeconds: server.timeoutSeconds,
       launchCommandPreview: buildMCPLaunchPreview(command, commandArgs),
       recommendedTemplate,
+      suggestedServerSeed: {
+        ...suggestedServerSeed,
+        env: redactEnvValues(env),
+        envRedacted: Object.keys(env).length > 0,
+      },
     },
     validation: {
       errorCount: validation.errorCount,

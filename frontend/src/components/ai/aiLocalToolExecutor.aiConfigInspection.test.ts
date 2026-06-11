@@ -356,7 +356,7 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"supportsWholeCommandAutoSplit":true');
     expect(result.content).toContain('"fullCommandPasteExample":"$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio"');
     expect(result.content).toContain('"title":"启动命令"');
-    expect(result.content).toContain('"example":"npx / node / uvx / python"');
+    expect(result.content).toContain('"example":"npx / node / uvx / python / docker"');
     expect(result.content).toContain('PowerShell $env:KEY=VALUE;');
     expect(result.content).toContain('"title":"npx 包"');
     expect(result.content).toContain('"exampleLaunchPreview":"npx -y @modelcontextprotocol/server-filesystem --stdio"');
@@ -384,6 +384,11 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"args":["mcp-server-github","--stdio"]');
     expect(result.content).toContain('"envKeys":["GITHUB_TOKEN"]');
     expect(result.content).toContain('"launchCommandPreview":"uvx mcp-server-github --stdio"');
+    expect(result.content).toContain('"suggestedServerSeed"');
+    expect(result.content).toContain('"name":"mcp-server-github"');
+    expect(result.content).toContain('"env":{"GITHUB_TOKEN":"***"}');
+    expect(result.content).toContain('"fullCommand":"GITHUB_TOKEN=*** uvx mcp-server-github --stdio"');
+    expect(result.content).not.toContain('ghp test');
     expect(result.content).toContain('"recommendedTemplate":{"key":"uvx"');
     expect(result.content).toContain('"canSave":true');
   });

@@ -86,7 +86,7 @@ describe('buildAISystemContextMessages', () => {
     expect(joined).toContain('inspect_ai_tool_catalog 按关键词读取真实工具目录');
     expect(joined).toContain('inspect_mcp_setup 读取真实 MCP 配置');
     expect(joined).toContain('inspect_mcp_authoring_guide 读取真实新增指引和模板');
-    expect(joined).toContain('inspect_mcp_draft 返回自动拆分、启动预览、配置错误/告警和 nextActions');
+    expect(joined).toContain('inspect_mcp_draft 返回自动拆分、启动预览、suggestedServerSeed、配置错误/告警和 nextActions');
     expect(joined).toContain('inspect_mcp_tool_schema 读取真实 inputSchema');
     expect(joined).toContain('inspect_ai_guidance 读取真实提示与技能配置');
     expect(joined).toContain('inspect_ai_context 读取当前挂载的表结构上下文');

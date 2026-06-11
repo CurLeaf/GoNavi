@@ -114,7 +114,7 @@ export const appendDatabaseInspectionGuidanceMessages = (
     messages,
     availableToolNames,
     'inspect_mcp_draft',
-    '如果用户贴出 MCP README 启动命令、command/args/env/timeout 草稿，或问“这条 MCP 命令在 GoNavi 里怎么填”，优先调用 inspect_mcp_draft 返回自动拆分、启动预览、配置错误/告警和 nextActions，再给用户具体填写结果。',
+    '如果用户贴出 MCP README 启动命令、command/args/env/timeout 草稿，或问“这条 MCP 命令在 GoNavi 里怎么填”，优先调用 inspect_mcp_draft 返回自动拆分、启动预览、suggestedServerSeed、配置错误/告警和 nextActions，再给用户具体填写结果。',
   );
   appendGuidanceIfToolAvailable(
     messages,

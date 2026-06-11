@@ -15,9 +15,19 @@ describe('aiMCPDraftInspectionInsights', () => {
       args: ['mcp-server-github', '--stdio'],
       envKeys: ['GITHUB_TOKEN'],
     });
+    expect(snapshot.input.fullCommand).toBe('GITHUB_TOKEN=*** uvx mcp-server-github --stdio');
     expect(snapshot.draft.launchCommandPreview).toBe('uvx mcp-server-github --stdio');
     expect(snapshot.draft.envKeys).toEqual(['GITHUB_TOKEN']);
     expect(snapshot.draft.timeoutSeconds).toBe(45);
+    expect(snapshot.draft.suggestedServerSeed).toMatchObject({
+      name: 'mcp-server-github',
+      transport: 'stdio',
+      command: 'uvx',
+      args: ['mcp-server-github', '--stdio'],
+      env: { GITHUB_TOKEN: '***' },
+      envRedacted: true,
+      timeoutSeconds: 45,
+    });
     expect(snapshot.draft.recommendedTemplate).toMatchObject({
       key: 'uvx',
       title: 'uvx 工具',
@@ -25,6 +35,7 @@ describe('aiMCPDraftInspectionInsights', () => {
     });
     expect(snapshot.validation.canSave).toBe(true);
     expect(snapshot.nextActions).toContain('当前草稿可以保存并测试工具发现；如果发现 0 个工具，再检查服务是否支持 stdio。');
+    expect(JSON.stringify(snapshot)).not.toContain('ghp test');
   });
 
   it('validates split fields and returns concrete next actions for common mistakes', () => {
@@ -59,6 +70,11 @@ describe('aiMCPDraftInspectionInsights', () => {
     expect(snapshot.draft.recommendedTemplate).toMatchObject({
       key: 'docker',
       title: 'Docker 镜像',
+    });
+    expect(snapshot.draft.suggestedServerSeed).toMatchObject({
+      name: 'docker',
+      command: 'docker',
+      timeoutSeconds: 10,
     });
     expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-interactive-missing');
     expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-image-missing');
