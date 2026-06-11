@@ -109,4 +109,44 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('把脚本名、模块名、--stdio 和环境变量拆到命令参数或环境变量里');
     expect(markup).toContain('命令参数可能缺少脚本或模块名');
   });
+
+  it('renders env key purpose hints without requiring users to guess common MCP variables', () => {
+    const markup = renderToStaticMarkup(
+      <AIMCPServerCard
+        server={{
+          id: 'mcp-2',
+          name: 'GitHub MCP',
+          transport: 'stdio',
+          command: 'uvx',
+          args: ['mcp-server-github', '--stdio'],
+          env: {
+            GITHUB_TOKEN: '...',
+            HTTPS_PROXY: 'http://127.0.0.1:7890',
+          },
+          enabled: true,
+          timeoutSeconds: 20,
+        }}
+        serverTools={[]}
+        cardBg="#fff"
+        cardBorder="rgba(0,0,0,0.08)"
+        inputBg="#fff"
+        darkMode={false}
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        loading={false}
+        onChange={() => {}}
+        onTest={() => {}}
+        onSave={() => {}}
+        onDelete={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('环境变量用途提示');
+    expect(markup).toContain('只解释 key 的用途和风险，不会显示 value');
+    expect(markup).toContain('GITHUB_TOKEN');
+    expect(markup).toContain('GitHub Token');
+    expect(markup).toContain('HTTPS_PROXY');
+    expect(markup).toContain('HTTPS 代理');
+    expect(markup).toContain('当前像示例占位值');
+    expect(markup).toContain('密钥类变量只保存在本机配置');
+  });
 });

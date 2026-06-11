@@ -383,6 +383,9 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"command":"uvx"');
     expect(result.content).toContain('"args":["mcp-server-github","--stdio"]');
     expect(result.content).toContain('"envKeys":["GITHUB_TOKEN"]');
+    expect(result.content).toContain('"envHints"');
+    expect(result.content).toContain('"label":"GitHub Token"');
+    expect(result.content).toContain('"secretLikeCount":1');
     expect(result.content).toContain('"launchCommandPreview":"uvx mcp-server-github --stdio"');
     expect(result.content).toContain('"suggestedServerSeed"');
     expect(result.content).toContain('"name":"mcp-server-github"');

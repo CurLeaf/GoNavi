@@ -18,6 +18,18 @@ describe('aiMCPDraftInspectionInsights', () => {
     expect(snapshot.input.fullCommand).toBe('GITHUB_TOKEN=*** uvx mcp-server-github --stdio');
     expect(snapshot.draft.launchCommandPreview).toBe('uvx mcp-server-github --stdio');
     expect(snapshot.draft.envKeys).toEqual(['GITHUB_TOKEN']);
+    expect(snapshot.draft.envHints).toMatchObject({
+      envVarCount: 1,
+      secretLikeCount: 1,
+      items: [{
+        key: 'GITHUB_TOKEN',
+        category: 'secret',
+        label: 'GitHub Token',
+        sensitive: true,
+        known: true,
+      }],
+    });
+    expect(snapshot.draft.envHints?.nextActions.join('\n')).toContain('密钥类变量只保存在本机配置');
     expect(snapshot.draft.timeoutSeconds).toBe(45);
     expect(snapshot.draft.suggestedServerSeed).toMatchObject({
       name: 'mcp-server-github',

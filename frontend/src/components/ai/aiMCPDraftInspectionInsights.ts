@@ -1,5 +1,6 @@
 import type { AIMCPServerConfig } from '../../types';
 import { parseMCPCommandDraft, type ParseMCPCommandDraftResult } from '../../utils/mcpCommandDraft';
+import { buildMCPEnvHintProfile } from '../../utils/mcpEnvHints';
 import { parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import { buildMCPLaunchPreview } from '../../utils/mcpServerGuidance';
 import { buildMCPServerDraftSeed } from '../../utils/mcpServerDraftSeed';
@@ -171,6 +172,7 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
   const validation = validateMCPServerDraft(server, parsedEnvDraft);
   const issueKeys = new Set(validation.issues.map((issue) => issue.key));
   const recommendedTemplate = resolveRecommendedTemplate(command, commandArgs);
+  const envHintProfile = buildMCPEnvHintProfile(command, commandArgs, env);
   const suggestedServerSeed = buildMCPServerDraftSeed({
     name: toTrimmedString(args.name ?? args.serverName) || undefined,
     command,
@@ -207,6 +209,24 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
       args: commandArgs,
       envKeys: Object.keys(env).sort(),
       envVarCount: Object.keys(env).length,
+      envHints: envHintProfile ? {
+        envVarCount: envHintProfile.envVarCount,
+        secretLikeCount: envHintProfile.secretLikeCount,
+        endpointLikeCount: envHintProfile.endpointLikeCount,
+        items: envHintProfile.items.map((item) => ({
+          key: item.key,
+          category: item.category,
+          label: item.label,
+          detail: item.detail,
+          valueHint: item.valueHint,
+          sensitive: item.sensitive,
+          known: item.known,
+          empty: item.empty,
+          placeholder: item.placeholder,
+        })),
+        warnings: envHintProfile.warnings,
+        nextActions: envHintProfile.nextActions,
+      } : null,
       invalidEnvLines: parsedEnvDraft?.invalidLines || [],
       timeoutSeconds: server.timeoutSeconds,
       launchCommandPreview: buildMCPLaunchPreview(command, commandArgs),

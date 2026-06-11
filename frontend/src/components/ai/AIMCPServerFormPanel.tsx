@@ -8,6 +8,7 @@ import type { ParsedMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import type { MCPServerDraftValidation } from '../../utils/mcpServerValidation';
 import AIMCPHelpBlock, { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
 import AIMCPArgumentHints from './AIMCPArgumentHints';
+import AIMCPEnvHints from './AIMCPEnvHints';
 import AIMCPServerValidationPanel from './AIMCPServerValidationPanel';
 import AIMCPToolSchemaSummary from './AIMCPToolSchemaSummary';
 
@@ -166,6 +167,14 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
             : `已识别 ${parsedEnvDraft.validLines} 条环境变量。`
           : '每行都要写成 KEY=VALUE；没有等号或 key 含空格的行不会保存。'}
       </div>
+      <AIMCPEnvHints
+        command={server.command}
+        args={server.args}
+        env={parsedEnvDraft.env}
+        cardBorder={cardBorder}
+        darkMode={darkMode}
+        overlayTheme={overlayTheme}
+      />
     </AIMCPHelpBlock>
 
     <AIMCPServerValidationPanel
