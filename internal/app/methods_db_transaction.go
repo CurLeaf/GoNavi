@@ -19,19 +19,22 @@ const sqlEditorTransactionFinishTimeout = 30 * time.Second
 // is called by the SQL editor UI.
 func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
+	transactionDBType := resolveDDLDBType(runConfig)
+	transactionConfig := runConfig
+	transactionConfig.Type = transactionDBType
 
 	if queryID == "" {
 		queryID = generateQueryID()
 	}
 
-	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	if !shouldUseManagedSQLTransaction(runConfig.Type, query) {
+	query = sanitizeSQLForPgLike(transactionDBType, query)
+	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return a.DBQueryMulti(config, dbName, query, queryID)
 	}
 
-	beginSQL, commitSQL, rollbackSQL, hasTextTransaction := sqlFileBatchTransactionSQL(runConfig.Type)
+	beginSQL, commitSQL, rollbackSQL, hasTextTransaction := sqlFileBatchTransactionSQL(transactionDBType)
 	implicitTextTransaction := false
-	if implicitCommitSQL, implicitRollbackSQL, ok := sqlEditorImplicitTransactionSQL(runConfig.Type); ok {
+	if implicitCommitSQL, implicitRollbackSQL, ok := sqlEditorImplicitTransactionSQL(transactionDBType); ok {
 		commitSQL = implicitCommitSQL
 		rollbackSQL = implicitRollbackSQL
 		hasTextTransaction = true
@@ -70,7 +73,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !ok {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
 				QueryID: queryID,
 			}
 		}
@@ -97,7 +100,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !hasTextTransaction {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
 				QueryID: queryID,
 			}
 		}
@@ -105,7 +108,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !ok {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
 				QueryID: queryID,
 			}
 		}
@@ -137,7 +140,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	statements := splitSQLStatements(query)
-	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, runConfig, statements)
+	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, transactionConfig, statements)
 	if err != nil {
 		var rollbackErr error
 		if transactor != nil {
@@ -163,7 +166,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		execer:      sessionExecer,
 		transactor:  transactor,
 		cancel:      transactionCancel,
-		dbType:      runConfig.Type,
+		dbType:      transactionDBType,
 		commitSQL:   commitSQL,
 		rollbackSQL: rollbackSQL,
 		createdAt:   time.Now(),

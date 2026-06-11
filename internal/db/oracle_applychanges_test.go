@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ type oracleRecordingState struct {
 	execQueries  []string
 	execArgs     [][]driver.NamedValue
 	queries      []string
+	beginCalls   int
 	rowsAffected int64
 	queryResults map[string]oracleRecordingQueryResult
 	queryError   error
@@ -61,6 +63,12 @@ func (s *oracleRecordingState) snapshotQueries() []string {
 	return append([]string(nil), s.queries...)
 }
 
+func (s *oracleRecordingState) snapshotBeginCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginCalls
+}
+
 type oracleRecordingDriver struct{}
 
 func (oracleRecordingDriver) Open(name string) (driver.Conn, error) {
@@ -83,7 +91,12 @@ func (c *oracleRecordingConn) Prepare(query string) (driver.Stmt, error) {
 
 func (c *oracleRecordingConn) Close() error { return nil }
 
-func (c *oracleRecordingConn) Begin() (driver.Tx, error) { return oracleRecordingTx{}, nil }
+func (c *oracleRecordingConn) Begin() (driver.Tx, error) {
+	c.state.mu.Lock()
+	c.state.beginCalls++
+	c.state.mu.Unlock()
+	return oracleRecordingTx{}, nil
+}
 
 func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.state.mu.Lock()
@@ -189,6 +202,61 @@ func openOracleRecordingDB(t *testing.T) (*sql.DB, *oracleRecordingState) {
 	})
 
 	return dbConn, state
+}
+
+func TestOracleOpenTransactionExecerUsesPinnedSessionTransactionSQL(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		finish       func(TransactionExecer) error
+		wantFinalSQL string
+	}{
+		{
+			name: "commit",
+			finish: func(tx TransactionExecer) error {
+				return tx.Commit()
+			},
+			wantFinalSQL: "COMMIT",
+		},
+		{
+			name: "rollback",
+			finish: func(tx TransactionExecer) error {
+				return tx.Rollback()
+			},
+			wantFinalSQL: "ROLLBACK",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dbConn, state := openOracleRecordingDB(t)
+			oracleDB := &OracleDB{conn: dbConn}
+			stmt := "UPDATE USERS SET NAME = 'new' WHERE ID = 1"
+
+			tx, err := oracleDB.OpenTransactionExecer(context.Background())
+			if err != nil {
+				t.Fatalf("OpenTransactionExecer returned error: %v", err)
+			}
+			if _, err := tx.ExecContext(context.Background(), stmt); err != nil {
+				t.Fatalf("ExecContext returned error: %v", err)
+			}
+			if err := tt.finish(tx); err != nil {
+				t.Fatalf("finish returned error: %v", err)
+			}
+			if err := tx.Close(); err != nil {
+				t.Fatalf("Close returned error: %v", err)
+			}
+
+			if got := state.snapshotBeginCalls(); got != 0 {
+				t.Fatalf("expected Oracle transaction execer not to call database/sql Begin, got %d", got)
+			}
+			wantExecs := []string{stmt, tt.wantFinalSQL}
+			if got := state.snapshotExecQueries(); !reflect.DeepEqual(got, wantExecs) {
+				t.Fatalf("expected exec queries %#v, got %#v", wantExecs, got)
+			}
+		})
+	}
 }
 
 func TestOracleApplyChangesReturnsErrorWhenUpdateMatchesNoRows(t *testing.T) {

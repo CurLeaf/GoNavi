@@ -258,11 +258,11 @@ func (o *OracleDB) OpenTransactionExecer(ctx context.Context) (TransactionExecer
 	if o.conn == nil {
 		return nil, fmt.Errorf("连接未打开")
 	}
-	tx, err := o.conn.BeginTx(ctx, nil)
+	conn, err := o.conn.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLTxStatementExecer(tx), nil
+	return NewSQLConnTransactionExecer(conn, "COMMIT", "ROLLBACK"), nil
 }
 
 func (o *OracleDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {

@@ -683,6 +683,68 @@ func TestDBQueryMultiTransactionalUsesImplicitSessionTransactionForOracle(t *tes
 	}
 }
 
+func TestDBQueryMultiTransactionalUsesOracleImplicitSessionForOceanBaseOracleProtocol(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		verifyDriverAgentRevisionFunc = originalVerifyDriverAgentRevisionFunc
+	})
+
+	stmt := "UPDATE USERS SET NAME = 'new' WHERE ID = 1"
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{
+			stmt: 1,
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	verifyDriverAgentRevisionFunc = func(config connection.ConnectionConfig) error {
+		return nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              "127.0.0.1",
+		Port:              2881,
+		User:              "app",
+		OceanBaseProtocol: "oracle",
+	}
+
+	result := app.DBQueryMultiTransactional(config, "APP", stmt, "ob-oracle-tx-query")
+	if !result.Success {
+		t.Fatalf("expected OceanBase Oracle transactional query success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil {
+		t.Fatal("expected OceanBase Oracle transactional query to open a pinned Oracle-style session")
+	}
+	if fakeDB.session.closed {
+		t.Fatal("expected OceanBase Oracle transaction session to stay open before commit")
+	}
+	if len(fakeDB.execQueries) != 1 || fakeDB.execQueries[0] != stmt {
+		t.Fatalf("expected OceanBase Oracle to skip START TRANSACTION and execute only DML before commit, got %#v", fakeDB.execQueries)
+	}
+
+	commitResult := app.DBCommitTransaction(result.TransactionID)
+	if !commitResult.Success {
+		t.Fatalf("expected OceanBase Oracle commit success, got failure: %s", commitResult.Message)
+	}
+	wantExecs := []string{stmt, "COMMIT"}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected OceanBase Oracle implicit transaction COMMIT on pinned session, got %#v", fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+}
+
 func TestDBQueryMultiTransactionalOracleImplicitSessionOutlivesAppContextCancellation(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

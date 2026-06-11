@@ -128,8 +128,8 @@ type TransactionExecer interface {
 	Rollback() error
 }
 
-// TransactionExecerProvider is implemented by drivers that can expose a real
-// database/sql transaction for long-running SQL editor managed transactions.
+// TransactionExecerProvider is implemented by drivers that can expose a
+// long-running SQL editor managed transaction.
 type TransactionExecerProvider interface {
 	OpenTransactionExecer(ctx context.Context) (TransactionExecer, error)
 }
@@ -198,6 +198,141 @@ func (e *sqlConnStatementExecer) Close() error {
 		return nil
 	}
 	return e.conn.Close()
+}
+
+type sqlConnTransactionExecer struct {
+	mu          sync.Mutex
+	conn        *sql.Conn
+	done        bool
+	commitSQL   string
+	rollbackSQL string
+}
+
+func NewSQLConnTransactionExecer(conn *sql.Conn, commitSQL string, rollbackSQL string) TransactionExecer {
+	return &sqlConnTransactionExecer{
+		conn:        conn,
+		commitSQL:   strings.TrimSpace(commitSQL),
+		rollbackSQL: strings.TrimSpace(rollbackSQL),
+	}
+}
+
+func (e *sqlConnTransactionExecer) activeConn() (*sql.Conn, error) {
+	if e == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	if e.done {
+		return nil, fmt.Errorf("事务已结束")
+	}
+	return e.conn, nil
+}
+
+func (e *sqlConnTransactionExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return 0, err
+	}
+	res, err := conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlConnTransactionExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlConnTransactionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlConnTransactionExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) finish(sqlText string) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.conn == nil || e.done {
+		e.mu.Unlock()
+		return nil
+	}
+	conn := e.conn
+	e.done = true
+	e.mu.Unlock()
+	if strings.TrimSpace(sqlText) == "" {
+		return nil
+	}
+	_, err := conn.ExecContext(context.Background(), sqlText)
+	return err
+}
+
+func (e *sqlConnTransactionExecer) Commit() error {
+	return e.finish(e.commitSQL)
+}
+
+func (e *sqlConnTransactionExecer) Rollback() error {
+	return e.finish(e.rollbackSQL)
+}
+
+func (e *sqlConnTransactionExecer) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.conn == nil {
+		e.mu.Unlock()
+		return nil
+	}
+	conn := e.conn
+	shouldRollback := !e.done && e.rollbackSQL != ""
+	rollbackSQL := e.rollbackSQL
+	e.conn = nil
+	e.done = true
+	e.mu.Unlock()
+
+	var rollbackErr error
+	if shouldRollback {
+		_, rollbackErr = conn.ExecContext(context.Background(), rollbackSQL)
+	}
+	closeErr := conn.Close()
+	if rollbackErr != nil {
+		return rollbackErr
+	}
+	return closeErr
 }
 
 type sqlTxStatementExecer struct {
