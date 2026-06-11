@@ -777,6 +777,7 @@ interface EditableCellProps {
   handleSave: (record: Item) => void;
   focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   columnType?: string;
+  dbType?: string;
   inputCellPadding?: React.CSSProperties;
   as?: any;
   modifiedColumns?: Record<string, Set<string>>;
@@ -826,6 +827,7 @@ const areEditableCellPropsEqual = (prevProps: EditableCellProps, nextProps: Edit
   if (prevProps.dataIndex !== nextProps.dataIndex) return false;
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.columnType !== nextProps.columnType) return false;
+  if (prevProps.dbType !== nextProps.dbType) return false;
   if (prevProps.darkMode !== nextProps.darkMode) return false;
   if (prevProps.as !== nextProps.as) return false;
   if (prevProps.handleSave !== nextProps.handleSave) return false;
@@ -863,6 +865,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   handleSave,
   focusCell,
   columnType,
+  dbType,
   inputCellPadding,
   as: Component = 'td',
   modifiedColumns,
@@ -950,7 +953,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   let childNode = children;
 
-  const pickerType = getTemporalPickerType(columnType);
+  const pickerType = getTemporalPickerType(columnType, dbType);
   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
 
   const isRowDeleted = deletedRowKeys && rowKeyStr && record?.[GONAVI_ROW_KEY] !== undefined
@@ -2334,7 +2337,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (value === undefined) return undefined;
           const normalizedName = String(columnName || '').trim();
           const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
-          const temporal = isTemporalColumnType(meta?.type);
+          const temporal = isTemporalColumnType(meta?.type, dbType);
 
           if (!temporal) {
               return value;
@@ -2355,7 +2358,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
           return value;
       },
-      [columnMetaMap, columnMetaMapByLowerName]
+      [columnMetaMap, columnMetaMapByLowerName, dbType]
   );
 
   const openForeignKeyTarget = useCallback((target: ForeignKeyTarget) => {
@@ -4376,7 +4379,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
 
       const columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
-      const pickerType = getTemporalPickerType(columnType);
+      const pickerType = getTemporalPickerType(columnType, dbType);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(raw || '')));
       const fieldName = getCellFieldName(record, dataIndex);
       if (isDateTimeField) {
@@ -4391,7 +4394,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           title,
           columnType,
       });
-  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, form, openCellEditor, rowKeyStr]);
+  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, dbType, form, openCellEditor, rowKeyStr]);
 
   const handleVirtualCellActivate = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!canModifyData) return;
@@ -4521,7 +4524,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const pickerType = getTemporalPickerType(editingCell.columnType);
+      const pickerType = getTemporalPickerType(editingCell.columnType, dbType);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[editingCell.dataIndex] || '')));
       const fieldName = getCellFieldName(record, editingCell.dataIndex);
       try {
@@ -4540,7 +4543,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               closeVirtualInlineEditor();
           }
       }
-  }, [closeVirtualInlineEditor, form, handleCellSave, virtualEditingCell]);
+  }, [closeVirtualInlineEditor, dbType, form, handleCellSave, virtualEditingCell]);
 
   const pageFindMatches = useMemo(() => collectDataGridFindMatches(
       mergedDisplayData,
@@ -4662,7 +4665,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           displayMap[col] = toFormText(displayVal);
           // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const rowPickerType = getTemporalPickerType(colMeta?.type);
+          const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
           if (rowPickerType && displayVal !== null && displayVal !== undefined) {
               const dVal = parseToDayjs(displayVal, rowPickerType);
               formMap[col] = dVal;
@@ -4679,7 +4682,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           nullCols,
           formValues: formMap,
       });
-  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, openRowEditor]);
+  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, dbType, openRowEditor]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4844,7 +4847,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               if (val && dayjs.isDayjs(val)) {
                   const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-                  const rowPickerType = getTemporalPickerType(colMeta?.type);
+                  const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
                   convertedValues[col] = formatFromDayjs(val as dayjs.Dayjs, rowPickerType);
               } else {
                   convertedValues[col] = val;
@@ -4863,7 +4866,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           if (nextVal && dayjs.isDayjs(nextVal)) {
               const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-              const rowPickerType = getTemporalPickerType(colMeta?.type);
+              const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
               nextVal = formatFromDayjs(nextVal as dayjs.Dayjs, rowPickerType);
           }
           const baseVal = baseRawMap[col];
@@ -4878,7 +4881,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName, dbType]);
 
 
   const enableVirtual = isTableSurfaceActive;
@@ -4994,6 +4997,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   cellProps.handleSave = handleCellSave;
                   cellProps.focusCell = openCellEditor;
                   cellProps.columnType = displayColumnTypeMap[dataIndex];
+                  cellProps.dbType = dbType;
                   cellProps.inputCellPadding = inputCellPadding;
                   cellProps.modifiedColumns = modifiedColumns;
                   cellProps.rowKeyStr = rowKeyStr;
@@ -5024,7 +5028,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   : undefined;
               const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;
               if (enableVirtual && enableInlineEditableCell) {
-                  const pickerType = getTemporalPickerType(columnType);
+                  const pickerType = getTemporalPickerType(columnType, dbType);
                   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
                   const virtualCellStyle = modifiedStyle ? { ...virtualCellWrapperStyle, ...modifiedStyle } : virtualCellWrapperStyle;
                   const virtualEditable = !!col.editable && !rowDeletedForRender;
@@ -5138,7 +5142,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return originalRenderContent;
           }
       };
-  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleSharedCellContextMenu, displayColumnTypeMap, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
+  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleSharedCellContextMenu, displayColumnTypeMap, dbType, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -7439,7 +7443,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const isJson = looksLikeJsonText(sample);
           const useTextArea = isJson || sample.includes('\n') || sample.length >= 160;
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const pickerType = getTemporalPickerType(colMeta?.type);
+          const pickerType = getTemporalPickerType(colMeta?.type, dbType);
           const isTemporalValue = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
           const isWritable = isWritableResultColumn(col, effectiveEditLocator);
           return {
@@ -7453,7 +7457,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               isWritable,
           };
       })
-  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
+  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, dbType, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
       clearAutoCommitTimer();
