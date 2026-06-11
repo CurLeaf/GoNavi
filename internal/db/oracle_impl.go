@@ -823,7 +823,7 @@ func parseOracleTemporalString(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) (err error) {
 	if o.conn == nil {
 		return fmt.Errorf("连接未打开")
 	}
@@ -833,11 +833,26 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		return err
 	}
 
-	tx, err := o.conn.Begin()
+	ctx := context.Background()
+	conn, err := o.conn.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	transactionFinished := false
+	defer func() {
+		if transactionFinished {
+			return
+		}
+		if _, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK"); rollbackErr != nil {
+			logger.Warnf("Oracle 表格编辑事务回滚失败：table=%s err=%v", tableName, rollbackErr)
+		}
+	}()
 
 	quoteIdent := func(name string) string {
 		n := strings.TrimSpace(name)
@@ -888,7 +903,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 			continue
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
@@ -921,7 +936,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
@@ -949,7 +964,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("插入失败：%v", err)
 		}
@@ -958,7 +973,11 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 	}
 
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("事务提交失败：%v", err)
+	}
+	transactionFinished = true
+	return nil
 }
 
 func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {

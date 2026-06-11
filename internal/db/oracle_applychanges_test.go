@@ -259,6 +259,72 @@ func TestOracleOpenTransactionExecerUsesPinnedSessionTransactionSQL(t *testing.T
 	}
 }
 
+func TestOracleApplyChangesUsesPinnedSessionTransactionSQL(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": 7,
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
+	}
+
+	if err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes); err != nil {
+		t.Fatalf("ApplyChanges() unexpected error: %v", err)
+	}
+	if got := state.snapshotBeginCalls(); got != 0 {
+		t.Fatalf("expected Oracle ApplyChanges not to call database/sql Begin, got %d", got)
+	}
+	wantExecs := []string{
+		`UPDATE "MYCIMLED"."EDC_LOG" SET "NAME" = :1 WHERE "ID" = :2`,
+		"COMMIT",
+	}
+	if got := state.snapshotExecQueries(); !reflect.DeepEqual(got, wantExecs) {
+		t.Fatalf("expected Oracle ApplyChanges pinned-session execs %#v, got %#v", wantExecs, got)
+	}
+}
+
+func TestOracleApplyChangesRollsBackPinnedSessionOnError(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.rowsAffected = 0
+	oracleDB := &OracleDB{conn: dbConn}
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": 7,
+			},
+			Values: map[string]interface{}{
+				"NAME": "new-name",
+			},
+		}},
+	}
+
+	err := oracleDB.ApplyChanges("MYCIMLED.EDC_LOG", changes)
+	if err == nil {
+		t.Fatal("expected ApplyChanges to return update row-count error")
+	}
+	if got := state.snapshotBeginCalls(); got != 0 {
+		t.Fatalf("expected Oracle ApplyChanges not to call database/sql Begin, got %d", got)
+	}
+	wantExecs := []string{
+		`UPDATE "MYCIMLED"."EDC_LOG" SET "NAME" = :1 WHERE "ID" = :2`,
+		"ROLLBACK",
+	}
+	if got := state.snapshotExecQueries(); !reflect.DeepEqual(got, wantExecs) {
+		t.Fatalf("expected Oracle ApplyChanges pinned-session rollback execs %#v, got %#v", wantExecs, got)
+	}
+}
+
 func TestOracleApplyChangesReturnsErrorWhenUpdateMatchesNoRows(t *testing.T) {
 	t.Parallel()
 
@@ -357,8 +423,8 @@ func TestOracleApplyChangesNormalizesTemporalStringsForUpdate(t *testing.T) {
 	}
 
 	executions := state.snapshotExecArgs()
-	if len(executions) != 1 {
-		t.Fatalf("期望执行 1 条更新，实际 %d 条", len(executions))
+	if len(executions) == 0 {
+		t.Fatal("期望至少执行 1 条更新，实际没有执行")
 	}
 	args := executions[0]
 	if len(args) != 2 {
@@ -395,8 +461,8 @@ func TestOracleApplyChangesUsesUnquotedRowIDLocator(t *testing.T) {
 	}
 
 	executions := state.snapshotExecQueries()
-	if len(executions) != 1 {
-		t.Fatalf("期望执行 1 条更新，实际 %d 条", len(executions))
+	if len(executions) == 0 {
+		t.Fatal("期望至少执行 1 条更新，实际没有执行")
 	}
 	query := executions[0]
 	if !strings.Contains(query, "ROWID = :2") {
