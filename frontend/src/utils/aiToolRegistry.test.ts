@@ -147,6 +147,15 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.description).toContain('本地已保存连接清单');
   });
 
+  it('registers the Redis topology inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_redis_topology');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('Redis 单机/哨兵/集群');
+    expect(info?.tool.function.description).toContain('Sentinel');
+    expect(info?.tool.function.description).toContain('不会回显 Redis 密码');
+    expect(info?.tool.function.parameters?.properties?.connectionId?.description).toContain('Redis 连接 ID');
+  });
+
   it('registers the external-sql-directory inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_external_sql_directories');
     expect(info).toBeTruthy();
@@ -280,6 +289,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_current_connection')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_connection_capabilities')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_saved_connections')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_redis_topology')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_directories')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_external_sql_file')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_recent_sql_activity')).toBe(true);

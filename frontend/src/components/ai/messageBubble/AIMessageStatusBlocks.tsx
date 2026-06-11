@@ -49,6 +49,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   inspect_current_connection: '读取当前连接摘要',
   inspect_connection_capabilities: '读取当前连接能力矩阵',
   inspect_saved_connections: '盘点本地已保存连接',
+  inspect_redis_topology: '诊断 Redis 拓扑配置',
   inspect_external_sql_directories: '盘点外部 SQL 目录',
   inspect_external_sql_file: '读取外部 SQL 文件',
   inspect_ai_sessions: '盘点本地 AI 历史会话',

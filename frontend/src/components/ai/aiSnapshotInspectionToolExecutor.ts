@@ -163,6 +163,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_current_connection: '读取当前连接失败',
       inspect_connection_capabilities: '读取当前连接能力矩阵失败',
       inspect_saved_connections: '读取本地连接清单失败',
+      inspect_redis_topology: '读取 Redis 拓扑配置失败',
       inspect_external_sql_directories: '读取外部 SQL 目录失败',
       inspect_external_sql_file: '读取外部 SQL 文件失败',
       inspect_ai_sessions: '读取本地 AI 会话清单失败',

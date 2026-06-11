@@ -197,6 +197,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_redis_topology',
+    '如果用户提到“Redis 哨兵/集群”“Sentinel master”“Redis Cluster 多库”“切换 Redis DB 失败”“Redis 多节点怎么填”，优先调用 inspect_redis_topology 读取真实 Redis 拓扑、节点、认证状态和风险提示，不要凭默认端口或经验猜测。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_external_sql_directories',
     '如果用户提到“外部 SQL 目录”“目录里的脚本”“某个 SQL 文件放在哪个目录”“当前打开的 SQL 文件来自哪里”，优先调用 inspect_external_sql_directories 读取真实外部 SQL 目录资产，再决定继续读取活动页签还是定位具体脚本。',
   );

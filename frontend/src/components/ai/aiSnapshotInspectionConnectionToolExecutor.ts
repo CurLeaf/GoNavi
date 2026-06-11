@@ -8,6 +8,7 @@ import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
+import { buildRedisTopologySnapshot } from './aiRedisTopologyInsights';
 import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
 import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
 import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
@@ -72,6 +73,17 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           keyword: args.keyword,
           type: args.type,
           limit: args.limit,
+        })),
+        success: true,
+      };
+    case 'inspect_redis_topology':
+      return {
+        content: JSON.stringify(buildRedisTopologySnapshot({
+          connections,
+          connectionId: args.connectionId,
+          keyword: args.keyword,
+          limit: args.limit,
+          includeRecommendations: args.includeRecommendations,
         })),
         success: true,
       };

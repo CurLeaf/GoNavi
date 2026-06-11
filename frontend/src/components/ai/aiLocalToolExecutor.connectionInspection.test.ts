@@ -162,4 +162,58 @@ describe('aiLocalToolExecutor connection inspection tools', () => {
     expect(result.content).toContain('"useSSH":true');
     expect(result.content).not.toContain('分析仓库');
   });
+
+  it('returns a Redis topology snapshot with Sentinel and Cluster risks', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_redis_topology', {
+        keyword: '订单',
+      }),
+      connections: [
+        {
+          id: 'redis-sentinel',
+          name: '订单 Redis Sentinel',
+          config: {
+            type: 'redis',
+            host: 'sentinel-a.local',
+            port: 6379,
+            hosts: ['sentinel-b.local:26379'],
+            topology: 'sentinel',
+            user: 'app',
+            password: 'redis-secret',
+            redisSentinelPassword: 'sentinel-secret',
+          },
+          hasRedisSentinelPassword: true,
+        },
+        {
+          id: 'redis-cluster',
+          name: '缓存集群',
+          config: {
+            type: 'redis',
+            host: '10.10.1.10',
+            port: 6379,
+            user: '',
+            topology: 'cluster',
+            hosts: ['10.10.1.11:6379'],
+            redisDB: 3,
+            useSSH: true,
+          },
+        },
+      ],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"totalRedisConnections":2');
+    expect(result.content).toContain('"totalMatched":1');
+    expect(result.content).toContain('"topology":"sentinel"');
+    expect(result.content).toContain('Sentinel master 名称为空');
+    expect(result.content).toContain('Sentinel 主地址端口是 6379');
+    expect(result.content).not.toContain('redis-secret');
+    expect(result.content).not.toContain('sentinel-secret');
+  });
 });

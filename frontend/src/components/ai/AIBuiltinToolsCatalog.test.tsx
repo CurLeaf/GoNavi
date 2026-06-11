@@ -73,6 +73,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_connection_capabilities');
     expect(markup).toContain('盘点本地连接资产');
     expect(markup).toContain('inspect_saved_connections');
+    expect(markup).toContain('诊断 Redis 单机/哨兵/集群配置');
+    expect(markup).toContain('inspect_redis_topology');
+    expect(markup).toContain('Sentinel master');
     expect(markup).toContain('盘点外部 SQL 目录');
     expect(markup).toContain('inspect_external_sql_directories');
     expect(markup).toContain('读取外部 SQL 文件');
