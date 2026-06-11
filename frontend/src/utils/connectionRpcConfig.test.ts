@@ -199,6 +199,30 @@ describe('buildRpcConnectionConfig', () => {
     });
   });
 
+  it('preserves Redis cluster and Sentinel topology fields for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-redis-sentinel',
+      type: 'redis',
+      host: 'sentinel-a.local',
+      port: '26379' as unknown as number,
+      hosts: ['sentinel-b.local:26379', 'sentinel-c.local:26379'],
+      topology: 'sentinel',
+      user: 'default',
+      password: 'redis-secret',
+      redisSentinelMaster: 'mymaster',
+      redisSentinelUser: 'sentinel-user',
+      redisSentinelPassword: 'sentinel-secret',
+      redisDB: '3' as unknown as number,
+    } as any);
+
+    expect(result.topology).toBe('sentinel');
+    expect(result.hosts).toEqual(['sentinel-b.local:26379', 'sentinel-c.local:26379']);
+    expect(result.redisSentinelMaster).toBe('mymaster');
+    expect(result.redisSentinelUser).toBe('sentinel-user');
+    expect(result.redisSentinelPassword).toBe('sentinel-secret');
+    expect(result.redisDB).toBe(3);
+  });
+
   it('returns a Wails connection model instance for RPC compatibility', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-model',

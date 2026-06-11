@@ -49,6 +49,10 @@ const (
 	redisSearchMaxDuration            = 3 * time.Second
 )
 
+var redisDBSwitchConnect = func(client *RedisClientImpl, config connection.ConnectionConfig) error {
+	return client.Connect(config)
+}
+
 // NewRedisClient creates a new Redis client instance
 func NewRedisClient() RedisClient {
 	return &RedisClientImpl{}
@@ -1589,49 +1593,18 @@ func (r *RedisClientImpl) SelectDB(index int) error {
 		return fmt.Errorf("数据库索引必须在 0-15 之间")
 	}
 
-	// Create new client with different DB
-	addr := ""
-	if len(r.seedAddrs) > 0 {
-		addr = r.seedAddrs[0]
-	}
-	if r.forwarder != nil {
-		addr = r.forwarder.LocalAddr
-	}
-	if addr == "" {
-		addr = fmt.Sprintf("%s:%d", r.config.Host, r.config.Port)
-	}
-
-	timeout := normalizeRedisTimeout(r.config.Timeout)
-
-	opts := &redis.Options{
-		Addr:         addr,
-		Username:     strings.TrimSpace(r.config.User),
-		Password:     r.config.Password,
-		DB:           index,
-		DialTimeout:  timeout,
-		ReadTimeout:  timeout,
-		WriteTimeout: timeout,
-	}
-
-	newClient := redis.NewClient(opts)
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	if err := newClient.Ping(ctx).Err(); err != nil {
-		newClient.Close()
+	nextConfig := r.config
+	nextConfig.RedisDB = index
+	nextClient := &RedisClientImpl{}
+	if err := redisDBSwitchConnect(nextClient, nextConfig); err != nil {
 		return fmt.Errorf("切换数据库失败: %w", err)
 	}
 
-	// Close old client and replace
-	if r.client != nil {
-		_ = r.client.Close()
+	oldClient := r.client
+	*r = *nextClient
+	if oldClient != nil {
+		_ = oldClient.Close()
 	}
-	r.client = newClient
-	r.singleClient = newClient
-	r.clusterClient = nil
-	r.currentDB = index
-	r.config.RedisDB = index
 
 	logger.Infof("Redis 切换到数据库: db%d", index)
 	return nil

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // 回归保护：HGETALL 在 RESP3 下返回 map[interface{}]interface{}（go-redis v9 默认 RESP3），
@@ -272,6 +274,70 @@ func TestRedisClusterKeepsSSHValidation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "集群模式暂不支持 SSH 隧道") {
 		t.Fatalf("expected cluster SSH error, got %v", err)
+	}
+}
+
+func TestRedisSelectDBReconnectsWithSentinelConfig(t *testing.T) {
+	oldConnect := redisDBSwitchConnect
+	defer func() {
+		redisDBSwitchConnect = oldConnect
+	}()
+
+	var captured connection.ConnectionConfig
+	redisDBSwitchConnect = func(client *RedisClientImpl, config connection.ConnectionConfig) error {
+		captured = config
+		next := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+		client.client = next
+		client.singleClient = next
+		client.config = config
+		client.currentDB = config.RedisDB
+		return nil
+	}
+
+	oldClient := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+	client := &RedisClientImpl{
+		client:       oldClient,
+		singleClient: oldClient,
+		config: connection.ConnectionConfig{
+			Type:                  "redis",
+			Host:                  "sentinel-a.local",
+			Port:                  26379,
+			Hosts:                 []string{"sentinel-b.local:26379", "sentinel-c.local:26379"},
+			Topology:              "sentinel",
+			User:                  "data-user",
+			Password:              "data-pass",
+			RedisSentinelMaster:   "mymaster",
+			RedisSentinelUser:     "sentinel-user",
+			RedisSentinelPassword: "sentinel-pass",
+			UseSSL:                true,
+			SSLMode:               "required",
+			RedisDB:               0,
+		},
+		currentDB: 0,
+	}
+	defer client.Close()
+
+	if err := client.SelectDB(6); err != nil {
+		t.Fatalf("SelectDB returned error: %v", err)
+	}
+
+	if captured.RedisDB != 6 || client.currentDB != 6 {
+		t.Fatalf("expected RedisDB/currentDB=6, captured=%d current=%d", captured.RedisDB, client.currentDB)
+	}
+	if captured.Topology != "sentinel" {
+		t.Fatalf("expected sentinel topology to be preserved, got %q", captured.Topology)
+	}
+	if captured.RedisSentinelMaster != "mymaster" {
+		t.Fatalf("expected Sentinel master to be preserved, got %q", captured.RedisSentinelMaster)
+	}
+	if captured.RedisSentinelUser != "sentinel-user" || captured.RedisSentinelPassword != "sentinel-pass" {
+		t.Fatalf("expected Sentinel credentials to be preserved, got user=%q password=%q", captured.RedisSentinelUser, captured.RedisSentinelPassword)
+	}
+	if len(captured.Hosts) != 2 || captured.Hosts[0] != "sentinel-b.local:26379" || captured.Hosts[1] != "sentinel-c.local:26379" {
+		t.Fatalf("expected Sentinel hosts to be preserved, got %#v", captured.Hosts)
+	}
+	if !captured.UseSSL || captured.SSLMode != "required" {
+		t.Fatalf("expected TLS settings to be preserved, got useSSL=%v sslMode=%q", captured.UseSSL, captured.SSLMode)
 	}
 }
 
