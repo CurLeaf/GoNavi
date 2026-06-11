@@ -37,6 +37,17 @@ describe('mcpArgumentHints', () => {
     expect(profile?.nextActions).toContain('补充 镜像名，示例：mcp/server-fetch:latest');
   });
 
+  it('detects full command lines pasted into the command field', () => {
+    const profile = buildMCPArgumentHintProfile('docker run --rm mcp/server-fetch:latest', []);
+
+    expect(profile?.normalizedCommand).toBe('docker');
+    expect(profile?.inlineArgs).toEqual(['run', '--rm', 'mcp/server-fetch:latest']);
+    expect(profile?.commandFieldWarning).toContain('启动命令字段里还包含 3 个参数');
+    expect(profile?.steps.find((item) => item.key === 'run')?.satisfied).toBe(true);
+    expect(profile?.steps.find((item) => item.key === 'image')?.satisfied).toBe(true);
+    expect(profile?.nextActions).toContain('补充 保持标准输入，示例：-i');
+  });
+
   it('falls back to executable guidance for custom binaries', () => {
     const profile = buildMCPArgumentHintProfile('D:\\tools\\acme-mcp-server.exe', []);
 

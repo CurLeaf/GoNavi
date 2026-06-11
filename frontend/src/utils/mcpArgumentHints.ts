@@ -11,6 +11,9 @@ export interface MCPArgumentHintStep {
 
 export interface MCPArgumentHintProfile {
   commandName: string;
+  normalizedCommand: string;
+  inlineArgs: string[];
+  commandFieldWarning?: string;
   title: string;
   summary: string;
   orderHint: string;
@@ -20,14 +23,25 @@ export interface MCPArgumentHintProfile {
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
-const normalizeCommandName = (command: string): string => {
+const parseCommandField = (command: string): { normalizedCommand: string; commandName: string; inlineArgs: string[] } => {
   const { tokens } = splitShellLikeCommand(command);
   const raw = toTrimmedString(tokens[0] || command);
   const lastPathPart = raw.split(/[\\/]/u).pop() || raw;
-  return lastPathPart
+  const commandName = lastPathPart
     .replace(/\.(exe|cmd|bat|ps1)$/iu, '')
     .toLowerCase();
+  const inlineArgs = tokens.length > 1 && isInlineArgHintCommand(commandName)
+    ? tokens.slice(1).map(toTrimmedString).filter(Boolean)
+    : [];
+  return {
+    normalizedCommand: raw,
+    commandName,
+    inlineArgs,
+  };
 };
+
+const isInlineArgHintCommand = (commandName: string): boolean =>
+  ['npx', 'npm', 'pnpm', 'yarn', 'node', 'bun', 'deno', 'python', 'python3', 'py', 'uvx', 'uv', 'docker'].includes(commandName);
 
 const normalizeArgs = (args?: string[]): string[] =>
   (Array.isArray(args) ? args : []).map(toTrimmedString).filter(Boolean);
@@ -120,11 +134,14 @@ export const buildMCPArgumentHintProfile = (
   command: string,
   args?: string[],
 ): MCPArgumentHintProfile | null => {
-  const commandName = normalizeCommandName(command);
+  const { normalizedCommand, commandName, inlineArgs } = parseCommandField(command);
   if (!commandName) {
     return null;
   }
-  const normalizedArgs = normalizeArgs(args);
+  const normalizedArgs = [...inlineArgs, ...normalizeArgs(args)];
+  const commandFieldWarning = inlineArgs.length > 0
+    ? `检测到启动命令字段里还包含 ${inlineArgs.length} 个参数：${inlineArgs.join(' / ')}。建议 command 只保留 ${normalizedCommand}，其余移到命令参数。`
+    : undefined;
 
   if (commandName === 'npx' || commandName === 'npm' || commandName === 'pnpm' || commandName === 'yarn') {
     const steps = [
@@ -135,6 +152,9 @@ export const buildMCPArgumentHintProfile = (
     ];
     return {
       commandName,
+      normalizedCommand,
+      inlineArgs,
+      commandFieldWarning,
       title: 'npx / npm 参数顺序建议',
       summary: 'npm 生态 MCP 通常要把安装确认、包名和 --stdio 拆成独立参数标签。',
       orderHint: '推荐顺序：-y -> 包名 -> --stdio -> 服务自己的业务参数',
@@ -151,6 +171,9 @@ export const buildMCPArgumentHintProfile = (
     ];
     return {
       commandName,
+      normalizedCommand,
+      inlineArgs,
+      commandFieldWarning,
       title: 'Node 脚本参数顺序建议',
       summary: 'Node 类启动器的命令只填 node/bun/deno，脚本路径和 --stdio 放到参数里。',
       orderHint: '推荐顺序：脚本路径 -> --stdio -> 服务自己的业务参数',
@@ -167,6 +190,9 @@ export const buildMCPArgumentHintProfile = (
     ];
     return {
       commandName,
+      normalizedCommand,
+      inlineArgs,
+      commandFieldWarning,
       title: 'Python 参数顺序建议',
       summary: 'Python MCP 常见形式是 python -m 模块名，-m 和模块名都要作为独立参数。',
       orderHint: '推荐顺序：-m -> 模块名 -> --stdio',
@@ -183,6 +209,9 @@ export const buildMCPArgumentHintProfile = (
     ];
     return {
       commandName,
+      normalizedCommand,
+      inlineArgs,
+      commandFieldWarning,
       title: 'uvx 参数顺序建议',
       summary: 'uvx 类 MCP 通常把包名作为第一个参数，再按 README 补 stdio 或配置参数。',
       orderHint: '推荐顺序：包名 -> --stdio -> 服务自己的业务参数',
@@ -201,6 +230,9 @@ export const buildMCPArgumentHintProfile = (
     ];
     return {
       commandName,
+      normalizedCommand,
+      inlineArgs,
+      commandFieldWarning,
       title: 'Docker MCP 参数顺序建议',
       summary: 'Docker 场景 command 只填 docker，run、-i、--rm、镜像名和容器参数都放到 args 里。',
       orderHint: '推荐顺序：run -> --rm -> -i -> -e KEY=VALUE -> 镜像名 -> 服务自己的业务参数',
@@ -215,6 +247,9 @@ export const buildMCPArgumentHintProfile = (
   ];
   return {
     commandName,
+    normalizedCommand,
+    inlineArgs,
+    commandFieldWarning,
     title: '本机可执行文件参数建议',
     summary: '自研或已编译 MCP Server 的参数以 README 为准；GoNavi 会原样按标签顺序传入。',
     orderHint: '常见顺序：stdio/--stdio -> 配置文件或业务参数',

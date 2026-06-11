@@ -9,6 +9,7 @@ interface AIMCPArgumentHintsProps {
   command: string;
   args?: string[];
   onArgsChange?: (args: string[]) => void;
+  onCommandArgsChange?: (command: string, args: string[]) => void;
   cardBorder: string;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
@@ -23,10 +24,25 @@ const buildMissingRequiredArgs = (
     .map((item) => item.trim())
     .filter(Boolean);
 
+const mergeArgs = (left: string[], right: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of [...left, ...right]) {
+    const text = String(item || '').trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
+};
+
 const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   command,
   args,
   onArgsChange,
+  onCommandArgsChange,
   cardBorder,
   darkMode,
   overlayTheme,
@@ -36,7 +52,8 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
     return null;
   }
   const missingRequiredArgs = buildMissingRequiredArgs(profile);
-  const canApplyMissingArgs = Boolean(onArgsChange && missingRequiredArgs.length > 0);
+  const canApplyMissingArgs = Boolean(onArgsChange && missingRequiredArgs.length > 0 && profile.inlineArgs.length === 0);
+  const canSplitInlineArgs = Boolean(onCommandArgsChange && profile.inlineArgs.length > 0);
 
   return (
     <div
@@ -57,6 +74,9 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
         {profile.title}
       </div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{profile.summary}</div>
+      {profile.commandFieldWarning ? (
+        <div style={buildMCPHintStyle('#b45309')}>{profile.commandFieldWarning}</div>
+      ) : null}
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{profile.orderHint}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {profile.steps.map((step) => (
@@ -105,6 +125,28 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
           }}
         >
           一键补齐缺失必填参数：{missingRequiredArgs.join(' / ')}
+        </button>
+      ) : null}
+      {canSplitInlineArgs ? (
+        <button
+          type="button"
+          onClick={() => onCommandArgsChange?.(
+            profile.normalizedCommand,
+            mergeArgs(profile.inlineArgs, args || []),
+          )}
+          style={{
+            alignSelf: 'flex-start',
+            padding: '5px 11px',
+            borderRadius: 999,
+            border: `1px solid ${cardBorder}`,
+            background: darkMode ? 'rgba(37,99,235,0.16)' : 'rgba(37,99,235,0.10)',
+            color: '#2563eb',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          一键拆分启动命令字段：保留 {profile.normalizedCommand}，移动 {profile.inlineArgs.length} 个参数
         </button>
       ) : null}
     </div>
