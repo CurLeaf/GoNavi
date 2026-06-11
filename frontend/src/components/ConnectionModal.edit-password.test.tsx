@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-const source = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
+const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
+const redisSectionsSource = readFileSync(new URL('./ConnectionModalRedisSections.tsx', import.meta.url), 'utf8');
+const source = `${connectionModalSource}\n${redisSectionsSource}`;
 
 describe('ConnectionModal edit password behavior', () => {
   it('keeps the prefilled primary password masked by default', () => {
