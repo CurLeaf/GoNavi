@@ -53,6 +53,10 @@ describe('AIMCPServerCard', () => {
     expect(markup).toContain('npx -y package --stdio');
     expect(markup).toContain('-y、@modelcontextprotocol/server-filesystem、--stdio、server.js');
     expect(markup).toContain('每个参数单独录入一个标签');
+    expect(markup).toContain('当前命令 node 的参数提示');
+    expect(markup).toContain('Node 脚本参数顺序建议');
+    expect(markup).toContain('推荐顺序：脚本路径 -&gt; --stdio -&gt; 服务自己的业务参数');
+    expect(markup).toContain('必填参数看起来已经齐了');
     expect(markup).toContain('每行一个 KEY=VALUE');
     expect(markup).toContain('没有等号或 key 含空格的行不会保存');
     expect(markup).toContain('不要把 npx -y package --stdio 或 node server.js --stdio 整串都塞进这里');

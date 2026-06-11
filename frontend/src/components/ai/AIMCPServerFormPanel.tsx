@@ -7,6 +7,7 @@ import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { ParsedMCPEnvDraft } from '../../utils/mcpEnvDraft';
 import type { MCPServerDraftValidation } from '../../utils/mcpServerValidation';
 import AIMCPHelpBlock, { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
+import AIMCPArgumentHints from './AIMCPArgumentHints';
 import AIMCPServerValidationPanel from './AIMCPServerValidationPanel';
 import AIMCPToolSchemaSummary from './AIMCPToolSchemaSummary';
 
@@ -128,6 +129,13 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
         onChange={(value) => onChange({ args: value })}
         placeholder="命令参数，回车录入，例如：-y、包名、--stdio"
         style={{ width: '100%' }}
+      />
+      <AIMCPArgumentHints
+        command={server.command}
+        args={server.args}
+        cardBorder={cardBorder}
+        darkMode={darkMode}
+        overlayTheme={overlayTheme}
       />
     </AIMCPHelpBlock>
 
