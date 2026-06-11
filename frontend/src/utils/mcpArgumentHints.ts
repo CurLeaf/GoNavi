@@ -53,6 +53,31 @@ const hasPythonModuleArg = (args: string[]): boolean => {
   return moduleFlagIndex >= 0 && Boolean(args[moduleFlagIndex + 1]);
 };
 
+const hasDockerRunArg = (args: string[]): boolean =>
+  args.some((arg) => arg.toLowerCase() === 'run');
+
+const hasDockerInteractiveArg = (args: string[]): boolean =>
+  hasArg(args, '-i') || hasArg(args, '--interactive');
+
+const hasDockerImageArg = (args: string[]): boolean => {
+  const runIndex = args.findIndex((arg) => arg.toLowerCase() === 'run');
+  const candidates = runIndex >= 0 ? args.slice(runIndex + 1) : args;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const arg = candidates[index];
+    if (!arg || arg.startsWith('-')) {
+      const lower = arg.toLowerCase();
+      if (['-e', '--env', '--name', '--network', '-v', '--volume'].includes(lower)) {
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.includes('=') || arg.includes(':') || arg.includes('/')) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const buildStep = (
   key: string,
   label: string,
@@ -144,6 +169,24 @@ export const buildMCPArgumentHintProfile = (
       title: 'uvx 参数顺序建议',
       summary: 'uvx 类 MCP 通常把包名作为第一个参数，再按 README 补 stdio 或配置参数。',
       orderHint: '推荐顺序：包名 -> --stdio -> 服务自己的业务参数',
+      steps,
+      nextActions: buildNextActions(steps),
+    };
+  }
+
+  if (commandName === 'docker') {
+    const steps = [
+      buildStep('run', '运行子命令', 'run', 'Docker MCP 通常要以 docker run 启动容器。', true, hasDockerRunArg(normalizedArgs)),
+      buildStep('interactive', '保持标准输入', '-i', 'MCP 需要 stdio 持续连接，Docker 容器必须保留 stdin。', true, hasDockerInteractiveArg(normalizedArgs)),
+      buildStep('cleanup', '退出后清理容器', '--rm', '测试和日常使用建议自动删除临时容器，避免残留。', false, hasArg(normalizedArgs, '--rm')),
+      buildStep('image', '镜像名', 'mcp/server-fetch:latest', 'README 里的 Docker 镜像名，放在 docker run 选项之后。', true, hasDockerImageArg(normalizedArgs)),
+      buildStep('container-env', '容器环境变量', '-e API_KEY=...', '容器内应用需要的 token 通常要用 -e/--env 传给容器。', false, normalizedArgs.some((arg) => arg === '-e' || arg === '--env' || arg.startsWith('-e='))),
+    ];
+    return {
+      commandName,
+      title: 'Docker MCP 参数顺序建议',
+      summary: 'Docker 场景 command 只填 docker，run、-i、--rm、镜像名和容器参数都放到 args 里。',
+      orderHint: '推荐顺序：run -> --rm -> -i -> -e KEY=VALUE -> 镜像名 -> 服务自己的业务参数',
       steps,
       nextActions: buildNextActions(steps),
     };

@@ -28,6 +28,15 @@ describe('mcpArgumentHints', () => {
     expect(profile?.nextActions).toContain('补充 模块名，示例：your_mcp_server');
   });
 
+  it('guides docker users to keep stdin and provide an image', () => {
+    const profile = buildMCPArgumentHintProfile('docker', ['run', '--rm']);
+
+    expect(profile?.title).toContain('Docker');
+    expect(profile?.orderHint).toContain('run -> --rm -> -i');
+    expect(profile?.nextActions).toContain('补充 保持标准输入，示例：-i');
+    expect(profile?.nextActions).toContain('补充 镜像名，示例：mcp/server-fetch:latest');
+  });
+
   it('falls back to executable guidance for custom binaries', () => {
     const profile = buildMCPArgumentHintProfile('D:\\tools\\acme-mcp-server.exe', []);
 

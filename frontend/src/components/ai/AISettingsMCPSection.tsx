@@ -123,7 +123,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
     >
       <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>常见启动方式模板</div>
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        不确定命令和参数怎么拆时，先选一个最接近的启动方式。GoNavi 会自动带入示例值，你再改成自己的脚本名、模块名或 exe 路径即可。
+        不确定命令和参数怎么拆时，先选一个最接近的启动方式。GoNavi 会自动带入示例值，你再改成自己的脚本名、模块名、Docker 镜像或 exe 路径即可。
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
         {MCP_SERVER_DRAFT_TEMPLATES.map((template) => (
@@ -154,7 +154,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
     </div>
     {mcpServers.length === 0 && (
       <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
-        还没有 MCP 服务。常见形式是 `npx -y package --stdio`、`node server.js`、`uvx some-mcp-server`、`python -m server`。
+        还没有 MCP 服务。常见形式是 `npx -y package --stdio`、`node server.js`、`uvx some-mcp-server`、`python -m server`、`docker run --rm -i image`。
       </div>
     )}
     {mcpServers.map((server) => (

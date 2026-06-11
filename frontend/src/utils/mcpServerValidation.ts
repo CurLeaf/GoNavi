@@ -33,6 +33,7 @@ const KNOWN_LAUNCHER_COMMANDS = new Set([
   'py',
   'uv',
   'uvx',
+  'docker',
   'go',
   'java',
   'cmd',
@@ -74,7 +75,33 @@ const argsContainEnvOrShellGlue = (args: string[]): boolean =>
 
 const launcherUsuallyNeedsArgs = (command: string): boolean => {
   const firstToken = firstShellToken(command);
-  return ['node', 'python', 'python3', 'py', 'uvx', 'npx', 'bun', 'deno', 'go', 'java'].includes(firstToken);
+  return ['node', 'python', 'python3', 'py', 'uvx', 'npx', 'bun', 'deno', 'docker', 'go', 'java'].includes(firstToken);
+};
+
+const isDockerCommand = (command: string): boolean =>
+  firstShellToken(command) === 'docker';
+
+const hasDockerRunArg = (args: string[]): boolean =>
+  args.some((arg) => arg.toLowerCase() === 'run');
+
+const hasDockerInteractiveArg = (args: string[]): boolean =>
+  args.some((arg) => arg.toLowerCase() === '-i' || arg.toLowerCase() === '--interactive');
+
+const hasDockerImageArg = (args: string[]): boolean => {
+  const runIndex = args.findIndex((arg) => arg.toLowerCase() === 'run');
+  const candidates = runIndex >= 0 ? args.slice(runIndex + 1) : args;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const arg = candidates[index];
+    if (!arg || arg.startsWith('-')) {
+      const lower = arg.toLowerCase();
+      if (['-e', '--env', '--name', '--network', '-v', '--volume'].includes(lower)) {
+        index += 1;
+      }
+      continue;
+    }
+    return true;
+  }
+  return false;
 };
 
 export const validateMCPServerDraft = (
@@ -127,6 +154,33 @@ export const validateMCPServerDraft = (
       title: '命令参数可能缺少脚本或模块名',
       detail: 'node、python、uvx、npx 这类启动器通常还需要 server.js、-m your_server 或包名作为参数。',
     });
+  }
+
+  if (command && isDockerCommand(command)) {
+    if (!hasDockerRunArg(args)) {
+      issues.push({
+        key: 'docker-run-missing',
+        severity: 'warning',
+        title: 'Docker 参数缺少 run',
+        detail: 'Docker MCP 通常需要 command=docker，args 里单独填写 run、--rm、-i、镜像名和服务参数。',
+      });
+    }
+    if (!hasDockerInteractiveArg(args)) {
+      issues.push({
+        key: 'docker-interactive-missing',
+        severity: 'warning',
+        title: 'Docker 参数缺少 -i',
+        detail: 'MCP 需要持续读取标准输入；docker run 场景请加 -i 或 --interactive，否则工具发现可能立即断开。',
+      });
+    }
+    if (!hasDockerImageArg(args)) {
+      issues.push({
+        key: 'docker-image-missing',
+        severity: 'warning',
+        title: 'Docker 参数可能缺少镜像名',
+        detail: '请在 docker run 选项之后填写 README 提供的镜像名，例如 mcp/server-fetch:latest。',
+      });
+    }
   }
 
   if (argsContainEnvOrShellGlue(args)) {

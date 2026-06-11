@@ -75,11 +75,11 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
           options={[{ label: 'stdio', value: 'stdio' }]}
         />
       </AIMCPHelpBlock>
-      <AIMCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 npx/node/uvx/python 这类启动器，把包名、脚本名或模块名放到下面的参数里。不要把 npx -y package --stdio 或 node server.js --stdio 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="npx / node / uvx / python">
+      <AIMCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 npx/node/uvx/python/docker 这类启动器，把包名、脚本名、模块名或 docker run 参数放到下面的参数里。不要把 npx -y package --stdio、node server.js --stdio 或 docker run -i image 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="npx / node / uvx / python / docker">
         <Input
           value={server.command}
           onChange={(event) => onChange({ command: event.target.value })}
-          placeholder="启动命令，例如：npx / node / uvx / python"
+          placeholder="启动命令，例如：npx / node / uvx / python / docker"
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
         />
       </AIMCPHelpBlock>
@@ -122,7 +122,7 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </AIMCPHelpBlock>
     </div>
 
-    <AIMCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 npx -y package --stdio，要把 -y、package 和 --stdio 分开填；node server.js --stdio 要把 server.js 和 --stdio 分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="-y、@modelcontextprotocol/server-filesystem、--stdio、server.js">
+    <AIMCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 npx -y package --stdio，要把 -y、package 和 --stdio 分开填；node server.js --stdio 要把 server.js 和 --stdio 分开填；docker run --rm -i image 要把 run、--rm、-i 和镜像名分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="-y、@modelcontextprotocol/server-filesystem、--stdio、server.js、run、--rm、-i、image">
       <Select
         mode="tags"
         value={server.args || []}

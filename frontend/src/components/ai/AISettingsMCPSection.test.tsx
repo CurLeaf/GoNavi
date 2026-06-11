@@ -108,10 +108,10 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('timeout');
     expect(markup).toContain('只填程序名或启动器本身');
     expect(markup).toContain('应填：');
-    expect(markup).toContain('填 npx、node、uvx、python，或某个 exe 的绝对路径');
+    expect(markup).toContain('填 npx、node、uvx、python、docker，或某个 exe 的绝对路径');
     expect(markup).toContain('不要填整行命令，例如不要填 npx -y pkg --stdio');
     expect(markup).toContain('把脚本名、模块名、开关参数拆开逐项填写');
-    expect(markup).toContain('不要再填 npx/node/uvx/python');
+    expect(markup).toContain('不要再填 npx/node/uvx/python/docker');
     expect(markup).toContain('给 MCP Server 传入 KEY=VALUE 形式的配置');
     expect(markup).toContain('不要写 export、set 或 $env: 前缀');
     expect(markup).toContain('单次工具发现或调用最多等待多久');
@@ -119,6 +119,8 @@ describe('AISettingsMCPSection', () => {
     expect(markup).toContain('npx 包');
     expect(markup).toContain('npx -y @modelcontextprotocol/server-filesystem --stdio');
     expect(markup).toContain('Node 脚本');
+    expect(markup).toContain('Docker 镜像');
+    expect(markup).toContain('docker run -i --rm image');
     expect(markup).toContain('新增 MCP 服务');
     expect(markup).toContain('还没有 MCP 服务');
     expect(markup).toContain('npx -y package --stdio');
@@ -203,6 +205,28 @@ describe('AISettingsMCPSection', () => {
     expect(onAddServer).toHaveBeenCalledWith(expect.objectContaining({
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-filesystem', '--stdio'],
+    }));
+  });
+
+  it('seeds a docker MCP draft with interactive stdio args', () => {
+    const onAddServer = vi.fn();
+    const tree = AISettingsMCPSection(buildMCPSectionProps({
+      mcpClientStatuses: [],
+      selectedMCPClientStatus: undefined,
+      onAddServer,
+    }));
+
+    const dockerTemplateButton = findElement(
+      tree,
+      (node) => node.type === 'button' && flattenElementText(node.props?.children).includes('Docker 镜像'),
+    );
+    expect(dockerTemplateButton).toBeTruthy();
+    dockerTemplateButton.props.onClick();
+
+    expect(onAddServer).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'docker',
+      args: ['run', '--rm', '-i', 'mcp/server-fetch:latest'],
+      timeoutSeconds: 45,
     }));
   });
 });

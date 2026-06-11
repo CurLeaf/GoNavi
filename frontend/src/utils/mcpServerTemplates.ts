@@ -62,6 +62,19 @@ export const MCP_SERVER_DRAFT_TEMPLATES: MCPServerDraftTemplate[] = [
     },
   },
   {
+    key: 'docker',
+    title: 'Docker 镜像',
+    description: '适合 README 里写着 `docker run -i --rm image` 的容器化 MCP。本机需要已安装 Docker。',
+    detail: '示例会填成 `docker run --rm -i mcp/server-fetch:latest`；容器内 token 通常用 -e KEY=VALUE 放到参数里。',
+    seed: {
+      name: 'Docker MCP',
+      command: 'docker',
+      args: ['run', '--rm', '-i', 'mcp/server-fetch:latest'],
+      env: {},
+      timeoutSeconds: 45,
+    },
+  },
+  {
     key: 'exe',
     title: '本机 EXE',
     description: '适合已经编译好的本机二进制或公司内部工具。',

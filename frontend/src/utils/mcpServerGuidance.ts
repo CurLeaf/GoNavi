@@ -30,6 +30,7 @@ export const MCP_COMMAND_EXAMPLES = [
   'uvx mcp-server-fetch',
   'node server.js --stdio',
   'python -m your_mcp_server',
+  'docker run --rm -i mcp/server-fetch:latest',
 ];
 
 export const MCP_COMMAND_PARSE_EXAMPLE = '$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio';
@@ -38,7 +39,7 @@ export const MCP_SERVER_FILL_STEPS: MCPFillStep[] = [
   { step: '1', title: '模板 / 完整命令', detail: '优先选最接近的模板，或先粘一整行命令让 GoNavi 自动拆分。' },
   { step: '2', title: '服务名称', detail: '命名成 Browser、GitHub、Filesystem 这类一眼能认出的用途名。' },
   { step: '3', title: '启动命令', detail: '这里只填程序名或启动器本身，不要把整行命令塞进去。' },
-  { step: '4', title: '命令参数', detail: '把脚本名、模块名和 --stdio 这类参数拆开逐项填写。' },
+  { step: '4', title: '命令参数', detail: '把脚本名、模块名、Docker run 参数和 --stdio 这类参数拆开逐项填写。' },
   { step: '5', title: '环境变量 / 超时', detail: '只有在服务确实需要额外配置时再补，不需要可以留空。' },
 ];
 
@@ -77,21 +78,21 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
     key: 'command',
     title: '启动命令',
     summary: '只填程序名或启动器本身。',
-    detail: '常见是 npx、node、uvx、python；包名、脚本名和 --stdio 这类内容放到参数里。',
-    fill: '填 npx、node、uvx、python，或某个 exe 的绝对路径。',
+    detail: '常见是 npx、node、uvx、python、docker；包名、脚本名、run、-i 和 --stdio 这类内容放到参数里。',
+    fill: '填 npx、node、uvx、python、docker，或某个 exe 的绝对路径。',
     avoid: '不要填整行命令，例如不要填 npx -y pkg --stdio。',
     fieldState: 'required',
-    example: 'npx / node / uvx / python',
+    example: 'npx / node / uvx / python / docker',
   },
   {
     key: 'args',
     title: '命令参数',
     summary: '把脚本名、模块名、开关参数拆开逐项填写。',
-    detail: '例如 npx -y pkg --stdio，要拆成 -y、pkg 和 --stdio；node server.js --stdio 要拆成 server.js 和 --stdio。',
-    fill: '逐项填 -y、包名、脚本名、-m、--stdio 等参数。',
-    avoid: '不要再填 npx/node/uvx/python，也不要把多个参数粘成一个长字符串。',
+    detail: '例如 npx -y pkg --stdio，要拆成 -y、pkg 和 --stdio；docker run --rm -i image 要拆成 run、--rm、-i 和 image。',
+    fill: '逐项填 -y、包名、脚本名、-m、--stdio、run、--rm、-i、镜像名等参数。',
+    avoid: '不要再填 npx/node/uvx/python/docker，也不要把多个参数粘成一个长字符串。',
     fieldState: 'optional',
-    example: '-y / @modelcontextprotocol/server-filesystem / --stdio / server.js',
+    example: '-y / @modelcontextprotocol/server-filesystem / --stdio / server.js / run / --rm / -i / image',
   },
   {
     key: 'env',
@@ -118,6 +119,7 @@ export const MCP_FIELD_GUIDES: MCPFieldGuide[] = [
 export const MCP_AUTHORING_NOTES = [
   '启动命令只填程序本身，不要把脚本名、模块名和 --stdio 混进去。',
   'README 给 npx 示例时，command 填 npx，args 逐项填 -y、包名和 --stdio；不要把整行 npx 命令放进 command。',
+  'README 给 Docker 示例时，command 填 docker，args 逐项填 run、--rm、-i、镜像名和容器参数；容器内 token 通常用 -e KEY=VALUE 传给容器。',
   '如果 README 里只给了一整行命令，优先粘到完整命令框自动拆分；支持 KEY=VALUE、env KEY=VALUE、PowerShell $env:KEY=VALUE; 和 Windows set KEY=VALUE && 这几类前缀环境变量写法。',
   '环境变量每行一条 KEY=VALUE，不要写 export，也不要和启动命令混成一行保存。',
   '密钥类环境变量会保存到本机配置，并只在启动 MCP 进程时作为进程环境传入；不要把密钥写进聊天内容。',
@@ -135,9 +137,9 @@ export const MCP_TROUBLESHOOTING_GUIDES: MCPTroubleshootingGuide[] = [
   {
     key: 'timeout-or-no-tools',
     symptom: '测试超时或发现 0 个工具',
-    likelyCause: '服务启动慢、缺少 stdio 参数，或填成了只支持 HTTP/SSE 的 MCP 服务。',
-    fix: '先确认这个服务支持 stdio，再补齐 --stdio 等参数；启动慢时把超时调到 45 或 60 秒。',
-    example: 'args=--stdio, timeout=45',
+    likelyCause: '服务启动慢、缺少 stdio 参数，Docker 容器缺少 -i，或填成了只支持 HTTP/SSE 的 MCP 服务。',
+    fix: '先确认这个服务支持 stdio，再补齐 --stdio 或 Docker -i 等参数；启动慢时把超时调到 45 或 60 秒。',
+    example: 'args=--stdio 或 docker run --rm -i image, timeout=45',
   },
   {
     key: 'auth-failed',
