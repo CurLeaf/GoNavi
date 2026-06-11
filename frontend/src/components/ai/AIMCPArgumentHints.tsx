@@ -2,19 +2,31 @@ import React from 'react';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { buildMCPArgumentHintProfile } from '../../utils/mcpArgumentHints';
+import { splitShellLikeCommand } from '../../utils/mcpCommandDraft';
 import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
 
 interface AIMCPArgumentHintsProps {
   command: string;
   args?: string[];
+  onArgsChange?: (args: string[]) => void;
   cardBorder: string;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
 }
 
+const buildMissingRequiredArgs = (
+  profile: NonNullable<ReturnType<typeof buildMCPArgumentHintProfile>>,
+): string[] =>
+  profile.steps
+    .filter((step) => step.required && !step.satisfied)
+    .flatMap((step) => splitShellLikeCommand(step.example).tokens)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   command,
   args,
+  onArgsChange,
   cardBorder,
   darkMode,
   overlayTheme,
@@ -23,6 +35,8 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   if (!profile) {
     return null;
   }
+  const missingRequiredArgs = buildMissingRequiredArgs(profile);
+  const canApplyMissingArgs = Boolean(onArgsChange && missingRequiredArgs.length > 0);
 
   return (
     <div
@@ -74,6 +88,25 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
           必填参数看起来已经齐了，测试失败时再对照 README 检查业务参数和环境变量。
         </div>
       )}
+      {canApplyMissingArgs ? (
+        <button
+          type="button"
+          onClick={() => onArgsChange?.([...(args || []), ...missingRequiredArgs])}
+          style={{
+            alignSelf: 'flex-start',
+            padding: '5px 11px',
+            borderRadius: 999,
+            border: `1px solid ${cardBorder}`,
+            background: darkMode ? 'rgba(245,158,11,0.14)' : 'rgba(245,158,11,0.10)',
+            color: '#b45309',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          一键补齐缺失必填参数：{missingRequiredArgs.join(' / ')}
+        </button>
+      ) : null}
     </div>
   );
 };

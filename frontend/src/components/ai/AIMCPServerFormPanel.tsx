@@ -134,6 +134,7 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       <AIMCPArgumentHints
         command={server.command}
         args={server.args}
+        onArgsChange={(args) => onChange({ args })}
         cardBorder={cardBorder}
         darkMode={darkMode}
         overlayTheme={overlayTheme}
