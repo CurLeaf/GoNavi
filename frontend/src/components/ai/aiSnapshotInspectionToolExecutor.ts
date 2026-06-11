@@ -11,36 +11,8 @@ import type {
   TabData,
 } from '../../types';
 import type { SqlLog } from '../../store';
-import { buildAIContextSnapshot } from './aiContextInsights';
-import {
-  buildAIChatSessionsSnapshot,
-  buildAIMessageFlowSnapshot,
-} from './aiChatSessionInsights';
-import { buildAIContextBudgetSnapshot } from './aiContextBudgetInsights';
-import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
-import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
-import {
-  buildSavedQueriesSnapshot,
-  buildSqlSnippetsSnapshot,
-} from './aiSavedSqlInsights';
-import { buildSavedConnectionsSnapshot } from './aiSavedConnectionInsights';
-import { buildExternalSQLFileSnapshot } from './aiExternalSqlFileInsights';
-import { buildExternalSQLDirectoriesSnapshot } from './aiExternalSqlInsights';
-import { buildAppLogSnapshot } from './aiAppLogInsights';
-import { buildAIUpstreamLogSnapshot } from './aiUpstreamLogInsights';
-import { findBestMatchingExternalSQLDirectory } from './aiExternalSqlPathUtils';
-import {
-  buildRecentSqlActivitySnapshot,
-  buildRecentSqlLogsSnapshot,
-} from './aiSqlLogInsights';
-import { buildSqlEditorTransactionSnapshot } from './aiSqlEditorTransactionInsights';
-import {
-  buildActiveTabSnapshot,
-  buildWorkspaceTabsSnapshot,
-} from './aiWorkspaceInsights';
-import { buildShortcutSnapshot } from './aiShortcutInsights';
-import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
-import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsights';
+import { executeConnectionWorkspaceSnapshotToolCall } from './aiSnapshotInspectionConnectionToolExecutor';
+import { executeDiagnosticsSnapshotToolCall } from './aiSnapshotInspectionDiagnosticsToolExecutor';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
 import { executeAppHealthSnapshotToolCall } from './aiSnapshotInspectionAppHealthToolExecutor';
 import type {
@@ -148,312 +120,44 @@ export async function executeSnapshotInspectionToolCall(
       return sqlRiskResult;
     }
 
-    switch (toolName) {
-      case 'inspect_current_connection':
-        return {
-          content: JSON.stringify(buildCurrentConnectionSnapshot({
-            activeContext,
-            tabs,
-            activeTabId,
-            connections,
-          })),
-          success: true,
-        };
-      case 'inspect_connection_capabilities':
-        return {
-          content: JSON.stringify(buildConnectionCapabilitiesSnapshot({
-            connectionId: args.connectionId,
-            activeContext,
-            tabs,
-            activeTabId,
-            connections,
-          })),
-          success: true,
-        };
-      case 'inspect_saved_connections':
-        return {
-          content: JSON.stringify(buildSavedConnectionsSnapshot({
-            connections,
-            keyword: args.keyword,
-            type: args.type,
-            limit: args.limit,
-          })),
-          success: true,
-        };
-      case 'inspect_external_sql_directories':
-        return {
-          content: JSON.stringify(buildExternalSQLDirectoriesSnapshot({
-            externalSQLDirectories,
-            connections,
-            tabs,
-            keyword: args.keyword,
-            connectionId: args.connectionId,
-            dbName: args.dbName,
-            limit: args.limit,
-          })),
-          success: true,
-        };
-      case 'inspect_external_sql_file': {
-        const requestedFilePath = String(args.filePath || '').trim();
-        if (!requestedFilePath) {
-          return {
-            content: '读取外部 SQL 文件失败: filePath 不能为空',
-            success: false,
-          };
-        }
-        if (!findBestMatchingExternalSQLDirectory(requestedFilePath, externalSQLDirectories)) {
-          return {
-            content: '读取外部 SQL 文件失败: 目标文件不在已配置的外部 SQL 目录中',
-            success: false,
-          };
-        }
-        const readResult = typeof runtime?.readSQLFile === 'function'
-          ? await runtime.readSQLFile(requestedFilePath)
-          : { success: false, message: '当前环境暂不支持读取本地 SQL 文件' };
-        if (!readResult?.success) {
-          return {
-            content: `读取外部 SQL 文件失败: ${readResult?.message || '未知错误'}`,
-            success: false,
-          };
-        }
-        return {
-          content: JSON.stringify(buildExternalSQLFileSnapshot({
-            filePath: requestedFilePath,
-            previewCharLimit: args.previewCharLimit,
-            readResult: readResult?.data,
-            externalSQLDirectories,
-            connections,
-            tabs,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_active_tab':
-        return {
-          content: JSON.stringify(buildActiveTabSnapshot({
-            tabs,
-            activeTabId,
-            connections,
-            includeContent: args.includeContent !== false,
-          })),
-          success: true,
-        };
-      case 'inspect_workspace_tabs':
-        return {
-          content: JSON.stringify(buildWorkspaceTabsSnapshot({
-            tabs,
-            activeTabId,
-            connections,
-            includeContent: args.includeContent === true,
-            limit: args.limit,
-          })),
-          success: true,
-        };
-      case 'inspect_ai_context':
-        return {
-          content: JSON.stringify(buildAIContextSnapshot({
-            activeContext,
-            aiContexts,
-            connections,
-            includeDDL: args.includeDDL === true,
-            ddlLimit: args.ddlLimit,
-          })),
-          success: true,
-        };
-      case 'inspect_ai_sessions':
-        return {
-          content: JSON.stringify(buildAIChatSessionsSnapshot({
-            aiChatSessions,
-            aiChatHistory,
-            activeSessionId,
-            keyword: args.keyword,
-            limit: args.limit,
-            includePreview: args.includePreview !== false,
-          })),
-          success: true,
-        };
-      case 'inspect_ai_message_flow':
-        return {
-          content: JSON.stringify(buildAIMessageFlowSnapshot({
-            aiChatSessions,
-            aiChatHistory,
-            activeSessionId,
-            sessionId: args.sessionId,
-            limit: args.limit,
-            includeContent: args.includeContent !== false,
-            previewLimit: args.previewLimit,
-          })),
-          success: true,
-        };
-      case 'inspect_ai_context_budget':
-        return {
-          content: JSON.stringify(buildAIContextBudgetSnapshot({
-            aiContexts,
-            aiChatHistory,
-            aiChatSessions,
-            activeSessionId,
-            sessionId: args.sessionId,
-            messageLimit: args.messageLimit,
-            includeDetails: args.includeDetails,
-            mcpTools,
-            skills,
-            userPromptSettings,
-          })),
-          success: true,
-        };
-      case 'inspect_recent_sql_logs':
-        return {
-          content: JSON.stringify(buildRecentSqlLogsSnapshot({
-            sqlLogs,
-            limit: args.limit,
-            status: args.status,
-          })),
-          success: true,
-        };
-      case 'inspect_recent_sql_activity':
-        return {
-          content: JSON.stringify(buildRecentSqlActivitySnapshot({
-            sqlLogs,
-            limit: args.limit,
-            status: args.status,
-            keyword: args.keyword,
-            dbName: args.dbName,
-            activityKind: args.activityKind,
-          })),
-          success: true,
-        };
-      case 'inspect_sql_editor_transaction': {
-        const transactionState = typeof runtime?.getSqlEditorTransactionState === 'function'
-          ? await runtime.getSqlEditorTransactionState()
-          : undefined;
-        return {
-          content: JSON.stringify(buildSqlEditorTransactionSnapshot({
-            transactionState,
-            tabs,
-            activeTabId,
-            connections,
-            sqlLogs,
-            includeSqlPreview: args.includeSqlPreview !== false,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_app_logs': {
-        const readResult = typeof runtime?.readAppLogTail === 'function'
-          ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
-          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
-        if (!readResult?.success) {
-          return {
-            content: `读取 GoNavi 应用日志失败: ${readResult?.message || '未知错误'}`,
-            success: false,
-          };
-        }
-        return {
-          content: JSON.stringify(buildAppLogSnapshot({
-            readResult,
-            keyword: args.keyword,
-            lineLimit: args.lineLimit,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_upstream_logs': {
-        const keyword = String(args.requestId || args.provider || args.keyword || 'AI 上游请求').trim();
-        const readResult = typeof runtime?.readAppLogTail === 'function'
-          ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, keyword)
-          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
-        if (!readResult?.success) {
-          return {
-            content: `读取 AI 上游请求日志失败: ${readResult?.message || '未知错误'}`,
-            success: false,
-          };
-        }
-        return {
-          content: JSON.stringify(buildAIUpstreamLogSnapshot({
-            readResult,
-            provider: args.provider,
-            requestId: args.requestId,
-            keyword: args.keyword,
-            lineLimit: args.lineLimit,
-            requestLimit: args.requestLimit,
-            includeBody: args.includeBody !== false,
-            includeLines: args.includeLines === true,
-            bodyPreviewLimit: args.bodyPreviewLimit,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_recent_connection_failures': {
-        const readResult = typeof runtime?.readAppLogTail === 'function'
-          ? await runtime.readAppLogTail(Number(args.lineLimit) || 120, String(args.keyword || ''))
-          : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
-        if (!readResult?.success) {
-          return {
-            content: `读取最近连接失败记录失败: ${readResult?.message || '未知错误'}`,
-            success: false,
-          };
-        }
-        return {
-          content: JSON.stringify(buildRecentConnectionFailureSnapshot({
-            readResult,
-            keyword: args.keyword,
-            lineLimit: args.lineLimit,
-          })),
-          success: true,
-        };
-      }
-      case 'inspect_ai_last_render_error':
-        return {
-          content: JSON.stringify(buildAILastRenderErrorSnapshot()),
-          success: true,
-        };
-      case 'inspect_saved_queries':
-        return {
-          content: JSON.stringify(buildSavedQueriesSnapshot({
-            savedQueries,
-            connections,
-            keyword: args.keyword,
-            connectionId: args.connectionId,
-            dbName: args.dbName,
-            limit: args.limit,
-            includeSql: args.includeSql !== false,
-          })),
-          success: true,
-        };
-      case 'inspect_sql_snippets':
-        return {
-          content: JSON.stringify(buildSqlSnippetsSnapshot({
-            sqlSnippets,
-            keyword: args.keyword,
-            limit: args.limit,
-            includeBody: args.includeBody !== false,
-          })),
-          success: true,
-        };
-      case 'inspect_shortcuts': {
-        const [shortcutOptions, currentPlatform] = await Promise.all([
-          typeof runtime?.getShortcutOptions === 'function'
-            ? runtime.getShortcutOptions()
-            : Promise.resolve(undefined),
-          typeof runtime?.getShortcutPlatform === 'function'
-            ? runtime.getShortcutPlatform()
-            : Promise.resolve(undefined),
-        ]);
-        return {
-          content: JSON.stringify(buildShortcutSnapshot({
-            shortcutOptions,
-            currentPlatform,
-            action: args.action,
-            keyword: args.keyword,
-            includeDisabled: args.includeDisabled !== false,
-            includeAllPlatforms: args.includeAllPlatforms !== false,
-          })),
-          success: true,
-        };
-      }
-      default:
-        return null;
+    const connectionWorkspaceResult = await executeConnectionWorkspaceSnapshotToolCall({
+      toolName,
+      args,
+      activeContext,
+      aiContexts,
+      connections,
+      tabs,
+      activeTabId,
+      externalSQLDirectories,
+      runtime,
+    });
+    if (connectionWorkspaceResult) {
+      return connectionWorkspaceResult;
     }
+
+    const diagnosticsResult = await executeDiagnosticsSnapshotToolCall({
+      toolName,
+      args,
+      aiChatHistory,
+      aiChatSessions,
+      activeSessionId,
+      aiContexts,
+      connections,
+      tabs,
+      activeTabId,
+      mcpTools,
+      sqlLogs,
+      savedQueries,
+      sqlSnippets,
+      skills,
+      userPromptSettings,
+      runtime,
+    });
+    if (diagnosticsResult) {
+      return diagnosticsResult;
+    }
+
+    return null;
   } catch (error: any) {
     const label = {
       inspect_current_connection: '读取当前连接失败',
