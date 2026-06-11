@@ -19,6 +19,7 @@ export const useSqlEditorTransactionController = ({
   const setSqlEditorPendingTransaction = useStore(state => state.setSqlEditorPendingTransaction);
   const [pendingSqlTransaction, setPendingSqlTransaction] = useState<PendingSqlEditorTransaction | null>(null);
   const pendingSqlTransactionRef = useRef<PendingSqlEditorTransaction | null>(null);
+  const finishingTransactionIdsRef = useRef<Set<string>>(new Set());
   const autoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoCommitCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [autoCommitRemainingSeconds, setAutoCommitRemainingSeconds] = useState<number | null>(null);
@@ -50,13 +51,17 @@ export const useSqlEditorTransactionController = ({
     if (!transaction || (transactionId && transaction.id !== transactionId)) {
       return;
     }
+    if (finishingTransactionIdsRef.current.has(transaction.id)) {
+      return;
+    }
     clearAutoCommitTimer();
+    finishingTransactionIdsRef.current.add(transaction.id);
+    updatePendingSqlTransaction(null);
     try {
       const res = action === 'commit'
         ? await DBCommitTransaction(transaction.id)
         : await DBRollbackTransaction(transaction.id);
       if (res?.success) {
-        updatePendingSqlTransaction(null);
         if (action === 'commit') {
           message.success(source === 'auto' ? 'SQL 事务已自动提交' : 'SQL 事务已提交');
         } else {
@@ -64,13 +69,13 @@ export const useSqlEditorTransactionController = ({
         }
         return;
       }
-      updatePendingSqlTransaction(null);
       const fallback = action === 'commit' ? '提交失败' : '回滚失败';
       message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(res?.message || '未知错误')}`);
     } catch (err: any) {
-      updatePendingSqlTransaction(null);
       const fallback = action === 'commit' ? '提交失败' : '回滚失败';
       message.error(`${source === 'auto' ? '自动提交失败' : fallback}: ${formatSqlExecutionError(err?.message || err || '未知错误')}`);
+    } finally {
+      finishingTransactionIdsRef.current.delete(transaction.id);
     }
   }, [clearAutoCommitTimer, updatePendingSqlTransaction]);
 
